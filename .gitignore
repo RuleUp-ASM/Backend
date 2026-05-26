@@ -1,16 +1,8 @@
-# Compiled class file
+# ==========================================
+# Java / Kotlin
+# ==========================================
 *.class
-
-# Log file
 *.log
-
-# BlueJ files
-*.ctxt
-
-# Mobile Tools for Java (J2ME)
-.mtj.tmp/
-
-# Package Files #
 *.jar
 *.war
 *.nar
@@ -18,7 +10,238 @@
 *.zip
 *.tar.gz
 *.rar
-
-# virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
 replay_pid*
+
+# ==========================================
+# Gradle
+# ==========================================
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/main/**/build/
+!**/src/test/**/build/
+.gradletasknamecache
+out/
+bin/
+
+# ==========================================
+# Maven (혹시 사용 시)
+# ==========================================
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# ==========================================
+# Spring Boot
+# ==========================================
+spring-boot-application.log
+application-local.yml
+application-local.yaml
+application-local.properties
+application-secret.yml
+application-secret.yaml
+application-secret.properties
+application-dev.yml
+application-prod.yml
+
+# ==========================================
+# IntelliJ IDEA
+# ==========================================
+.idea/
+*.iws
+*.iml
+*.ipr
+.idea_modules/
+
+# JetBrains plugins
+atlassian-ide-plugin.xml
+.idea/replstate.xml
+.idea/sonarlint/
+.idea/httpRequests/
+.idea/dictionaries/
+.idea/shelf/
+
+# ==========================================
+# Eclipse
+# ==========================================
+.metadata
+tmp/
+*.tmp
+*.bak
+*.swp
+*~.nib
+local.properties
+.settings/
+.loadpath
+.recommenders
+.project
+.classpath
+.factorypath
+.apt_generated
+.springBeans
+.sts4-cache
+
+# ==========================================
+# VS Code
+# ==========================================
+.vscode/
+*.code-workspace
+.history/
+
+# ==========================================
+# 환경 변수 / 시크릿 (절대 커밋 금지!)
+# ==========================================
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+.env.test
+*.pem
+*.key
+*.crt
+*.p12
+*.jks
+*.keystore
+secrets/
+config/local/
+config/secret/
+
+# AWS 자격 증명
+.aws/
+aws-credentials.json
+credentials.json
+
+# Firebase 자격 증명
+google-services.json
+firebase-adminsdk-*.json
+serviceAccountKey.json
+
+# OAuth 시크릿
+oauth-secret.yml
+oauth-secret.properties
+
+# ==========================================
+# Docker
+# ==========================================
+.docker/
+docker-compose.override.yml
+.dockerignore.local
+
+# ==========================================
+# 데이터베이스
+# ==========================================
+*.db
+*.sqlite
+*.sqlite3
+*.sql.gz
+*.dump
+dump.rdb
+data/
+postgres-data/
+redis-data/
+
+# ==========================================
+# 로그 / 임시 파일
+# ==========================================
+logs/
+*.log
+*.log.*
+log/
+tmp/
+temp/
+.cache/
+
+# ==========================================
+# 테스트 결과
+# ==========================================
+test-results/
+coverage/
+*.lcov
+.nyc_output/
+junit.xml
+jacoco.exec
+allure-results/
+
+# ==========================================
+# OS - macOS
+# ==========================================
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# ==========================================
+# OS - Windows
+# ==========================================
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# ==========================================
+# OS - Linux
+# ==========================================
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# ==========================================
+# 빌드 / 패키지 매니저
+# ==========================================
+node_modules/
+package-lock.json
+yarn.lock
+.npm/
+.yarn/
+
+# ==========================================
+# 룰업 특화
+# ==========================================
+# AI 모델 파일 (크기 큼, Git LFS 또는 S3 사용 권장)
+*.tflite
+*.mlmodel
+*.onnx
+*.pb
+*.h5
+
+# 인증서·키
+*.p8
+*.mobileprovision
+
+# 로컬 개발용 데이터
+local-data/
+fixtures/local/
+sample-data/
+
+# 백업 파일
+*.backup
+*.bak
+*.orig
