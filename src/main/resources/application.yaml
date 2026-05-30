@@ -1,3 +1,43 @@
+# 경로: Backend-dev/src/main/resources/application.yaml
 spring:
   application:
     name: ruleup-backend
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ruleup
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate      # 스키마는 Flyway가 관리. JPA는 검증만.
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration   # 1단계에서 여기에 SQL 넣을 예정
+
+  servlet:
+    multipart:
+      max-file-size: 10MB     # 프로필 사진 10MB 제한 (스펙)
+      max-request-size: 10MB
+
+# 우리 앱 전용 설정 (외부에서 받는 값은 전부 .env에서 주입)
+app:
+  jwt:
+    secret: ${JWT_SECRET}
+    access-token-ttl: 1800        # 30분 (초)
+    refresh-token-ttl: 2592000    # 30일
+    signup-token-ttl: 300         # 5분
+  oauth:
+    kakao:
+      client-id: ${KAKAO_REST_API_KEY}
+      client-secret: ${KAKAO_CLIENT_SECRET}
+      redirect-uri: ${KAKAO_REDIRECT_URI}
+    google:
+      client-id: ${GOOGLE_CLIENT_ID}
+      client-secret: ${GOOGLE_CLIENT_SECRET}
+      redirect-uri: ${GOOGLE_REDIRECT_URI}
