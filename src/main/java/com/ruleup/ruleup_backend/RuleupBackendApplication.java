@@ -3,9 +3,10 @@ package com.ruleup.ruleup_backend;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
+import org.springframework.boot.security.autoconfigure.servlet.UserDetailsServiceAutoConfiguration;
 
-@SpringBootApplication
-@ConfigurationPropertiesScan   // ← AppProperties를 자동으로 읽게 해줌
+@SpringBootApplication(exclude = UserDetailsServiceAutoConfiguration.class)
+@ConfigurationPropertiesScan
 public class RuleupBackendApplication {
 	public static void main(String[] args) {
 		SpringApplication.run(RuleupBackendApplication.class, args);
