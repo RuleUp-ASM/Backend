@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 
 @Slf4j
 @RestControllerAdvice
@@ -15,6 +16,13 @@ public class GlobalExceptionHandler {
         ErrorCode code = e.getErrorCode();
         return ResponseEntity.status(code.getStatus())
                 .body(ApiResponse.fail(ErrorResponse.of(code)));
+    }
+
+    // 본문 JSON이 깨졌거나 형식이 안 맞을 때 → 400
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNotReadable(HttpMessageNotReadableException e) {
+        ErrorCode code = ErrorCode.INVALID_REQUEST;
+        return ResponseEntity.status(code.getStatus()).body(ApiResponse.fail(ErrorResponse.of(code)));
     }
 
     @ExceptionHandler(Exception.class)

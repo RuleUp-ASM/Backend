@@ -2,6 +2,8 @@
 spring:
   application:
     name: ruleup-backend
+  jackson:
+    property-naming-strategy: SNAKE_CASE
 
   datasource:
     url: jdbc:postgresql://localhost:5432/ruleup
