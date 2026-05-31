@@ -41,6 +41,7 @@ public class SecurityConfig {
                                 "/api/auth/refresh",
                                 "/api/auth/logout",
                                 "/api/auth/nickname-availability",
+                                "/files/**",
                                 "/actuator/health"
                         ).permitAll()
                         .anyRequest().authenticated()

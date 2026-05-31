@@ -25,7 +25,7 @@ spring:
   servlet:
     multipart:
       max-file-size: 10MB     # 프로필 사진 10MB 제한 (스펙)
-      max-request-size: 10MB
+      max-request-size: 11MB
 
 # 우리 앱 전용 설정 (외부에서 받는 값은 전부 .env에서 주입)
 app:
@@ -49,3 +49,6 @@ logging:
     # 기본 유저는 우리 설정상 쓸 수 없으니, 'generated password' 경고만 숨김
     org.springframework.boot.security.autoconfigure: error
     org.springframework.boot.autoconfigure.security: error
+
+server:
+  forward-headers-strategy: framework

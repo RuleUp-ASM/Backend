@@ -83,4 +83,13 @@ public class User {
     public void softDelete() {
         this.deletedAt = Instant.now();
     }
+
+    /** 관심 카테고리 교체 */
+    public void changeInterestCategories(List<String> categories) {
+        this.interestCategories = (categories != null) ? new ArrayList<>(categories) : new ArrayList<>();
+    }
+
+    /** 프로필 이미지 URL 설정/해제 */
+    public void changeProfileImage(String url) { this.profileImageUrl = url; }
+    public void removeProfileImage() { this.profileImageUrl = null; }
 }

@@ -245,5 +245,3 @@ sample-data/
 *.backup
 *.bak
 *.orig
-
-/uploads/
