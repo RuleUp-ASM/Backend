@@ -12,10 +12,14 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** 구글 OAuth. code 교환 → userinfo에서 sub/email/picture 조회. */
 @Component
 public class GoogleOAuthClient implements OAuthClient {
+    private static final Logger log = LoggerFactory.getLogger(GoogleOAuthClient.class);
 
     private static final String TOKEN_URI = "https://oauth2.googleapis.com/token";
     private static final String USER_URI = "https://www.googleapis.com/oauth2/v3/userinfo";
@@ -39,6 +43,7 @@ public class GoogleOAuthClient implements OAuthClient {
                     .retrieve().body(GoogleUserResponse.class);
             return new OAuthUserInfo(u.sub(), u.email(), u.picture());
         } catch (RestClientResponseException e) {
+            log.warn("Google OAuth failed: status={}, body={}", e.getStatusCode(), e.getResponseBodyAsString());
             throw new BusinessException(e.getStatusCode().is4xxClientError()
                     ? ErrorCode.OAUTH_CODE_INVALID : ErrorCode.OAUTH_PROVIDER_UNAVAILABLE);
         } catch (RestClientException e) {
@@ -61,6 +66,6 @@ public class GoogleOAuthClient implements OAuthClient {
         return res.accessToken();
     }
 
-    record GoogleTokenResponse(String accessToken) {}
+    record GoogleTokenResponse(@JsonProperty("access_token") String accessToken) {}
     record GoogleUserResponse(String sub, String email, String picture) {}
 }

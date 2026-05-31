@@ -9,6 +9,7 @@ import org.hibernate.annotations.Generated;
 import org.hibernate.generator.EventType;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
+import com.ruleup.ruleup_backend.common.AssignedIdEntity;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -25,7 +26,7 @@ import java.util.UUID;
 @Table(name = "users")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class User {
+public class User extends AssignedIdEntity {
 
     @Id
     @Column(name = "id", nullable = false, updatable = false)

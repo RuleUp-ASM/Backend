@@ -8,6 +8,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.Generated;
 import org.hibernate.generator.EventType;
+import com.ruleup.ruleup_backend.common.AssignedIdEntity;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -20,7 +21,7 @@ import java.util.UUID;
 @Table(name = "refresh_tokens")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class RefreshToken {
+public class RefreshToken extends AssignedIdEntity {
 
     @Id
     @Column(name = "id", nullable = false, updatable = false)
