@@ -54,11 +54,15 @@ public class GoogleOAuthClient implements OAuthClient {
     private String requestToken(String code, String codeVerifier, String redirectUri) {
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("grant_type", "authorization_code");
-        form.add("client_id", config.clientId());
-        form.add("client_secret", config.clientSecret());
+        form.add("client_id", config.clientId());.
+        if (config.clientSecret() != null && !config.clientSecret().isBlank()) {
+            form.add("client_secret", config.clientSecret());
+        }
         form.add("redirect_uri", redirectUri);
         form.add("code", code);
-        if (codeVerifier != null && !codeVerifier.isBlank()) form.add("code_verifier", codeVerifier);
+        if (codeVerifier != null && !codeVerifier.isBlank()) {
+            form.add("code_verifier", codeVerifier);
+        }
 
         GoogleTokenResponse res = restClient.post().uri(TOKEN_URI)
                 .contentType(MediaType.APPLICATION_FORM_URLENCODED)
