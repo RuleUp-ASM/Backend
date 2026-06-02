@@ -54,7 +54,7 @@ public class GoogleOAuthClient implements OAuthClient {
     private String requestToken(String code, String codeVerifier, String redirectUri) {
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("grant_type", "authorization_code");
-        form.add("client_id", config.clientId());.
+        form.add("client_id", config.clientId());
         if (config.clientSecret() != null && !config.clientSecret().isBlank()) {
             form.add("client_secret", config.clientSecret());
         }
