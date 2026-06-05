@@ -1,9 +1,6 @@
-# 경로: Backend-dev/src/main/resources/application.yaml
 spring:
   application:
     name: ruleup-backend
-  jackson:
-    property-naming-strategy: SNAKE_CASE
 
   datasource:
     url: jdbc:mysql://localhost:3306/ruleup?serverTimezone=UTC&characterEncoding=UTF-8&rewriteBatchedStatements=true
