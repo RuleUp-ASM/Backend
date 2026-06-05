@@ -49,6 +49,7 @@ public class JwtProvider {
     public String issueSignupToken(String oauthSubject, String provider, String email) {
         Instant now = Instant.now();
         return Jwts.builder()
+                .id(UUID.randomUUID().toString())   // jti: 토큰 유일성 보장
                 .subject(oauthSubject)
                 .claim(CLAIM_TYPE, TokenType.SIGNUP.name())
                 .claim("provider", provider)
@@ -68,6 +69,7 @@ public class JwtProvider {
     private String build(String subject, TokenType type, long ttlSeconds) {
         Instant now = Instant.now();
         return Jwts.builder()
+                .id(UUID.randomUUID().toString())   // jti: 같은 초에 발급돼도 토큰(=해시)이 유일해지도록
                 .subject(subject)
                 .claim(CLAIM_TYPE, type.name())
                 .issuedAt(Date.from(now))
