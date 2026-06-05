@@ -7,6 +7,8 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.Generated;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import org.hibernate.generator.EventType;
 import com.ruleup.ruleup_backend.common.AssignedIdEntity;
 
@@ -24,7 +26,8 @@ import java.util.UUID;
 public class RefreshToken extends AssignedIdEntity {
 
     @Id
-    @Column(name = "id", nullable = false, updatable = false)
+    @JdbcTypeCode(SqlTypes.CHAR)
+    @Column(name = "id", nullable = false, updatable = false, length = 36)
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)        // 여러 토큰 → 한 User

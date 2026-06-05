@@ -1,0 +1,59 @@
+name: CI
+
+# 언제 돌릴지: PR 올릴 때 + feature/onboarding에 push될 때
+on:
+  pull_request:
+  push:
+    branches: [ feature/onboarding ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    # 테스트(@SpringBootTest)가 Flyway 마이그레이션(MySQL ENUM, JSON, DATETIME 등)을 실행하므로
+    # 진짜 MySQL 8.4를 곁들여 띄운다.
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: ruleup
+          MYSQL_USER: ruleup
+          MYSQL_PASSWORD: ruleup
+          MYSQL_ROOT_PASSWORD: rootpw
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -u root -prootpw"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    # application.yaml이 ${...}로 참조하는 값들을 CI에서 주입.
+    # test 프로파일 → MockOAuthClient가 떠서 실제 카카오/구글 없이 통과한다.
+    env:
+      SPRING_PROFILES_ACTIVE: test
+      DB_USERNAME: ruleup
+      DB_PASSWORD: ruleup
+      JWT_SECRET: ci-only-secret-please-change-this-must-be-at-least-32-bytes-long-0123
+      KAKAO_REST_API_KEY: dummy
+      KAKAO_CLIENT_SECRET: dummy
+      KAKAO_REDIRECT_URI: ruleup://login/callback
+      GOOGLE_CLIENT_ID: dummy
+      GOOGLE_CLIENT_SECRET: dummy
+      GOOGLE_REDIRECT_URI: ruleup://login/callback
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: gradle
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x ./gradlew
+
+      - name: Build & Test
+        run: ./gradlew build

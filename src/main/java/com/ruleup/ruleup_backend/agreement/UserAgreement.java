@@ -26,15 +26,16 @@ import java.util.UUID;
 public class UserAgreement extends AssignedIdEntity {
 
     @Id
-    @Column(name = "id", nullable = false, updatable = false)
+    @JdbcTypeCode(SqlTypes.CHAR)
+    @Column(name = "id", nullable = false, updatable = false, length = 36)
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
-    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
-    @Column(name = "agreement_type", nullable = false, columnDefinition = "agreement_type")
+    @Enumerated(EnumType.STRING)
+    @Column(name = "agreement_type", nullable = false)
     private AgreementType agreementType;
 
     @Column(name = "version", nullable = false)

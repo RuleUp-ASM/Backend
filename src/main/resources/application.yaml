@@ -1,3 +1,4 @@
+# 경로: Backend-dev/src/main/resources/application.yaml
 spring:
   application:
     name: ruleup-backend
@@ -5,7 +6,7 @@ spring:
     property-naming-strategy: SNAKE_CASE
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/ruleup
+    url: jdbc:mysql://localhost:3306/ruleup?serverTimezone=UTC&characterEncoding=UTF-8&rewriteBatchedStatements=true
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
 
@@ -31,7 +32,7 @@ app:
   jwt:
     secret: ${JWT_SECRET}
     access-token-ttl: 1800        # 30분 (초)
-    refresh-token-ttl: 1209600   # 14일 (60*60*24*14)
+    refresh-token-ttl: 1209600    # 14일 (60*60*24*14)
     signup-token-ttl: 300         # 5분
   oauth:
     kakao:
