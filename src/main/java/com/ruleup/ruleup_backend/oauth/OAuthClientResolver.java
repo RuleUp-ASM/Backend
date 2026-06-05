@@ -23,7 +23,7 @@ public class OAuthClientResolver {
 
     public OAuthClient resolve(OAuthProvider provider) {
         OAuthClient client = clients.get(provider);
-        if (client == null) throw new BusinessException(ErrorCode.OAUTH_PROVIDER_UNAVAILABLE);
+        if (client == null) throw new BusinessException(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
         return client;
     }
 }
