@@ -1,4 +1,3 @@
-# 경로: Backend-dev/src/main/resources/application.yaml
 spring:
   application:
     name: ruleup-backend
@@ -32,7 +31,7 @@ app:
   jwt:
     secret: ${JWT_SECRET}
     access-token-ttl: 1800        # 30분 (초)
-    refresh-token-ttl: 2592000    # 30일
+    refresh-token-ttl: 1209600   # 14일 (60*60*24*14)
     signup-token-ttl: 300         # 5분
   oauth:
     kakao:
@@ -43,6 +42,26 @@ app:
       client-id: ${GOOGLE_CLIENT_ID}
       client-secret: ${GOOGLE_CLIENT_SECRET}
       redirect-uri: ${GOOGLE_REDIRECT_URI}
+
+  # 프로필 이미지 로컬 저장 위치 (ImageStorageService 기본값과 동일)
+  upload:
+    dir: ./uploads
+
+  # 리버스 프록시(EC2 + Cloudflare 터널) 뒤에서 Swagger Try-it-out이 정확한 주소로 가도록.
+  # 로컬은 비워두고, EC2에서만 systemd 환경변수로 채운다: SWAGGER_SERVER_URL=https://<도메인>
+  swagger:
+    server-url: ${SWAGGER_SERVER_URL:}
+
+# Swagger / OpenAPI 문서 설정
+springdoc:
+  swagger-ui:
+    enabled: true                 # 운영에서 닫고 싶으면 false (또는 SPRINGDOC_SWAGGER_UI_ENABLED=false)
+    path: /swagger-ui.html        # 접속 주소
+    operations-sorter: method
+  api-docs:
+    enabled: true                 # 문서(JSON)까지 닫으려면 false
+    path: /v3/api-docs
+
 
 logging:
   level:

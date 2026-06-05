@@ -37,6 +37,9 @@ dependencies {
 	implementation platform('me.paulschwarz:spring-dotenv-bom:5.0.1')
 	implementation 'me.paulschwarz:springboot4-dotenv'
 
+	// Swagger UI / OpenAPI 문서 (springdoc v3.x = Spring Boot 4.0 대응 라인)
+	implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.1'
+
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
 
