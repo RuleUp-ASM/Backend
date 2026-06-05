@@ -1,94 +1,56 @@
 package com.ruleup.ruleup_backend.profile;
 
-import com.ruleup.ruleup_backend.common.error.BusinessException;
-import com.ruleup.ruleup_backend.common.error.ErrorCode;
+import com.ruleup.ruleup_backend.common.response.ApiResponse;
 import com.ruleup.ruleup_backend.profile.dto.ProfileImageResponse;
 import com.ruleup.ruleup_backend.profile.dto.ProfileResponse;
 import com.ruleup.ruleup_backend.profile.dto.UpdateProfileRequest;
-import com.ruleup.ruleup_backend.reputation.ReputationScore;
-import com.ruleup.ruleup_backend.reputation.ReputationScoreRepository;
-import com.ruleup.ruleup_backend.user.InterestCategory;
-import com.ruleup.ruleup_backend.user.NicknamePolicy;
-import com.ruleup.ruleup_backend.user.User;
-import com.ruleup.ruleup_backend.user.UserRepository;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
-import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
-import java.math.BigDecimal;
-import java.time.Instant;
 import java.util.UUID;
 
-@Service
+/**
+ * 프로필 API (스펙 4.8 ~ 4.11). 모두 로그인 필요.
+ * 명세 경로: /api/v1/profile (조회·수정), /api/v1/profile/image (업로드·삭제)
+ */
+@Tag(name = "Profile", description = "내 프로필 조회 · 수정 · 사진")
+@SecurityRequirement(name = "bearerAuth")    // Swagger UI에서 자물쇠(토큰 입력) 표시
+@RestController
+@RequestMapping("/api/v1/profile")
 @RequiredArgsConstructor
-public class ProfileService {
+public class ProfileController {
 
-    private final UserRepository userRepository;
-    private final ReputationScoreRepository reputationScoreRepository;
-    private final ImageStorageService imageStorage;
+    private final ProfileService profileService;
 
-    @Transactional(readOnly = true)
-    public ProfileResponse getMyProfile(UUID userId) {
-        User user = loadActive(userId);
-        return ProfileResponse.from(user, mannerTemp(userId));
+    @Operation(summary = "내 프로필 조회")
+    @GetMapping
+    public ApiResponse<ProfileResponse> getMyProfile(@AuthenticationPrincipal String userId) {
+        return ApiResponse.ok(profileService.getMyProfile(UUID.fromString(userId)));
     }
 
-    @Transactional
-    public ProfileResponse updateProfile(UUID userId, UpdateProfileRequest req) {
-        User user = loadActive(userId);
-
-        // 닉네임: 값이 왔고 현재와 다를 때만 변경
-        if (req.nickname() != null && !req.nickname().equals(user.getNickname())) {
-            Instant changedAt = user.getNicknameChangedAt();
-            if (changedAt != null && Instant.now().isBefore(changedAt.plus(NicknamePolicy.CHANGE_INTERVAL)))
-                throw new BusinessException(ErrorCode.NICKNAME_CHANGE_TOO_SOON);
-            if (!NicknamePolicy.isValid(req.nickname()))
-                throw new BusinessException(ErrorCode.NICKNAME_INVALID);
-            if (userRepository.existsByNickname(req.nickname()))
-                throw new BusinessException(ErrorCode.NICKNAME_DUPLICATED);
-            user.changeNickname(req.nickname());
-        }
-
-        // 관심 카테고리
-        if (req.interestCategories() != null) {
-            if (!InterestCategory.allValid(req.interestCategories()))
-                throw new BusinessException(ErrorCode.INTEREST_CATEGORY_INVALID);
-            user.changeInterestCategories(req.interestCategories());
-        }
-
-        // 프로필 이미지 URL (직접 지정 시)
-        if (req.profileImageUrl() != null) {
-            user.changeProfileImage(req.profileImageUrl());
-        }
-
-        return ProfileResponse.from(user, mannerTemp(userId));   // 변경은 커밋 시 자동 반영
+    @Operation(summary = "프로필 수정", description = "모든 필드 선택(null이면 변경 안 함)")
+    @PatchMapping
+    public ApiResponse<ProfileResponse> updateMyProfile(@AuthenticationPrincipal String userId,
+                                                        @RequestBody UpdateProfileRequest request) {
+        return ApiResponse.ok(profileService.updateProfile(UUID.fromString(userId), request));
     }
 
-    @Transactional
-    public ProfileImageResponse uploadImage(UUID userId, MultipartFile image) {
-        User user = loadActive(userId);
-        String filename = imageStorage.store(image);
-        String url = ServletUriComponentsBuilder.fromCurrentContextPath()
-                .path("/files/").path(filename).toUriString();
-        user.changeProfileImage(url);
-        return new ProfileImageResponse(url);
+    @Operation(summary = "프로필 사진 업로드", description = "jpg/png, 최대 10MB")
+    @PostMapping("/image")
+    public ApiResponse<ProfileImageResponse> uploadImage(@AuthenticationPrincipal String userId,
+                                                         @RequestPart("image") MultipartFile image) {
+        return ApiResponse.ok(profileService.uploadImage(UUID.fromString(userId), image));
     }
 
-    @Transactional
-    public void deleteImage(UUID userId) {
-        loadActive(userId).removeProfileImage();
-    }
-
-    private User loadActive(UUID userId) {
-        return userRepository.findByIdAndDeletedAtIsNull(userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.ACCESS_TOKEN_INVALID));
-    }
-
-    private BigDecimal mannerTemp(UUID userId) {
-        return reputationScoreRepository.findById(userId)
-                .map(ReputationScore::getMannerTemperature)
-                .orElse(ReputationScore.INITIAL_TEMPERATURE);
+    @Operation(summary = "프로필 사진 제거", description = "기본 프로필로 복귀")
+    @DeleteMapping("/image")
+    public ApiResponse<Void> deleteImage(@AuthenticationPrincipal String userId) {
+        profileService.deleteImage(UUID.fromString(userId));
+        return ApiResponse.ok();
     }
 }

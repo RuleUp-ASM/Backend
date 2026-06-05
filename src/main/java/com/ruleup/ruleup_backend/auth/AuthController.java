@@ -5,48 +5,64 @@ import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.response.ApiResponse;
 import com.ruleup.ruleup_backend.user.OAuthProvider;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+/**
+ * 계정/인증 API (스펙 4.1 ~ 4.6).
+ * 경로 prefix는 명세에 맞춰 /api/v1/account, /api/v1/nicknames 를 사용한다.
+ */
+@Tag(name = "Account", description = "로그인 · 가입 · 토큰 · 닉네임")
 @RestController
-@RequestMapping("/api/auth")
 @RequiredArgsConstructor
 public class AuthController {
 
     private final AuthService authService;
 
-    @PostMapping("/oauth/{provider}")
-    public ApiResponse<OAuthLoginResponse> oauthLogin(@PathVariable String provider,
-                                                      @RequestBody OAuthLoginRequest request) {
+    /**
+     * 4.1 / 4.2 소셜 로그인.
+     * 명세는 /login/kakao, /login/google 로 나뉘지만 처리 로직이 동일하므로
+     * {provider} path 변수 하나로 받는다. (kakao | google)
+     */
+    @Operation(summary = "소셜 로그인", description = "Kakao/Google 인가코드 검증 후 기존/신규 분기")
+    @PostMapping("/api/v1/account/login/{provider}")
+    public ApiResponse<OAuthLoginResponse> login(@PathVariable String provider,
+                                                 @RequestBody OAuthLoginRequest request) {
         return ApiResponse.ok(authService.oauthLogin(parseProvider(provider), request));
     }
 
-    @PostMapping("/signup")
+    @Operation(summary = "신규 가입 완료", description = "signupToken으로 가입을 마치고 앱 토큰 발급")
+    @PostMapping("/api/v1/account/signup")
     public ApiResponse<SignupResponse> signup(@RequestBody SignupRequest request) {
         return ApiResponse.ok(authService.signup(request));
     }
 
-    @PostMapping("/refresh")
+    @Operation(summary = "앱 토큰 재발급", description = "refreshToken 회전")
+    @PostMapping("/api/v1/account/token/refresh")
     public ApiResponse<TokenResponse> refresh(@RequestBody RefreshRequest request) {
         return ApiResponse.ok(authService.refresh(request.refreshToken()));
     }
 
-    @PostMapping("/logout")
+    @Operation(summary = "로그아웃", description = "현재 기기 refreshToken revoke")
+    @PostMapping("/api/v1/account/logout")
     public ApiResponse<Void> logout(@RequestBody LogoutRequest request) {
         authService.logout(request.refreshToken());
-        return ApiResponse.ok();        // 200 + {success:true, data:null, error:null} (204 아님)
+        return ApiResponse.ok();        // 200 + {success:true, data:null, error:null}
     }
 
-    @GetMapping("/nickname-availability")
-    public ApiResponse<NicknameAvailabilityResponse> nicknameAvailability(@RequestParam String nickname) {
-        return ApiResponse.ok(authService.checkNickname(nickname));
+    @Operation(summary = "닉네임 형식/중복 검사", description = "valid(형식)·available(중복) 동시 반환")
+    @PostMapping("/api/v1/nicknames/check")
+    public ApiResponse<NicknameAvailabilityResponse> checkNickname(@RequestBody NicknameCheckRequest request) {
+        return ApiResponse.ok(authService.checkNickname(request.nickname()));
     }
 
     private OAuthProvider parseProvider(String provider) {
         try {
             return OAuthProvider.valueOf(provider.toUpperCase());
         } catch (IllegalArgumentException e) {
-            throw new BusinessException(ErrorCode.OAUTH_PROVIDER_UNAVAILABLE);
+            throw new BusinessException(ErrorCode.LOGIN_FAILED);
         }
     }
 }
