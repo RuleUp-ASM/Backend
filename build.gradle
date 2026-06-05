@@ -43,15 +43,16 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
 
-	compileOnly 'org.projectlombok:lombok'
-	annotationProcessor 'org.projectlombok:lombok'
+	// JDK 25 대응: Lombok 1.18.40+ 필요 (그 이전 버전은 JDK25 bytecode 미지원)
+	compileOnly 'org.projectlombok:lombok:1.18.40'
+	annotationProcessor 'org.projectlombok:lombok:1.18.40'
 
 	testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-security-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-validation-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
-	testCompileOnly 'org.projectlombok:lombok'
-	testAnnotationProcessor 'org.projectlombok:lombok'
+	testCompileOnly 'org.projectlombok:lombok:1.18.40'
+	testAnnotationProcessor 'org.projectlombok:lombok:1.18.40'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
