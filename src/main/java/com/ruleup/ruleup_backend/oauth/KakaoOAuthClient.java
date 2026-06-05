@@ -80,7 +80,8 @@ public class KakaoOAuthClient implements OAuthClient {
         return new OAuthUserInfo(String.valueOf(res.id()), email, img);
     }
 
-    // 카카오 응답에서 필요한 필드만 (SNAKE_CASE 설정으로 access_token→accessToken 자동 매핑)
+    // 카카오 응답에서 필요한 필드만.
+    // RestClient.create()는 전역 Jackson 설정을 따르지 않으므로 @JsonProperty로 직접 매핑한다.
     record KakaoTokenResponse(@JsonProperty("access_token") String accessToken) {}
     record KakaoUserResponse(Long id, @JsonProperty("kakao_account") KakaoAccount kakaoAccount) {
         record KakaoAccount(String email, Profile profile) {
