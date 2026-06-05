@@ -1,9 +1,9 @@
 package com.ruleup.ruleup_backend.security;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -14,16 +14,34 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 /**
  * 시큐리티 설정 (Stateless JWT).
  * 세션/CSRF/formLogin/httpBasic 끔. 공개 경로 외엔 전부 토큰 필요.
- * JWT 필터를 앞단에 끼우고, 미인증 시 EntryPoint가 401(우리 형식)로 응답.
+ * 경로는 API 명세(/api/v1/...)에 맞췄고, Swagger 문서 경로도 공개로 열어둔다.
  */
 @Configuration
 @EnableWebSecurity
 @RequiredArgsConstructor
 public class SecurityConfig {
 
-    // 필드에서 ObjectMapper 줄 삭제, 필터 생성도 jwtProvider만
     private final JwtProvider jwtProvider;
     private final JwtAuthenticationEntryPoint entryPoint;
+
+    // 로그인 없이 접근 가능한 공개 경로
+    private static final String[] PUBLIC = {
+            "/api/v1/account/login/**",      // 4.1 / 4.2 소셜 로그인
+            "/api/v1/account/signup",        // 4.3 가입
+            "/api/v1/account/token/refresh", // 4.4 토큰 재발급 (refreshToken 사용)
+            "/api/v1/nicknames/**",          // 4.6 닉네임 검사
+            "/api/v1/categories",            // 4.7 카테고리 마스터
+            "/files/**",                     // 정적 이미지 서빙
+            "/actuator/health"
+    };
+
+    // Swagger / OpenAPI 문서 경로
+    private static final String[] SWAGGER = {
+            "/swagger-ui.html",
+            "/swagger-ui/**",
+            "/v3/api-docs/**",
+            "/swagger-resources/**"
+    };
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
@@ -35,15 +53,10 @@ public class SecurityConfig {
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers(
-                                "/api/auth/oauth/**",
-                                "/api/auth/signup",
-                                "/api/auth/refresh",
-                                "/api/auth/logout",
-                                "/api/auth/nickname-availability",
-                                "/files/**",
-                                "/actuator/health"
-                        ).permitAll()
+                        .requestMatchers(PUBLIC).permitAll()
+                        .requestMatchers(SWAGGER).permitAll()
+                        // 4.5 로그아웃은 명세상 "로그인 O" → 인증 필요(공개 목록에서 제외)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/account/logout").authenticated()
                         .anyRequest().authenticated()
                 )
                 .exceptionHandling(ex -> ex.authenticationEntryPoint(entryPoint))

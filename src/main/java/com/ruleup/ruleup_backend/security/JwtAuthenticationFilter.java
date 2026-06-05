@@ -46,7 +46,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         try {
             Claims claims = jwtProvider.parse(token);
             if (!TokenType.ACCESS.name().equals(claims.get("type"))) {  // 액세스 토큰만 허용
-                writeError(response, ErrorCode.ACCESS_TOKEN_INVALID);
+                writeError(response, ErrorCode.LOGIN_REQUIRED);
                 return;
             }
             var auth = new UsernamePasswordAuthenticationToken(
@@ -54,9 +54,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             SecurityContextHolder.getContext().setAuthentication(auth);
             chain.doFilter(request, response);
         } catch (ExpiredJwtException e) {
-            writeError(response, ErrorCode.ACCESS_TOKEN_EXPIRED);
+            writeError(response, ErrorCode.LOGIN_REQUIRED);
         } catch (JwtException | IllegalArgumentException e) {
-            writeError(response, ErrorCode.ACCESS_TOKEN_INVALID);
+            writeError(response, ErrorCode.LOGIN_REQUIRED);
         }
     }
 

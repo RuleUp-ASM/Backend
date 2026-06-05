@@ -6,6 +6,7 @@ import com.ruleup.ruleup_backend.config.AppProperties;
 import com.ruleup.ruleup_backend.user.OAuthProvider;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
@@ -20,6 +21,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * 카카오 OAuth. code+verifier를 kauth로 교환 → kapi에서 사용자 조회.
  * client_id에는 REST API 키, client_secret(콘솔 기본 활성) 함께 전송.
  */
+@Profile("!local & !test")   // local/test 환경에서는 MockOAuthClient가 대신 뜬다
 @Component
 public class KakaoOAuthClient implements OAuthClient {
 
@@ -43,11 +45,11 @@ public class KakaoOAuthClient implements OAuthClient {
             String accessToken = requestToken(code, codeVerifier, redirectUri);
             return requestUser(accessToken);
         } catch (RestClientResponseException e) {
-            log.warn("[KAKAO-DEBUG] 실패 status={}, body={}", e.getStatusCode(), e.getResponseBodyAsString());
+            log.warn("Kakao OAuth failed: status={}", e.getStatusCode());
             throw new BusinessException(e.getStatusCode().is4xxClientError()
-                    ? ErrorCode.OAUTH_CODE_INVALID : ErrorCode.OAUTH_PROVIDER_UNAVAILABLE);
+                    ? ErrorCode.LOGIN_FAILED : ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
         } catch (RestClientException e) {                    // 연결 실패 등
-            throw new BusinessException(ErrorCode.OAUTH_PROVIDER_UNAVAILABLE);
+            throw new BusinessException(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
         }
     }
 
@@ -60,10 +62,6 @@ public class KakaoOAuthClient implements OAuthClient {
         form.add("code", code);
         if (codeVerifier != null && !codeVerifier.isBlank()) form.add("code_verifier", codeVerifier);
 
-        log.warn("[KAKAO-DEBUG] client_id앞={}, secret길이={}, redirect_uri={}",
-                config.clientId() == null ? "NULL" : config.clientId().substring(0, Math.min(6, config.clientId().length())),
-                config.clientSecret() == null ? -1 : config.clientSecret().length(),
-                redirectUri);
 
         KakaoTokenResponse res = restClient.post().uri(TOKEN_URI)
                 .contentType(MediaType.APPLICATION_FORM_URLENCODED)

@@ -43,18 +43,20 @@ public class ProfileService {
         if (req.nickname() != null && !req.nickname().equals(user.getNickname())) {
             Instant changedAt = user.getNicknameChangedAt();
             if (changedAt != null && Instant.now().isBefore(changedAt.plus(NicknamePolicy.CHANGE_INTERVAL)))
-                throw new BusinessException(ErrorCode.NICKNAME_CHANGE_TOO_SOON);
+                throw new BusinessException(ErrorCode.NICKNAME_CHANGE_LOCKED);
             if (!NicknamePolicy.isValid(req.nickname()))
-                throw new BusinessException(ErrorCode.NICKNAME_INVALID);
+                throw new BusinessException(ErrorCode.NICKNAME_FORMAT_INVALID);
             if (userRepository.existsByNickname(req.nickname()))
-                throw new BusinessException(ErrorCode.NICKNAME_DUPLICATED);
+                throw new BusinessException(ErrorCode.NICKNAME_TAKEN);
             user.changeNickname(req.nickname());
         }
 
         // 관심 카테고리
         if (req.interestCategories() != null) {
+            if (!InterestCategory.isCountValid(req.interestCategories()))
+                throw new BusinessException(ErrorCode.CATEGORY_LIMIT_EXCEEDED);
             if (!InterestCategory.allValid(req.interestCategories()))
-                throw new BusinessException(ErrorCode.INTEREST_CATEGORY_INVALID);
+                throw new BusinessException(ErrorCode.CATEGORY_INVALID);
             user.changeInterestCategories(req.interestCategories());
         }
 
@@ -83,7 +85,7 @@ public class ProfileService {
 
     private User loadActive(UUID userId) {
         return userRepository.findByIdAndDeletedAtIsNull(userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.ACCESS_TOKEN_INVALID));
+                .orElseThrow(() -> new BusinessException(ErrorCode.LOGIN_REQUIRED));
     }
 
     private BigDecimal mannerTemp(UUID userId) {

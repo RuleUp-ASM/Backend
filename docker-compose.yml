@@ -1,20 +1,24 @@
 services:
-  postgres:
-    image: postgres:16
-    container_name: ruleup-postgres
+  mysql:
+    image: mysql:8.4
+    container_name: ruleup-mysql
     environment:
-      POSTGRES_DB: ruleup
-      POSTGRES_USER: ${DB_USERNAME}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: ruleup
+      MYSQL_USER: ${DB_USERNAME}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-rootpw}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
     ports:
-      - "5432:5432"
+      - "3306:3306"
     volumes:
-      - ruleup_pgdata:/var/lib/postgresql/data
+      - ruleup_mysqldata:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d ruleup"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASSWORD:-rootpw}"]
       interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 10
 
 volumes:
-  ruleup_pgdata:
+  ruleup_mysqldata:

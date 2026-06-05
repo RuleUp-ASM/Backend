@@ -29,11 +29,12 @@ import java.util.UUID;
 public class User extends AssignedIdEntity {
 
     @Id
-    @Column(name = "id", nullable = false, updatable = false)
+    @JdbcTypeCode(SqlTypes.CHAR)                 // UUID를 CHAR(36) 문자열로 저장 (MySQL)
+    @Column(name = "id", nullable = false, updatable = false, length = 36)
     private UUID id;
 
-    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
-    @Column(name = "oauth_provider", nullable = false, columnDefinition = "oauth_provider")
+    @Enumerated(EnumType.STRING)                 // MySQL ENUM 컬럼에 문자열로 매핑
+    @Column(name = "oauth_provider", nullable = false)
     private OAuthProvider oauthProvider;
 
     @Column(name = "oauth_subject", nullable = false)
@@ -48,8 +49,8 @@ public class User extends AssignedIdEntity {
     @Column(name = "profile_image_url")
     private String profileImageUrl;
 
-    @JdbcTypeCode(SqlTypes.ARRAY)
-    @Column(name = "interest_categories", nullable = false, columnDefinition = "text[]")
+    @JdbcTypeCode(SqlTypes.JSON)                 // MySQL JSON 컬럼에 List<String> 매핑
+    @Column(name = "interest_categories", nullable = false)
     private List<String> interestCategories = new ArrayList<>();
 
     @Column(name = "nickname_changed_at")

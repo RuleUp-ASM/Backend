@@ -14,7 +14,7 @@ import tools.jackson.databind.json.JsonMapper;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 
-/** 인증 필요한데 토큰 없는 요청 → ACCESS_TOKEN_MISSING(401)을 봉투 형식으로 응답. */
+/** 인증 필요한데 토큰 없는 요청 → LOGIN_REQUIRED(401)을 봉투 형식으로 응답. */
 @Component
 public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
 
@@ -23,7 +23,7 @@ public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
     @Override
     public void commence(HttpServletRequest request, HttpServletResponse response,
                          AuthenticationException authException) throws IOException {
-        ErrorCode code = ErrorCode.ACCESS_TOKEN_MISSING;
+        ErrorCode code = ErrorCode.LOGIN_REQUIRED;
         response.setStatus(code.getStatus().value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
