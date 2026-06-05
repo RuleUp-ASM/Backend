@@ -43,6 +43,8 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
 
+	implementation 'org.springframework.boot:spring-boot-starter-cache'
+
 	// JDK 25 대응: Lombok 1.18.40+ 필요 (그 이전 버전은 JDK25 bytecode 미지원)
 	compileOnly 'org.projectlombok:lombok:1.18.40'
 	annotationProcessor 'org.projectlombok:lombok:1.18.40'
