@@ -5,6 +5,8 @@ import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -23,6 +25,7 @@ public class ReputationScore {
     public static final BigDecimal INITIAL_TEMPERATURE = new BigDecimal("36.5");
 
     @Id
+    @JdbcTypeCode(SqlTypes.CHAR)   // users.id 와 동일하게 CHAR(36) 문자열로 저장 (기본 UUID→BINARY 매핑이 user_id 컬럼과 충돌하던 버그 수정)
     private UUID userId;          // 값은 아래 @MapsId가 user.id에서 자동으로 채움
 
     @MapsId                       // "이 1:1의 PK = user의 PK" 라는 뜻 (PK 공유)
