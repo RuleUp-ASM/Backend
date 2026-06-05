@@ -2,6 +2,8 @@
 spring:
   application:
     name: ruleup-backend
+  jackson:
+    property-naming-strategy: SNAKE_CASE
 
   datasource:
     url: jdbc:postgresql://localhost:5432/ruleup
@@ -10,7 +12,7 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: validate      # 스키마는 Flyway가 관리. JPA는 검증만.
+      ddl-auto: none
     open-in-view: false
     properties:
       hibernate:
@@ -23,7 +25,7 @@ spring:
   servlet:
     multipart:
       max-file-size: 10MB     # 프로필 사진 10MB 제한 (스펙)
-      max-request-size: 10MB
+      max-request-size: 11MB
 
 # 우리 앱 전용 설정 (외부에서 받는 값은 전부 .env에서 주입)
 app:
@@ -41,3 +43,12 @@ app:
       client-id: ${GOOGLE_CLIENT_ID}
       client-secret: ${GOOGLE_CLIENT_SECRET}
       redirect-uri: ${GOOGLE_REDIRECT_URI}
+
+logging:
+  level:
+    # 기본 유저는 우리 설정상 쓸 수 없으니, 'generated password' 경고만 숨김
+    org.springframework.boot.security.autoconfigure: error
+    org.springframework.boot.autoconfigure.security: error
+
+server:
+  forward-headers-strategy: framework

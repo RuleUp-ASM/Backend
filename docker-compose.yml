@@ -1,18 +1,17 @@
-# 경로: Backend-dev/docker-compose.yml
 services:
   postgres:
     image: postgres:16
     container_name: ruleup-postgres
     environment:
       POSTGRES_DB: ruleup
-      POSTGRES_USER: ruleup
-      POSTGRES_PASSWORD: "dltjddms1012"
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
       - ruleup_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ruleup -d ruleup"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d ruleup"]
       interval: 5s
       timeout: 3s
       retries: 5
