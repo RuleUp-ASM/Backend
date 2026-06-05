@@ -6,6 +6,7 @@ import com.ruleup.ruleup_backend.config.AppProperties;
 import com.ruleup.ruleup_backend.user.OAuthProvider;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
@@ -17,6 +18,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /** 구글 OAuth. code 교환 → userinfo에서 sub/email/picture 조회. */
+@Profile("!local & !test")   // local/test 환경에서는 MockOAuthClient가 대신 뜬다
 @Component
 public class GoogleOAuthClient implements OAuthClient {
     private static final Logger log = LoggerFactory.getLogger(GoogleOAuthClient.class);

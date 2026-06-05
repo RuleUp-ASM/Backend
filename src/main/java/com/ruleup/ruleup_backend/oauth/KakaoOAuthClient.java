@@ -6,6 +6,7 @@ import com.ruleup.ruleup_backend.config.AppProperties;
 import com.ruleup.ruleup_backend.user.OAuthProvider;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
@@ -20,6 +21,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * 카카오 OAuth. code+verifier를 kauth로 교환 → kapi에서 사용자 조회.
  * client_id에는 REST API 키, client_secret(콘솔 기본 활성) 함께 전송.
  */
+@Profile("!local & !test")   // local/test 환경에서는 MockOAuthClient가 대신 뜬다
 @Component
 public class KakaoOAuthClient implements OAuthClient {
 
