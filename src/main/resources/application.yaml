@@ -40,19 +40,17 @@ app:
       client-id: ${GOOGLE_CLIENT_ID}
       client-secret: ${GOOGLE_CLIENT_SECRET}
       redirect-uri: ${GOOGLE_REDIRECT_URI}
-  llm:
-    # --- 현재 사용: Solar (Upstage), OpenAI 호환 ---
-    solar:
-      api-key: ${UPSTAGE_API_KEY}
-      model: ${SOLAR_MODEL:solar-pro2}               # response_format json_object 지원 모델
-      base-url: ${SOLAR_BASE_URL:https://api.upstage.ai/v1}
-      timeout-ms: ${SOLAR_TIMEOUT_MS:5000}           # 동기 호출 타임아웃(ms), 스펙 2.3
-
-    # --- 나중에 사용: Gemini (지금은 클라이언트 @Component 주석 처리되어 미동작) ---
-    gemini:
-      api-key: ${GEMINI_API_KEY:}
-      model: ${GEMINI_MODEL:gemini-2.5-flash-lite}   # 성능 확인 후 gemini-2.5-flash로 교체 가능
-      timeout-ms: ${GEMINI_TIMEOUT_MS:5000}
+  app:
+    llm:
+      solar:
+        api-key: ${UPSTAGE_API_KEY:}                 # 비밀키만 env (없어도 기동은 됨, 호출 시에만 필요)
+        model: solar-pro2
+        base-url: https://api.upstage.ai/v1
+        timeout-ms: 5000
+      gemini:
+        api-key: ${GEMINI_API_KEY:}
+        model: gemini-2.5-flash-lite
+        timeout-ms: 5000
 
   # 프로필 이미지 로컬 저장 위치 (ImageStorageService 기본값과 동일)
   upload:
