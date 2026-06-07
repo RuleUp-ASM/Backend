@@ -45,7 +45,9 @@ public class KakaoOAuthClient implements OAuthClient {
             String accessToken = requestToken(code, codeVerifier, redirectUri);
             return requestUser(accessToken);
         } catch (RestClientResponseException e) {
-            log.warn("Kakao OAuth failed: status={}", e.getStatusCode());
+            // 카카오가 준 에러 바디(error, error_code: 예 KOE320)를 함께 남겨야 원인 파악 가능.
+            // (status만으로는 redirect_uri 불일치 / PKCE / client_secret 중 무엇인지 알 수 없음)
+            log.warn("Kakao OAuth failed: status={}, body={}", e.getStatusCode(), e.getResponseBodyAsString());
             throw new BusinessException(e.getStatusCode().is4xxClientError()
                     ? ErrorCode.LOGIN_FAILED : ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
         } catch (RestClientException e) {                    // 연결 실패 등
@@ -80,8 +82,7 @@ public class KakaoOAuthClient implements OAuthClient {
         return new OAuthUserInfo(String.valueOf(res.id()), email, img);
     }
 
-    // 카카오 응답에서 필요한 필드만.
-    // RestClient.create()는 전역 Jackson 설정을 따르지 않으므로 @JsonProperty로 직접 매핑한다.
+    // 카카오 응답에서 필요한 필드만 (SNAKE_CASE 설정으로 access_token→accessToken 자동 매핑)
     record KakaoTokenResponse(@JsonProperty("access_token") String accessToken) {}
     record KakaoUserResponse(Long id, @JsonProperty("kakao_account") KakaoAccount kakaoAccount) {
         record KakaoAccount(String email, Profile profile) {

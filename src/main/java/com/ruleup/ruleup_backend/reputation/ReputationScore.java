@@ -25,7 +25,7 @@ public class ReputationScore {
     public static final BigDecimal INITIAL_TEMPERATURE = new BigDecimal("36.5");
 
     @Id
-    @JdbcTypeCode(SqlTypes.CHAR)   // users.id 와 동일하게 CHAR(36) 문자열로 저장 (기본 UUID→BINARY 매핑이 user_id 컬럼과 충돌하던 버그 수정)
+    @JdbcTypeCode(SqlTypes.CHAR)  // user_id도 users.id처럼 CHAR(36)로 바인딩 (기본 UUID→BINARY 방지)
     private UUID userId;          // 값은 아래 @MapsId가 user.id에서 자동으로 채움
 
     @MapsId                       // "이 1:1의 PK = user의 PK" 라는 뜻 (PK 공유)
