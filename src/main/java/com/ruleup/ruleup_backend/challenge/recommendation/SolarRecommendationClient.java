@@ -34,43 +34,64 @@ import java.util.List;
 public class SolarRecommendationClient implements RecommendationClient {
 
     private static final Logger log = LoggerFactory.getLogger(SolarRecommendationClient.class);
+    private static final String DEFAULT_BASE_URL = "https://api.upstage.ai/v1";
+    private static final String DEFAULT_MODEL = "solar-mini";
+    private static final long DEFAULT_TIMEOUT_MS = 5000L;
 
     private final RestClient restClient;
     // Spring Boot 4는 Jackson 3(tools.jackson)이라 com.fasterxml...ObjectMapper 빈이 없음 → 직접 생성.
     private final JsonMapper jsonMapper = JsonMapper.builder().build();
-    private final AppProperties.Llm.Solar config;
+    private final AppProperties.Llm.Solar config;   // 설정 누락 시 null일 수 있음(앱 기동은 막지 않음)
 
     public SolarRecommendationClient(AppProperties props) {
-        this.config = props.llm().solar();
+        AppProperties.Llm llm = (props != null) ? props.llm() : null;
+        this.config = (llm != null) ? llm.solar() : null;
+        if (config == null)
+            log.warn("app.llm.solar 설정이 없습니다. 추천 API(3.1)는 동작하지 않습니다(나머지 기능은 정상).");
 
+        long timeoutMs = (config != null && config.timeoutMs() > 0) ? config.timeoutMs() : DEFAULT_TIMEOUT_MS;
         var factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(Duration.ofMillis(config.timeoutMs()));
-        factory.setReadTimeout(Duration.ofMillis(config.timeoutMs()));
+        factory.setConnectTimeout(Duration.ofMillis(timeoutMs));
+        factory.setReadTimeout(Duration.ofMillis(timeoutMs));
         // base-url 예: https://api.upstage.ai/v1  → 실제 호출은 {base-url}/chat/completions
+        String baseUrl = (config != null && config.baseUrl() != null && !config.baseUrl().isBlank())
+                ? config.baseUrl() : DEFAULT_BASE_URL;
         this.restClient = RestClient.builder()
-                .baseUrl(config.baseUrl())
+                .baseUrl(baseUrl)
                 .requestFactory(factory)
                 .build();
     }
 
     @Override
     public GeminiSuggestion recommend(String title, String description) {
-        SolarRequest body = SolarRequest.of(config.model(), buildPrompt(title, description));
+        if (config == null || config.apiKey() == null || config.apiKey().isBlank()) {
+            log.warn("Solar 설정/API 키가 없어 추천을 수행할 수 없습니다.");
+            throw new BusinessException(ErrorCode.AI_RECOMMENDATION_FAILED);
+        }
+        String model = (config.model() != null && !config.model().isBlank()) ? config.model() : DEFAULT_MODEL;
+        SolarRequest body = SolarRequest.of(model, buildPrompt(title, description));
         try {
-            SolarResponse res = restClient.post().uri("/chat/completions")
+            // 응답 Content-Type이 application/json이 아닐 수 있어(octet-stream 등) String으로 받아 직접 파싱.
+            String raw = restClient.post().uri("/chat/completions")
                     .header("Authorization", "Bearer " + config.apiKey())
                     .contentType(MediaType.APPLICATION_JSON)
+                    .accept(MediaType.APPLICATION_JSON)
                     .body(body)
                     .retrieve()
-                    .body(SolarResponse.class);
+                    .body(String.class);
 
-            String json = res != null ? res.firstContent() : null;
-            if (json == null || json.isBlank()) {
+            if (raw == null || raw.isBlank()) {
+                log.warn("Solar returned empty body");
+                throw new BusinessException(ErrorCode.AI_RECOMMENDATION_FAILED);
+            }
+            SolarResponse res = jsonMapper.readValue(raw, SolarResponse.class);
+            String content = (res != null) ? res.firstContent() : null;
+            if (content == null || content.isBlank()) {
                 log.warn("Solar returned empty content");
                 throw new BusinessException(ErrorCode.AI_RECOMMENDATION_FAILED);
             }
             // 모델이 ```json 펜스나 잡설을 섞을 수 있어 첫 '{' ~ 마지막 '}'만 추출 후 파싱.
-            return jsonMapper.readValue(extractJson(json), GeminiSuggestion.class);
+            return jsonMapper.readValue(extractJson(content), GeminiSuggestion.class);
 
         } catch (BusinessException e) {
             throw e;
@@ -121,16 +142,21 @@ public class SolarRecommendationClient implements RecommendationClient {
     }
 
     // ===== Solar(OpenAI 호환) 요청/응답 매핑 (필요한 필드만) =====
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
     record SolarRequest(String model,
                         List<Message> messages,
                         Double temperature,
                         @JsonProperty("response_format") ResponseFormat responseFormat) {
         static SolarRequest of(String model, String prompt) {
+            // response_format(json_object)는 solar-pro2 계열만 지원. 그 외(solar-mini 등)는 보내지 않는다.
+            // (프롬프트가 "JSON으로만 응답"을 요구하고, 응답에서 {...}만 추출해 파싱하므로 동작에 지장 없음)
+            boolean jsonMode = model != null && model.toLowerCase().contains("pro2");
+            ResponseFormat rf = jsonMode ? new ResponseFormat("json_object") : null;  // null이면 위 @JsonInclude로 생략됨
             return new SolarRequest(
                     model,
                     List.of(new Message("user", prompt)),
                     0.4,
-                    new ResponseFormat("json_object"));   // solar-pro2 전용. 다른 모델이면 null로 두세요.
+                    rf);
         }
         record Message(String role, String content) {}
         record ResponseFormat(String type) {}
