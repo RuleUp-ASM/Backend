@@ -2,7 +2,7 @@ package com.ruleup.ruleup_backend.challenge.recommendation;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.config.AppProperties;
@@ -36,12 +36,12 @@ public class SolarRecommendationClient implements RecommendationClient {
     private static final Logger log = LoggerFactory.getLogger(SolarRecommendationClient.class);
 
     private final RestClient restClient;
-    private final ObjectMapper objectMapper;
+    // Spring Boot 4는 Jackson 3(tools.jackson)이라 com.fasterxml...ObjectMapper 빈이 없음 → 직접 생성.
+    private final JsonMapper jsonMapper = JsonMapper.builder().build();
     private final AppProperties.Llm.Solar config;
 
-    public SolarRecommendationClient(AppProperties props, ObjectMapper objectMapper) {
+    public SolarRecommendationClient(AppProperties props) {
         this.config = props.llm().solar();
-        this.objectMapper = objectMapper;
 
         var factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(Duration.ofMillis(config.timeoutMs()));
@@ -70,7 +70,7 @@ public class SolarRecommendationClient implements RecommendationClient {
                 throw new BusinessException(ErrorCode.AI_RECOMMENDATION_FAILED);
             }
             // 모델이 ```json 펜스나 잡설을 섞을 수 있어 첫 '{' ~ 마지막 '}'만 추출 후 파싱.
-            return objectMapper.readValue(extractJson(json), GeminiSuggestion.class);
+            return jsonMapper.readValue(extractJson(json), GeminiSuggestion.class);
 
         } catch (BusinessException e) {
             throw e;
