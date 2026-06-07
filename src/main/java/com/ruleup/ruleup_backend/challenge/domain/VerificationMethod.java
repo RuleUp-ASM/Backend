@@ -1,4 +1,4 @@
-package com.ruleup.ruleup_backend.challenge;
+package com.ruleup.ruleup_backend.challenge.domain;
 
 import java.util.Arrays;
 import java.util.Collection;
