@@ -23,8 +23,10 @@ import java.util.List;
  *  - 타임아웃/네트워크/파싱 실패는 전부 AI_RECOMMENDATION_FAILED(503)로 변환 → 클라가 직접 입력 모드로.
  *  - 받아온 값의 enum/숫자 "검증·보정"은 여기서 하지 않는다(서비스 책임).
  */
-@Component
-public class GeminiRecommendationClient {
+// 당분간 Solar 사용 → Gemini 비활성화. Gemini로 복귀 시 아래 @Component 주석을 해제하고
+// SolarRecommendationClient의 @Component를 주석 처리하세요. (빈은 둘 중 하나만 등록)
+// @Component
+public class GeminiRecommendationClient implements RecommendationClient {
 
     private static final Logger log = LoggerFactory.getLogger(GeminiRecommendationClient.class);
     private static final String ENDPOINT =
@@ -45,6 +47,7 @@ public class GeminiRecommendationClient {
     }
 
     /** title(+description)로 추천 초안을 받아온다. 실패 시 BusinessException(AI_RECOMMENDATION_FAILED). */
+    @Override
     public GeminiSuggestion recommend(String title, String description) {
         String uri = String.format(ENDPOINT, config.model());
         GeminiRequest body = GeminiRequest.of(buildPrompt(title, description));

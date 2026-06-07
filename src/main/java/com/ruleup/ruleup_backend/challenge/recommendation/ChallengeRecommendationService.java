@@ -35,13 +35,14 @@ public class ChallengeRecommendationService {
     private static final List<String> DEFAULT_REPEAT_DAYS = List.of("MON","TUE","WED","THU","FRI");
     private static final List<String> DEFAULT_VERIFICATIONS = List.of(VerificationMethod.SELF_CHECK.name());
 
-    private final GeminiRecommendationClient geminiClient;
+    // 빈으로 등록된 구현체가 주입됨(현재 SolarRecommendationClient, 나중에 GeminiRecommendationClient).
+    private final RecommendationClient recommendationClient;
 
     public RecommendationResponse recommend(RecommendationRequest req) {
         validateInput(req);
 
         // 트랜잭션 밖 외부 호출. 실패 시 AI_RECOMMENDATION_FAILED(503)가 그대로 전파됨.
-        GeminiSuggestion s = geminiClient.recommend(req.title(), req.description());
+        GeminiSuggestion s = recommendationClient.recommend(req.title(), req.description());
 
         // ---- 신뢰 경계 보정 ----
         String category = sanitizeCategory(s.category());
