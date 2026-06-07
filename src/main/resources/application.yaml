@@ -40,17 +40,16 @@ app:
       client-id: ${GOOGLE_CLIENT_ID}
       client-secret: ${GOOGLE_CLIENT_SECRET}
       redirect-uri: ${GOOGLE_REDIRECT_URI}
-  app:
-    llm:
-      solar:
-        api-key: ${UPSTAGE_API_KEY:}                 # 비밀키만 env (없어도 기동은 됨, 호출 시에만 필요)
-        model: solar-mini
-        base-url: https://api.upstage.ai/v1
-        timeout-ms: 5000
-      gemini:
-        api-key: ${GEMINI_API_KEY:}
-        model: gemini-2.5-flash-lite
-        timeout-ms: 5000
+  llm:
+    solar:
+      api-key: ${UPSTAGE_API_KEY:}                 # 비밀키만 env (없어도 기동은 됨, 호출 시에만 필요)
+      model: solar-mini
+      base-url: https://api.upstage.ai/v1
+      timeout-ms: 5000
+    gemini:
+      api-key: ${GEMINI_API_KEY:}
+      model: gemini-2.5-flash-lite
+      timeout-ms: 5000
 
   # 프로필 이미지 로컬 저장 위치 (ImageStorageService 기본값과 동일)
   upload:
