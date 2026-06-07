@@ -44,7 +44,7 @@ app:
     llm:
       solar:
         api-key: ${UPSTAGE_API_KEY:}                 # 비밀키만 env (없어도 기동은 됨, 호출 시에만 필요)
-        model: solar-pro2
+        model: solar-mini
         base-url: https://api.upstage.ai/v1
         timeout-ms: 5000
       gemini:
