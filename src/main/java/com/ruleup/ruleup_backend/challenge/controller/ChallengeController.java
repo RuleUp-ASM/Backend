@@ -10,6 +10,9 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import com.ruleup.ruleup_backend.common.image.ImageStorageService;
+import org.springframework.http.MediaType;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.UUID;
 
@@ -26,6 +29,7 @@ public class ChallengeController {
 
     private final ChallengeRecommendationService recommendationService;
     private final ChallengeService challengeService;
+    private final ImageStorageService imageStorageService;
 
     @Operation(summary = "AI 기본값 추천", description = "제목/설명으로 챌린지 기본값 추천(초안). 상태 저장 없음. '다시 추천'도 이 API 재호출.")
     @PostMapping("/recommendation")
@@ -38,6 +42,13 @@ public class ChallengeController {
     public ApiResponse<ChallengeResponse> create(@AuthenticationPrincipal String userId,
                                                  @RequestBody CreateChallengeRequest request) {
         return ApiResponse.ok(challengeService.create(UUID.fromString(userId), request));
+    }
+
+    @Operation(summary = "챌린지 대표 이미지 업로드",
+            description = "jpg/png, 최대 10MB. 반환된 imageUrl을 생성/수정 요청 body의 imageUrl에 넣는다.")
+    @PostMapping(value = "/image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResponse<ChallengeImageResponse> uploadImage(@RequestPart("image") MultipartFile image) {
+        return ApiResponse.ok(new ChallengeImageResponse(imageStorageService.storeAndGetUrl(image)));
     }
 
     @Operation(summary = "챌린지 상세 + 참여 자격")
