@@ -1,4 +1,4 @@
-package com.ruleup.ruleup_backend.profile;
+package com.ruleup.ruleup_backend.common.image;
 
 import com.ruleup.ruleup_backend.common.UuidGenerator;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
@@ -6,6 +6,7 @@ import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -60,5 +61,12 @@ public class ImageStorageService {
                 && (b[2] & 0xFF) == 0x4E && (b[3] & 0xFF) == 0x47)
             return "png";                                     // PNG: 89 50 4E 47
         throw new BusinessException(ErrorCode.IMAGE_INVALID_TYPE);
+    }
+
+    /** 저장 후 정적 서빙 URL(/files/{파일명})까지 만들어 반환. 프로필·챌린지 공용. */
+    public String storeAndGetUrl(MultipartFile file) {
+        String filename = store(file);
+        return ServletUriComponentsBuilder.fromCurrentContextPath()
+                .path("/files/").path(filename).toUriString();
     }
 }
