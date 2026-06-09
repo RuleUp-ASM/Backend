@@ -44,10 +44,14 @@ public class ChallengeController {
         return ApiResponse.ok(challengeService.create(UUID.fromString(userId), request));
     }
 
+    // ChallengeController.uploadImage — userId 받고 rate limit 적용
     @Operation(summary = "챌린지 대표 이미지 업로드",
             description = "jpg/png, 최대 10MB. 반환된 imageUrl을 생성/수정 요청 body의 imageUrl에 넣는다.")
     @PostMapping(value = "/image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ApiResponse<ChallengeImageResponse> uploadImage(@RequestPart("image") MultipartFile image) {
+    public ApiResponse<ChallengeImageResponse> uploadImage(
+            @AuthenticationPrincipal String userId,
+            @RequestPart("image") MultipartFile image) {
+        uploadRateLimiter.check(userId);   // 분당 N회 초과 시 예외
         return ApiResponse.ok(new ChallengeImageResponse(imageStorageService.storeAndGetUrl(image)));
     }
 
