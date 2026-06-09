@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 import com.ruleup.ruleup_backend.common.image.ImageStorageService;
 import org.springframework.http.MediaType;
 import org.springframework.web.multipart.MultipartFile;
+import com.ruleup.ruleup_backend.common.image.UploadRateLimiter;
 
 import java.util.UUID;
 
@@ -30,6 +31,7 @@ public class ChallengeController {
     private final ChallengeRecommendationService recommendationService;
     private final ChallengeService challengeService;
     private final ImageStorageService imageStorageService;
+    private final UploadRateLimiter uploadRateLimiter;
 
     @Operation(summary = "AI 기본값 추천", description = "제목/설명으로 챌린지 기본값 추천(초안). 상태 저장 없음. '다시 추천'도 이 API 재호출.")
     @PostMapping("/recommendation")
