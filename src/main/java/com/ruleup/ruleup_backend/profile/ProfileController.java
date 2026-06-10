@@ -11,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import com.ruleup.ruleup_backend.common.image.UploadRateLimiter;
 
 import java.util.UUID;
 
@@ -26,6 +27,7 @@ import java.util.UUID;
 public class ProfileController {
 
     private final ProfileService profileService;
+    private final UploadRateLimiter uploadRateLimiter;
 
     @Operation(summary = "내 프로필 조회")
     @GetMapping
@@ -44,6 +46,7 @@ public class ProfileController {
     @PostMapping("/image")
     public ApiResponse<ProfileImageResponse> uploadImage(@AuthenticationPrincipal String userId,
                                                          @RequestPart("image") MultipartFile image) {
+        uploadRateLimiter.check(userId);
         return ApiResponse.ok(profileService.uploadImage(UUID.fromString(userId), image));
     }
 
