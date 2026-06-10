@@ -27,6 +27,7 @@ import java.util.UUID;
 public class ProfileController {
 
     private final ProfileService profileService;
+    private final UploadRateLimiter uploadRateLimiter;
 
     @Operation(summary = "내 프로필 조회")
     @GetMapping
