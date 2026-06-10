@@ -44,6 +44,7 @@ public class ProfileController {
     @PostMapping("/image")
     public ApiResponse<ProfileImageResponse> uploadImage(@AuthenticationPrincipal String userId,
                                                          @RequestPart("image") MultipartFile image) {
+        uploadRateLimiter.check(userId);
         return ApiResponse.ok(profileService.uploadImage(UUID.fromString(userId), image));
     }
 
