@@ -1,10 +1,10 @@
 name: CI
 
-# 언제 돌릴지: PR 올릴 때 + feature/onboarding에 push될 때
+# 언제 돌릴지: PR 올릴 때 + dev 혹은 main에 push될 때
 on:
   pull_request:
   push:
-    branches: [ feature/onboarding ]
+    branches: [ dev, main ]
 
 jobs:
   build:
