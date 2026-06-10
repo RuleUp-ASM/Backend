@@ -52,6 +52,8 @@ public class ChallengeService {
         LocalDate startDate = validateStartDate(req.startDate());
         validatePenalty(req.penalty());
         validateReward(req.reward());
+        if (participationType == ParticipationType.GROUP)
+            checkMinMannerNotAboveOwner(userId, req.minMannerTemperature());
 
         Challenge challenge = Challenge.create(
                 userId, req.title(), req.description(), req.imageUrl(),
@@ -66,6 +68,14 @@ public class ChallengeService {
         challenge.increaseParticipantCount();
 
         return ChallengeResponse.from(challenge);
+    }
+
+    /** 그룹 기준 매너 온도가 생성자 본인 온도보다 높으면 거부 (생성/수정 공용). */
+    private void checkMinMannerNotAboveOwner(UUID ownerId, BigDecimal minManner) {
+        if (minManner == null) return;
+        if (mannerTemp(ownerId).compareTo(minManner) < 0) {
+            throw new BusinessException(ErrorCode.INVALID_MIN_MANNER_TEMPERATURE);
+        }
     }
 
     // ===== 3.3 상세 + 참여 자격 =====
@@ -122,6 +132,8 @@ public class ChallengeService {
             c.changeVerificationMethods(validateVerifications(req.verificationMethods()));
         c.changePenalty(req.penalty());
         c.changeReward(req.reward());
+        if (c.isGroup())
+            checkMinMannerNotAboveOwner(c.getCreatorId(), req.minMannerTemperature());
         c.changeMinMannerTemperature(req.minMannerTemperature());
 
         // 일정 변경 → endDate 재파생
