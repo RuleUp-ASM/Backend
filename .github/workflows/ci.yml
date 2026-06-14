@@ -6,9 +6,20 @@ on:
   push:
     branches: [ dev, main ]
 
+# 같은 브랜치/PR에 새 푸시가 오면 진행 중이던 이전 실행을 취소해 러너 시간을 절약.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
+
+    # test-reporter는 checks:write, jacoco 코멘트는 pull-requests:write 필요
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
 
     # 테스트(@SpringBootTest)가 Flyway 마이그레이션(MySQL ENUM, JSON, DATETIME 등)을 실행하므로
     # 진짜 MySQL 8.4를 곁들여 띄운다.
@@ -57,3 +68,32 @@ jobs:
 
       - name: Build & Test
         run: ./gradlew build
+
+      # 테스트가 깨져도(실패해도) 결과를 PR에 표시한다.
+      - name: Publish test report
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: JUnit Test Report
+          path: build/test-results/test/*.xml
+          reporter: java-junit
+
+      # 실패 분석용으로 HTML 리포트/테스트 결과를 통째로 보관 (7일)
+      - name: Upload test reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-reports
+          path: |
+            build/reports/tests/test
+            build/test-results/test
+          retention-days: 7
+
+      # 커버리지를 PR에 코멘트로 표시. 임계치(min-coverage)를 안 걸어서 막지 않고 보기만 한다.
+      - name: Add coverage to PR
+        uses: madrapps/jacoco-report@v1.7.1
+        if: github.event_name == 'pull_request'
+        with:
+          paths: ${{ github.workspace }}/build/reports/jacoco/test/jacocoTestReport.xml
+          token: ${{ secrets.GITHUB_TOKEN }}
+          title: 'Test Coverage'
