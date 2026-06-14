@@ -91,7 +91,7 @@ jobs:
 
       # 커버리지를 PR에 코멘트로 표시. 임계치(min-coverage)를 안 걸어서 막지 않고 보기만 한다.
       - name: Add coverage to PR
-        uses: madrapps/jacoco-report@v1.7.1
+        uses: madrapps/jacoco-report@v1.8.0
         if: github.event_name == 'pull_request'
         with:
           paths: ${{ github.workspace }}/build/reports/jacoco/test/jacocoTestReport.xml
