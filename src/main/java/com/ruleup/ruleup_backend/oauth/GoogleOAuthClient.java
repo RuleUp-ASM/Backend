@@ -26,11 +26,12 @@ public class GoogleOAuthClient implements OAuthClient {
     private static final String TOKEN_URI = "https://oauth2.googleapis.com/token";
     private static final String USER_URI = "https://www.googleapis.com/oauth2/v3/userinfo";
 
-    private final RestClient restClient = RestClient.create();
+    private final RestClient restClient;   // 공용 풀링 빈(OAuthHttpClientConfig) 주입
     private final AppProperties.Oauth.Provider config;
 
-    public GoogleOAuthClient(AppProperties props) {
+    public GoogleOAuthClient(AppProperties props, RestClient oauthRestClient) {
         this.config = props.oauth().google();
+        this.restClient = oauthRestClient;
     }
 
     @Override

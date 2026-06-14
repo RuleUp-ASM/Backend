@@ -29,11 +29,12 @@ public class KakaoOAuthClient implements OAuthClient {
     private static final String TOKEN_URI = "https://kauth.kakao.com/oauth/token";
     private static final String USER_URI = "https://kapi.kakao.com/v2/user/me";
 
-    private final RestClient restClient = RestClient.create();
+    private final RestClient restClient;   // 공용 풀링 빈(OAuthHttpClientConfig) 주입
     private final AppProperties.Oauth.Provider config;
 
-    public KakaoOAuthClient(AppProperties props) {
+    public KakaoOAuthClient(AppProperties props, RestClient oauthRestClient) {
         this.config = props.oauth().kakao();
+        this.restClient = oauthRestClient;
     }
 
     @Override

@@ -1,0 +1,22 @@
+version: 2
+updates:
+  # Gradle 의존성 (build.gradle) 업데이트 PR 자동 생성
+  - package-ecosystem: gradle
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    target-branch: dev
+    labels:
+      - dependencies
+
+  # GitHub Actions 버전(actions/checkout 등) 업데이트
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    target-branch: dev
+    labels:
+      - dependencies
+      - ci
