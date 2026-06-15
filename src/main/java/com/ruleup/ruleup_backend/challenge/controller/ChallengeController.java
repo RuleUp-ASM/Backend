@@ -1,7 +1,6 @@
 package com.ruleup.ruleup_backend.challenge.controller;
 
 import com.ruleup.ruleup_backend.challenge.dto.*;
-import com.ruleup.ruleup_backend.challenge.recommendation.ChallengeRecommendationService;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeService;
 import com.ruleup.ruleup_backend.common.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -18,26 +17,19 @@ import com.ruleup.ruleup_backend.common.image.UploadRateLimiter;
 import java.util.UUID;
 
 /**
- * 챌린지 API (스펙 3.1 ~ 3.5). 모두 로그인 필요.
- *  - 추천(3.1)과 생성(3.2)은 분리: AI 응답은 저장 없는 초안, 생성 요청의 값이 최종(스펙 2.1).
+ * 챌린지 API (조회/수정/삭제 + 이미지 업로드). 모두 로그인 필요.
+ *  - 추천·생성은 루틴 플로우(/api/v1/routines)로 이관됨. 여기엔 생성 이후 라이프사이클만 남는다.
  */
-@Tag(name = "Challenge", description = "챌린지 추천 · 생성 · 조회 · 수정 · 삭제")
+@Tag(name = "Challenge", description = "챌린지 조회 · 수정 · 삭제")
 @SecurityRequirement(name = "bearerAuth")
 @RestController
 @RequestMapping("/api/v1/challenges")
 @RequiredArgsConstructor
 public class ChallengeController {
 
-    private final ChallengeRecommendationService recommendationService;
     private final ChallengeService challengeService;
     private final ImageStorageService imageStorageService;
     private final UploadRateLimiter uploadRateLimiter;
-
-    @Operation(summary = "AI 기본값 추천", description = "제목/설명으로 챌린지 기본값 추천(초안). 상태 저장 없음. '다시 추천'도 이 API 재호출.")
-    @PostMapping("/recommendation")
-    public ApiResponse<RecommendationResponse> recommend(@RequestBody RecommendationRequest request) {
-        return ApiResponse.ok(recommendationService.recommend(request));
-    }
 
     @Operation(summary = "챌린지 생성", description = "추천을 수정·확정한 최종값으로 생성. RECRUITING으로 저장하고 생성자를 OWNER로 등록.")
     @PostMapping
@@ -46,14 +38,13 @@ public class ChallengeController {
         return ApiResponse.ok(challengeService.create(UUID.fromString(userId), request));
     }
 
-    // ChallengeController.uploadImage — userId 받고 rate limit 적용
     @Operation(summary = "챌린지 대표 이미지 업로드",
             description = "jpg/png, 최대 10MB. 반환된 imageUrl을 생성/수정 요청 body의 imageUrl에 넣는다.")
     @PostMapping(value = "/image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ApiResponse<ChallengeImageResponse> uploadImage(
             @AuthenticationPrincipal String userId,
             @RequestPart("image") MultipartFile image) {
-        uploadRateLimiter.check(userId);   // 분당 N회 초과 시 예외
+        uploadRateLimiter.check(userId);
         return ApiResponse.ok(new ChallengeImageResponse(imageStorageService.storeAndGetUrl(image)));
     }
 
