@@ -6,6 +6,8 @@ import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
+import com.ruleup.ruleup_backend.routine.service.ResolvedRoutine;
+import com.ruleup.ruleup_backend.routine.service.RoutineSelectionService;
 import com.ruleup.ruleup_backend.reputation.ReputationScore;
 import com.ruleup.ruleup_backend.reputation.ReputationScoreRepository;
 import com.ruleup.ruleup_backend.user.InterestCategory;
@@ -35,6 +37,7 @@ public class ChallengeService {
     private final ChallengeMemberRepository memberRepository;
     private final UserRepository userRepository;
     private final ReputationScoreRepository reputationScoreRepository;
+    private final RoutineSelectionService routineSelectionService;
 
     // ===== 3.2 생성 =====
     @Transactional
@@ -47,7 +50,6 @@ public class ChallengeService {
         ParticipationType participationType = validateParticipationType(req.participationType());
         Anonymity anonymity = validateAnonymity(req.anonymity());
         List<String> repeatDays = validateRepeatDays(req.repeatDays());
-        List<String> verifications = validateVerifications(req.verificationMethods());
         int durationDays = validateDuration(req.durationDays());
         LocalDate startDate = validateStartDate(req.startDate());
         validatePenalty(req.penalty());
@@ -55,10 +57,16 @@ public class ChallengeService {
         if (participationType == ParticipationType.GROUP)
             checkMinMannerNotAboveOwner(userId, req.minMannerTemperature());
 
+        // 루틴(인증) 검증 → 스냅샷 산출. AUTO 권한 부족 시 ROUTINE_PERMISSION_REQUIRED 로 바운스.
+        ResolvedRoutine routine = routineSelectionService.resolve(
+                req.templateId(), req.selectedMethod(), req.paramsOrEmpty(), req.grantedPermissionsOrEmpty());
+
         Challenge challenge = Challenge.create(
                 userId, req.title(), req.description(), req.imageUrl(),
                 category, participationType, req.minMannerTemperature(), repeatDays,
-                durationDays, startDate, verifications, req.penalty(), req.reward(),
+                durationDays, startDate,
+                routine.templateId(), routine.verification(), routine.params(),
+                req.penalty(), req.reward(),
                 anonymity, /* aiAssisted */ true);
 
         challengeRepository.save(challenge);
@@ -109,7 +117,8 @@ public class ChallengeService {
                 new ChallengeDetailResponse.Owner(ownerNickname),
                 c.getRepeatDays(), c.getDurationDays(),
                 c.getStartDate().toString(), c.getEndDate().toString(),
-                c.getVerificationMethods(), c.getPenalty(), c.getReward(),
+                c.getTemplateId(), c.getVerificationConfig(), c.getParams(),
+                c.getPenalty(), c.getReward(),
                 stats, eligibility);
     }
 
@@ -128,8 +137,8 @@ public class ChallengeService {
         c.changeDescription(req.description());
         if (req.category() != null)   c.changeCategory(validateCategory(req.category()));
         if (req.repeatDays() != null) c.changeRepeatDays(validateRepeatDays(req.repeatDays()));
-        if (req.verificationMethods() != null)
-            c.changeVerificationMethods(validateVerifications(req.verificationMethods()));
+        if (req.params() != null)
+            c.changeParams(routineSelectionService.revalidateParams(c.getTemplateId(), req.params()));
         c.changePenalty(req.penalty());
         c.changeReward(req.reward());
         if (c.isGroup())
@@ -250,14 +259,6 @@ public class ChallengeService {
         if (days == null || days.isEmpty() || !RepeatDay.allValid(days))
             throw new BusinessException(ErrorCode.INVALID_REPEAT_DAY);
         return days;
-    }
-
-    private List<String> validateVerifications(List<String> methods) {
-        if (methods == null || methods.isEmpty())
-            throw new BusinessException(ErrorCode.VERIFICATION_METHOD_REQUIRED);
-        if (!VerificationMethod.allValid(methods))
-            throw new BusinessException(ErrorCode.INVALID_VERIFICATION_METHOD);
-        return methods;
     }
 
     private int validateDuration(Integer durationDays) {

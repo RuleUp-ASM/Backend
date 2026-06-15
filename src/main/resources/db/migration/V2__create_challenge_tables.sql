@@ -2,7 +2,7 @@
 -- 챌린지 생성 기능 (테크스펙 4. DB). V1 컨벤션 동일:
 --   · UUID v7        → CHAR(36)
 --   · ENUM           → 컬럼 레벨 ENUM(...)
---   · 배열/가변설정    → JSON (값 검증은 앱에서: VerificationMethod/RepeatDay.allValid 등)
+--   · 배열/가변설정    → JSON (값 검증은 앱에서: RepeatDay.allValid 등)
 --   · 시각            → DATETIME(6), 날짜만 필요한 시작/종료일은 DATE
 --   · now()          → CURRENT_TIMESTAMP(6)
 
@@ -20,7 +20,9 @@ CREATE TABLE challenges (
                             duration_days          INT          NOT NULL,
                             start_date             DATE         NOT NULL,
                             end_date               DATE         NOT NULL,         -- 서버 파생(start + duration - 1)
-                            verification_methods   JSON         NOT NULL,         -- 예: ["GPS","PHOTO"]
+                            template_id            BIGINT UNSIGNED,                -- 매칭된 루틴 템플릿(직접 입력이면 NULL). FK 없이 앱에서 검증.
+                            verification_config    JSON         NOT NULL,         -- 인증 방식 스냅샷(템플릿에서 떠옴)
+                            params                 JSON         NOT NULL,         -- 이 챌린지의 목표값. 예: {"distance_km":5}
                             penalty_config         JSON         NOT NULL,
                             reward_config          JSON         NOT NULL,
                             anonymity              ENUM('REAL','ANONYMOUS') NOT NULL DEFAULT 'REAL',

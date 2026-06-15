@@ -1,0 +1,37 @@
+package com.ruleup.ruleup_backend.challenge.dto;
+
+import com.ruleup.ruleup_backend.challenge.domain.PenaltyConfig;
+import com.ruleup.ruleup_backend.challenge.domain.RewardConfig;
+import com.ruleup.ruleup_backend.routine.dto.RoutineOption;
+import com.ruleup.ruleup_backend.routine.dto.RoutineParam;
+
+import java.math.BigDecimal;
+import java.util.List;
+
+/**
+ * 추천 응답 — "전체 챌린지 초안". 사용자가 받아서 항목별로 수정한 뒤 생성으로 보낸다.
+ * (수정은 클라에서, 최종값이 생성 요청에 담기므로 별도 수정 API 불필요. PATCH 는 생성 이후용.)
+ *  - 루틴 매칭분(서버 진실): category, recommendedMethod, options, params, rationale
+ *  - 챌린지 기본값(사용자 수정): participationType ~ anonymity (현재 정적 baseline)
+ */
+public record ChallengeRecommendationResponse(
+        boolean matched,
+        Long templateId,
+        String title,
+        String description,
+        String category,
+        String recommendedMethod,
+        List<RoutineOption> options,
+        List<RoutineParam> params,
+        String rationale,
+        String participationType,
+        BigDecimal minMannerTemperature,
+        List<String> repeatDays,
+        Integer durationDays,
+        String startDate,
+        String endDate,
+        PenaltyConfig penalty,
+        RewardConfig reward,
+        String anonymity
+) {
+}
