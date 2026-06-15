@@ -1,0 +1,22 @@
+# 테스트 전용 오버라이드. 운영 application.yaml의 ${ENV} 자리들을 더미 값으로 채워
+# 로컬에서 환경변수 없이도 컨텍스트가 뜨게 한다.
+#  · DataSource 접속 정보는 Testcontainers(@ServiceConnection)가 런타임에 덮어쓰므로
+#    아래 username/password는 플레이스홀더 해소용 더미일 뿐 실제로는 쓰이지 않는다.
+app:
+  jwt:
+    # HS256 키는 32바이트 이상이어야 함 (테스트 전용, 운영 비밀과 무관)
+    secret: test-only-secret-please-change-this-must-be-at-least-32-bytes-long-0123456789
+  oauth:
+    kakao:
+      client-id: dummy
+      client-secret: dummy
+      redirect-uri: ruleup://login/callback
+    google:
+      client-id: dummy
+      client-secret: dummy
+      redirect-uri: ruleup://login/callback
+
+spring:
+  datasource:
+    username: test
+    password: test

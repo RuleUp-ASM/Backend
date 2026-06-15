@@ -58,6 +58,14 @@ dependencies {
 	testImplementation 'org.springframework.boot:spring-boot-starter-security-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-validation-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+
+	// 테스트 시 @SpringBootTest가 실제 MySQL을 필요로 하므로 Testcontainers로
+	// MySQL 8.4 컨테이너를 자동 기동한다(로컬·CI 동일). 모듈 버전은 testcontainers-bom으로 고정.
+	testImplementation platform('org.testcontainers:testcontainers-bom:1.20.6')
+	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+	testImplementation 'org.testcontainers:junit-jupiter'
+	testImplementation 'org.testcontainers:mysql'
+
 	testCompileOnly 'org.projectlombok:lombok:1.18.46'
 	testAnnotationProcessor 'org.projectlombok:lombok:1.18.46'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
@@ -65,6 +73,16 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform()
+
+	// 로컬(colima) 환경에서 Testcontainers가 Docker 소켓을 자동으로 찾도록 알려준다.
+	// colima 소켓은 기본 컨텍스트가 아니라 자동 감지가 안 되기 때문.
+	// CI(리눅스)에는 이 파일이 없으므로 블록을 건너뛰고 기본 /var/run/docker.sock 을 쓴다.
+	def colimaSock = file("${System.getProperty('user.home')}/.colima/default/docker.sock")
+	if (colimaSock.exists()) {
+		environment 'DOCKER_HOST', "unix://${colimaSock}"
+		environment 'TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE', '/var/run/docker.sock'
+	}
+
 	// 테스트가 끝나면 커버리지 리포트를 자동 생성
 	finalizedBy tasks.named('jacocoTestReport')
 }

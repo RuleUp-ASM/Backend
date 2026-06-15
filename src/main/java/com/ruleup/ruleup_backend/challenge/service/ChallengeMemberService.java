@@ -132,8 +132,9 @@ public class ChallengeMemberService {
         Anonymity anonymity = c.getAnonymity();
         List<MemberListResponse.Member> dto = members.stream().map(m -> {
             User u = userMap.get(m.getUserId());
-            String nickname = (u != null) ? anonymity.maskNickname(u.getNickname()) : null;
-            String profile = (u != null && !anonymity.isAnonymous()) ? u.getProfileImageUrl() : null;
+            // 검수 전/거절이면 타인에게는 임시 닉네임·사진 숨김(본인이 볼 땐 본인 값) → 그 위에 익명 마스킹 적용.
+            String nickname = (u != null) ? anonymity.maskNickname(u.visibleNicknameTo(viewerId)) : null;
+            String profile = (u != null && !anonymity.isAnonymous()) ? u.visibleProfileImageTo(viewerId) : null;
             BigDecimal manner = mannerMap.getOrDefault(m.getUserId(), ReputationScore.INITIAL_TEMPERATURE);
             return new MemberListResponse.Member(
                     m.getUserId().toString(), nickname, profile,

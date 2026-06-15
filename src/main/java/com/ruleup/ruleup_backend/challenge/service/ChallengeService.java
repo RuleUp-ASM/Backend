@@ -91,9 +91,9 @@ public class ChallengeService {
     public ChallengeDetailResponse getDetail(UUID userId, UUID challengeId) {
         Challenge c = loadActive(challengeId);
 
-        // 생성자 닉네임 (익명이면 마스킹)
+        // 생성자 닉네임 (검수 전/거절이면 타인에게 임시 닉네임 → 그 위에 익명 마스킹)
         String ownerNickname = userRepository.findById(c.getCreatorId())
-                .map(u -> c.getAnonymity().maskNickname(u.getNickname()))
+                .map(u -> c.getAnonymity().maskNickname(u.visibleNicknameTo(userId)))
                 .orElse(null);
 
         // 통계
