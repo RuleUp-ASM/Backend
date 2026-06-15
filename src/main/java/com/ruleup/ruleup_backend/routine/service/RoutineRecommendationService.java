@@ -17,18 +17,19 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 1단계 추천 (제목 → 템플릿 매칭 → 인증 방식 분류·추천). 상태 저장 없음.
+ * 1단계 추천 (제목 → 템플릿 매칭 → 지원 인증 방식 안내). 상태 저장 없음.
  *
  * 흐름:
- *   1) 입력 검증
+ *   1) 입력 검증(제목/설명)
  *   2) LLM 으로 "후보 템플릿 중 하나 선택 + 목표값 추출"      ← LLM 책임은 여기까지
  *   3) 서버 검증: templateId 가 카탈로그에 실재하는가, 목표값이 범위 안인가(아니면 기본값으로)
- *   4) 권한 비교로 분류:
- *        - 템플릿에 자동 옵션 있고 필요 권한 모두 보유 → ① 지금 바로 자동 가능(기본=자동)
- *        - 권한 부족하거나 자동 옵션 없음            → ② 수동(사진/체크)만 (기본=수동)
+ *   4) 인증 방식 안내:
+ *        - 템플릿에 자동 옵션 있으면 → AUTO(기본) + MANUAL
+ *        - 없으면                  → MANUAL 만
  *
- * 신뢰 경계: 인증 방식·신호·필요 권한은 전부 템플릿(서버)이 진실. LLM 은 만들지 못한다.
- * LLM 이 죽거나 매칭 실패해도 항상 "수동 인증" 추천을 돌려준다(폴백).
+ * ※ 추천 단계에서는 권한 보유 여부를 보지 않는다. AUTO 옵션엔 필요한 권한 "목록"만 실어주고,
+ *   실제 보유 확인/요청은 생성(2단계, RoutineService)에서 한다.
+ *   매칭 실패하거나 LLM 이 죽어도 항상 "수동 인증" 추천을 돌려준다(폴백).
  */
 @Service
 @RequiredArgsConstructor
@@ -54,27 +55,24 @@ public class RoutineRecommendationService {
         if (template == null) {
             return noMatchResponse(req.title());           // 직접 입력 = 수동만
         }
-        return matchedResponse(req, template, match);      // 자동/수동 분류 추천
+        return matchedResponse(req, template, match);      // 자동/수동 안내
     }
 
-    // ===== 매칭 성공: 목표값 보정 + 권한 분류 =====
+    // ===== 매칭 성공: 목표값 보정 + 인증 방식 안내(권한 안 봄) =====
     private RoutineRecommendationResponse matchedResponse(RoutineRecommendationRequest req,
                                                           RoutineTemplate template,
                                                           RoutineMatch match) {
         List<RoutineParam> params = resolveParams(template, match);
-        List<String> granted = req.grantedPermissionsOrEmpty();
 
         List<RoutineOption> options = new ArrayList<>();
         String recommendedMethod;
 
         if (template.supportsAuto()) {
-            List<String> missing = missingPermissions(template.getAutoRequiredPermissions(), granted);
-            boolean autoAvailable = missing.isEmpty();
-            options.add(autoOption(template, missing, autoAvailable));   // ① 자동
-            options.add(manualOption(template, !autoAvailable));         // ② 수동(폴백)
-            recommendedMethod = autoAvailable ? "AUTO" : "MANUAL";
+            options.add(autoOption(template));            // ① 자동(기본)
+            options.add(manualOption(template, false));   // ② 수동
+            recommendedMethod = "AUTO";
         } else {
-            options.add(manualOption(template, true));                   // 자동 불가 → 수동만 기본
+            options.add(manualOption(template, true));    // 자동 불가 → 수동만
             recommendedMethod = "MANUAL";
         }
 
@@ -86,8 +84,8 @@ public class RoutineRecommendationService {
     // ===== 매칭 실패(직접 입력): 수동 1개 =====
     private RoutineRecommendationResponse noMatchResponse(String title) {
         RoutineOption manual = new RoutineOption(
-                "MANUAL", true, true, "MANUAL", SignalSource.PHOTO.name(), "NONE",
-                null, List.of("CAMERA"), List.of());
+                "MANUAL", true, "MANUAL", SignalSource.PHOTO.name(), "NONE",
+                null, List.of("CAMERA"));
         return new RoutineRecommendationResponse(
                 false, null, title, null, "MANUAL", List.of(manual), List.of(), null);
     }
@@ -103,31 +101,24 @@ public class RoutineRecommendationService {
     }
 
     // ===== 인증 옵션 빌더 =====
-    private RoutineOption autoOption(RoutineTemplate t, List<String> missing, boolean available) {
+    private RoutineOption autoOption(RoutineTemplate t) {
         WearableRequirement wear = (t.getAutoWearableReq() != null)
                 ? t.getAutoWearableReq() : WearableRequirement.NONE;
         return new RoutineOption(
-                "AUTO", available, available,
+                "AUTO", true,
                 t.getAutoVerificationType().name(),
                 t.getAutoSignalSource().name(),
                 wear.name(),
                 t.getAutoExternalService(),
-                t.getAutoRequiredPermissions(),
-                missing);
+                t.getAutoRequiredPermissions());   // 보유 여부 안 따지고 "필요 목록"만 전달
     }
 
     private RoutineOption manualOption(RoutineTemplate t, boolean recommended) {
         SignalSource signal = t.getManualSignalSource();
         List<String> perms = (signal == SignalSource.PHOTO) ? List.of("CAMERA") : List.of();
         return new RoutineOption(
-                "MANUAL", true, recommended,
-                "MANUAL", signal.name(), "NONE", null, perms, List.of());
-    }
-
-    /** 필요 권한 중 아직 보유하지 않은 것(순서 보존). */
-    private List<String> missingPermissions(List<String> required, List<String> granted) {
-        if (required == null) return List.of();
-        return required.stream().filter(p -> !granted.contains(p)).toList();
+                "MANUAL", recommended,
+                "MANUAL", signal.name(), "NONE", null, perms);
     }
 
     // ===== 입력 검증 =====
