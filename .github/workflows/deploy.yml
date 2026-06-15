@@ -30,7 +30,7 @@ jobs:
 
       # jar + systemd 유닛 파일을 EC2로 전송
       - name: Copy files to EC2
-        uses: appleboy/scp-action@v0.1.7
+        uses: appleboy/scp-action@v1.0.0
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
@@ -41,7 +41,7 @@ jobs:
 
       # systemd 유닛 적용 + 서비스 재시작
       - name: Apply unit & restart
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
