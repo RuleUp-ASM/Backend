@@ -7,6 +7,7 @@ import com.ruleup.ruleup_backend.auth.dto.*;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.config.AppProperties;
+import com.ruleup.ruleup_backend.moderation.UserModerationRequested;
 import com.ruleup.ruleup_backend.oauth.OAuthClient;
 import com.ruleup.ruleup_backend.oauth.OAuthClientResolver;
 import com.ruleup.ruleup_backend.oauth.OAuthUserInfo;
@@ -19,6 +20,7 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,6 +43,7 @@ public class AuthService {
     private final TokenService tokenService;
     private final JwtProvider jwtProvider;
     private final AppProperties props;
+    private final ApplicationEventPublisher eventPublisher;
 
     // ===== OAuth 로그인 =====
     // ⚠️ 일부러 @Transactional 을 붙이지 않는다.
@@ -109,6 +112,10 @@ public class AuthService {
         userRepository.save(user);
         reputationScoreRepository.save(ReputationScore.createDefault(user));
         saveAgreements(user, ag);
+
+        // 가입은 여기서 그대로 완료(닉네임/사진 상태는 PENDING).
+        // 커밋 후 비동기로 LLM 검수 → 문제면 타인에게 임시 닉네임/숨김 + 알림.
+        eventPublisher.publishEvent(new UserModerationRequested(user.getId()));
 
         TokenService.TokenPair pair = tokenService.issueTokenPair(user);
         return SignupResponse.from(pair, user, ReputationScore.INITIAL_TEMPERATURE);

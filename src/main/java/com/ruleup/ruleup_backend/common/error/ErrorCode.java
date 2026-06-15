@@ -75,6 +75,9 @@ public enum ErrorCode {
     ROUTINE_PERMISSION_REQUIRED(HttpStatus.BAD_REQUEST, "자동 인증에 필요한 권한이 허용되지 않았습니다."),
     INVALID_ROUTINE_PARAM(HttpStatus.BAD_REQUEST, "목표값이 올바르지 않습니다."),
 
+    // ===== 알림 =====
+    NOTIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "알림을 찾을 수 없습니다."),
+
     // ===== 공통 =====
     TOO_MANY_REQUESTS(HttpStatus.TOO_MANY_REQUESTS, "요청이 너무 많습니다. 잠시 후 다시 시도해주세요."),
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류가 발생했습니다."),
