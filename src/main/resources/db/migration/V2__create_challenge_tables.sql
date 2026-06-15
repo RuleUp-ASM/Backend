@@ -19,8 +19,10 @@ CREATE TABLE challenges (
                             repeat_days            JSON         NOT NULL,         -- 예: ["MON","TUE"]
                             duration_days          INT          NOT NULL,
                             start_date             DATE         NOT NULL,
-                            end_date               DATE         NOT NULL,         -- 서버 파생(start + duration - 1)
-                            verification_methods   JSON         NOT NULL,         -- 예: ["GPS","PHOTO"]
+                            end_date               DATE         NOT NULL,
+                            template_id            BIGINT UNSIGNED,                -- 매칭된 루틴 템플릿(직접 입력이면 NULL). FK 없이 앱에서 검증.
+                            verification_config    JSON         NOT NULL,         -- 인증 방식 스냅샷(템플릿에서 떠옴)
+                            params                 JSON         NOT NULL,         -- 이 챌린지의 목표값. 예: {"distance_km":5}
                             penalty_config         JSON         NOT NULL,
                             reward_config          JSON         NOT NULL,
                             anonymity              ENUM('REAL','ANONYMOUS') NOT NULL DEFAULT 'REAL',

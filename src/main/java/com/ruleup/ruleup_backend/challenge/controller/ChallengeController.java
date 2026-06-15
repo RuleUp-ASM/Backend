@@ -3,6 +3,9 @@ package com.ruleup.ruleup_backend.challenge.controller;
 import com.ruleup.ruleup_backend.challenge.dto.*;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeService;
 import com.ruleup.ruleup_backend.common.response.ApiResponse;
+import com.ruleup.ruleup_backend.routine.dto.RoutineRecommendationRequest;
+import com.ruleup.ruleup_backend.routine.dto.RoutineRecommendationResponse;
+import com.ruleup.ruleup_backend.routine.service.RoutineRecommendationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -16,20 +19,23 @@ import com.ruleup.ruleup_backend.common.image.UploadRateLimiter;
 
 import java.util.UUID;
 
-/**
- * 챌린지 API (조회/수정/삭제 + 이미지 업로드). 모두 로그인 필요.
- *  - 추천·생성은 루틴 플로우(/api/v1/routines)로 이관됨. 여기엔 생성 이후 라이프사이클만 남는다.
- */
-@Tag(name = "Challenge", description = "챌린지 조회 · 수정 · 삭제")
+@Tag(name = "Challenge", description = "챌린지 추천 · 생성 · 조회 · 수정 · 삭제")
 @SecurityRequirement(name = "bearerAuth")
 @RestController
 @RequestMapping("/api/v1/challenges")
 @RequiredArgsConstructor
 public class ChallengeController {
 
+    private final RoutineRecommendationService routineRecommendationService;
     private final ChallengeService challengeService;
     private final ImageStorageService imageStorageService;
     private final UploadRateLimiter uploadRateLimiter;
+
+    @Operation(summary = "루틴 추천", description = "제목/설명을 미리 정의된 루틴 템플릿과 매칭해 인증 방식·목표값을 추천(초안). 권한은 보지 않는다.")
+    @PostMapping("/recommendation")
+    public ApiResponse<RoutineRecommendationResponse> recommend(@RequestBody RoutineRecommendationRequest request) {
+        return ApiResponse.ok(routineRecommendationService.recommend(request));
+    }
 
     @Operation(summary = "챌린지 생성", description = "추천을 수정·확정한 최종값으로 생성. RECRUITING으로 저장하고 생성자를 OWNER로 등록.")
     @PostMapping
