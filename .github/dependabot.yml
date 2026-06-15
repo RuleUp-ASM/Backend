@@ -1,6 +1,5 @@
 version: 2
 updates:
-  # Gradle 의존성: 매주 월요일 검사, 모든 업데이트를 단일 그룹 PR로 묶는다.
   - package-ecosystem: "gradle"
     directory: "/"
     schedule:
@@ -19,7 +18,6 @@ updates:
         patterns:
           - "*"
 
-  # GitHub Actions 버전(actions/checkout 등) 업데이트
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
