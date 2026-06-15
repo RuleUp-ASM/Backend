@@ -36,3 +36,6 @@ public record VerificationConfig(
                 ? new ArrayList<>(List.of("CAMERA")) : new ArrayList<>();
         return new VerificationConfig(
                 SelectedMethod.MANUAL, VerificationType.MANUAL, signal,
+                WearableRequirement.NONE, perms, null);
+    }
+}
