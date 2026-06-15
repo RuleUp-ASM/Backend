@@ -1,22 +1,38 @@
 version: 2
 updates:
-  # Gradle 의존성 (build.gradle) 업데이트 PR 자동 생성
-  - package-ecosystem: gradle
+  - package-ecosystem: "gradle"
     directory: "/"
     schedule:
-      interval: weekly
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Seoul"
+    target-branch: "dev"
     open-pull-requests-limit: 5
-    target-branch: dev
+    commit-message:
+      prefix: "chore"
     labels:
-      - dependencies
+      - "dependencies"
+    groups:
+      gradle-dependencies:
+        patterns:
+          - "*"
 
-  # GitHub Actions 버전(actions/checkout 등) 업데이트
-  - package-ecosystem: github-actions
+  - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: weekly
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Seoul"
+    target-branch: "dev"
     open-pull-requests-limit: 5
-    target-branch: dev
+    commit-message:
+      prefix: "chore"
     labels:
-      - dependencies
-      - ci
+      - "dependencies"
+      - "ci"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
