@@ -71,7 +71,7 @@ jobs:
 
       # 테스트가 깨져도(실패해도) 결과를 PR에 표시한다.
       - name: Publish test report
-        uses: dorny/test-reporter@v1
+        uses: dorny/test-reporter@v3
         if: always()
         with:
           name: JUnit Test Report
