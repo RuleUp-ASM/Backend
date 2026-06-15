@@ -1,0 +1,33 @@
+version: 2
+updates:
+  # Gradle 의존성: 매주 한 번 검사하고, 모든 업데이트를 PR "하나"로 묶는다.
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Seoul"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore"
+    groups:
+      # patterns "*" → 모든 gradle 의존성 업데이트를 단일 그룹 PR로 합친다.
+      gradle-dependencies:
+        patterns:
+          - "*"
+
+  # GitHub Actions 버전도 같이 관리 (ecosystem이 달라 PR은 분리되지만, 액션끼리는 하나로 묶음).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Seoul"
+    commit-message:
+      prefix: "chore"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
