@@ -6,6 +6,11 @@ spring:
     url: jdbc:mysql://localhost:3306/ruleup?serverTimezone=UTC&characterEncoding=UTF-8&rewriteBatchedStatements=true
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
+    hikari:
+      # 동시 로그인이 몰릴 때 기본값(10)으로는 DB 커넥션이 말라 지연될 수 있어 명시.
+      # 토큰 발급마다 refresh_tokens write가 일어나므로 여유를 둔다.
+      maximum-pool-size: 20
+      minimum-idle: 5
 
   jpa:
     hibernate:
