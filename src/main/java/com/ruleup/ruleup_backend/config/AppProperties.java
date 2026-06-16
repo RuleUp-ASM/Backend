@@ -3,7 +3,7 @@ package com.ruleup.ruleup_backend.config;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "app")
-public record AppProperties(Jwt jwt, Oauth oauth, Llm llm) {
+public record AppProperties(Jwt jwt, Oauth oauth, Llm llm, Client client) {
 
     public record Jwt(
             String secret,
@@ -31,4 +31,12 @@ public record AppProperties(Jwt jwt, Oauth oauth, Llm llm) {
                 long timeoutMs      // 동기 호출 타임아웃 (스펙 2.3: 예 5000)
         ) {}
     }
+
+    /** 앱 버전 게이트(GET /intro). 강제/권장 업데이트 안내값. */
+    public record Client(
+            int minVersionCode,         // 이 코드 미만이면 강제 업데이트(400)
+            String minAppVersion,       // 화면 표시용 최소 버전명 (예: "1.0.0")
+            String recommendAppVersion, // 화면 표시용 권장 버전명 (예: "1.2.0")
+            String devTestMsg           // 개발/점검용 안내 메시지 (없으면 빈 문자열)
+    ) {}
 }
