@@ -23,7 +23,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.util.UriComponentsBuilder;
 
+import java.net.URI;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
@@ -76,6 +78,26 @@ public class AuthService {
         String token = jwtProvider.issueSignupToken(info.subject(), provider.name(), info.email());
         return OAuthLoginResponse.newUser(token, props.jwt().signupTokenTtl(),
                 info.email(), info.profileImageUrl());
+    }
+
+    // ===== iOS 카카오 로그인용 서버 콜백 브리지 =====
+    // 카카오 REST API는 redirect_uri를 https만 허용한다. iOS 앱은 그 https redirect를
+    // (Universal Links 없이는) 직접 잡을 수 없으므로, 서버가 https 콜백을 대신 받아
+    // 인가코드를 앱 커스텀 스킴 딥링크로 넘겨준다. 앱은 그 code로 기존
+    // POST /login/{provider} 를 호출해 토큰을 받는다(토큰 교환 로직은 그대로 재사용).
+    public URI buildAppCallbackRedirect(String provider, String code, String state, String error) {
+        UriComponentsBuilder b = UriComponentsBuilder
+                .fromUriString(props.oauth().appRedirectUri())
+                .queryParam("provider", provider);
+        if (error != null && !error.isBlank()) {
+            b.queryParam("error", error);          // 사용자가 동의 취소/실패한 경우
+        } else {
+            b.queryParam("code", code);
+        }
+        if (state != null && !state.isBlank()) {
+            b.queryParam("state", state);          // 앱이 CSRF 검증에 사용
+        }
+        return b.encode().build().toUri();
     }
 
     // ===== 가입 =====
