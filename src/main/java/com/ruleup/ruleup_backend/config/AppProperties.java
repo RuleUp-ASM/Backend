@@ -12,12 +12,14 @@ public record AppProperties(Jwt jwt, Oauth oauth, Llm llm, Client client) {
             long signupTokenTtl
     ) {}
 
-    public record Oauth(Provider kakao, Provider google) {
+    public record Oauth(Provider kakao, Provider google, String appRedirectUri) {
         public record Provider(
                 String clientId,
                 String clientSecret,
                 String redirectUri
         ) {}
+        // appRedirectUri: 서버 콜백이 인가코드를 앱으로 돌려줄 커스텀 스킴 딥링크.
+        // (카카오는 https redirect만 허용 → iOS 앱이 https를 직접 못 잡으므로 서버가 중계)
     }
 
     /** LLM(챌린지 기본값 추천·루틴 매칭·콘텐츠 검수). 실패 시 각 기능별 폴백. */
