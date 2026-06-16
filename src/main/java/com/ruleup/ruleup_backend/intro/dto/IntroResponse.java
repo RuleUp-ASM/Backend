@@ -3,20 +3,27 @@ package com.ruleup.ruleup_backend.intro.dto;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 /**
- * GET /intro 응답 본문 (앱 버전 게이트).
+ * GET /intro 응답 data (공통 봉투 ApiResponse 안에 실린다).
  *
- * <p>안드로이드 {@code IntroDTO} 와 1:1로 매칭되는 "납작한(flat)" 모델이다.
- * 클라가 에러 바디를 {@code devTestMsg / minAppVersion / recommendAppVersion}
- * 최상위 필드로 바로 역직렬화하기 때문에, 이 엔드포인트는 의도적으로
- * 공통 봉투({@code {success, data, error}})를 쓰지 않고 이 형태를 그대로 내려준다.
- * (성공 200 / 강제 업데이트 400 모두 동일한 본문 형태)
+ * <p>최종 응답 형태(다른 API와 동일한 봉투):
+ * <pre>
+ * { "success": true,
+ *   "data": { "forceUpdate": false, "devTestMsg": null, "minAppVersion": "1.0.0", "recommendAppVersion": "1.2.0" },
+ *   "error": null }
+ * </pre>
  *
- * <p>필드 값이 비어 있으면 null로 내려, 클라의 {@code ?: UNKNOWN} 폴백이 동작하도록 한다.
+ * <p>서버가 헤더 appVersionCode를 최소 지원 코드와 비교해 {@code forceUpdate}를 판정한다.
+ * 클라는 봉투를 풀어({@code getOrThrow()}) data를 받고, forceUpdate면 강제 업데이트 화면을 띄운다
+ * (표시 문구는 minAppVersion/recommendAppVersion 사용). 별도 400/에러 분기가 필요 없다.
+ * 빈 문자열 설정값은 null로 내려, 클라의 {@code ?: UNKNOWN} 폴백이 동작하도록 한다.
  */
-@Schema(description = "앱 인트로/버전 안내 응답 (성공 200·강제 업데이트 400 공통 본문)")
+@Schema(description = "앱 인트로/버전 안내 (ApiResponse.data)")
 public record IntroResponse(
 
-        @Schema(description = "개발/점검용 안내 메시지 (없으면 null)", example = "점검 중입니다. 잠시 후 다시 시도해주세요.")
+        @Schema(description = "강제 업데이트 필요 여부", example = "false")
+        boolean forceUpdate,
+
+        @Schema(description = "개발/점검용 안내 메시지 (없으면 null)", example = "점검 중입니다.")
         String devTestMsg,
 
         @Schema(description = "지원하는 최소 앱 버전명 (이 미만이면 강제 업데이트)", example = "1.0.0")
@@ -26,9 +33,11 @@ public record IntroResponse(
         String recommendAppVersion
 ) {
 
-    /** 빈 문자열·공백은 null로 정규화해서 만든다. (클라의 UNKNOWN 폴백과 맞물리도록) */
-    public static IntroResponse of(String devTestMsg, String minAppVersion, String recommendAppVersion) {
+    /** 버전 문구의 빈 문자열·공백은 null로 정규화해서 만든다. */
+    public static IntroResponse of(boolean forceUpdate, String devTestMsg,
+                                   String minAppVersion, String recommendAppVersion) {
         return new IntroResponse(
+                forceUpdate,
                 blankToNull(devTestMsg),
                 blankToNull(minAppVersion),
                 blankToNull(recommendAppVersion)
