@@ -25,4 +25,7 @@ public interface ChallengeMemberRepository extends JpaRepository<ChallengeMember
 
     /** ACTIVE 멤버 수 (participant_count 정합성 검증·재계산용) */
     long countByChallengeIdAndStatus(UUID challengeId, MemberStatus status);
+
+    /** 내 멤버십 중 상태별 (인증 sync: ACTIVE 챌린지 추림) */
+    List<ChallengeMember> findByUserIdAndStatus(UUID userId, MemberStatus status);
 }

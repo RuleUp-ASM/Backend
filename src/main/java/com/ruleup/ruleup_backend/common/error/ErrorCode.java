@@ -78,6 +78,10 @@ public enum ErrorCode {
     // ===== 알림 =====
     NOTIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "알림을 찾을 수 없습니다."),
 
+    // ===== 인증 sync (§3.1) =====
+    SYNC_TOO_FREQUENT(HttpStatus.TOO_MANY_REQUESTS, "sync 요청 간격이 너무 짧습니다."),
+    INVALID_SIGNAL_PAYLOAD(HttpStatus.BAD_REQUEST, "인증 신호 페이로드가 올바르지 않습니다."),
+
     // ===== 공통 =====
     TOO_MANY_REQUESTS(HttpStatus.TOO_MANY_REQUESTS, "요청이 너무 많습니다. 잠시 후 다시 시도해주세요."),
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류가 발생했습니다."),
