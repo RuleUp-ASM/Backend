@@ -16,6 +16,7 @@ import com.ruleup.ruleup_backend.user.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.ruleup.ruleup_backend.recommendation.service.SegmentScoreUpdater;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -38,6 +39,7 @@ public class ChallengeService {
     private final UserRepository userRepository;
     private final ReputationScoreRepository reputationScoreRepository;
     private final RoutineSelectionService routineSelectionService;
+    private final SegmentScoreUpdater segmentScoreUpdater;
 
     // ===== 3.2 생성 =====
     @Transactional
