@@ -168,4 +168,20 @@ public class ChallengeMember extends AssignedIdEntity {
     public void incrementPeriodCompleted() {
         this.curPeriodCompleted = (this.curPeriodCompleted == null ? 0 : this.curPeriodCompleted) + 1;
     }
+
+    /** 진행률 카운터만 갱신(확정 배치 — todayStatus·lastSyncedAt 안 건드림). */
+    public void applyCounts(int successDays, int failDays, java.math.BigDecimal progressRate) {
+        this.successDays = successDays;
+        this.failDays = failDays;
+        this.progressRate = progressRate;
+    }
+
+    /** 빈도형 주기 롤오버: 미달분 정산 + 다음 주기로. */
+    public void rolloverPeriod(java.time.LocalDate nextStart, java.time.LocalDate nextEnd, int shortfall, boolean met) {
+        this.failDays += shortfall;
+        if (met) this.periodsMet = (this.periodsMet == null ? 0 : this.periodsMet) + 1;
+        this.curPeriodStart = nextStart;
+        this.curPeriodEnd = nextEnd;
+        this.curPeriodCompleted = 0;
+    }
 }

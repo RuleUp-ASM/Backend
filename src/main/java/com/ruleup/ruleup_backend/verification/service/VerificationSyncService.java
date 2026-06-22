@@ -53,6 +53,7 @@ public class VerificationSyncService {
     private final SyncRateLimiter rateLimiter;
     private final VerificationMemberSetup memberSetup;
     private final VerificationConfigFactory configFactory;
+    private final VerificationProgressService progressService;
     private final Map<VerificationMethod, MethodEvaluator> evaluators;
 
     public VerificationSyncService(ChallengeMemberRepository memberRepo,
@@ -62,6 +63,7 @@ public class VerificationSyncService {
                                    SyncRateLimiter rateLimiter,
                                    VerificationMemberSetup memberSetup,
                                    VerificationConfigFactory configFactory,
+                                   VerificationProgressService progressService,
                                    List<MethodEvaluator> evaluatorList) {
         this.memberRepo = memberRepo;
         this.challengeRepo = challengeRepo;
@@ -70,6 +72,7 @@ public class VerificationSyncService {
         this.rateLimiter = rateLimiter;
         this.memberSetup = memberSetup;
         this.configFactory = configFactory;
+        this.progressService = progressService;
         this.evaluators = evaluatorList.stream()
                 .collect(Collectors.toMap(MethodEvaluator::method, e -> e, (a, b) -> a));
     }
@@ -104,7 +107,7 @@ public class VerificationSyncService {
             VerificationDaily daily = loadOrCreateDaily(member, challenge, today);
             VerificationStatus todayStatus = processMember(member, challenge, config, daily, signals, today, now);
 
-            updateProgress(member, todayStatus, now);
+            progressService.updateAfterSync(member, todayStatus, now);
             updated.add(new SyncResponse.UpdatedChallenge(
                     member.getChallengeId().toString(), todayStatus.name(), member.getProgressRate()));
         }
@@ -191,16 +194,6 @@ public class VerificationSyncService {
         return target ? Disposition.EVALUATE : Disposition.NOT_TARGET;
     }
 
-    private void updateProgress(ChallengeMember member, VerificationStatus todayStatus, Instant now) {
-        int success = (int) dailyRepo.countByChallengeMemberIdAndStatus(member.getId(), VerificationStatus.SUCCESS);
-        int fail = (int) dailyRepo.countByChallengeMemberIdAndStatus(member.getId(), VerificationStatus.FAILED);
-        int target = Math.max(member.getTargetDays(), 1);
-        BigDecimal rate = BigDecimal.valueOf(success)
-                .multiply(BigDecimal.valueOf(100))
-                .divide(BigDecimal.valueOf(target), 2, RoundingMode.HALF_UP);
-        if (rate.compareTo(BigDecimal.valueOf(100)) > 0) rate = BigDecimal.valueOf(100);
-        member.applyProgress(success, fail, rate, todayStatus, now);
-    }
 
     private int maxLagHours(VerificationConfig config) {
         return switch (config.primaryMethod()) {

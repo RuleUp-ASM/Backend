@@ -3,7 +3,8 @@ package com.ruleup.ruleup_backend.challenge.repository;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.challenge.domain.MemberStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
-
+import com.ruleup.ruleup_backend.verification.domain.ScheduleType;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -28,4 +29,8 @@ public interface ChallengeMemberRepository extends JpaRepository<ChallengeMember
 
     /** 내 멤버십 중 상태별 (인증 sync: ACTIVE 챌린지 추림) */
     List<ChallengeMember> findByUserIdAndStatus(UUID userId, MemberStatus status);
+
+    /** 빈도형 주기 롤오버 대상: 현재 주기가 끝난 ACTIVE 멤버. */
+    List<ChallengeMember> findByScheduleTypeAndStatusAndCurPeriodEndLessThan(
+            ScheduleType scheduleType, MemberStatus status, LocalDate date);
 }

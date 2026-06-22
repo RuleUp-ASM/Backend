@@ -3,6 +3,8 @@ package com.ruleup.ruleup_backend.verification.repository;
 import com.ruleup.ruleup_backend.verification.domain.VerificationDaily;
 import com.ruleup.ruleup_backend.verification.domain.VerificationStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -24,4 +26,13 @@ public interface VerificationDailyRepository extends JpaRepository<VerificationD
 
     /** 확정 배치: 유예까지 끝나 이제 잠가도 되는 PENDING 행(§2.14). */
     List<VerificationDaily> findByStatusAndFinalizeAfterLessThanEqual(VerificationStatus status, Instant now);
+
+    /**
+     * 확정 배치 클레임(§2.14): 유예 끝난 PENDING 행을 FOR UPDATE SKIP LOCKED 로 선점.
+     * 동시에 도는 스케줄러는 잠긴 행을 건너뛰어 중복 확정이 구조적으로 불가능(ShedLock 없이 멱등).
+     */
+    @Query(value = "SELECT * FROM VerificationDaily " +
+            "WHERE status = 'PENDING' AND finalizeAfter IS NOT NULL AND finalizeAfter <= :now " +
+            "ORDER BY finalizeAfter LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
+    List<VerificationDaily> findDuePendingForUpdate(@Param("now") Instant now, @Param("limit") int limit);
 }
