@@ -1,7 +1,12 @@
-# CI 전용 런타임 이미지 — jar는 워크플로에서 미리 빌드(./gradlew bootJar).
-# RUN 명령이 없어 arm64 이미지를 에뮬레이션 없이 빠르게 만든다.
+# 멀티스테이지: 빌드(JDK)에서 jar 굽고 → 런타임(JRE)에 복사.
+# 컨테이너 안에서 자족적으로 빌드해 .dockerignore(build 제외)·CI 환경에 안 휘둘림.
+FROM eclipse-temurin:25-jdk AS build
+WORKDIR /src
+COPY . .
+RUN chmod +x gradlew && ./gradlew clean bootJar -x test --no-daemon
+
 FROM eclipse-temurin:25-jre
 WORKDIR /app
-COPY build/libs/*.jar app.jar
+COPY --from=build /src/build/libs/*.jar app.jar
 EXPOSE 8080
-ENTRYPOINT ["java","-jar","/app/app.jar"]s
+ENTRYPOINT ["java","-jar","/app/app.jar"]
