@@ -11,6 +11,8 @@ import org.hibernate.annotations.Generated;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.generator.EventType;
 import org.hibernate.type.SqlTypes;
+import com.ruleup.ruleup_backend.verification.domain.ScheduleType;
+import com.ruleup.ruleup_backend.verification.domain.PeriodUnit;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -133,4 +135,53 @@ public class ChallengeMember extends AssignedIdEntity {
 
     public boolean isPending() { return status == MemberStatus.PENDING; }
     public boolean isActive()  { return status == MemberStatus.ACTIVE; }
+
+    // ===== 인증 진행률 비정규화 갱신 (sync·배치) =====
+    public void setupFixedDays(int targetDays) {
+        this.scheduleType = ScheduleType.FIXED_DAYS;
+        this.targetDays = targetDays;
+    }
+
+    public void setupFrequency(PeriodUnit unit, int periodTarget, java.time.LocalDate curStart,
+                               java.time.LocalDate curEnd, int periodsTotal, int targetDays) {
+        this.scheduleType = ScheduleType.FREQUENCY;
+        this.periodUnit = unit;
+        this.periodTarget = periodTarget;
+        this.curPeriodStart = curStart;
+        this.curPeriodEnd = curEnd;
+        this.curPeriodCompleted = 0;
+        this.periodsTotal = periodsTotal;
+        this.periodsMet = 0;
+        this.targetDays = targetDays;
+    }
+
+    public void applyProgress(int successDays, int failDays, java.math.BigDecimal progressRate,
+                              com.ruleup.ruleup_backend.verification.domain.VerificationStatus todayStatus,
+                              java.time.Instant lastSyncedAt) {
+        this.successDays = successDays;
+        this.failDays = failDays;
+        this.progressRate = progressRate;
+        this.todayStatus = todayStatus;
+        this.lastSyncedAt = lastSyncedAt;
+    }
+
+    public void incrementPeriodCompleted() {
+        this.curPeriodCompleted = (this.curPeriodCompleted == null ? 0 : this.curPeriodCompleted) + 1;
+    }
+
+    /** 진행률 카운터만 갱신(확정 배치 — todayStatus·lastSyncedAt 안 건드림). */
+    public void applyCounts(int successDays, int failDays, java.math.BigDecimal progressRate) {
+        this.successDays = successDays;
+        this.failDays = failDays;
+        this.progressRate = progressRate;
+    }
+
+    /** 빈도형 주기 롤오버: 미달분 정산 + 다음 주기로. */
+    public void rolloverPeriod(java.time.LocalDate nextStart, java.time.LocalDate nextEnd, int shortfall, boolean met) {
+        this.failDays += shortfall;
+        if (met) this.periodsMet = (this.periodsMet == null ? 0 : this.periodsMet) + 1;
+        this.curPeriodStart = nextStart;
+        this.curPeriodEnd = nextEnd;
+        this.curPeriodCompleted = 0;
+    }
 }

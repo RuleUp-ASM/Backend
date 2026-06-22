@@ -73,6 +73,9 @@ public class RoutineTemplate {
     @Column(name = "rationale", length = 255)
     private String rationale;
 
+    @Column(name = "verificationMethod", length = 20)
+    private String verificationMethod;
+
     /**
      * paramSchema(JSON) → ParamSpec 목록. 순서 보존(LinkedHashMap).
      * 잘못된 항목(맵이 아님)은 건너뛴다.
