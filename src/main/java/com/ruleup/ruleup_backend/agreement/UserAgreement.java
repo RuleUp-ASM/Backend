@@ -16,36 +16,36 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * 약관 동의 이력 (user_agreements 테이블). User와 N:1.
+ * 약관 동의 이력 (UserAgreement 테이블). User와 N:1.
  * "누가/어떤 약관/어떤 버전에/언제" 동의했는지 별도 행으로 추적.
  */
 @Entity
-@Table(name = "user_agreements")
+@Table(name = "UserAgreement")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class UserAgreement extends AssignedIdEntity {
 
     @Id
-    @JdbcTypeCode(SqlTypes.CHAR)
-    @Column(name = "id", nullable = false, updatable = false, length = 36)
+    @JdbcTypeCode(SqlTypes.BINARY)
+    @Column(name = "id", nullable = false, updatable = false)
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id", nullable = false)
+    @JoinColumn(name = "userId", nullable = false)
     private User user;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "agreement_type", nullable = false)
+    @Column(name = "agreementType", nullable = false)
     private AgreementType agreementType;
 
     @Column(name = "version", nullable = false)
     private String version;
 
-    @Column(name = "revoked_at")
+    @Column(name = "revokedAt")
     private Instant revokedAt;
 
     @Generated(event = EventType.INSERT)
-    @Column(name = "agreed_at", nullable = false, updatable = false)
+    @Column(name = "agreedAt", nullable = false, updatable = false)
     private Instant agreedAt;
 
     public static UserAgreement agree(User user, AgreementType type, String version) {

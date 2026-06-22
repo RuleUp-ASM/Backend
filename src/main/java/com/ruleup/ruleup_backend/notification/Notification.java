@@ -13,20 +13,20 @@ import org.hibernate.type.SqlTypes;
 import java.time.Instant;
 import java.util.UUID;
 
-/** 사용자 알림 (notifications 테이블). 닉네임/사진 변경 요청 등. */
+/** 사용자 알림 (Notification 테이블). 닉네임/사진 변경 요청 등. */
 @Entity
-@Table(name = "notifications")
+@Table(name = "Notification")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Notification {
 
     @Id
-    @JdbcTypeCode(SqlTypes.CHAR)
-    @Column(name = "id", nullable = false, updatable = false, length = 36)
+    @JdbcTypeCode(SqlTypes.BINARY)
+    @Column(name = "id", nullable = false, updatable = false)
     private UUID id;
 
-    @JdbcTypeCode(SqlTypes.CHAR)
-    @Column(name = "user_id", nullable = false, length = 36)
+    @JdbcTypeCode(SqlTypes.BINARY)
+    @Column(name = "userId", nullable = false)
     private UUID userId;
 
     @Enumerated(EnumType.STRING)
@@ -39,11 +39,11 @@ public class Notification {
     @Column(name = "message", nullable = false, length = 500)
     private String message;
 
-    @Column(name = "read_at")
+    @Column(name = "readAt")
     private Instant readAt;
 
     @Generated(event = EventType.INSERT)
-    @Column(name = "created_at", nullable = false, updatable = false)
+    @Column(name = "createdAt", nullable = false, updatable = false)
     private Instant createdAt;
 
     public static Notification create(UUID userId, NotificationType type, String title, String message) {
