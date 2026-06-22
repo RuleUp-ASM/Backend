@@ -2,6 +2,7 @@ package com.ruleup.ruleup_backend.challenge.domain;
 
 import com.ruleup.ruleup_backend.common.AssignedIdEntity;
 import com.ruleup.ruleup_backend.common.UuidGenerator;
+import com.ruleup.ruleup_backend.verification.domain.VerificationStatus;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -11,33 +12,37 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.generator.EventType;
 import org.hibernate.type.SqlTypes;
 
+import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
 
 /**
- * 챌린지 멤버십 (challenge_members 테이블). 챌린지 1개 × 사용자 1명 = 1행.
- *  - uq_member(challenge_id, user_id)로 한 챌린지 1회 멤버십 (스펙 5 재참여).
+ * 챌린지 멤버십 (ChallengeMember 테이블). 챌린지 1개 × 사용자 1명 = 1행.
+ *  - uqMember(challengeId, userId)로 한 챌린지 1회 멤버십 (스펙 5 재참여).
  *  - 생성자는 챌린지 생성 시 OWNER/ACTIVE로 함께 등록.
  *  - 참여 신청: 솔로/기준미설정 → ACTIVE 즉시, 그룹+기준 → PENDING(운영자 승인 대기).
+ *  - 진행률(scheduleType~periodsMet)은 인증 sync·확정 배치가 유지하는 비정규화 필드(인증 스펙 §4.2).
+ *    멤버 생성 시엔 기본값(FIXED_DAYS·0)으로 시작하고, 인증 단계에서 실제 스케줄로 세팅·갱신.
  * 연관관계 대신 challengeId/userId만 보유(다른 도메인과 동일 패턴).
  */
 @Entity
-@Table(name = "challenge_members")
+@Table(name = "ChallengeMember")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class ChallengeMember extends AssignedIdEntity {
 
     @Id
-    @JdbcTypeCode(SqlTypes.CHAR)
-    @Column(name = "id", nullable = false, updatable = false, length = 36)
+    @JdbcTypeCode(SqlTypes.BINARY)
+    @Column(name = "id", nullable = false, updatable = false)
     private UUID id;
 
-    @JdbcTypeCode(SqlTypes.CHAR)
-    @Column(name = "challenge_id", nullable = false, updatable = false, length = 36)
+    @JdbcTypeCode(SqlTypes.BINARY)
+    @Column(name = "challengeId", nullable = false, updatable = false)
     private UUID challengeId;
 
-    @JdbcTypeCode(SqlTypes.CHAR)
-    @Column(name = "user_id", nullable = false, updatable = false, length = 36)
+    @JdbcTypeCode(SqlTypes.BINARY)
+    @Column(name = "userId", nullable = false, updatable = false)
     private UUID userId;
 
     @Enumerated(EnumType.STRING)
@@ -49,8 +54,55 @@ public class ChallengeMember extends AssignedIdEntity {
     private MemberStatus status;
 
     @Generated(event = EventType.INSERT)
-    @Column(name = "joined_at", nullable = false, updatable = false)
+    @Column(name = "joinedAt", nullable = false, updatable = false)
     private Instant joinedAt;            // 참여(또는 신청) 시각
+
+    // ===== 진행률 비정규화 (인증 스펙 §4.2) — 인증 sync·확정 배치가 유지 =====
+    @Enumerated(EnumType.STRING)
+    @Column(name = "scheduleType", nullable = false)
+    private ScheduleType scheduleType = ScheduleType.FIXED_DAYS;
+
+    @Column(name = "targetDays", nullable = false)
+    private int targetDays = 0;          // 전체 대상일(빈도형: 필요 횟수 ΣN)
+
+    @Column(name = "successDays", nullable = false)
+    private int successDays = 0;
+
+    @Column(name = "failDays", nullable = false)
+    private int failDays = 0;
+
+    @Column(name = "progressRate", nullable = false, precision = 5, scale = 2)
+    private BigDecimal progressRate = BigDecimal.ZERO;   // 진행률(%)
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "todayStatus")
+    private VerificationStatus todayStatus;
+
+    @Column(name = "lastSyncedAt")
+    private Instant lastSyncedAt;
+
+    // --- 빈도형(FREQUENCY) 전용 주기 카운터 ---
+    @Enumerated(EnumType.STRING)
+    @Column(name = "periodUnit")
+    private PeriodUnit periodUnit;
+
+    @Column(name = "periodTarget")
+    private Integer periodTarget;        // 주기당 N
+
+    @Column(name = "curPeriodStart")
+    private LocalDate curPeriodStart;
+
+    @Column(name = "curPeriodEnd")
+    private LocalDate curPeriodEnd;
+
+    @Column(name = "curPeriodCompleted")
+    private Integer curPeriodCompleted;
+
+    @Column(name = "periodsTotal")
+    private Integer periodsTotal;
+
+    @Column(name = "periodsMet")
+    private Integer periodsMet;
 
     private static ChallengeMember of(UUID challengeId, UUID userId, MemberRole role, MemberStatus status) {
         ChallengeMember m = new ChallengeMember();

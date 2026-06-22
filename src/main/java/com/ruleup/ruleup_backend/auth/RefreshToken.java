@@ -16,35 +16,35 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Refresh Token (refresh_tokens 테이블). User와 N:1.
- * 토큰 원문이 아니라 hash만 저장. revoked_at으로 강제 무효화 표시.
+ * Refresh Token (RefreshToken 테이블). User와 N:1.
+ * 토큰 원문이 아니라 hash만 저장. revokedAt으로 강제 무효화 표시.
  */
 @Entity
-@Table(name = "refresh_tokens")
+@Table(name = "RefreshToken")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class RefreshToken extends AssignedIdEntity {
 
     @Id
-    @JdbcTypeCode(SqlTypes.CHAR)
-    @Column(name = "id", nullable = false, updatable = false, length = 36)
+    @JdbcTypeCode(SqlTypes.BINARY)
+    @Column(name = "id", nullable = false, updatable = false)
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)        // 여러 토큰 → 한 User
-    @JoinColumn(name = "user_id", nullable = false)
+    @JoinColumn(name = "userId", nullable = false)
     private User user;
 
-    @Column(name = "token_hash", nullable = false)
+    @Column(name = "tokenHash", nullable = false)
     private String tokenHash;
 
-    @Column(name = "expires_at", nullable = false)
+    @Column(name = "expiresAt", nullable = false)
     private Instant expiresAt;
 
-    @Column(name = "revoked_at")
+    @Column(name = "revokedAt")
     private Instant revokedAt;
 
     @Generated(event = EventType.INSERT)
-    @Column(name = "created_at", nullable = false, updatable = false)
+    @Column(name = "createdAt", nullable = false, updatable = false)
     private Instant createdAt;
 
     public static RefreshToken issue(User user, String tokenHash, Instant expiresAt) {

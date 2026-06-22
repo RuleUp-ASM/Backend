@@ -22,18 +22,18 @@ import java.util.Map;
 import java.util.UUID;
 
 @Entity
-@Table(name = "challenges")
+@Table(name = "Challenge")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Challenge extends AssignedIdEntity {
 
     @Id
-    @JdbcTypeCode(SqlTypes.CHAR)
-    @Column(name = "id", nullable = false, updatable = false, length = 36)
+    @JdbcTypeCode(SqlTypes.BINARY)
+    @Column(name = "id", nullable = false, updatable = false)
     private UUID id;
 
-    @JdbcTypeCode(SqlTypes.CHAR)
-    @Column(name = "creator_id", nullable = false, updatable = false, length = 36)
+    @JdbcTypeCode(SqlTypes.BINARY)
+    @Column(name = "creatorId", nullable = false, updatable = false)
     private UUID creatorId;
 
     @Column(name = "title", nullable = false, length = 30)
@@ -42,38 +42,38 @@ public class Challenge extends AssignedIdEntity {
     @Column(name = "description", length = 200)
     private String description;
 
-    @Column(name = "image_url", length = 500)
+    @Column(name = "imageUrl", length = 500)
     private String imageUrl;
 
     @Column(name = "category", nullable = false, length = 20)
     private String category;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "participation_type", nullable = false)
+    @Column(name = "participationType", nullable = false)
     private ParticipationType participationType;
 
-    @Column(name = "min_manner_temperature", precision = 4, scale = 1)
+    @Column(name = "minMannerTemperature", precision = 4, scale = 1)
     private BigDecimal minMannerTemperature;
 
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "repeat_days", nullable = false)
+    @Column(name = "repeatDays", nullable = false)
     private List<String> repeatDays = new ArrayList<>();
 
-    @Column(name = "duration_days", nullable = false)
+    @Column(name = "durationDays", nullable = false)
     private Integer durationDays;
 
-    @Column(name = "start_date", nullable = false)
+    @Column(name = "startDate", nullable = false)
     private LocalDate startDate;
 
-    @Column(name = "end_date", nullable = false)
+    @Column(name = "endDate", nullable = false)
     private LocalDate endDate;
 
     // ===== 루틴(인증) =====
-    @Column(name = "template_id")
+    @Column(name = "templateId")
     private Long templateId;                          // 매칭된 루틴 템플릿(직접 입력이면 null)
 
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "verification_config", nullable = false)
+    @Column(name = "verificationConfig", nullable = false)
     private VerificationConfig verificationConfig;    // 인증 방식 스냅샷
 
     @JdbcTypeCode(SqlTypes.JSON)
@@ -81,11 +81,11 @@ public class Challenge extends AssignedIdEntity {
     private Map<String, Object> params = new LinkedHashMap<>();   // 목표값(예: {"distance_km":5})
 
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "penalty_config", nullable = false)
+    @Column(name = "penaltyConfig", nullable = false)
     private PenaltyConfig penalty;
 
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "reward_config", nullable = false)
+    @Column(name = "rewardConfig", nullable = false)
     private RewardConfig reward;
 
     @Enumerated(EnumType.STRING)
@@ -96,21 +96,21 @@ public class Challenge extends AssignedIdEntity {
     @Column(name = "status", nullable = false)
     private ChallengeStatus status;
 
-    @Column(name = "ai_assisted", nullable = false)
+    @Column(name = "aiAssisted", nullable = false)
     private boolean aiAssisted;
 
-    @Column(name = "participant_count", nullable = false)
+    @Column(name = "participantCount", nullable = false)
     private int participantCount;
 
-    @Column(name = "deleted_at")
+    @Column(name = "deletedAt")
     private Instant deletedAt;
 
     @Generated(event = EventType.INSERT)
-    @Column(name = "created_at", nullable = false, updatable = false)
+    @Column(name = "createdAt", nullable = false, updatable = false)
     private Instant createdAt;
 
     @Generated(event = {EventType.INSERT, EventType.UPDATE})
-    @Column(name = "updated_at", nullable = false)
+    @Column(name = "updatedAt", nullable = false)
     private Instant updatedAt;
 
     private static LocalDate deriveEndDate(LocalDate start, int durationDays) {

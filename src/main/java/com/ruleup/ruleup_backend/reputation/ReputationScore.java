@@ -12,11 +12,11 @@ import java.math.BigDecimal;
 import java.util.UUID;
 
 /**
- * 매너 온도 (reputation_scores 테이블). User와 1:1, PK를 User와 공유(@MapsId).
+ * 매너 온도 (ReputationScore 테이블). User와 1:1, PK를 User와 공유(@MapsId).
  * W1에서는 초기값 36.5 저장/표시만. 계산 로직은 이후 스펙.
  */
 @Entity
-@Table(name = "reputation_scores")
+@Table(name = "ReputationScore")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class ReputationScore {
@@ -25,15 +25,15 @@ public class ReputationScore {
     public static final BigDecimal INITIAL_TEMPERATURE = new BigDecimal("36.5");
 
     @Id
-    @JdbcTypeCode(SqlTypes.CHAR)  // user_id도 users.id처럼 CHAR(36)로 바인딩 (기본 UUID→BINARY 방지)
-    private UUID userId;          // 값은 아래 @MapsId가 user.id에서 자동으로 채움
+    @JdbcTypeCode(SqlTypes.BINARY)  // userId도 User.id처럼 BINARY(16)로 바인딩
+    private UUID userId;            // 값은 아래 @MapsId가 user.id에서 자동으로 채움
 
-    @MapsId                       // "이 1:1의 PK = user의 PK" 라는 뜻 (PK 공유)
+    @MapsId                         // "이 1:1의 PK = user의 PK" 라는 뜻 (PK 공유)
     @OneToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id")
+    @JoinColumn(name = "userId")
     private User user;
 
-    @Column(name = "manner_temperature", nullable = false)
+    @Column(name = "mannerTemperature", nullable = false)
     private BigDecimal mannerTemperature;
 
     public static ReputationScore createDefault(User user) {
