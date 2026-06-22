@@ -33,4 +33,7 @@ public interface ChallengeMemberRepository extends JpaRepository<ChallengeMember
     /** 빈도형 주기 롤오버 대상: 현재 주기가 끝난 ACTIVE 멤버. */
     List<ChallengeMember> findByScheduleTypeAndStatusAndCurPeriodEndLessThan(
             ScheduleType scheduleType, MemberStatus status, LocalDate date);
+
+    /** 내 모든 멤버십(상태 무관) — 진행률 status=ALL */
+    List<ChallengeMember> findByUserId(UUID userId);
 }
