@@ -1,0 +1,7 @@
+# CI 전용 런타임 이미지 — jar는 워크플로에서 미리 빌드(./gradlew bootJar).
+# RUN 명령이 없어 arm64 이미지를 에뮬레이션 없이 빠르게 만든다.
+FROM eclipse-temurin:25-jre
+WORKDIR /app
+COPY build/libs/*.jar app.jar
+EXPOSE 8080
+ENTRYPOINT ["java","-jar","/app/app.jar"]s
