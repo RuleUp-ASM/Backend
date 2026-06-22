@@ -11,6 +11,8 @@ import org.hibernate.annotations.Generated;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.generator.EventType;
 import org.hibernate.type.SqlTypes;
+import com.ruleup.ruleup_backend.verification.domain.ScheduleType;
+import com.ruleup.ruleup_backend.verification.domain.PeriodUnit;
 
 import java.math.BigDecimal;
 import java.time.Instant;
