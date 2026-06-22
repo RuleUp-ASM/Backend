@@ -54,7 +54,7 @@ jobs:
       GOOGLE_REDIRECT_URI: ruleup://login/callback
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up JDK 25
         uses: actions/setup-java@v5
