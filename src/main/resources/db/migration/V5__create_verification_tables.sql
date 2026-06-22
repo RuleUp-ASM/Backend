@@ -20,7 +20,7 @@ CREATE TABLE VerificationDaily (
                                    createdAt        DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
                                    updatedAt        DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
 
-                                   KEY idxVerificationDailyStatusFinalize (status, finalizeAfter)
+                                   KEY idxVerificationDailyStatusFinalize (status, finalizeAfter),
                                    CONSTRAINT fkVerificationDailyMember FOREIGN KEY (challengeMemberId) REFERENCES ChallengeMember(id),
                                    CONSTRAINT uqVerificationDailyMemberDate UNIQUE (challengeMemberId, targetDate)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
