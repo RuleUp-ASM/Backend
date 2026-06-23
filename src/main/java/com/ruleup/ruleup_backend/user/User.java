@@ -135,13 +135,13 @@ public class User extends AssignedIdEntity {
     }
 
     /**
-     * 추천용 인구통계 설정(온보딩에서 받은 값). 전부 nullable.
-     * TODO: 시그업 플로우(SignupRequest·AuthService·안드 클라)에 수집 연결 — 인증/추천 단계에서.
+     * 추천용 인구통계 설정(가입 후 최초 접속 시 수집, 선택). 전달된 값만 덮어쓴다(미입력=null은 건너뜀).
+     * 추천은 채워진 세그먼트만 사용하므로 일부만 입력하거나 전부 건너뛰어도 동작한다.
      */
     public void registerDemographics(String countryCode, LocalDate birthDate, Gender gender) {
-        this.countryCode = countryCode;
-        this.birthDate = birthDate;
-        this.gender = gender;
+        if (countryCode != null) this.countryCode = countryCode;
+        if (birthDate != null) this.birthDate = birthDate;
+        if (gender != null) this.gender = gender;
     }
 
     /**
