@@ -16,7 +16,8 @@ import java.util.UUID;
 
 /**
  * 추천용 인구통계 수집(가입 후 최초 접속, 선택). 채워진 값만 저장하고, 안 보낸 필드는 건너뛴다.
- * 형식이 잘못된 값(비-ISO 날짜, 알 수 없는 성별/국가 길이)만 400으로 막는다.
+ * 형식이 잘못된 값(비-ISO 날짜, 알 수 없는 성별)만 400으로 막는다.
+ * 국가 코드는 여기서 받지 않는다 — 서버가 가입·로그인 시 요청에서 해석해 채운다(CountryResolver).
  */
 @Service
 @RequiredArgsConstructor
@@ -28,16 +29,7 @@ public class DemographicsService {
     public void update(UUID userId, DemographicsRequest req) {
         User user = userRepository.findByIdAndDeletedAtIsNull(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.LOGIN_REQUIRED));
-        user.registerDemographics(parseCountry(req.countryCode()), parseBirth(req.birthDate()), parseGender(req.gender()));
-    }
-
-    /** ISO 3166-1 alpha-2 (예: "KR"). 비거나 없으면 null(건너뜀), 형식 틀리면 400. */
-    private String parseCountry(String code) {
-        if (code == null || code.isBlank()) return null;
-        String c = code.trim().toUpperCase();
-        if (c.length() != 2 || !c.chars().allMatch(Character::isLetter))
-            throw new BusinessException(ErrorCode.INVALID_REQUEST);
-        return c;
+        user.registerDemographics(parseBirth(req.birthDate()), parseGender(req.gender()));
     }
 
     /** ISO 날짜(yyyy-MM-dd). 비거나 없으면 null(건너뜀), 형식/미래 등 비정상이면 400. */

@@ -39,8 +39,9 @@ public class RecommendationController {
     }
 
     @Operation(summary = "추천용 인구통계 입력",
-            description = "가입 후 최초 접속 시 수집(선택). 원치 않는 필드는 null/미전송으로 두면 건너뛴다. "
-                    + "추천 정확도 향상에만 쓰이며, 미입력 시에도 전체 인기도 기반으로 추천된다.")
+            description = "가입 후 최초 접속 시 수집(선택: birthDate·gender). 원치 않는 필드는 null/미전송으로 두면 건너뛴다. "
+                    + "국가 코드는 받지 않는다(서버가 가입·로그인 시 요청에서 해석). "
+                    + "미입력 시에도 전체 인기도 기반으로 추천된다.")
     @PutMapping("/demographics")
     public ApiResponse<Void> demographics(@AuthenticationPrincipal String userId,
                                           @RequestBody DemographicsRequest request) {

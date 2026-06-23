@@ -137,11 +137,19 @@ public class User extends AssignedIdEntity {
     /**
      * 추천용 인구통계 설정(가입 후 최초 접속 시 수집, 선택). 전달된 값만 덮어쓴다(미입력=null은 건너뜀).
      * 추천은 채워진 세그먼트만 사용하므로 일부만 입력하거나 전부 건너뛰어도 동작한다.
+     * 국가 코드는 사용자 입력이 아니라 서버가 요청에서 해석하므로 {@link #updateCountryCode}로 따로 채운다.
      */
-    public void registerDemographics(String countryCode, LocalDate birthDate, Gender gender) {
-        if (countryCode != null) this.countryCode = countryCode;
+    public void registerDemographics(LocalDate birthDate, Gender gender) {
         if (birthDate != null) this.birthDate = birthDate;
         if (gender != null) this.gender = gender;
+    }
+
+    /**
+     * 국가 코드 갱신(사용자 입력 X — 서버가 요청에서 해석한 값). 가입·로그인마다 최신화.
+     * 해석 불가(null)면 기존값을 보존한다.
+     */
+    public void updateCountryCode(String countryCode) {
+        if (countryCode != null) this.countryCode = countryCode;
     }
 
     /**
