@@ -41,7 +41,7 @@ app:
       redirect-uri: ${KAKAO_REDIRECT_URI}
     google:
       client-id: ${GOOGLE_CLIENT_ID}
-      client-secret: ${GOOGLE_CLIENT_SECRET}
+      client-secret: ${GOOGLE_CLIENT_SECRET:}
       redirect-uri: ${GOOGLE_REDIRECT_URI}
     # 서버 콜백(/login/{provider}/callback)이 인가코드를 앱으로 넘길 커스텀 스킴 딥링크.
     # iOS는 카카오가 요구하는 https redirect를 앱이 직접 못 잡으므로 서버가 중계한다.
