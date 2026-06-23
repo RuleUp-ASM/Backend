@@ -5,7 +5,8 @@ package com.ruleup.ruleup_backend.recommendation.domain;
  *  - COUNTRY  : 국가(콜드스타트 base). segmentValue = ISO alpha-2 (예: "KR").
  *  - GENDER   : 성별. segmentValue = "MALE"/"FEMALE".
  *  - AGE_BAND : 연령대. segmentValue = "10s"/"20s"/... (birthDate에서 파생).
+ *  - PLATFORM : 클라 플랫폼. segmentValue = "ANDROID"/"IOS" (가입·로그인 시 수집한 기기 정보).
  */
 public enum SegmentType {
-    COUNTRY, GENDER, AGE_BAND
+    COUNTRY, GENDER, AGE_BAND, PLATFORM
 }

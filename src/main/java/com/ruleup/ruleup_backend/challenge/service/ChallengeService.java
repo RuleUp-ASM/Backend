@@ -77,6 +77,11 @@ public class ChallengeService {
         memberRepository.save(ChallengeMember.owner(challenge.getId(), userId));
         challenge.increaseParticipantCount();
 
+        // 추천 웜업: 생성자의 세그먼트(국가·성별·연령대·플랫폼)별로 선택 템플릿 점수 누적.
+        // 직접 입력(templateId == null)이면 recordSelection 내부에서 무시된다.
+        userRepository.findById(userId)
+                .ifPresent(u -> segmentScoreUpdater.recordSelection(u, routine.templateId()));
+
         return ChallengeResponse.from(challenge);
     }
 

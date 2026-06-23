@@ -10,8 +10,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * User → 세그먼트 축(COUNTRY·GENDER·AGE_BAND). 인구통계는 선택 입력이라 채워진 것만(NULL=미입력 제외).
+ * User → 세그먼트 축(COUNTRY·GENDER·AGE_BAND·PLATFORM). 선택 입력이라 채워진 것만(NULL=미입력 제외).
  *  - AGE_BAND: 생일 → 연령대 10년 단위 문자열("20","30"...).
+ *  - PLATFORM: 가입·로그인 시 수집한 기기 플랫폼("ANDROID"/"IOS").
  */
 @Component
 public class SegmentResolver {
@@ -27,6 +28,9 @@ public class SegmentResolver {
         String band = ageBand(user.getBirthDate());
         if (band != null) {
             segments.add(new Segment(SegmentType.AGE_BAND, band));
+        }
+        if (user.getPlatform() != null) {
+            segments.add(new Segment(SegmentType.PLATFORM, user.getPlatform().name()));
         }
         return segments;
     }

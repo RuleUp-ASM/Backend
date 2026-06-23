@@ -89,6 +89,24 @@ public class User extends AssignedIdEntity {
     @Column(name = "gender")
     private Gender gender;
 
+    // ===== 기기 정보 (가입 시 최초 수집, 로그인마다 갱신; 추천 PLATFORM 세그먼트로 사용) =====
+    /** 클라 플랫폼(ANDROID/IOS). 추천 PLATFORM 세그먼트 축. NULL = 미입력. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "platform", length = 16)
+    private Platform platform;
+
+    /** 앱 버전 코드(정수, 예: 안드로이드 versionCode). */
+    @Column(name = "appVersionCode")
+    private Integer appVersionCode;
+
+    /** 앱 버전 네임(표시용, 예: "1.2.0"). */
+    @Column(name = "appVersionName", length = 32)
+    private String appVersionName;
+
+    /** 기기 정보 마지막 갱신 시각(로그인마다 갱신). */
+    @Column(name = "deviceInfoUpdatedAt")
+    private Instant deviceInfoUpdatedAt;
+
     @Column(name = "nicknameChangedAt")
     private Instant nicknameChangedAt;
 
@@ -124,6 +142,17 @@ public class User extends AssignedIdEntity {
         this.countryCode = countryCode;
         this.birthDate = birthDate;
         this.gender = gender;
+    }
+
+    /**
+     * 기기 정보 갱신(가입 시 최초 수집, 로그인마다 갱신).
+     * 전달된 값만 덮어쓴다(부분 전송 시 기존값 보존). 추천 PLATFORM 세그먼트에 platform 사용.
+     */
+    public void updateDeviceInfo(Platform platform, Integer appVersionCode, String appVersionName) {
+        if (platform != null) this.platform = platform;
+        if (appVersionCode != null) this.appVersionCode = appVersionCode;
+        if (appVersionName != null) this.appVersionName = appVersionName;
+        this.deviceInfoUpdatedAt = Instant.now();
     }
 
     /** UUID에서 안정적으로 파생한 임시 닉네임(예: user_ab12cd). 사람이 봐도 사람마다 다르다. */
