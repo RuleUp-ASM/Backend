@@ -69,6 +69,8 @@ public class KakaoOAuthClient implements OAuthClient {
         KakaoTokenResponse res = restClient.post().uri(TOKEN_URI)
                 .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                 .body(form).retrieve().body(KakaoTokenResponse.class);
+        if (res == null || res.accessToken() == null)
+            throw new BusinessException(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
         return res.accessToken();
     }
 
@@ -76,6 +78,9 @@ public class KakaoOAuthClient implements OAuthClient {
         KakaoUserResponse res = restClient.get().uri(USER_URI)
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                 .retrieve().body(KakaoUserResponse.class);
+        // 200이지만 바디가 비었거나 역직렬화 실패 시 body()가 null → NPE 누수 방지
+        if (res == null || res.id() == null)
+            throw new BusinessException(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
 
         String email = (res.kakaoAccount() != null) ? res.kakaoAccount().email() : null;
         String img = (res.kakaoAccount() != null && res.kakaoAccount().profile() != null)
