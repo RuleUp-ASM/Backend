@@ -6,6 +6,7 @@ import com.ruleup.ruleup_backend.agreement.UserAgreementRepository;
 import com.ruleup.ruleup_backend.auth.dto.*;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
+import com.ruleup.ruleup_backend.common.web.CountryResolver;
 import com.ruleup.ruleup_backend.config.AppProperties;
 import com.ruleup.ruleup_backend.moderation.UserModerationRequested;
 import com.ruleup.ruleup_backend.oauth.OAuthClient;
@@ -46,6 +47,7 @@ public class AuthService {
     private final JwtProvider jwtProvider;
     private final AppProperties props;
     private final ApplicationEventPublisher eventPublisher;
+    private final CountryResolver countryResolver;
 
     // ===== OAuth 로그인 =====
     // ⚠️ 일부러 @Transactional 을 붙이지 않는다.
@@ -61,11 +63,16 @@ public class AuthService {
 
         // 2) DB 분기 (기존 회원이면 토큰 발급, 신규면 signupToken만)
         return userRepository.findByOauthProviderAndOauthSubject(provider, info.subject())
-                .map(this::loginExisting)
+                .map(user -> loginExisting(user, req))
                 .orElseGet(() -> issueSignupToken(provider, info));
     }
 
-    private OAuthLoginResponse loginExisting(User user) {
+    private OAuthLoginResponse loginExisting(User user, OAuthLoginRequest req) {
+        // 로그인마다: 기기 정보 갱신 + 국가 코드(서버가 요청에서 해석) 최신화.
+        // user는 트랜잭션 밖에서 조회된 detached 엔티티 → save(merge)로 반영(변경 없으면 UPDATE 생략).
+        applyDeviceInfo(user, req.deviceInfo());
+        user.updateCountryCode(countryResolver.resolve());
+        userRepository.save(user);
         TokenService.TokenPair pair = tokenService.issueTokenPair(user);   // 내부에서 @Transactional
         BigDecimal temp = reputationScoreRepository.findById(user.getId())
                 .map(ReputationScore::getMannerTemperature)
@@ -131,6 +138,8 @@ public class AuthService {
 
         User user = User.create(provider, oauthSubject, email,
                 req.nickname(), req.profileImageUrl(), new ArrayList<>(categories));
+        applyDeviceInfo(user, req.deviceInfoOrNull());        // 가입 시 기기 정보 최초 수집(있으면)
+        user.updateCountryCode(countryResolver.resolve());   // 국가 코드는 서버가 요청에서 해석
         userRepository.save(user);
         reputationScoreRepository.save(ReputationScore.createDefault(user));
         saveAgreements(user, ag);
@@ -141,6 +150,12 @@ public class AuthService {
 
         TokenService.TokenPair pair = tokenService.issueTokenPair(user);
         return SignupResponse.from(pair, user, ReputationScore.INITIAL_TEMPERATURE);
+    }
+
+    /** 기기 정보(선택값)를 유저에 반영. 가입·로그인 공용. null이면 무시(기존값 보존). */
+    private void applyDeviceInfo(User user, DeviceInfoRequest device) {
+        if (device == null) return;
+        user.updateDeviceInfo(device.toPlatform(), device.appVersionCode(), device.appVersionName());
     }
 
     private void saveAgreements(User user, SignupRequest.Agreements ag) {

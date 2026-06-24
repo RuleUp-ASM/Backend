@@ -22,10 +22,15 @@ CREATE TABLE User (
                       profileImageStatus  ENUM('PENDING','APPROVED','REJECTED') NOT NULL DEFAULT 'PENDING',
                       moderationCheckedAt DATETIME(6),
                       interestCategories  JSON            NOT NULL,                 -- 코드 유효성(15종)은 앱 검증
-    -- 추천용 인구통계(#7). 온보딩에서 수집, 탈퇴 시 익명화 위해 nullable.
-                      countryCode         CHAR(2),                                 -- ISO 3166-1 alpha-2 (예: 'KR')
+    -- 추천용 인구통계(#7). 탈퇴 시 익명화 위해 nullable.
+                      countryCode         CHAR(2),                                 -- ISO 3166-1 alpha-2 (예: 'KR'). 사용자 입력 X — 서버가 요청(Accept-Language/지오 헤더)에서 해석
                       birthDate           DATE,                                    -- 나이는 앱에서 계산(age band 파생)
                       gender              ENUM('MALE','FEMALE'),                   -- NULL = 미입력
+    -- 기기 정보(가입 시 최초 수집, 로그인마다 갱신). platform은 추천 PLATFORM 세그먼트로 사용.
+                      platform            ENUM('ANDROID','IOS'),
+                      appVersionCode      INT,                                     -- 앱 버전 코드(정수)
+                      appVersionName      VARCHAR(32),                             -- 앱 버전 네임(표시용)
+                      deviceInfoUpdatedAt DATETIME(6),                             -- 기기 정보 마지막 갱신(로그인마다)
                       nicknameChangedAt   DATETIME(6),
                       deletedAt           DATETIME(6),                             -- 탈퇴/소프트삭제 시각
                       createdAt           DATETIME(6)     NOT NULL DEFAULT CURRENT_TIMESTAMP(6),

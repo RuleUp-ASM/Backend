@@ -89,6 +89,24 @@ public class User extends AssignedIdEntity {
     @Column(name = "gender")
     private Gender gender;
 
+    // ===== 기기 정보 (가입 시 최초 수집, 로그인마다 갱신; 추천 PLATFORM 세그먼트로 사용) =====
+    /** 클라 플랫폼(ANDROID/IOS). 추천 PLATFORM 세그먼트 축. NULL = 미입력. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "platform", length = 16)
+    private Platform platform;
+
+    /** 앱 버전 코드(정수, 예: 안드로이드 versionCode). */
+    @Column(name = "appVersionCode")
+    private Integer appVersionCode;
+
+    /** 앱 버전 네임(표시용, 예: "1.2.0"). */
+    @Column(name = "appVersionName", length = 32)
+    private String appVersionName;
+
+    /** 기기 정보 마지막 갱신 시각(로그인마다 갱신). */
+    @Column(name = "deviceInfoUpdatedAt")
+    private Instant deviceInfoUpdatedAt;
+
     @Column(name = "nicknameChangedAt")
     private Instant nicknameChangedAt;
 
@@ -117,13 +135,32 @@ public class User extends AssignedIdEntity {
     }
 
     /**
-     * 추천용 인구통계 설정(온보딩에서 받은 값). 전부 nullable.
-     * TODO: 시그업 플로우(SignupRequest·AuthService·안드 클라)에 수집 연결 — 인증/추천 단계에서.
+     * 추천용 인구통계 설정(가입 후 최초 접속 시 수집, 선택). 전달된 값만 덮어쓴다(미입력=null은 건너뜀).
+     * 추천은 채워진 세그먼트만 사용하므로 일부만 입력하거나 전부 건너뛰어도 동작한다.
+     * 국가 코드는 사용자 입력이 아니라 서버가 요청에서 해석하므로 {@link #updateCountryCode}로 따로 채운다.
      */
-    public void registerDemographics(String countryCode, LocalDate birthDate, Gender gender) {
-        this.countryCode = countryCode;
-        this.birthDate = birthDate;
-        this.gender = gender;
+    public void registerDemographics(LocalDate birthDate, Gender gender) {
+        if (birthDate != null) this.birthDate = birthDate;
+        if (gender != null) this.gender = gender;
+    }
+
+    /**
+     * 국가 코드 갱신(사용자 입력 X — 서버가 요청에서 해석한 값). 가입·로그인마다 최신화.
+     * 해석 불가(null)면 기존값을 보존한다.
+     */
+    public void updateCountryCode(String countryCode) {
+        if (countryCode != null) this.countryCode = countryCode;
+    }
+
+    /**
+     * 기기 정보 갱신(가입 시 최초 수집, 로그인마다 갱신).
+     * 전달된 값만 덮어쓴다(부분 전송 시 기존값 보존). 추천 PLATFORM 세그먼트에 platform 사용.
+     */
+    public void updateDeviceInfo(Platform platform, Integer appVersionCode, String appVersionName) {
+        if (platform != null) this.platform = platform;
+        if (appVersionCode != null) this.appVersionCode = appVersionCode;
+        if (appVersionName != null) this.appVersionName = appVersionName;
+        this.deviceInfoUpdatedAt = Instant.now();
     }
 
     /** UUID에서 안정적으로 파생한 임시 닉네임(예: user_ab12cd). 사람이 봐도 사람마다 다르다. */

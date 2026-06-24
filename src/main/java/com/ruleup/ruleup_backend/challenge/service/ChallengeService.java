@@ -16,7 +16,6 @@ import com.ruleup.ruleup_backend.user.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import com.ruleup.ruleup_backend.recommendation.service.SegmentScoreUpdater;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -39,7 +38,6 @@ public class ChallengeService {
     private final UserRepository userRepository;
     private final ReputationScoreRepository reputationScoreRepository;
     private final RoutineSelectionService routineSelectionService;
-    private final SegmentScoreUpdater segmentScoreUpdater;
 
     // ===== 3.2 생성 =====
     @Transactional
@@ -77,6 +75,8 @@ public class ChallengeService {
         memberRepository.save(ChallengeMember.owner(challenge.getId(), userId));
         challenge.increaseParticipantCount();
 
+        // 추천 세그먼트 점수는 여기서 즉시 갱신하지 않는다(매 생성마다 바뀌면 추천 캐시 효율↓).
+        // SegmentScoreBatch 가 주기적으로 누적 챌린지를 재집계한다.
         return ChallengeResponse.from(challenge);
     }
 
