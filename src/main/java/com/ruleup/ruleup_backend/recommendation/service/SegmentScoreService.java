@@ -5,7 +5,7 @@ import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.recommendation.domain.SegmentType;
 import com.ruleup.ruleup_backend.recommendation.domain.TemplateSegmentScore;
 import com.ruleup.ruleup_backend.recommendation.repository.TemplateSegmentScoreRepository;
-import com.ruleup.ruleup_backend.user.User;
+import com.ruleup.ruleup_backend.user.domain.User;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -34,7 +34,7 @@ import java.util.UUID;
  */
 @Service
 @RequiredArgsConstructor
-public class SegmentScoreBatch {
+public class SegmentScoreService {
 
     private final ChallengeRepository challengeRepository;
     private final UserRepository userRepository;

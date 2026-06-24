@@ -1,6 +1,6 @@
 package com.ruleup.ruleup_backend.oauth;
 
-import com.ruleup.ruleup_backend.user.OAuthProvider;
+import com.ruleup.ruleup_backend.user.domain.OAuthProvider;
 
 /**
  * IdP별 OAuth 처리 추상화.

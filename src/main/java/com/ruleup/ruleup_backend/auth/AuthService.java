@@ -1,7 +1,9 @@
 package com.ruleup.ruleup_backend.auth;
+import com.ruleup.ruleup_backend.user.domain.*;
+import com.ruleup.ruleup_backend.auth.domain.*;
 
-import com.ruleup.ruleup_backend.agreement.AgreementType;
-import com.ruleup.ruleup_backend.agreement.UserAgreement;
+import com.ruleup.ruleup_backend.agreement.domain.AgreementType;
+import com.ruleup.ruleup_backend.agreement.domain.UserAgreement;
 import com.ruleup.ruleup_backend.agreement.UserAgreementRepository;
 import com.ruleup.ruleup_backend.auth.dto.*;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
@@ -12,7 +14,7 @@ import com.ruleup.ruleup_backend.moderation.UserModerationRequested;
 import com.ruleup.ruleup_backend.oauth.OAuthClient;
 import com.ruleup.ruleup_backend.oauth.OAuthClientResolver;
 import com.ruleup.ruleup_backend.oauth.OAuthUserInfo;
-import com.ruleup.ruleup_backend.reputation.ReputationScore;
+import com.ruleup.ruleup_backend.reputation.domain.ReputationScore;
 import com.ruleup.ruleup_backend.reputation.ReputationScoreRepository;
 import com.ruleup.ruleup_backend.security.JwtProvider;
 import com.ruleup.ruleup_backend.security.TokenType;

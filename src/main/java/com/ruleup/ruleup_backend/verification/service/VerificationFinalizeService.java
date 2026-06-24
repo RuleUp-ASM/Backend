@@ -1,10 +1,9 @@
 package com.ruleup.ruleup_backend.verification.service;
+import com.ruleup.ruleup_backend.common.verification.*;
 
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
-import com.ruleup.ruleup_backend.challenge.domain.MemberStatus;
-import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
-import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
+import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
 import com.ruleup.ruleup_backend.verification.domain.*;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationMethodResultRepository;
@@ -27,15 +26,14 @@ import java.util.List;
  */
 @Service
 @RequiredArgsConstructor
-public class VerificationFinalizeBatch {
+public class VerificationFinalizeService {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final int CLAIM_LIMIT = 200;
 
     private final VerificationDailyRepository dailyRepo;
     private final VerificationMethodResultRepository methodResultRepo;
-    private final ChallengeRepository challengeRepo;
-    private final ChallengeMemberRepository memberRepo;
+    private final ChallengeQueryService challengeQuery;
     private final VerificationConfigFactory configFactory;
     private final VerificationProgressService progressService;
 
@@ -51,7 +49,7 @@ public class VerificationFinalizeBatch {
     }
 
     private void finalizeOne(VerificationDaily daily, Instant now) {
-        Challenge challenge = challengeRepo.findById(daily.getChallengeId()).orElse(null);
+        Challenge challenge = challengeQuery.findChallenge(daily.getChallengeId()).orElse(null);
         if (challenge == null) {
             daily.recordResult(VerificationStatus.FAILED, null, "NO_SIGNAL_RECEIVED", now);
             return;
@@ -61,17 +59,38 @@ public class VerificationFinalizeBatch {
         Polarity polarity = polarityOf(config, method);
 
         if (polarity == Polarity.CONSTRAINT) {
-            // 제약형: 위반이면 sync에서 이미 FAILED 잠김 → 여기 온 건 무위반 → SUCCESS
+            // 제약형(MAX·AVOID): 위반이면 sync에서 이미 FAILED 잠김 → 여기 온 건 무위반 → SUCCESS
             daily.recordResult(VerificationStatus.SUCCESS, method.name(), null, now);
         } else {
             // 도달형: 창 닫힘·미충족 → FAILED. 신호 자체가 없었으면 NO_SIGNAL_RECEIVED.
             var mr = methodResultRepo.findByVerificationDailyIdAndMethod(daily.getId(), method.name()).orElse(null);
-            String reason = (mr == null) ? "NO_SIGNAL_RECEIVED" : failureReasonFor(method);
+            String reason;
+            if (mr == null) {
+                reason = "NO_SIGNAL_RECEIVED";
+            } else if (mr.getEvidence() != null && "UNTRUSTED_HEALTH_SOURCE".equals(mr.getEvidence().get("pendingReason"))) {
+                reason = "UNTRUSTED_HEALTH_SOURCE";   // HEALTH: 신뢰 게이트로만 막혀 통과분 0(§8.2)
+            } else {
+                reason = failureReasonFor(method, config);
+            }
             daily.recordResult(VerificationStatus.FAILED, null, reason, now);
         }
 
-        ChallengeMember member = memberRepo.findById(daily.getChallengeMemberId()).orElse(null);
+        ChallengeMember member = challengeQuery.findMember(daily.getChallengeMemberId()).orElse(null);
         if (member != null) progressService.recount(member);
+    }
+
+    /**
+     * 예비 폴백 잠정성공 확정(침묵=동의, §9.2). 이의 윈도우가 지난 MANUAL_FALLBACK 잠정 행을 lock.
+     * (신고 시 무효화 플로우는 PN/RP 스펙 범위 — 여기선 무신고 확정만.)
+     */
+    @Scheduled(fixedDelay = 60_000)
+    @Transactional
+    public void confirmFallbackDisputes() {
+        Instant now = Instant.now();
+        List<VerificationDaily> due = dailyRepo.findFallbackDisputeDue(now, CLAIM_LIMIT);
+        for (VerificationDaily daily : due) {
+            daily.confirmFallback(now);   // disputeClosesAt 해제 + verifiedAt 세팅(진행률은 이미 SUCCESS로 반영됨)
+        }
     }
 
     /** 매일 00:05 KST: 종료된 빈도형 주기 정산 + 롤오버. */
@@ -79,10 +98,9 @@ public class VerificationFinalizeBatch {
     @Transactional
     public void rolloverFrequencyPeriods() {
         LocalDate today = LocalDate.now(KST);
-        List<ChallengeMember> members = memberRepo
-                .findByScheduleTypeAndStatusAndCurPeriodEndLessThan(ScheduleType.FREQUENCY, MemberStatus.ACTIVE, today);
+        List<ChallengeMember> members = challengeQuery.findFrequencyRolloverTargets(today);
         for (ChallengeMember m : members) {
-            Challenge ch = challengeRepo.findByIdAndDeletedAtIsNull(m.getChallengeId()).orElse(null);
+            Challenge ch = challengeQuery.findActiveChallenge(m.getChallengeId()).orElse(null);
             if (ch == null) continue;
             rolloverMember(m, ch, today);
             progressService.recount(m);
@@ -115,19 +133,31 @@ public class VerificationFinalizeBatch {
         return switch (method) {
             case SCREEN_TIME -> (c.screenTime() != null && c.screenTime().polarity() != null) ? c.screenTime().polarity() : Polarity.ACHIEVEMENT;
             case GPS_PRESENCE, GPS_DISTANCE -> (c.gps() != null && c.gps().polarity() != null) ? c.gps().polarity() : Polarity.ACHIEVEMENT;
+            case HEALTH -> (c.health() != null && c.health().polarity() != null) ? c.health().polarity() : Polarity.ACHIEVEMENT;
             case SLEEP -> (c.sleep() != null && c.sleep().polarity() != null) ? c.sleep().polarity() : Polarity.ACHIEVEMENT;
             default -> Polarity.ACHIEVEMENT;   // WAKE 등
         };
     }
 
-    private String failureReasonFor(VerificationMethod method) {
+    private String failureReasonFor(VerificationMethod method, VerificationConfig config) {
         return switch (method) {
             case WAKE -> "WOKE_UP_LATE";
             case SCREEN_TIME -> "INSUFFICIENT_USAGE";
             case GPS_PRESENCE -> "INSUFFICIENT_DWELL";
             case GPS_DISTANCE -> "INSUFFICIENT_DISTANCE";
+            case HEALTH -> healthFailureReason(config);
             case SLEEP -> "INSUFFICIENT_SLEEP";
             default -> "NO_SIGNAL_RECEIVED";
         };
+    }
+
+    private String healthFailureReason(VerificationConfig config) {
+        if (config.health() != null && config.health().metric() != null) {
+            return switch (config.health().metric()) {
+                case STEPS -> "INSUFFICIENT_STEPS";
+                default -> "INSUFFICIENT_DISTANCE";   // DISTANCE / EXERCISE_DURATION
+            };
+        }
+        return "INSUFFICIENT_DISTANCE";
     }
 }

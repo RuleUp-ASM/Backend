@@ -1,4 +1,5 @@
 package com.ruleup.ruleup_backend.verification.domain;
+import com.ruleup.ruleup_backend.common.verification.*;
 
 import com.ruleup.ruleup_backend.common.AssignedIdEntity;
 import com.ruleup.ruleup_backend.common.UuidGenerator;
@@ -14,7 +15,6 @@ import org.hibernate.type.SqlTypes;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
-
 /**
  * 하루 인증 판정 (VerificationDaily 테이블) — 그날 챌린지 단위 최종 판정 [부모].
  * 방식별 평가(VerificationMethodResult)를 종합한 결과. 인증 스펙 §4.
@@ -68,6 +68,14 @@ public class VerificationDaily extends AssignedIdEntity {
     @Column(name = "verifiedAt")
     private Instant verifiedAt;          // 확정 시각
 
+    // ===== v2: 확정 경로 + 예비 폴백 이의 윈도우 (테크스펙 v2 §9) =====
+    @Enumerated(EnumType.STRING)
+    @Column(name = "verifiedVia")
+    private VerifiedVia verifiedVia;     // AUTO / MANUAL / MANUAL_FALLBACK (없으면 미확정)
+
+    @Column(name = "disputeClosesAt")
+    private Instant disputeClosesAt;     // 예비 폴백 잠정성공의 이의 윈도우 종료(침묵=동의 확정 시각)
+
     @Generated(event = EventType.INSERT)
     @Column(name = "createdAt", nullable = false, updatable = false)
     private Instant createdAt;
@@ -94,12 +102,48 @@ public class VerificationDaily extends AssignedIdEntity {
         this.finalizeAfter = finalizeAfter;
     }
 
-    /** 종합 판정 반영(평가/확정 시점). 판정 산출 로직은 인증 단계에서. */
+    /** 종합 판정 반영(평가/확정 시점). 자동 경로는 verifiedVia=AUTO로 마킹. */
     public void recordResult(VerificationStatus status, String method, String failureReason, Instant verifiedAt) {
         this.status = status;
         this.method = method;
         this.failureReason = failureReason;
         this.verifiedAt = verifiedAt;
+        if (status == VerificationStatus.SUCCESS && this.verifiedVia == null) {
+            this.verifiedVia = VerifiedVia.AUTO;
+        }
+    }
+
+    /** 정규 수동(PHOTO/SELF_CHECK) 확정 — 즉시 SUCCESS. */
+    public void recordManual(String method, Instant verifiedAt) {
+        this.status = VerificationStatus.SUCCESS;
+        this.method = method;
+        this.failureReason = null;
+        this.verifiedAt = verifiedAt;
+        this.verifiedVia = VerifiedVia.MANUAL;
+        this.disputeClosesAt = null;
+    }
+
+    /**
+     * 예비 폴백 잠정 성공(§9.2). 상태는 SUCCESS로 보이되 verifiedVia=MANUAL_FALLBACK + disputeClosesAt 마킹.
+     * 이의 윈도우 동안 신고 없으면 확정 배치가 lock(verifiedAt 세팅·disputeClosesAt 해제).
+     */
+    public void recordFallbackProvisional(String method, Instant disputeClosesAt) {
+        this.status = VerificationStatus.SUCCESS;
+        this.method = method;
+        this.failureReason = null;
+        this.verifiedVia = VerifiedVia.MANUAL_FALLBACK;
+        this.disputeClosesAt = disputeClosesAt;
+        this.verifiedAt = null;   // 아직 확정 전(잠정)
+    }
+
+    /** 폴백 이의 윈도우 종료 → 확정(침묵=동의). */
+    public void confirmFallback(Instant verifiedAt) {
+        this.verifiedAt = verifiedAt;
+        this.disputeClosesAt = null;
+    }
+
+    public boolean isFallbackPendingDispute() {
+        return verifiedVia == VerifiedVia.MANUAL_FALLBACK && verifiedAt == null && disputeClosesAt != null;
     }
 
     public boolean isPending() { return status == VerificationStatus.PENDING; }

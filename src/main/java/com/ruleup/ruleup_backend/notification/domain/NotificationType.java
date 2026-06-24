@@ -1,4 +1,4 @@
-package com.ruleup.ruleup_backend.notification;
+package com.ruleup.ruleup_backend.notification.domain;
 
 /** 알림 종류. enum 이름이 응답 JSON의 type 문자열이 된다. */
 public enum NotificationType {

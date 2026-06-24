@@ -1,4 +1,5 @@
 package com.ruleup.ruleup_backend.reputation;
+import com.ruleup.ruleup_backend.reputation.domain.*;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.UUID;

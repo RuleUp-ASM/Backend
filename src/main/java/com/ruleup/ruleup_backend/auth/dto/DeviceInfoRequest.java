@@ -1,6 +1,6 @@
 package com.ruleup.ruleup_backend.auth.dto;
 
-import com.ruleup.ruleup_backend.user.Platform;
+import com.ruleup.ruleup_backend.user.domain.Platform;
 
 /**
  * 클라이언트 기기 정보. 가입(signup.clientProperties.deviceInfo) 시 최초 수집,

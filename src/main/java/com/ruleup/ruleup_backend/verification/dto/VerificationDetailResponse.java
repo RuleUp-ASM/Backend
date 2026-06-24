@@ -29,6 +29,8 @@ public record VerificationDetailResponse(
             String status,
             String windowClosesAt,
             String verifiedAt,
+            String verifiedVia,        // AUTO / MANUAL / MANUAL_FALLBACK (§11.3)
+            String disputeClosesAt,    // 예비 폴백 이의 윈도우 종료(잠정성공 중)
             String failureReason,
             Map<String, Object> evidence
     ) {}

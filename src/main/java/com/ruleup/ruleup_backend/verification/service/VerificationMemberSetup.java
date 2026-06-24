@@ -3,7 +3,7 @@ package com.ruleup.ruleup_backend.verification.service;
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.verification.domain.Frequency;
-import com.ruleup.ruleup_backend.verification.domain.PeriodUnit;
+import com.ruleup.ruleup_backend.common.verification.PeriodUnit;
 import com.ruleup.ruleup_backend.verification.domain.VerificationConfig;
 import org.springframework.stereotype.Component;
 

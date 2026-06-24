@@ -53,6 +53,14 @@ app:
       base-url: https://generativelanguage.googleapis.com/v1beta
       timeout-ms: 5000
 
+  # 장소 검색 프록시(§5.2 NEARBY_BRAND 앵커 바인딩). 키 없으면 빈 결과(graceful).
+  places:
+    naver:
+      base-url: https://openapi.naver.com
+      client-id: ${NAVER_CLIENT_ID:}               # 발급 후 주입(없으면 검색 빈 결과)
+      client-secret: ${NAVER_CLIENT_SECRET:}
+      timeout-ms: 3000
+
   # 프로필 이미지 로컬 저장 위치 (ImageStorageService 기본값과 동일)
   upload:
     dir: ./uploads

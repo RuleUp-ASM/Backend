@@ -1,7 +1,7 @@
 package com.ruleup.ruleup_backend.recommendation.service;
 
 import com.ruleup.ruleup_backend.recommendation.domain.SegmentType;
-import com.ruleup.ruleup_backend.user.User;
+import com.ruleup.ruleup_backend.user.domain.User;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;

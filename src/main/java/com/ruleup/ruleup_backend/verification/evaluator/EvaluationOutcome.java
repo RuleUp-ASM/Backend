@@ -1,6 +1,6 @@
 package com.ruleup.ruleup_backend.verification.evaluator;
 
-import com.ruleup.ruleup_backend.verification.domain.VerificationStatus;
+import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
 
 import java.time.Instant;
 import java.util.Map;

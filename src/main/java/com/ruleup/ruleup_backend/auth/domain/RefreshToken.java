@@ -1,7 +1,7 @@
-package com.ruleup.ruleup_backend.auth;
+package com.ruleup.ruleup_backend.auth.domain;
 
 import com.ruleup.ruleup_backend.common.UuidGenerator;
-import com.ruleup.ruleup_backend.user.User;
+import com.ruleup.ruleup_backend.user.domain.User;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;

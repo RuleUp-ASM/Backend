@@ -1,4 +1,4 @@
-package com.ruleup.ruleup_backend.notification;
+package com.ruleup.ruleup_backend.notification.domain;
 
 import com.ruleup.ruleup_backend.common.UuidGenerator;
 import jakarta.persistence.*;

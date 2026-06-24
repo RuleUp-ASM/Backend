@@ -1,4 +1,4 @@
-package com.ruleup.ruleup_backend.user;
+package com.ruleup.ruleup_backend.user.domain;
 
 import lombok.Getter;
 

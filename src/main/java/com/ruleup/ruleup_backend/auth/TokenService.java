@@ -1,10 +1,10 @@
 package com.ruleup.ruleup_backend.auth;
 
-import com.ruleup.ruleup_backend.auth.RefreshToken;
+import com.ruleup.ruleup_backend.auth.domain.RefreshToken;
 import com.ruleup.ruleup_backend.auth.RefreshTokenRepository;
 import com.ruleup.ruleup_backend.config.AppProperties;
 import com.ruleup.ruleup_backend.security.JwtProvider;
-import com.ruleup.ruleup_backend.user.User;
+import com.ruleup.ruleup_backend.user.domain.User;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

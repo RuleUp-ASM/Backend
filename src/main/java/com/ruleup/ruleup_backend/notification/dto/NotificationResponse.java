@@ -1,6 +1,6 @@
 package com.ruleup.ruleup_backend.notification.dto;
 
-import com.ruleup.ruleup_backend.notification.Notification;
+import com.ruleup.ruleup_backend.notification.domain.Notification;
 
 import java.util.List;
 

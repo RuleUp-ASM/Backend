@@ -16,6 +16,7 @@ public record ChallengeProgress(
         int remainingDays,
         boolean todayTarget,
         String todayStatus,
+        String setupStatus,     // PENDING_SETUP / READY (§11.2 최초 진입 셋업 노출용)
         Period period,          // 빈도형만, 아니면 null
         String lastSyncedAt
 ) {
