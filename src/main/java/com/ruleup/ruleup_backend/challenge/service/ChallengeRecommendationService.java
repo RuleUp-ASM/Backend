@@ -115,4 +115,18 @@ public class ChallengeRecommendationService {
             return DEFAULT_ANONYMITY.name();
         }
     }
+
+    /** 추천 선택 경로(Path A): templateId로 챌린지 초안 구성. LLM(루틴매칭·설정제안) 둘 다 우회 — 설정은 정적 기본값. */
+    public ChallengeRecommendationResponse recommendByTemplate(Long templateId, String title, String description) {
+        RoutineRecommendationResponse routine = routineRecommendationService.recommendByTemplate(templateId, title);
+        LocalDate start = LocalDate.now().plusDays(START_OFFSET_DAYS);
+        LocalDate end = start.plusDays((long) DEFAULT_DURATION_DAYS - 1);
+        return new ChallengeRecommendationResponse(
+                routine.matched(), routine.templateId(), routine.title(), description, routine.category(),
+                routine.recommendedMethod(), routine.options(), routine.params(), routine.rationale(),
+                DEFAULT_PARTICIPATION.name(), null, DEFAULT_REPEAT_DAYS, DEFAULT_DURATION_DAYS,
+                start.toString(), end.toString(),
+                new PenaltyConfig(DEFAULT_MANNER_DEDUCTION, new PenaltyConfig.SnsShare(false, null), false),
+                new RewardConfig(DEFAULT_MANNER_GAIN), DEFAULT_ANONYMITY.name());
+    }
 }

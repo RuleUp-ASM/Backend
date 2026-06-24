@@ -104,6 +104,9 @@ public class VerificationSyncService {
 
             if (member.getTargetDays() == 0) memberSetup.apply(member, challenge, config);
 
+            // v2: 셋업 전(PENDING_SETUP)이면 신호는 수용하되 평가 skip("권한 없는데 FAILED" 원천 차단, §4·§11.1)
+            if (!member.isSetupReady()) continue;
+
             VerificationDaily daily = loadOrCreateDaily(member, challenge, today);
             VerificationStatus todayStatus = processMember(member, challenge, config, daily, signals, today, now);
 
@@ -153,7 +156,7 @@ public class VerificationSyncService {
                 .findByVerificationDailyIdAndMethod(daily.getId(), method.name()).orElse(null);
         Map<String, Object> prior = (mr != null) ? mr.getEvidence() : null;
 
-        DayContext ctx = new DayContext(today, KST, now, config, signals, prior, null);
+        DayContext ctx = new DayContext(today, KST, now, config, signals, prior, member.getAnchors(), null);
         EvaluationOutcome outcome = evaluator.evaluate(ctx);
 
         if (mr == null) {
@@ -200,6 +203,7 @@ public class VerificationSyncService {
             case WAKE -> (config.wake() != null) ? config.wake().maxSignalLagHours() : 2;
             case SCREEN_TIME -> (config.screenTime() != null) ? config.screenTime().maxSignalLagHours() : 1;
             case GPS_PRESENCE, GPS_DISTANCE -> (config.gps() != null) ? config.gps().maxSignalLagHours() : 1;
+            case HEALTH -> (config.health() != null) ? config.health().maxSignalLagHours() : 2;
             case SLEEP -> (config.sleep() != null) ? config.sleep().maxSignalLagHours() : 12;
             default -> 1;
         };
@@ -210,6 +214,7 @@ public class VerificationSyncService {
             case WAKE -> (config.wake() != null && config.wake().polarity() != null) ? config.wake().polarity() : Polarity.ACHIEVEMENT;
             case SCREEN_TIME -> (config.screenTime() != null && config.screenTime().polarity() != null) ? config.screenTime().polarity() : Polarity.ACHIEVEMENT;
             case GPS_PRESENCE, GPS_DISTANCE -> (config.gps() != null && config.gps().polarity() != null) ? config.gps().polarity() : Polarity.ACHIEVEMENT;
+            case HEALTH -> (config.health() != null && config.health().polarity() != null) ? config.health().polarity() : Polarity.ACHIEVEMENT;
             case SLEEP -> (config.sleep() != null && config.sleep().polarity() != null) ? config.sleep().polarity() : Polarity.ACHIEVEMENT;
             default -> Polarity.ACHIEVEMENT;
         };

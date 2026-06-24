@@ -75,6 +75,8 @@ public class ChallengeService {
         memberRepository.save(ChallengeMember.owner(challenge.getId(), userId));
         challenge.increaseParticipantCount();
 
+        // 추천 세그먼트 점수는 여기서 즉시 갱신하지 않는다(매 생성마다 바뀌면 추천 캐시 효율↓).
+        // SegmentScoreBatch 가 주기적으로 누적 챌린지를 재집계한다.
         return ChallengeResponse.from(challenge);
     }
 
@@ -277,13 +279,13 @@ public class ChallengeService {
         }
     }
 
-    private void validatePenalty(com.ruleup.ruleup_backend.challenge.domain.PenaltyConfig penalty) {
+    private void validatePenalty(PenaltyConfig penalty) {
         if (penalty == null || penalty.mannerDeduction() == null
                 || penalty.mannerDeduction().compareTo(BigDecimal.ZERO) < 0)
             throw new BusinessException(ErrorCode.INVALID_PENALTY);
     }
 
-    private void validateReward(com.ruleup.ruleup_backend.challenge.domain.RewardConfig reward) {
+    private void validateReward(RewardConfig reward) {
         if (reward == null || reward.mannerGain() == null
                 || reward.mannerGain().compareTo(BigDecimal.ZERO) < 0)
             throw new BusinessException(ErrorCode.INVALID_REWARD);

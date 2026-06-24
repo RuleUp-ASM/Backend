@@ -18,22 +18,27 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
 /**
- * 수동 인증 제출 (§3.4, VF-04). 자기증명 = 제출 즉시 SUCCESS.
- *  - 서버는 대상일·기간·중복만 검증(사진 내용·VLM 없음).
- *  - 무결성(가짜 신고·VOID)은 PN/RP 스펙 범위.
+ * 수동 인증 제출(테크스펙 v2 §9, §11.6). 두 갈래:
+ *  1) 정규 수동(PHOTO/SELF_CHECK): 자기증명 = 제출 즉시 SUCCESS(verifiedVia=MANUAL). 봉투·대상일·중복만 검증.
+ *  2) 예비 폴백(asFallback=true): 자동인데 오늘 자동 불가일 때. 주1회(롤링7일)·잠정 SUCCESS·이의윈도우 확정(§9.2).
+ *  - 사진 내용은 판단하지 않음(VLM 없음).
  */
 @Service
 @RequiredArgsConstructor
 public class VerificationManualService {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    private static final int FALLBACK_WEEKLY_LIMIT = 1;       // 주 1회(롤링 7일, §9.2)
+    private static final Duration DISPUTE_WINDOW = Duration.ofHours(24); // 이의 윈도우(§9.2: 24h, 다음 새벽과 맞물림)
 
     private final ChallengeRepository challengeRepo;
     private final ChallengeMemberRepository memberRepo;
@@ -77,22 +82,40 @@ public class VerificationManualService {
         }
 
         Instant now = Instant.now();
+        boolean fallback = req.fallback();
+
+        // 예비 폴백: 주1회 한도 — 초과면 그냥 실패(버튼 비활성 우회 방지, §9.2).
+        if (fallback && !member.tryUseFallback(today, FALLBACK_WEEKLY_LIMIT)) {
+            throw new BusinessException(ErrorCode.FALLBACK_LIMIT_EXCEEDED);
+        }
+
         VerificationMethodResult mr = methodResultRepo
                 .findByVerificationDailyIdAndMethod(daily.getId(), method).orElse(null);
         if (mr == null) {
             mr = VerificationMethodResult.create(daily.getId(), method, null, true);
         }
-        Map<String, Object> evidence = isPhoto
-                ? Map.of("imageUrl", req.imageUrl()) : Map.of("selfCheck", true);
+        Map<String, Object> evidence = new HashMap<>();
+        if (isPhoto) evidence.put("imageUrl", req.imageUrl()); else evidence.put("selfCheck", true);
+        if (fallback) evidence.put("fallback", true);
         mr.evaluate(VerificationStatus.SUCCESS, evidence, now);
         methodResultRepo.save(mr);
 
-        daily.recordResult(VerificationStatus.SUCCESS, method, null, now);
+        Instant disputeClosesAt = null;
+        if (fallback) {
+            disputeClosesAt = now.plus(DISPUTE_WINDOW);
+            daily.recordFallbackProvisional(method, disputeClosesAt);   // 잠정 SUCCESS + 이의윈도우
+        } else {
+            daily.recordManual(method, now);                            // 정규 수동 = 즉시 확정 SUCCESS
+        }
 
         if (targetDate.equals(today)) progressService.updateAfterSync(member, VerificationStatus.SUCCESS, now);
         else progressService.recount(member);
 
-        return new ManualVerificationResponse(targetDate.toString(), "SUCCESS", method, member.getProgressRate());
+        return new ManualVerificationResponse(
+                targetDate.toString(), "SUCCESS",
+                fallback ? "MANUAL_FALLBACK" : "MANUAL",
+                (disputeClosesAt != null) ? disputeClosesAt.toString() : null,
+                method, member.getProgressRate());
     }
 
     private LocalDate parseTargetDate(String raw, LocalDate today) {

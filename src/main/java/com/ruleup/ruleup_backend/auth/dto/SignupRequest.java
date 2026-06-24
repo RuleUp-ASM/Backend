@@ -12,7 +12,8 @@ import java.util.List;
  *   "interestCategories": ["EXERCISE","CODING"],
  *   "profileImageUrl": null,
  *   "clientProperties": {
- *     "agreements": { "terms": true, "privacy": true, "marketing": false }
+ *     "agreements": { "terms": true, "privacy": true, "marketing": false },
+ *     "deviceInfo": { "platform": "ANDROID", "appVersionCode": 12, "appVersionName": "1.2.0" }
  *   }
  * }
  */
@@ -23,7 +24,8 @@ public record SignupRequest(
         String profileImageUrl,
         ClientProperties clientProperties) {
 
-    public record ClientProperties(Agreements agreements) {}
+    /** 기기 정보(deviceInfo)는 선택값. 가입 시 최초 수집되어 추천 PLATFORM 세그먼트로 사용된다. */
+    public record ClientProperties(Agreements agreements, DeviceInfoRequest deviceInfo) {}
 
     /** terms·privacy 필수, marketing 선택 */
     public record Agreements(boolean terms, boolean privacy, boolean marketing) {}
@@ -31,5 +33,10 @@ public record SignupRequest(
     /** clientProperties.agreements 를 null 안전하게 꺼내는 헬퍼 */
     public Agreements agreementsOrNull() {
         return (clientProperties != null) ? clientProperties.agreements() : null;
+    }
+
+    /** clientProperties.deviceInfo 를 null 안전하게 꺼내는 헬퍼 */
+    public DeviceInfoRequest deviceInfoOrNull() {
+        return (clientProperties != null) ? clientProperties.deviceInfo() : null;
     }
 }

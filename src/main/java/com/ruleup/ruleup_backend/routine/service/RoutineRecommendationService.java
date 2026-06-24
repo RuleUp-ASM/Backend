@@ -130,4 +130,13 @@ public class RoutineRecommendationService {
         if (req.description() != null && req.description().length() > 255)
             throw new BusinessException(ErrorCode.ROUTINE_DESCRIPTION_TOO_LONG);
     }
+
+    /** 추천 선택 경로: templateId로 루틴 상세를 바로 구성(LLM 매칭 우회). 목표값은 템플릿 기본값. */
+    public RoutineRecommendationResponse recommendByTemplate(Long templateId, String title) {
+        if (templateId == null) return noMatchResponse(title);
+        RoutineTemplate template = catalog.findById(templateId).orElse(null);
+        if (template == null) return noMatchResponse(title);
+        String t = (title != null && !title.isBlank()) ? title : template.getName();
+        return matchedResponse(new RoutineRecommendationRequest(t, null), template, RoutineMatch.none());
+    }
 }

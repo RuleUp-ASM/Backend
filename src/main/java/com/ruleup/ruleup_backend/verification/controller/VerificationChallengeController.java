@@ -3,9 +3,14 @@ package com.ruleup.ruleup_backend.verification.controller;
 import com.ruleup.ruleup_backend.common.response.ApiResponse;
 import com.ruleup.ruleup_backend.verification.dto.ManualVerificationRequest;
 import com.ruleup.ruleup_backend.verification.dto.ManualVerificationResponse;
+import com.ruleup.ruleup_backend.verification.dto.MemberLocationRequest;
+import com.ruleup.ruleup_backend.verification.dto.MemberLocationResponse;
+import com.ruleup.ruleup_backend.verification.dto.SetupRequest;
+import com.ruleup.ruleup_backend.verification.dto.SetupResponse;
 import com.ruleup.ruleup_backend.verification.dto.VerificationDetailResponse;
 import com.ruleup.ruleup_backend.verification.service.VerificationManualService;
 import com.ruleup.ruleup_backend.verification.service.VerificationReadService;
+import com.ruleup.ruleup_backend.verification.service.VerificationSetupService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -25,6 +30,7 @@ public class VerificationChallengeController {
 
     private final VerificationReadService readService;
     private final VerificationManualService manualService;
+    private final VerificationSetupService setupService;
 
     @Operation(summary = "챌린지 인증 여부 판단(§3.3)",
             description = "검증 결과/실패 화면용. 진행 요약·오늘 상태·실패 사유·방식별 마지막 평가·최근 로그. 참여 멤버만.")
@@ -42,5 +48,23 @@ public class VerificationChallengeController {
                                                           @PathVariable UUID challengeId,
                                                           @RequestBody ManualVerificationRequest request) {
         return ApiResponse.ok(manualService.submit(UUID.fromString(userId), challengeId, request));
+    }
+
+    @Operation(summary = "최초 진입 셋업(§11.4)",
+            description = "권한 grant·바인딩 장소·대상 앱 등록. 모두 충족 시 READY(평가 대상 진입), 미충족 시 missing[] 반환.")
+    @PostMapping("/{challengeId}/setup")
+    public ApiResponse<SetupResponse> setup(@AuthenticationPrincipal String userId,
+                                            @PathVariable UUID challengeId,
+                                            @RequestBody SetupRequest request) {
+        return ApiResponse.ok(setupService.setup(UUID.fromString(userId), challengeId, request));
+    }
+
+    @Operation(summary = "내 인증 장소 수정(§11.5)",
+            description = "본인 앵커 교체. 최근 변경 후 쿨다운 동안은 재변경 불가. 즉시 적용.")
+    @PutMapping("/{challengeId}/my-location")
+    public ApiResponse<MemberLocationResponse> updateLocation(@AuthenticationPrincipal String userId,
+                                                              @PathVariable UUID challengeId,
+                                                              @RequestBody MemberLocationRequest request) {
+        return ApiResponse.ok(setupService.updateLocation(UUID.fromString(userId), challengeId, request));
     }
 }

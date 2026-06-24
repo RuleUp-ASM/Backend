@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.verification.evaluator;
 
+import com.ruleup.ruleup_backend.verification.domain.GeoAnchor;
 import com.ruleup.ruleup_backend.verification.domain.GpsConfig;
 import com.ruleup.ruleup_backend.verification.domain.VerificationMethod;
 import com.ruleup.ruleup_backend.verification.signal.*;
@@ -9,10 +10,13 @@ import java.time.Instant;
 import java.util.*;
 
 /**
- * GPS PRESENCE 평가기 (§2.6) — 도달형. 지오펜스 체류 ≥ dwellMinutes.
- *  - 주신호 GEOFENCE: DWELL 트랜지션 = OS가 loiteringDelay(=dwellMinutes) 체류 확정 → 즉시 SUCCESS.
- *    ENTER→EXIT 구간은 누적해 dwell 합산(evidence 상태 유지, 증분).
- *  - fallback LOCATION: 반경 내 측위 포인트의 시간 폭으로 체류 근사.
+ * GPS PRESENCE 평가기(테크스펙 v2 §5, §7.2).
+ *  - VISIT(도달형): 지오펜스 체류 ≥ dwellMinutes. DWELL 트랜지션(OS가 loiteringDelay 체류 확정)→즉시 SUCCESS.
+ *    DWELL 없으면 ENTER/EXIT 페어 누적 ≥ 목표. fallback LOCATION: 멤버 앵커(OR) 반경 내 측위 시간폭 근사(§7.2, 부록 A).
+ *  - AVOID(제약형, v2): 창/하루 내 ENTER가 하나라도 있으면 즉시 FAILED(ENTERED_AVOID_ZONE). 없으면 마감 배치가 SUCCESS.
+ *
+ *  앵커는 PER_MEMBER(challenge_members.anchors). 트랜지션은 geofenceId=challengeMemberId라
+ *  좌표 없이도 처리되고, 좌표는 LOCATION fallback 반경 판정에서만 쓴다(멤버 앵커 OR, 없으면 config 레거시 단일앵커).
  */
 @Component
 public class GpsPresenceEvaluator implements MethodEvaluator {
@@ -25,17 +29,28 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
         GpsConfig cfg = ctx.config().gps();
         if (cfg == null) return EvaluationOutcome.pending(null, null);
 
-        int goalMin = (cfg.dwellMinutes() != null) ? cfg.dwellMinutes() : 0;
         Instant windowClose = TimeWindows.startOfDay(ctx.targetDate().plusDays(1), ctx.zone());
+        List<GeofenceTransition> trans = collectTransitions(ctx.signals());
+        trans.sort(Comparator.comparing(t -> nz(safe(t.at()))));
 
+        // ===== AVOID(제약형): 창 내 ENTER 1건이라도 → 즉시 FAILED =====
+        if (cfg.isAvoid()) {
+            boolean entered = trans.stream().anyMatch(t -> "ENTER".equals(t.transition()) || "DWELL".equals(t.transition()));
+            Map<String, Object> ev = new HashMap<>();
+            ev.put("avoid", true);
+            ev.put("entered", entered);
+            return entered
+                    ? EvaluationOutcome.failed("ENTERED_AVOID_ZONE", ev, windowClose)
+                    : EvaluationOutcome.pending(ev, windowClose);   // 무위반은 마감 배치가 SUCCESS 확정
+        }
+
+        // ===== VISIT(도달형): dwell 누적 =====
+        int goalMin = (cfg.dwellMinutes() != null) ? cfg.dwellMinutes() : 0;
         long dwellSec = priorSeconds(ctx.priorEvidence());
         Instant openEnter = priorEnter(ctx.priorEvidence());
         boolean dwellConfirmed = false;
         String source = "TRANSITION";
 
-        // GEOFENCE 트랜지션 처리
-        List<GeofenceTransition> trans = collectTransitions(ctx.signals());
-        trans.sort(Comparator.comparing(t -> safe(t.at())));
         for (GeofenceTransition t : trans) {
             Instant at = safe(t.at());
             if (at == null) continue;
@@ -49,9 +64,9 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
             }
         }
 
-        // fallback: 트랜지션 전무 + LOCATION 포인트가 반경 내면 그 시간 폭으로 근사
-        if (trans.isEmpty() && cfg.lat() != null && cfg.lng() != null) {
-            long approx = locationDwellSeconds(ctx.signals(), cfg);
+        // fallback: 트랜지션 전무 → 멤버 앵커(OR) 반경 내 LOCATION 포인트 시간폭으로 근사
+        if (trans.isEmpty()) {
+            long approx = locationDwellSeconds(ctx.signals(), ctx.memberAnchors(), cfg);
             if (approx > 0) { dwellSec += approx; source = "POINTS"; }
         }
 
@@ -80,15 +95,20 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
         return out;
     }
 
-    /** 반경 내 LOCATION 포인트의 [첫,마지막] 시간 폭(초). 거친 근사. */
-    private long locationDwellSeconds(List<SyncSignal> signals, GpsConfig cfg) {
+    /**
+     * 멤버 앵커(OR) 중 어느 하나의 반경 내에 있는 LOCATION 포인트들의 [첫,마지막] 시간폭(초). 거친 근사.
+     * 앵커가 없으면 config 레거시 단일앵커(lat/lng/radiusM)로 폴백.
+     */
+    private long locationDwellSeconds(List<SyncSignal> signals, List<GeoAnchor> anchors, GpsConfig cfg) {
         if (signals == null) return 0;
+        List<GeoAnchor> use = effectiveAnchors(anchors, cfg);
+        if (use.isEmpty()) return 0;
+
         Instant first = null, last = null;
-        int radius = (cfg.radiusM() != null) ? cfg.radiusM() : 100;
         for (SyncSignal s : signals) {
             if (!SignalType.LOCATION.name().equals(s.type()) || s.points() == null) continue;
             for (GeoPoint p : s.points()) {
-                if (Haversine.meters(cfg.lat(), cfg.lng(), p.lat(), p.lng()) > radius) continue;
+                if (!insideAny(p, use)) continue;
                 Instant at = safe(p.at());
                 if (at == null) continue;
                 if (first == null || at.isBefore(first)) first = at;
@@ -96,6 +116,22 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
             }
         }
         return (first != null && last != null) ? Math.max(last.getEpochSecond() - first.getEpochSecond(), 0) : 0;
+    }
+
+    private List<GeoAnchor> effectiveAnchors(List<GeoAnchor> anchors, GpsConfig cfg) {
+        if (anchors != null && !anchors.isEmpty()) return anchors;
+        if (cfg.lat() != null && cfg.lng() != null) {
+            int r = (cfg.radiusM() != null) ? cfg.radiusM() : 100;
+            return List.of(new GeoAnchor(cfg.lat(), cfg.lng(), r, "legacy"));
+        }
+        return List.of();
+    }
+
+    private boolean insideAny(GeoPoint p, List<GeoAnchor> anchors) {
+        for (GeoAnchor a : anchors) {
+            if (Haversine.meters(a.lat(), a.lng(), p.lat(), p.lng()) <= a.radiusM()) return true;
+        }
+        return false;
     }
 
     private long priorSeconds(Map<String, Object> prior) {
@@ -107,4 +143,5 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
         return (v != null) ? safe(v.toString()) : null;
     }
     private Instant safe(String iso) { return TimeWindows.parseInstant(iso); }
+    private Instant nz(Instant i) { return (i != null) ? i : Instant.EPOCH; }
 }

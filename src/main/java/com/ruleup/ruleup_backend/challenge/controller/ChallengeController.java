@@ -76,4 +76,11 @@ public class ChallengeController {
         challengeService.delete(UUID.fromString(userId), UUID.fromString(challengeId));
         return ApiResponse.ok();
     }
+
+    @Operation(summary = "추천 선택 → 초안(LLM 우회)", description = "추천 버튼에서 고른 templateId로 챌린지 초안을 바로 구성. LLM 안 거침.")
+    @PostMapping("/recommendation/by-template")
+    public ApiResponse<ChallengeRecommendationResponse> recommendByTemplate(@RequestBody TemplateRecommendationRequest request) {
+        return ApiResponse.ok(challengeRecommendationService.recommendByTemplate(
+                request.templateId(), request.title(), request.description()));
+    }
 }

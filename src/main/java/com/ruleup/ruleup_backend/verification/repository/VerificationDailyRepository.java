@@ -35,4 +35,14 @@ public interface VerificationDailyRepository extends JpaRepository<VerificationD
             "WHERE status = 'PENDING' AND finalizeAfter IS NOT NULL AND finalizeAfter <= :now " +
             "ORDER BY finalizeAfter LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
     List<VerificationDaily> findDuePendingForUpdate(@Param("now") Instant now, @Param("limit") int limit);
+
+    /**
+     * 예비 폴백 잠정성공(§9.2) 중 이의 윈도우가 끝난 행 — 침묵=동의 확정 대상.
+     * status=SUCCESS이지만 verifiedVia=MANUAL_FALLBACK & verifiedAt 미세팅 & disputeClosesAt<=now.
+     */
+    @Query(value = "SELECT * FROM VerificationDaily " +
+            "WHERE verifiedVia = 'MANUAL_FALLBACK' AND verifiedAt IS NULL " +
+            "AND disputeClosesAt IS NOT NULL AND disputeClosesAt <= :now " +
+            "ORDER BY disputeClosesAt LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
+    List<VerificationDaily> findFallbackDisputeDue(@Param("now") Instant now, @Param("limit") int limit);
 }

@@ -38,11 +38,11 @@ app:
     kakao:
       client-id: ${KAKAO_REST_API_KEY}
       client-secret: ${KAKAO_CLIENT_SECRET}
-      redirect-uri: ${KAKAO_REDIRECT_URI}
+      redirect-uri: ${KAKAO_REDIRECT_URI:}
     google:
       client-id: ${GOOGLE_CLIENT_ID}
-      client-secret: ${GOOGLE_CLIENT_SECRET}
-      redirect-uri: ${GOOGLE_REDIRECT_URI}
+      client-secret: ${GOOGLE_CLIENT_SECRET:}
+      redirect-uri: ${GOOGLE_REDIRECT_URI:}
     # 서버 콜백(/login/{provider}/callback)이 인가코드를 앱으로 넘길 커스텀 스킴 딥링크.
     # iOS는 카카오가 요구하는 https redirect를 앱이 직접 못 잡으므로 서버가 중계한다.
     app-redirect-uri: ${APP_OAUTH_REDIRECT_URI:ruleup://login/callback}
@@ -52,6 +52,14 @@ app:
       model: gemini-2.5-flash-lite
       base-url: https://generativelanguage.googleapis.com/v1beta
       timeout-ms: 5000
+
+  # 장소 검색 프록시(§5.2 NEARBY_BRAND 앵커 바인딩). 키 없으면 빈 결과(graceful).
+  places:
+    naver:
+      base-url: https://openapi.naver.com
+      client-id: ${NAVER_CLIENT_ID:}               # 발급 후 주입(없으면 검색 빈 결과)
+      client-secret: ${NAVER_CLIENT_SECRET:}
+      timeout-ms: 3000
 
   # 프로필 이미지 로컬 저장 위치 (ImageStorageService 기본값과 동일)
   upload:

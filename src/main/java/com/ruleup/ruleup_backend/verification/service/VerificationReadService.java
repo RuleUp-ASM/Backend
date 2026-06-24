@@ -107,6 +107,7 @@ public class VerificationReadService {
                 m.getSuccessDays(), m.getTargetDays(), remaining,
                 isTodayTarget(config, ch, m, today),
                 m.getTodayStatus() != null ? m.getTodayStatus().name() : null,
+                m.getSetupStatus() != null ? m.getSetupStatus().name() : null,
                 freq ? toPeriod(m) : null,
                 str(m.getLastSyncedAt()));
     }
@@ -115,11 +116,13 @@ public class VerificationReadService {
                              VerificationDaily daily, List<VerificationMethodResult> results) {
         boolean isTarget = isTodayTarget(config, ch, m, today);
         if (daily == null) {
-            return new Today(isTarget, isTarget ? "PENDING" : "NOT_TARGET", null, null, null, null);
+            return new Today(isTarget, isTarget ? "PENDING" : "NOT_TARGET", null, null, null, null, null, null);
         }
         var evidence = results.isEmpty() ? null : results.get(0).getEvidence();
         return new Today(isTarget, daily.getStatus().name(),
                 str(daily.getWindowClosesAt()), str(daily.getVerifiedAt()),
+                daily.getVerifiedVia() != null ? daily.getVerifiedVia().name() : null,
+                str(daily.getDisputeClosesAt()),
                 daily.getFailureReason(), evidence);
     }
 

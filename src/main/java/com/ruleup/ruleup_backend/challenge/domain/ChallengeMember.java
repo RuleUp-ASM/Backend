@@ -13,10 +13,14 @@ import org.hibernate.generator.EventType;
 import org.hibernate.type.SqlTypes;
 import com.ruleup.ruleup_backend.verification.domain.ScheduleType;
 import com.ruleup.ruleup_backend.verification.domain.PeriodUnit;
+import com.ruleup.ruleup_backend.verification.domain.SetupStatus;
+import com.ruleup.ruleup_backend.verification.domain.GeoAnchor;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -106,6 +110,24 @@ public class ChallengeMember extends AssignedIdEntity {
     @Column(name = "periodsMet")
     private Integer periodsMet;
 
+    // ===== v2: 셋업 상태 + 멤버 바인딩 앵커(PER_MEMBER) + 예비 폴백 카운터 (테크스펙 v2 §4·§5·§9) =====
+    @Enumerated(EnumType.STRING)
+    @Column(name = "setupStatus", nullable = false)
+    private SetupStatus setupStatus = SetupStatus.PENDING_SETUP;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "anchors")
+    private List<GeoAnchor> anchors;          // 멤버 GeoAnchor[] (없으면 null). config가 아니라 멤버에 저장.
+
+    @Column(name = "anchorUpdatedAt")
+    private Instant anchorUpdatedAt;          // 수정 쿨다운 기준
+
+    @Column(name = "fallbackUsedPeriodStart")
+    private LocalDate fallbackUsedPeriodStart;// 예비 폴백 주1회(롤링 7일) 윈도우 시작
+
+    @Column(name = "fallbackUsedCount", nullable = false)
+    private int fallbackUsedCount = 0;
+
     private static ChallengeMember of(UUID challengeId, UUID userId, MemberRole role, MemberStatus status) {
         ChallengeMember m = new ChallengeMember();
         m.id = UuidGenerator.generate();
@@ -142,8 +164,8 @@ public class ChallengeMember extends AssignedIdEntity {
         this.targetDays = targetDays;
     }
 
-    public void setupFrequency(PeriodUnit unit, int periodTarget, java.time.LocalDate curStart,
-                               java.time.LocalDate curEnd, int periodsTotal, int targetDays) {
+    public void setupFrequency(PeriodUnit unit, int periodTarget, LocalDate curStart,
+                               LocalDate curEnd, int periodsTotal, int targetDays) {
         this.scheduleType = ScheduleType.FREQUENCY;
         this.periodUnit = unit;
         this.periodTarget = periodTarget;
@@ -155,9 +177,9 @@ public class ChallengeMember extends AssignedIdEntity {
         this.targetDays = targetDays;
     }
 
-    public void applyProgress(int successDays, int failDays, java.math.BigDecimal progressRate,
-                              com.ruleup.ruleup_backend.verification.domain.VerificationStatus todayStatus,
-                              java.time.Instant lastSyncedAt) {
+    public void applyProgress(int successDays, int failDays, BigDecimal progressRate,
+                              VerificationStatus todayStatus,
+                              Instant lastSyncedAt) {
         this.successDays = successDays;
         this.failDays = failDays;
         this.progressRate = progressRate;
@@ -170,18 +192,45 @@ public class ChallengeMember extends AssignedIdEntity {
     }
 
     /** 진행률 카운터만 갱신(확정 배치 — todayStatus·lastSyncedAt 안 건드림). */
-    public void applyCounts(int successDays, int failDays, java.math.BigDecimal progressRate) {
+    public void applyCounts(int successDays, int failDays, BigDecimal progressRate) {
         this.successDays = successDays;
         this.failDays = failDays;
         this.progressRate = progressRate;
     }
 
     /** 빈도형 주기 롤오버: 미달분 정산 + 다음 주기로. */
-    public void rolloverPeriod(java.time.LocalDate nextStart, java.time.LocalDate nextEnd, int shortfall, boolean met) {
+    public void rolloverPeriod(LocalDate nextStart, LocalDate nextEnd, int shortfall, boolean met) {
         this.failDays += shortfall;
         if (met) this.periodsMet = (this.periodsMet == null ? 0 : this.periodsMet) + 1;
         this.curPeriodStart = nextStart;
         this.curPeriodEnd = nextEnd;
         this.curPeriodCompleted = 0;
+    }
+
+    // ===== v2: 셋업 / 앵커 / 폴백 =====
+
+    /** 최초 진입 셋업 완료 → READY(평가 대상 진입). */
+    public void markSetupReady() { this.setupStatus = SetupStatus.READY; }
+
+    public boolean isSetupReady() { return setupStatus == SetupStatus.READY; }
+
+    /** 멤버 앵커 교체(셋업/내 위치 수정). 본인 것만 바뀐다(§5.1). */
+    public void replaceAnchors(List<GeoAnchor> newAnchors, Instant at) {
+        this.anchors = (newAnchors != null) ? new ArrayList<>(newAnchors) : null;
+        this.anchorUpdatedAt = at;
+    }
+
+    /**
+     * 예비 폴백 한도 소진 시도(주1회·롤링 7일, §9.2). 윈도우가 만료됐으면 리셋 후 1회 허용.
+     * @return true=사용 허용(카운터 반영됨) / false=한도 초과
+     */
+    public boolean tryUseFallback(LocalDate today, int weeklyLimit) {
+        if (fallbackUsedPeriodStart == null || !today.isBefore(fallbackUsedPeriodStart.plusDays(7))) {
+            this.fallbackUsedPeriodStart = today;     // 새 7일 윈도우 개시
+            this.fallbackUsedCount = 0;
+        }
+        if (fallbackUsedCount >= weeklyLimit) return false;
+        this.fallbackUsedCount++;
+        return true;
     }
 }
