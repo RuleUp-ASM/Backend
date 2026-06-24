@@ -2,7 +2,7 @@ package com.ruleup.ruleup_backend.challenge.domain;
 
 import com.ruleup.ruleup_backend.common.AssignedIdEntity;
 import com.ruleup.ruleup_backend.common.UuidGenerator;
-import com.ruleup.ruleup_backend.verification.domain.VerificationStatus;
+import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -11,10 +11,10 @@ import org.hibernate.annotations.Generated;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.generator.EventType;
 import org.hibernate.type.SqlTypes;
-import com.ruleup.ruleup_backend.verification.domain.ScheduleType;
-import com.ruleup.ruleup_backend.verification.domain.PeriodUnit;
-import com.ruleup.ruleup_backend.verification.domain.SetupStatus;
-import com.ruleup.ruleup_backend.verification.domain.GeoAnchor;
+import com.ruleup.ruleup_backend.common.verification.ScheduleType;
+import com.ruleup.ruleup_backend.common.verification.PeriodUnit;
+import com.ruleup.ruleup_backend.common.verification.SetupStatus;
+import com.ruleup.ruleup_backend.common.verification.GeoAnchor;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -148,12 +148,10 @@ public class ChallengeMember extends AssignedIdEntity {
         return of(challengeId, userId, MemberRole.MEMBER, initialStatus);
     }
 
-    public void approve() { this.status = MemberStatus.ACTIVE; }
-    public void reject()  { this.status = MemberStatus.REMOVED; }
     public void leave()   { this.status = MemberStatus.LEFT; }
 
-    /** 탈퇴/거절(LEFT·REMOVED) 후 재참여 신청 → PENDING 복귀 (스펙 5: 재참여는 status 갱신으로 처리). */
-    public void rejoinAsPending() { this.status = MemberStatus.PENDING; }
+    // 참여/승인/거절/재참여 상태 전이는 동시성 안전을 위해
+    // ChallengeMemberRepository.compareAndSetStatus(CAS)로 처리한다(엔티티 직접 변경 X).
 
     public boolean isPending() { return status == MemberStatus.PENDING; }
     public boolean isActive()  { return status == MemberStatus.ACTIVE; }

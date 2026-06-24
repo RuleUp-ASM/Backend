@@ -1,6 +1,6 @@
 package com.ruleup.ruleup_backend.oauth;
 
-import com.ruleup.ruleup_backend.user.OAuthProvider;
+import com.ruleup.ruleup_backend.user.domain.OAuthProvider;
 
 /**
  * 로컬/테스트 전용 가짜 OAuth 클라이언트.

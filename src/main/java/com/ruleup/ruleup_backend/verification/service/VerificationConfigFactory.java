@@ -1,4 +1,5 @@
 package com.ruleup.ruleup_backend.verification.service;
+import com.ruleup.ruleup_backend.common.verification.*;
 
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.routine.domain.RoutineTemplate;

@@ -1,4 +1,4 @@
-package com.ruleup.ruleup_backend.user;
+package com.ruleup.ruleup_backend.user.domain;
 
 /**
  * 성별 (추천 인구통계용). NULL = 미입력.

@@ -1,4 +1,4 @@
-package com.ruleup.ruleup_backend.user;
+package com.ruleup.ruleup_backend.user.domain;
 
 /**
  * 클라이언트 기기 플랫폼 (가입 시 수집, 로그인마다 갱신).

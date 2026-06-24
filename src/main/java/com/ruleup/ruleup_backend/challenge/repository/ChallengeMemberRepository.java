@@ -3,8 +3,12 @@ package com.ruleup.ruleup_backend.challenge.repository;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.challenge.domain.MemberStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
-import com.ruleup.ruleup_backend.verification.domain.ScheduleType;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import com.ruleup.ruleup_backend.common.verification.ScheduleType;
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -36,4 +40,15 @@ public interface ChallengeMemberRepository extends JpaRepository<ChallengeMember
 
     /** 내 모든 멤버십(상태 무관) — 진행률 status=ALL */
     List<ChallengeMember> findByUserId(UUID userId);
+
+    /**
+     * 멤버 상태 원자적 전이(CAS): 현재 status가 {@code from} 중 하나일 때만 {@code to}로 변경.
+     * 반환값(영향 행 수)이 1이면 이 호출이 전이를 성사시킨 것 → 참여자 수 증감 등 후속 처리를 1회만 수행.
+     * 동시 요청은 행 잠금으로 직렬화되어, 뒤늦은 호출은 0행을 받아 중복 처리를 막는다.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE ChallengeMember m SET m.status = :to WHERE m.id = :id AND m.status IN :from")
+    int compareAndSetStatus(@Param("id") UUID id,
+                            @Param("from") Collection<MemberStatus> from,
+                            @Param("to") MemberStatus to);
 }

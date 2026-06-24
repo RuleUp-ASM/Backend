@@ -2,11 +2,10 @@ package com.ruleup.ruleup_backend.verification.service;
 
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
-import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
-import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
+import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
-import com.ruleup.ruleup_backend.verification.domain.GeoAnchor;
+import com.ruleup.ruleup_backend.common.verification.GeoAnchor;
 import com.ruleup.ruleup_backend.verification.domain.VerificationConfig;
 import com.ruleup.ruleup_backend.verification.domain.VerificationMethod;
 import com.ruleup.ruleup_backend.verification.dto.MemberLocationRequest;
@@ -47,14 +46,13 @@ public class VerificationSetupService {
     private static final int MAX_RADIUS_M = 5000;     // 상한
     private static final Duration CHANGE_COOLDOWN = Duration.ofDays(7); // §11.5 잦은 변경 방지
 
-    private final ChallengeRepository challengeRepo;
-    private final ChallengeMemberRepository memberRepo;
+    private final ChallengeQueryService challengeQuery;
     private final VerificationConfigFactory configFactory;
 
     // ===== §11.4 최초 진입 셋업 =====
     @Transactional
     public SetupResponse setup(UUID userId, UUID challengeId, SetupRequest req) {
-        Challenge ch = challengeRepo.findByIdAndDeletedAtIsNull(challengeId)
+        Challenge ch = challengeQuery.findActiveChallenge(challengeId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
         ChallengeMember member = activeMember(challengeId, userId);
         VerificationConfig config = configFactory.build(ch);
@@ -96,7 +94,7 @@ public class VerificationSetupService {
         if (missing.isEmpty()) {
             member.markSetupReady();
         }
-        memberRepo.save(member);
+        challengeQuery.saveMember(member);
 
         return new SetupResponse(member.getSetupStatus().name(), missing);
     }
@@ -121,7 +119,7 @@ public class VerificationSetupService {
         member.replaceAnchors(anchors, now);
         // 셋업이 아직이면 장소가 채워졌으니 READY로 끌어올림(권한은 셋업에서 이미 본 것으로 가정).
         if (!member.isSetupReady()) member.markSetupReady();
-        memberRepo.save(member);
+        challengeQuery.saveMember(member);
 
         // 즉시 적용. (윈도우-락 "익일부터" 단계 적용은 staged anchors 스키마 도입 후속 과제.)
         String appliedFrom = LocalDate.now(KST).toString();
@@ -130,7 +128,7 @@ public class VerificationSetupService {
 
     // ===== 헬퍼 =====
     private ChallengeMember activeMember(UUID challengeId, UUID userId) {
-        ChallengeMember member = memberRepo.findByChallengeIdAndUserId(challengeId, userId).orElse(null);
+        ChallengeMember member = challengeQuery.findMembership(challengeId, userId).orElse(null);
         if (member == null || !member.isActive()) {
             throw new BusinessException(ErrorCode.NOT_CHALLENGE_MEMBER);
         }

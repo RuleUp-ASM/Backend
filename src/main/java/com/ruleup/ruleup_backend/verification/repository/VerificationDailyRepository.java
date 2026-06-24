@@ -1,7 +1,7 @@
 package com.ruleup.ruleup_backend.verification.repository;
 
 import com.ruleup.ruleup_backend.verification.domain.VerificationDaily;
-import com.ruleup.ruleup_backend.verification.domain.VerificationStatus;
+import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;

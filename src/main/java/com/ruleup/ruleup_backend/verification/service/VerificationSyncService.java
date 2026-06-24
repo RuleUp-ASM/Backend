@@ -1,11 +1,10 @@
 package com.ruleup.ruleup_backend.verification.service;
+import com.ruleup.ruleup_backend.common.verification.*;
 
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus;
-import com.ruleup.ruleup_backend.challenge.domain.MemberStatus;
-import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
-import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
+import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.verification.domain.*;
@@ -46,8 +45,7 @@ public class VerificationSyncService {
     private static final Set<String> KNOWN_SIGNAL_TYPES =
             Arrays.stream(SignalType.values()).map(Enum::name).collect(Collectors.toUnmodifiableSet());
 
-    private final ChallengeMemberRepository memberRepo;
-    private final ChallengeRepository challengeRepo;
+    private final ChallengeQueryService challengeQuery;
     private final VerificationDailyRepository dailyRepo;
     private final VerificationMethodResultRepository methodResultRepo;
     private final SyncRateLimiter rateLimiter;
@@ -56,8 +54,7 @@ public class VerificationSyncService {
     private final VerificationProgressService progressService;
     private final Map<VerificationMethod, MethodEvaluator> evaluators;
 
-    public VerificationSyncService(ChallengeMemberRepository memberRepo,
-                                   ChallengeRepository challengeRepo,
+    public VerificationSyncService(ChallengeQueryService challengeQuery,
                                    VerificationDailyRepository dailyRepo,
                                    VerificationMethodResultRepository methodResultRepo,
                                    SyncRateLimiter rateLimiter,
@@ -65,8 +62,7 @@ public class VerificationSyncService {
                                    VerificationConfigFactory configFactory,
                                    VerificationProgressService progressService,
                                    List<MethodEvaluator> evaluatorList) {
-        this.memberRepo = memberRepo;
-        this.challengeRepo = challengeRepo;
+        this.challengeQuery = challengeQuery;
         this.dailyRepo = dailyRepo;
         this.methodResultRepo = methodResultRepo;
         this.rateLimiter = rateLimiter;
@@ -92,11 +88,11 @@ public class VerificationSyncService {
         LocalDate today = LocalDate.now(KST);
         Instant now = Instant.now();
 
-        List<ChallengeMember> members = memberRepo.findByUserIdAndStatus(userId, MemberStatus.ACTIVE);
+        List<ChallengeMember> members = challengeQuery.findActiveMemberships(userId);
         List<SyncResponse.UpdatedChallenge> updated = new ArrayList<>();
 
         for (ChallengeMember member : members) {
-            Challenge challenge = challengeRepo.findByIdAndDeletedAtIsNull(member.getChallengeId()).orElse(null);
+            Challenge challenge = challengeQuery.findActiveChallenge(member.getChallengeId()).orElse(null);
             if (challenge == null || challenge.getStatus() != ChallengeStatus.ACTIVE) continue;
 
             VerificationConfig config = configFactory.build(challenge);

@@ -1,6 +1,6 @@
 package com.ruleup.ruleup_backend.auth.dto;
 
-import com.ruleup.ruleup_backend.user.InterestCategory;
+import com.ruleup.ruleup_backend.user.domain.InterestCategory;
 
 import java.util.Arrays;
 import java.util.List;

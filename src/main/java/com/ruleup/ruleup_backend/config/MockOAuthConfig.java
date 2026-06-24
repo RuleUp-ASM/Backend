@@ -2,7 +2,7 @@ package com.ruleup.ruleup_backend.config;
 
 import com.ruleup.ruleup_backend.oauth.MockOAuthClient;
 import com.ruleup.ruleup_backend.oauth.OAuthClient;
-import com.ruleup.ruleup_backend.user.OAuthProvider;
+import com.ruleup.ruleup_backend.user.domain.OAuthProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;

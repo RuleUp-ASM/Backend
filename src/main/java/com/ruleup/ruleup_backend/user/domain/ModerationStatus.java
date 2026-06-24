@@ -1,4 +1,4 @@
-package com.ruleup.ruleup_backend.user;
+package com.ruleup.ruleup_backend.user.domain;
 
 /**
  * 닉네임 / 프로필 사진의 LLM 검수 상태.

@@ -2,14 +2,13 @@ package com.ruleup.ruleup_backend.verification.service;
 
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
-import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
-import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
+import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.verification.domain.VerificationConfig;
 import com.ruleup.ruleup_backend.verification.domain.VerificationDaily;
 import com.ruleup.ruleup_backend.verification.domain.VerificationMethodResult;
-import com.ruleup.ruleup_backend.verification.domain.VerificationStatus;
+import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
 import com.ruleup.ruleup_backend.verification.dto.ManualVerificationRequest;
 import com.ruleup.ruleup_backend.verification.dto.ManualVerificationResponse;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
@@ -40,8 +39,7 @@ public class VerificationManualService {
     private static final int FALLBACK_WEEKLY_LIMIT = 1;       // 주 1회(롤링 7일, §9.2)
     private static final Duration DISPUTE_WINDOW = Duration.ofHours(24); // 이의 윈도우(§9.2: 24h, 다음 새벽과 맞물림)
 
-    private final ChallengeRepository challengeRepo;
-    private final ChallengeMemberRepository memberRepo;
+    private final ChallengeQueryService challengeQuery;
     private final VerificationDailyRepository dailyRepo;
     private final VerificationMethodResultRepository methodResultRepo;
     private final VerificationConfigFactory configFactory;
@@ -50,9 +48,9 @@ public class VerificationManualService {
 
     @Transactional
     public ManualVerificationResponse submit(UUID userId, UUID challengeId, ManualVerificationRequest req) {
-        Challenge ch = challengeRepo.findByIdAndDeletedAtIsNull(challengeId)
+        Challenge ch = challengeQuery.findActiveChallenge(challengeId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
-        ChallengeMember member = memberRepo.findByChallengeIdAndUserId(challengeId, userId).orElse(null);
+        ChallengeMember member = challengeQuery.findMembership(challengeId, userId).orElse(null);
         if (member == null || !member.isActive()) {
             throw new BusinessException(ErrorCode.NOT_CHALLENGE_MEMBER);
         }

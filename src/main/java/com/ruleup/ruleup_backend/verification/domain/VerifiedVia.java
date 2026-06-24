@@ -1,4 +1,5 @@
 package com.ruleup.ruleup_backend.verification.domain;
+import com.ruleup.ruleup_backend.common.verification.*;
 
 /**
  * 인증 확정 경로(테크스펙 v2 §9). VerificationStatus는 5종 유지하고 이 필드로 폴백을 구분(경량화).

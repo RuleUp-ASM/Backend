@@ -1,11 +1,10 @@
 package com.ruleup.ruleup_backend.verification.service;
+import com.ruleup.ruleup_backend.common.verification.*;
 
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus;
-import com.ruleup.ruleup_backend.challenge.domain.MemberStatus;
-import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
-import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
+import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.verification.domain.*;
@@ -33,8 +32,7 @@ public class VerificationReadService {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
-    private final ChallengeMemberRepository memberRepo;
-    private final ChallengeRepository challengeRepo;
+    private final ChallengeQueryService challengeQuery;
     private final VerificationDailyRepository dailyRepo;
     private final VerificationMethodResultRepository methodResultRepo;
     private final VerificationConfigFactory configFactory;
@@ -42,12 +40,12 @@ public class VerificationReadService {
     // ===== §3.2 진행률 일괄 =====
     public List<ChallengeProgress> progress(UUID userId, String statusFilter) {
         List<ChallengeMember> members = "ALL".equalsIgnoreCase(statusFilter)
-                ? memberRepo.findByUserId(userId)
-                : memberRepo.findByUserIdAndStatus(userId, MemberStatus.ACTIVE);
+                ? challengeQuery.findAllMemberships(userId)
+                : challengeQuery.findActiveMemberships(userId);
         LocalDate today = LocalDate.now(KST);
         List<ChallengeProgress> out = new ArrayList<>();
         for (ChallengeMember m : members) {
-            Challenge ch = challengeRepo.findByIdAndDeletedAtIsNull(m.getChallengeId()).orElse(null);
+            Challenge ch = challengeQuery.findActiveChallenge(m.getChallengeId()).orElse(null);
             if (ch == null) continue;
             out.add(toProgress(m, ch, configFactory.build(ch), today));
         }
@@ -56,9 +54,9 @@ public class VerificationReadService {
 
     // ===== §3.3 상세 검증 결과 =====
     public VerificationDetailResponse detail(UUID userId, UUID challengeId, int logDays) {
-        Challenge ch = challengeRepo.findByIdAndDeletedAtIsNull(challengeId)
+        Challenge ch = challengeQuery.findActiveChallenge(challengeId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
-        ChallengeMember member = memberRepo.findByChallengeIdAndUserId(challengeId, userId).orElse(null);
+        ChallengeMember member = challengeQuery.findMembership(challengeId, userId).orElse(null);
         if (member == null || !member.isActive()) {
             throw new BusinessException(ErrorCode.NOT_CHALLENGE_MEMBER);
         }

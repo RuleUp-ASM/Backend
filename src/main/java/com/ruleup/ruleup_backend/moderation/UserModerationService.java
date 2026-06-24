@@ -1,8 +1,8 @@
 package com.ruleup.ruleup_backend.moderation;
 
 import com.ruleup.ruleup_backend.notification.NotificationService;
-import com.ruleup.ruleup_backend.notification.NotificationType;
-import com.ruleup.ruleup_backend.user.User;
+import com.ruleup.ruleup_backend.notification.domain.NotificationType;
+import com.ruleup.ruleup_backend.user.domain.User;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;

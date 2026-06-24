@@ -1,6 +1,6 @@
 package com.ruleup.ruleup_backend.verification.evaluator;
 
-import com.ruleup.ruleup_backend.verification.domain.GeoAnchor;
+import com.ruleup.ruleup_backend.common.verification.GeoAnchor;
 import com.ruleup.ruleup_backend.verification.domain.VerificationConfig;
 import com.ruleup.ruleup_backend.verification.signal.SyncSignal;
 

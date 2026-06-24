@@ -1,8 +1,8 @@
 package com.ruleup.ruleup_backend.verification.service;
 
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
-import com.ruleup.ruleup_backend.verification.domain.ScheduleType;
-import com.ruleup.ruleup_backend.verification.domain.VerificationStatus;
+import com.ruleup.ruleup_backend.common.verification.ScheduleType;
+import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;

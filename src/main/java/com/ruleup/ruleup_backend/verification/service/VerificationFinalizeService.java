@@ -1,10 +1,9 @@
 package com.ruleup.ruleup_backend.verification.service;
+import com.ruleup.ruleup_backend.common.verification.*;
 
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
-import com.ruleup.ruleup_backend.challenge.domain.MemberStatus;
-import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
-import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
+import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
 import com.ruleup.ruleup_backend.verification.domain.*;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationMethodResultRepository;
@@ -27,15 +26,14 @@ import java.util.List;
  */
 @Service
 @RequiredArgsConstructor
-public class VerificationFinalizeBatch {
+public class VerificationFinalizeService {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final int CLAIM_LIMIT = 200;
 
     private final VerificationDailyRepository dailyRepo;
     private final VerificationMethodResultRepository methodResultRepo;
-    private final ChallengeRepository challengeRepo;
-    private final ChallengeMemberRepository memberRepo;
+    private final ChallengeQueryService challengeQuery;
     private final VerificationConfigFactory configFactory;
     private final VerificationProgressService progressService;
 
@@ -51,7 +49,7 @@ public class VerificationFinalizeBatch {
     }
 
     private void finalizeOne(VerificationDaily daily, Instant now) {
-        Challenge challenge = challengeRepo.findById(daily.getChallengeId()).orElse(null);
+        Challenge challenge = challengeQuery.findChallenge(daily.getChallengeId()).orElse(null);
         if (challenge == null) {
             daily.recordResult(VerificationStatus.FAILED, null, "NO_SIGNAL_RECEIVED", now);
             return;
@@ -77,7 +75,7 @@ public class VerificationFinalizeBatch {
             daily.recordResult(VerificationStatus.FAILED, null, reason, now);
         }
 
-        ChallengeMember member = memberRepo.findById(daily.getChallengeMemberId()).orElse(null);
+        ChallengeMember member = challengeQuery.findMember(daily.getChallengeMemberId()).orElse(null);
         if (member != null) progressService.recount(member);
     }
 
@@ -100,10 +98,9 @@ public class VerificationFinalizeBatch {
     @Transactional
     public void rolloverFrequencyPeriods() {
         LocalDate today = LocalDate.now(KST);
-        List<ChallengeMember> members = memberRepo
-                .findByScheduleTypeAndStatusAndCurPeriodEndLessThan(ScheduleType.FREQUENCY, MemberStatus.ACTIVE, today);
+        List<ChallengeMember> members = challengeQuery.findFrequencyRolloverTargets(today);
         for (ChallengeMember m : members) {
-            Challenge ch = challengeRepo.findByIdAndDeletedAtIsNull(m.getChallengeId()).orElse(null);
+            Challenge ch = challengeQuery.findActiveChallenge(m.getChallengeId()).orElse(null);
             if (ch == null) continue;
             rolloverMember(m, ch, today);
             progressService.recount(m);

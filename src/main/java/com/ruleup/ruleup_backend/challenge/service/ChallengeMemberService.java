@@ -8,11 +8,12 @@ import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
-import com.ruleup.ruleup_backend.reputation.ReputationScore;
+import com.ruleup.ruleup_backend.reputation.domain.ReputationScore;
 import com.ruleup.ruleup_backend.reputation.ReputationScoreRepository;
-import com.ruleup.ruleup_backend.user.User;
+import com.ruleup.ruleup_backend.user.domain.User;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -51,16 +52,21 @@ public class ChallengeMemberService {
         MemberStatus initial = decideInitialStatus(c, userId);
 
         if (existing != null) {
-            // 재참여: 기존 행 상태만 갱신 (새 INSERT는 uq_member에 막힘)
-            if (initial == MemberStatus.ACTIVE) { existing.approve(); c.increaseParticipantCount(); }
-            else                                { reactivateAsPending(existing); }
-            return new JoinResponse(existing.getStatus().name());
+            // 재참여: LEFT/REMOVED → initial 로 CAS. 동시 재참여는 행 잠금으로 직렬화되어 1건만 성사.
+            int updated = memberRepository.compareAndSetStatus(
+                    existing.getId(), List.of(MemberStatus.LEFT, MemberStatus.REMOVED), initial);
+            if (updated == 0) throw new BusinessException(ErrorCode.ALREADY_JOINED);
+            if (initial == MemberStatus.ACTIVE) challengeRepository.incrementParticipantCount(challengeId);
+            return new JoinResponse(initial.name());
         }
 
-        ChallengeMember member = ChallengeMember.join(challengeId, userId, initial);
-        memberRepository.save(member);
-        if (initial == MemberStatus.ACTIVE) c.increaseParticipantCount();
-
+        // 최초 참여: uq_member 로 동시 INSERT는 1건만 성공, 나머지는 중복으로 변환.
+        try {
+            memberRepository.saveAndFlush(ChallengeMember.join(challengeId, userId, initial));
+        } catch (DataIntegrityViolationException dup) {
+            throw new BusinessException(ErrorCode.ALREADY_JOINED);
+        }
+        if (initial == MemberStatus.ACTIVE) challengeRepository.incrementParticipantCount(challengeId);
         return new JoinResponse(initial.name());
     }
 
@@ -75,11 +81,6 @@ public class ChallengeMemberService {
         return MemberStatus.ACTIVE;
     }
 
-    private void reactivateAsPending(ChallengeMember m) {
-        // LEFT/REMOVED → PENDING 재신청. approve()/reject()만으론 PENDING 복귀가 안 되어 별도 처리.
-        m.rejoinAsPending();
-    }
-
     // ===== 3.7 승인/거절 (OWNER) =====
     @Transactional
     public MemberActionResponse handleApplication(UUID ownerId, UUID challengeId, UUID targetUserId, String action) {
@@ -90,17 +91,29 @@ public class ChallengeMemberService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.MEMBER_NOT_FOUND));
 
         if (action == null) throw new BusinessException(ErrorCode.INVALID_MEMBER_ACTION);
-        switch (action) {
-            case "APPROVE" -> {
-                if (member.isPending()) {        // 멱등: 이미 ACTIVE면 count 중복 증가 방지
-                    member.approve();
-                    c.increaseParticipantCount();
-                }
-            }
-            case "REJECT" -> member.reject();
+        return switch (action) {
+            // 둘 다 PENDING 신청에 대한 처리. CAS로 동시 처리 시 1회만 성사(참여자 수 중복 증가 방지).
+            case "APPROVE" -> transitionFromPending(challengeId, targetUserId, member, MemberStatus.ACTIVE, true);
+            case "REJECT"  -> transitionFromPending(challengeId, targetUserId, member, MemberStatus.REMOVED, false);
             default -> throw new BusinessException(ErrorCode.INVALID_MEMBER_ACTION);
+        };
+    }
+
+    /**
+     * PENDING → to 로 원자적 전이. 성사(1행)면 (옵션) 참여자 수 증가 후 to 반환.
+     * 이미 처리됐으면(0행) 현재 상태를 재조회해 멱등 응답.
+     */
+    private MemberActionResponse transitionFromPending(UUID challengeId, UUID targetUserId,
+                                                       ChallengeMember member, MemberStatus to, boolean bumpCount) {
+        int updated = memberRepository.compareAndSetStatus(
+                member.getId(), List.of(MemberStatus.PENDING), to);
+        if (updated == 1) {
+            if (bumpCount) challengeRepository.incrementParticipantCount(challengeId);
+            return new MemberActionResponse(to.name());
         }
-        return new MemberActionResponse(member.getStatus().name());
+        MemberStatus current = memberRepository.findByChallengeIdAndUserId(challengeId, targetUserId)
+                .map(ChallengeMember::getStatus).orElse(member.getStatus());
+        return new MemberActionResponse(current.name());
     }
 
     // ===== 3.8 멤버 목록 =====

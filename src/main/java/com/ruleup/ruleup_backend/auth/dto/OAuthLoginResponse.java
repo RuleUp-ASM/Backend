@@ -1,7 +1,7 @@
 package com.ruleup.ruleup_backend.auth.dto;
 
 import com.ruleup.ruleup_backend.auth.TokenService;
-import com.ruleup.ruleup_backend.user.User;
+import com.ruleup.ruleup_backend.user.domain.User;
 
 import java.math.BigDecimal;
 

@@ -1,4 +1,5 @@
 package com.ruleup.ruleup_backend.notification;
+import com.ruleup.ruleup_backend.notification.domain.*;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 

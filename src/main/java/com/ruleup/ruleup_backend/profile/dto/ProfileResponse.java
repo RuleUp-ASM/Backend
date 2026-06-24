@@ -1,7 +1,7 @@
 package com.ruleup.ruleup_backend.profile.dto;
 
-import com.ruleup.ruleup_backend.user.NicknamePolicy;
-import com.ruleup.ruleup_backend.user.User;
+import com.ruleup.ruleup_backend.user.domain.NicknamePolicy;
+import com.ruleup.ruleup_backend.user.domain.User;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
