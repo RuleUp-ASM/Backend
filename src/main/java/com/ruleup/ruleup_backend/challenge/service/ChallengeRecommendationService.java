@@ -1,6 +1,5 @@
 package com.ruleup.ruleup_backend.challenge.service;
 
-import com.ruleup.ruleup_backend.challenge.domain.Anonymity;
 import com.ruleup.ruleup_backend.challenge.domain.ParticipationType;
 import com.ruleup.ruleup_backend.challenge.domain.PenaltyConfig;
 import com.ruleup.ruleup_backend.challenge.domain.RepeatDay;
@@ -42,7 +41,6 @@ public class ChallengeRecommendationService {
     private static final int START_OFFSET_DAYS = 1;                     // 내일 시작(서버 고정)
     private static final BigDecimal DEFAULT_MANNER_DEDUCTION = new BigDecimal("1.0");
     private static final BigDecimal DEFAULT_MANNER_GAIN = new BigDecimal("1.0");
-    private static final Anonymity DEFAULT_ANONYMITY = Anonymity.REAL;
 
     public ChallengeRecommendationResponse recommend(RoutineRecommendationRequest req) {
         // 1) 루틴 매칭(인증·목표값) — LLM 호출 1
@@ -56,7 +54,6 @@ public class ChallengeRecommendationService {
         int duration = sanitizeDuration(s.durationDays());
         BigDecimal deduction = sanitizeNonNegative(s.mannerDeduction(), DEFAULT_MANNER_DEDUCTION);
         BigDecimal gain = sanitizeNonNegative(s.mannerGain(), DEFAULT_MANNER_GAIN);
-        String anonymity = sanitizeAnonymity(s.anonymity());
 
         LocalDate start = LocalDate.now().plusDays(START_OFFSET_DAYS);
         LocalDate end = start.plusDays((long) duration - 1);
@@ -78,8 +75,7 @@ public class ChallengeRecommendationService {
                 start.toString(),
                 end.toString(),
                 new PenaltyConfig(deduction, new PenaltyConfig.SnsShare(false, null), false),
-                new RewardConfig(gain),
-                anonymity);
+                new RewardConfig(gain));
     }
 
     // ===== LLM 값 검증·폴백 (신뢰 경계) =====
@@ -107,15 +103,6 @@ public class ChallengeRecommendationService {
         return (v != null && v.compareTo(BigDecimal.ZERO) >= 0) ? v : fallback;
     }
 
-    private String sanitizeAnonymity(String v) {
-        if (v == null) return DEFAULT_ANONYMITY.name();
-        try {
-            return Anonymity.valueOf(v.trim().toUpperCase()).name();
-        } catch (IllegalArgumentException e) {
-            return DEFAULT_ANONYMITY.name();
-        }
-    }
-
     /** 추천 선택 경로(Path A): templateId로 챌린지 초안 구성. LLM(루틴매칭·설정제안) 둘 다 우회 — 설정은 정적 기본값. */
     public ChallengeRecommendationResponse recommendByTemplate(Long templateId, String title, String description) {
         RoutineRecommendationResponse routine = routineRecommendationService.recommendByTemplate(templateId, title);
@@ -127,6 +114,6 @@ public class ChallengeRecommendationService {
                 DEFAULT_PARTICIPATION.name(), null, DEFAULT_REPEAT_DAYS, DEFAULT_DURATION_DAYS,
                 start.toString(), end.toString(),
                 new PenaltyConfig(DEFAULT_MANNER_DEDUCTION, new PenaltyConfig.SnsShare(false, null), false),
-                new RewardConfig(DEFAULT_MANNER_GAIN), DEFAULT_ANONYMITY.name());
+                new RewardConfig(DEFAULT_MANNER_GAIN));
     }
 }
