@@ -38,9 +38,8 @@ public class GeminiChallengeSettingsClient implements ChallengeSettingsClient {
             - durationDays: 챌린지 기간(일). 보통 7~30.
             - mannerDeduction: 실패 시 매너 차감(0 이상 숫자, 보통 0.5~3.0)
             - mannerGain: 성공 시 매너 가산(0 이상 숫자, 보통 0.5~3.0)
-            - anonymity: "REAL" 또는 "ANONYMOUS"
 
-            출력 JSON 예: {"participationType":"SOLO","repeatDays":["MON","TUE","WED","THU","FRI"],"durationDays":14,"mannerDeduction":1.0,"mannerGain":1.0,"anonymity":"REAL"}
+            출력 JSON 예: {"participationType":"SOLO","repeatDays":["MON","TUE","WED","THU","FRI"],"durationDays":14,"mannerDeduction":1.0,"mannerGain":1.0}
             """.formatted(title, description == null ? "" : description);
     }
 }

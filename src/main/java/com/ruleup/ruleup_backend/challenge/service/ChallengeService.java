@@ -48,7 +48,8 @@ public class ChallengeService {
 
         String category = validateCategory(req.category());
         ParticipationType participationType = validateParticipationType(req.participationType());
-        Anonymity anonymity = validateAnonymity(req.anonymity());
+        // 익명(ANONYMOUS) 기능은 보류 — 입력값과 무관하게 항상 실명(REAL)로 저장한다(스키마는 유지).
+        Anonymity anonymity = Anonymity.REAL;
         List<String> repeatDays = validateRepeatDays(req.repeatDays());
         int durationDays = validateDuration(req.durationDays());
         LocalDate startDate = validateStartDate(req.startDate());
@@ -93,9 +94,9 @@ public class ChallengeService {
     public ChallengeDetailResponse getDetail(UUID userId, UUID challengeId) {
         Challenge c = loadActive(challengeId);
 
-        // 생성자 닉네임 (검수 전/거절이면 타인에게 임시 닉네임 → 그 위에 익명 마스킹)
+        // 생성자 닉네임 (검수 전/거절이면 타인에게 임시 닉네임)
         String ownerNickname = userRepository.findById(c.getCreatorId())
-                .map(u -> c.getAnonymity().maskNickname(u.visibleNicknameTo(userId)))
+                .map(u -> u.visibleNicknameTo(userId))
                 .orElse(null);
 
         // 통계
@@ -248,14 +249,6 @@ public class ChallengeService {
         }
     }
 
-    private Anonymity validateAnonymity(String v) {
-        if (v == null) return Anonymity.REAL;        // 미지정 시 실명 기본
-        try {
-            return Anonymity.valueOf(v);
-        } catch (Exception e) {
-            throw new BusinessException(ErrorCode.INVALID_ANONYMITY);
-        }
-    }
 
     private List<String> validateRepeatDays(List<String> days) {
         if (days == null || days.isEmpty() || !RepeatDay.allValid(days))
