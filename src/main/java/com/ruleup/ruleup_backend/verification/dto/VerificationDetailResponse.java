@@ -43,5 +43,6 @@ public record VerificationDetailResponse(
             Map<String, Object> detail
     ) {}
 
-    public record DailyLog(String date, String status, String method, String verifiedAt) {}
+    // §11.3: verifiedVia = AUTO / MANUAL / MANUAL_FALLBACK (이 날의 인증 경로).
+    public record DailyLog(String date, String status, String method, String verifiedVia, String verifiedAt) {}
 }

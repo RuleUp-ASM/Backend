@@ -77,7 +77,9 @@ public class VerificationReadService {
         List<DailyLog> logs = dailyRepo.findByChallengeMemberIdOrderByTargetDateDesc(member.getId()).stream()
                 .limit(Math.max(logDays, 1))
                 .map(d -> new DailyLog(d.getTargetDate().toString(), d.getStatus().name(),
-                        d.getMethod(), str(d.getVerifiedAt())))
+                        d.getMethod(),
+                        d.getVerifiedVia() != null ? d.getVerifiedVia().name() : null,
+                        str(d.getVerifiedAt())))
                 .toList();
 
         boolean freq = config.isFrequency();
