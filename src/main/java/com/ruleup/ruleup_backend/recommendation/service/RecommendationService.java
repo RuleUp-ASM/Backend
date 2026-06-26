@@ -5,9 +5,8 @@ import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.challenge.domain.MemberStatus;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
-import com.ruleup.ruleup_backend.recommendation.domain.TemplateSegmentScore;
 import com.ruleup.ruleup_backend.recommendation.dto.RecommendedRoutine;
-import com.ruleup.ruleup_backend.recommendation.repository.TemplateSegmentScoreRepository;
+import com.ruleup.ruleup_backend.recommendation.dto.SegmentScoreEntry;
 import com.ruleup.ruleup_backend.routine.domain.RoutineTemplate;
 import com.ruleup.ruleup_backend.routine.match.RoutineCandidate;
 import com.ruleup.ruleup_backend.routine.service.RoutineCatalog;
@@ -33,9 +32,11 @@ import java.util.stream.Collectors;
 public class RecommendationService {
 
     private static final double INTEREST_WEIGHT = 5.0;
+    /** 생성화면 추천 태그는 최대 3건만 노출. limit 파라미터가 더 커도 여기서 자른다. */
+    private static final int MAX_RECOMMENDATIONS = 3;
 
     private final UserRepository userRepo;
-    private final TemplateSegmentScoreRepository scoreRepo;
+    private final SegmentScoreReader segmentScoreReader;
     private final SegmentResolver segmentResolver;
     private final RoutineCatalog catalog;
     private final ChallengeMemberRepository memberRepo;
@@ -45,11 +46,11 @@ public class RecommendationService {
         User user = userRepo.findById(userId).orElse(null);
         if (user == null) return List.of();
 
-        // 1) 세그먼트 점수 합
+        // 1) 세그먼트 점수 합 (배치가 채운 Redis 캐시에서 읽음 — DB 직격 없음)
         Map<Long, Double> segScore = new HashMap<>();
         for (Segment seg : segmentResolver.resolve(user)) {
-            for (TemplateSegmentScore s : scoreRepo.findBySegmentTypeAndSegmentValue(seg.type(), seg.value())) {
-                segScore.merge(s.getTemplateId(), s.getScore().doubleValue(), Double::sum);
+            for (SegmentScoreEntry e : segmentScoreReader.scoresFor(seg.type(), seg.value())) {
+                segScore.merge(e.templateId(), e.score(), Double::sum);
             }
         }
         // 2) 관심사(정규화: WAKE_UP→WAKEUP)
@@ -59,7 +60,7 @@ public class RecommendationService {
         // 3) 진행 중 템플릿 제외
         Set<Long> active = activeTemplateIds(userId);
 
-        int cap = Math.max(limit, 1);
+        int cap = Math.min(Math.max(limit, 1), MAX_RECOMMENDATIONS);
         return catalog.candidates().stream()
                 .filter(c -> !active.contains(c.id()))
                 .map(c -> {

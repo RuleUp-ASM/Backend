@@ -26,10 +26,10 @@ public class RecommendationController {
 
     private final RecommendationService recommendationService;
 
-    @Operation(summary = "루틴 추천", description = "관심사 + 세그먼트 인기도 기반 루틴 템플릿 추천. 진행 중 템플릿 제외.")
+    @Operation(summary = "루틴 추천", description = "관심사 + 세그먼트 인기도 기반 루틴 템플릿 추천. 진행 중 템플릿 제외. 최대 3건.")
     @GetMapping("/routines")
     public ApiResponse<List<RecommendedRoutine>> routines(@AuthenticationPrincipal String userId,
-                                                          @RequestParam(defaultValue = "20") int limit) {
+                                                          @RequestParam(defaultValue = "3") int limit) {
         return ApiResponse.ok(recommendationService.recommendRoutines(UUID.fromString(userId), limit));
     }
 }

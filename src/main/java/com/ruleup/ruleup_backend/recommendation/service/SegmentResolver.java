@@ -1,6 +1,7 @@
 package com.ruleup.ruleup_backend.recommendation.service;
 
 import com.ruleup.ruleup_backend.recommendation.domain.SegmentType;
+import com.ruleup.ruleup_backend.user.Gender;
 import com.ruleup.ruleup_backend.user.User;
 import org.springframework.stereotype.Component;
 
@@ -17,14 +18,19 @@ import java.util.List;
 public class SegmentResolver {
 
     public List<Segment> resolve(User user) {
+        return resolve(user.getCountryCode(), user.getGender(), user.getBirthDate());
+    }
+
+    /** 원시 인구통계(국가/성별/생일)에서 세그먼트 산출. 배치 투영(ChallengeCreatorSegmentRow)에서 직접 호출. */
+    public List<Segment> resolve(String countryCode, Gender gender, LocalDate birthDate) {
         List<Segment> segments = new ArrayList<>();
-        if (user.getCountryCode() != null && !user.getCountryCode().isBlank()) {
-            segments.add(new Segment(SegmentType.COUNTRY, user.getCountryCode()));
+        if (countryCode != null && !countryCode.isBlank()) {
+            segments.add(new Segment(SegmentType.COUNTRY, countryCode));
         }
-        if (user.getGender() != null) {
-            segments.add(new Segment(SegmentType.GENDER, user.getGender().name()));
+        if (gender != null) {
+            segments.add(new Segment(SegmentType.GENDER, gender.name()));
         }
-        String band = ageBand(user.getBirthDate());
+        String band = ageBand(birthDate);
         if (band != null) {
             segments.add(new Segment(SegmentType.AGE_BAND, band));
         }

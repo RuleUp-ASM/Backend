@@ -22,6 +22,14 @@ spring:
     enabled: true
     locations: classpath:db/migration   # 1단계에서 여기에 SQL 넣을 예정
 
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+  cache:
+    type: ${SPRING_CACHE_TYPE:redis}   # 테스트는 application-test.yaml에서 simple로 덮어씀
+
   servlet:
     multipart:
       max-file-size: 10MB     # 프로필 사진 10MB 제한 (스펙)
@@ -34,6 +42,11 @@ app:
     access-token-ttl: 1800        # 30분 (초)
     refresh-token-ttl: 1209600    # 14일 (60*60*24*14)
     signup-token-ttl: 300         # 5분
+  # 추천 세그먼트 점수 윈도우 배치 튜닝(SegmentScoreRebuildBatch).
+  recommendation:
+    segment-window-days: ${RECO_SEGMENT_WINDOW_DAYS:30}        # 최근 N일 생성 챌린지만 집계
+    rebuild-initial-delay-ms: ${RECO_REBUILD_INITIAL_DELAY_MS:60000}   # 부팅 후 첫 재계산까지
+    rebuild-interval-ms: ${RECO_REBUILD_INTERVAL_MS:3600000}   # 재계산 주기(기본 1시간)
   oauth:
     kakao:
       client-id: ${KAKAO_REST_API_KEY}
