@@ -6,6 +6,9 @@ app:
   jwt:
     # HS256 키는 32바이트 이상이어야 함 (테스트 전용, 운영 비밀과 무관)
     secret: test-only-secret-please-change-this-must-be-at-least-32-bytes-long-0123456789
+  recommendation:
+    # 짧은 테스트 동안 추천 재계산 배치가 끼어들지 않도록 첫 실행을 멀리 민다.
+    rebuild-initial-delay-ms: 3600000
   oauth:
     kakao:
       client-id: dummy
@@ -20,3 +23,7 @@ spring:
   datasource:
     username: test
     password: test
+  # 테스트는 Redis를 띄우지 않는다 → 인메모리(ConcurrentMap) 캐시로 폴백.
+  # (CacheConfig의 RedisCacheManager 빈은 @Profile("!test")로 빠진다.)
+  cache:
+    type: simple
