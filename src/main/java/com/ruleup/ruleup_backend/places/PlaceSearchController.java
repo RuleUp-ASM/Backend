@@ -21,12 +21,13 @@ public class PlaceSearchController {
 
     private final PlaceSearchService placeSearchService;
 
-    @Operation(summary = "장소 검색(§5.2)",
-            description = "키워드로 브랜드/매장을 찾아 좌표를 반환. lat/lng는 정렬 힌트(선택).")
+    @Operation(summary = "장소 검색(§11.7)",
+            description = "키워드로 브랜드/매장을 찾아 좌표를 반환. lat/lng는 정렬 힌트(선택), radiusM은 NEARBY_BRAND 반경(기본 1500).")
     @GetMapping("/search")
-    public ApiResponse<PlaceSearchResponse> search(@RequestParam String query,
+    public ApiResponse<PlaceSearchResponse> search(@RequestParam("q") String q,
                                                    @RequestParam(required = false) Double lat,
-                                                   @RequestParam(required = false) Double lng) {
-        return ApiResponse.ok(placeSearchService.search(query, lat, lng));
+                                                   @RequestParam(required = false) Double lng,
+                                                   @RequestParam(required = false) Integer radiusM) {
+        return ApiResponse.ok(placeSearchService.search(q, lat, lng, radiusM));
     }
 }

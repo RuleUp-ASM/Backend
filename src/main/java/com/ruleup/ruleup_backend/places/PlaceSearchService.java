@@ -57,8 +57,13 @@ public class PlaceSearchService {
         return clientId != null && !clientId.isBlank() && clientSecret != null && !clientSecret.isBlank();
     }
 
-    /** 키워드로 장소 검색. lat/lng는 정렬 힌트(선택). 미설정·실패 시 빈 목록. */
-    public PlaceSearchResponse search(String query, Double lat, Double lng) {
+    /**
+     * 키워드로 장소 검색(§11.7). lat/lng는 정렬 힌트(선택), radiusM은 NEARBY_BRAND 반경(클라 기본 1500).
+     * 미설정·실패 시 빈 목록.
+     * ※ Naver Local Search는 서버측 좌표·반경 필터를 지원하지 않아 lat/lng/radiusM은 API 계약 충족용으로
+     *   받기만 한다(실제 앵커 반경 적용은 클라/셋업 단계).
+     */
+    public PlaceSearchResponse search(String query, Double lat, Double lng, Integer radiusM) {
         if (query == null || query.isBlank()) {
             throw new BusinessException(ErrorCode.INVALID_QUERY);
         }
