@@ -6,14 +6,19 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.ruleup.ruleup_backend.config.AppProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Google Gemini(generateContent) 공용 호출기.
@@ -30,11 +35,17 @@ public class GeminiClient {
     private static final String DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
     private static final String DEFAULT_MODEL = "gemini-2.5-flash-lite";
     private static final long DEFAULT_TIMEOUT_MS = 5000L;
+    private static final int DEFAULT_MAX_RETRIES = 2;          // 최초 1회 + 재시도 2회 = 최대 3번
+    private static final long DEFAULT_RETRY_BACKOFF_MS = 300L; // 지수 백오프 base
+    /** 일시 오류로 보고 재시도할 HTTP 상태(503 UNAVAILABLE·429 Too Many·5xx 일부). */
+    private static final Set<Integer> RETRYABLE_STATUS = Set.of(429, 500, 502, 503, 504);
 
     private final RestClient restClient;
     private final JsonMapper jsonMapper = JsonMapper.builder().build();
     private final AppProperties.Llm.Gemini config;
     private final String model;
+    private final int maxRetries;
+    private final long retryBackoffMs;
 
     public GeminiClient(AppProperties props) {
         AppProperties.Llm llm = (props != null) ? props.llm() : null;
@@ -48,6 +59,10 @@ public class GeminiClient {
                 ? config.baseUrl() : DEFAULT_BASE_URL;
         this.model = (config != null && config.model() != null && !config.model().isBlank())
                 ? config.model() : DEFAULT_MODEL;
+        this.maxRetries = (config != null && config.maxRetries() > 0)
+                ? config.maxRetries() : DEFAULT_MAX_RETRIES;
+        this.retryBackoffMs = (config != null && config.retryBackoffMs() > 0)
+                ? config.retryBackoffMs() : DEFAULT_RETRY_BACKOFF_MS;
         this.restClient = RestClient.builder()
                 .baseUrl(baseUrl)
                 .requestFactory(factory)
@@ -75,27 +90,76 @@ public class GeminiClient {
             log.warn("Gemini API 키가 없어 호출을 건너뜁니다.");
             return null;
         }
-        try {
-            String raw = restClient.post()
-                    .uri("/models/{model}:generateContent", model)
-                    .header("x-goog-api-key", config.apiKey())
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .accept(MediaType.APPLICATION_JSON)
-                    .body(body)
-                    .retrieve()
-                    .body(String.class);
+        // 503(UNAVAILABLE)·429·타임아웃 같은 일시 오류는 짧은 백오프 후 재시도. 그 외/소진 시 null 폴백.
+        int attempts = maxRetries + 1;
+        for (int attempt = 1; attempt <= attempts; attempt++) {
+            try {
+                // 응답을 byte[] 로 받는다: Gemini 가 application/octet-stream 으로 줘도 변환 실패하지 않음.
+                // onStatus no-op 으로 4xx/5xx 에 예외를 던지지 않게 해 상태코드를 직접 보고 재시도 판단.
+                ResponseEntity<byte[]> resp = restClient.post()
+                        .uri("/models/{model}:generateContent", model)
+                        .header("x-goog-api-key", config.apiKey())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .accept(MediaType.APPLICATION_JSON)
+                        .body(body)
+                        .retrieve()
+                        .onStatus(HttpStatusCode::isError, (req, res) -> { })
+                        .toEntity(byte[].class);
 
-            if (raw == null || raw.isBlank()) return null;
+                HttpStatusCode status = resp.getStatusCode();
+                if (status.is2xxSuccessful()) {
+                    byte[] bytes = resp.getBody();
+                    if (bytes == null || bytes.length == 0) return null;
+                    GeminiResponse res = jsonMapper.readValue(
+                            new String(bytes, StandardCharsets.UTF_8), GeminiResponse.class);
+                    String content = (res != null) ? res.firstText() : null;
+                    return (content == null || content.isBlank()) ? null : content;
+                }
 
-            GeminiResponse res = jsonMapper.readValue(raw, GeminiResponse.class);
-            String content = (res != null) ? res.firstText() : null;
-            return (content == null || content.isBlank()) ? null : content;
+                // 에러 상태: 재시도 대상이고 기회가 남았으면 백오프 후 재시도, 아니면 폴백.
+                if (RETRYABLE_STATUS.contains(status.value()) && attempt < attempts) {
+                    log.warn("Gemini 호출 실패(status={}, {}/{}회) — 재시도", status.value(), attempt, attempts);
+                    if (!backoff(attempt)) return null;
+                    continue;
+                }
+                log.warn("Gemini 호출 실패: status={} body={}", status.value(), errorBody(resp.getBody()));
+                return null;
 
-        } catch (Exception e) {
-            // 타임아웃·HTTP·파싱 실패 전부 null → 호출 측이 폴백한다.
-            log.warn("Gemini 호출 실패: {}", e.getMessage());
-            return null;
+            } catch (ResourceAccessException timeout) {
+                // 연결/읽기 타임아웃: 재시도 가치 있음.
+                if (attempt < attempts) {
+                    log.warn("Gemini 호출 타임아웃({}/{}회) — 재시도: {}", attempt, attempts, timeout.getMessage());
+                    if (!backoff(attempt)) return null;
+                    continue;
+                }
+                log.warn("Gemini 호출 실패(타임아웃): {}", timeout.getMessage());
+                return null;
+            } catch (Exception e) {
+                // 직렬화·파싱 등 재시도해도 같을 오류는 즉시 폴백.
+                log.warn("Gemini 호출 실패: {}", e.getMessage());
+                return null;
+            }
         }
+        return null;
+    }
+
+    /** 지수 백오프 대기. 인터럽트되면 false(중단 신호) → 호출 측이 즉시 폴백. */
+    private boolean backoff(int attempt) {
+        long wait = retryBackoffMs * (1L << (attempt - 1)); // 300, 600, 1200ms ...
+        try {
+            Thread.sleep(wait);
+            return true;
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    /** 에러 응답 바이트를 로그용 문자열로(앞부분만). */
+    private static String errorBody(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) return "";
+        String s = new String(bytes, StandardCharsets.UTF_8);
+        return (s.length() > 300) ? s.substring(0, 300) : s;
     }
 
     /** 응답 텍스트에서 JSON 객체 부분만 추출(혹시 펜스/설명이 섞여 와도 대비). */

@@ -63,6 +63,8 @@ app:
       model: gemini-2.5-flash-lite
       base-url: https://generativelanguage.googleapis.com/v1beta
       timeout-ms: 5000
+      max-retries: ${GEMINI_MAX_RETRIES:2}         # 503(UNAVAILABLE)·429·타임아웃 시 재시도 횟수
+      retry-backoff-ms: ${GEMINI_RETRY_BACKOFF_MS:300}  # 지수 백오프 base (300→600→1200ms)
 
   # 장소 검색 프록시(§5.2 NEARBY_BRAND 앵커 바인딩). 키 없으면 빈 결과(graceful).
   places:

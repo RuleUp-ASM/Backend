@@ -30,7 +30,9 @@ public record AppProperties(Jwt jwt, Oauth oauth, Llm llm, Client client) {
                 String apiKey,
                 String model,       // 예: gemini-2.5-flash-lite
                 String baseUrl,     // 예: https://generativelanguage.googleapis.com/v1beta
-                long timeoutMs      // 동기 호출 타임아웃 (스펙 2.3: 예 5000)
+                long timeoutMs,     // 동기 호출 타임아웃 (스펙 2.3: 예 5000)
+                int maxRetries,     // 일시 오류(503/429/타임아웃) 재시도 횟수. 0/미설정 → 기본값
+                long retryBackoffMs // 재시도 사이 대기(지수 백오프 base, ms). 0/미설정 → 기본값
         ) {}
     }
 
