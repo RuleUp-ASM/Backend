@@ -3,7 +3,7 @@ package com.ruleup.ruleup_backend.oauth;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.config.AppProperties;
-import com.ruleup.ruleup_backend.user.OAuthProvider;
+import com.ruleup.ruleup_backend.user.domain.OAuthProvider;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.context.annotation.Profile;
@@ -44,6 +44,9 @@ public class GoogleOAuthClient implements OAuthClient {
             GoogleUserResponse u = restClient.get().uri(USER_URI)
                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                     .retrieve().body(GoogleUserResponse.class);
+            // 200이지만 바디가 비었거나 역직렬화 실패 시 body()가 null → NPE 누수 방지
+            if (u == null || u.sub() == null)
+                throw new BusinessException(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
             return new OAuthUserInfo(u.sub(), u.email(), u.picture());
         } catch (RestClientResponseException e) {
             log.warn("Google OAuth failed: status={}, body={}", e.getStatusCode(), e.getResponseBodyAsString());
@@ -70,6 +73,8 @@ public class GoogleOAuthClient implements OAuthClient {
         GoogleTokenResponse res = restClient.post().uri(TOKEN_URI)
                 .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                 .body(form).retrieve().body(GoogleTokenResponse.class);
+        if (res == null || res.accessToken() == null)
+            throw new BusinessException(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
         return res.accessToken();
     }
 

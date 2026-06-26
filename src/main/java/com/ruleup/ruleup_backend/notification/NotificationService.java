@@ -1,4 +1,5 @@
 package com.ruleup.ruleup_backend.notification;
+import com.ruleup.ruleup_backend.notification.domain.*;
 
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;

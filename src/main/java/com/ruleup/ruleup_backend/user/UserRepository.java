@@ -1,4 +1,5 @@
 package com.ruleup.ruleup_backend.user;
+import com.ruleup.ruleup_backend.user.domain.*;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.Optional;

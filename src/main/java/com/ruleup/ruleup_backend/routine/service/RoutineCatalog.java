@@ -67,7 +67,7 @@ public class RoutineCatalog {
 
     @Transactional(readOnly = true)
     protected Map<Long, RoutineTemplate> load() {
-        return templateRepository.findAll().stream()
+        return templateRepository.findAllWithVerification().stream()   // 인증 정의까지 fetch join
                 .collect(Collectors.toMap(RoutineTemplate::getId, Function.identity(),
                         (a, b) -> a, java.util.LinkedHashMap::new));
     }

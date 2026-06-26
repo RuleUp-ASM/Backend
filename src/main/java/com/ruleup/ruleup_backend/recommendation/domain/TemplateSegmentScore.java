@@ -13,9 +13,9 @@ import java.time.Instant;
 /**
  * 세그먼트별 템플릿 인기 점수 (TemplateSegmentScore 테이블) — 추천 warm-up.
  * 복합 PK (segmentType, segmentValue, templateId). 인증/챌린지와 달리 단일 UUID PK가 아님.
- *  - 조회 시 세그먼트 합으로 정렬해 top-N. templateId는 RoutineTemplate.id(FK 아님, 정적 카탈로그) → JOIN.
- *  - 점수는 SegmentScoreRebuildBatch가 슬라이딩 윈도우로 주기 재계산해 통째로 교체한다
- *    (실시간 증분 아님 → 캐시 무효화 thrash 없음).
+ *  - 점수는 SegmentScoreService 가 주기적으로 누적 챌린지를 재집계해 통째로 재작성한다(실시간 X).
+ *  - 조회 시 유저 세그먼트들의 점수 합으로 정렬해 top-N.
+ *  - templateId는 RoutineTemplate.id를 가리키지만 FK 아님(정적 카탈로그, 앱 검증) → JOIN으로 사용.
  */
 @Entity
 @Table(name = "TemplateSegmentScore")
@@ -55,12 +55,12 @@ public class TemplateSegmentScore {
         return s;
     }
 
-    /** 윈도우 배치 집계 결과 1행(점수·선택 횟수를 한 번에 세팅). 전체 재계산 후 saveAll용. */
-    public static TemplateSegmentScore ofAggregate(SegmentType segmentType, String segmentValue, Long templateId,
-                                                   BigDecimal score, int selectionCount) {
+    /** 배치 재집계용: 누적 선택 수(count)로 점수를 통째로 설정(선택 1건 = 가중 1.0). */
+    public static TemplateSegmentScore rebuilt(SegmentType segmentType, String segmentValue,
+                                               Long templateId, long count) {
         TemplateSegmentScore s = of(segmentType, segmentValue, templateId);
-        s.score = score;
-        s.selectionCount = selectionCount;
+        s.score = BigDecimal.valueOf(count);
+        s.selectionCount = (int) count;
         return s;
     }
 }

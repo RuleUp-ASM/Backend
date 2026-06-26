@@ -119,8 +119,8 @@ public class ChallengeRecommendationService {
     /** 추천 선택 경로(Path A): templateId로 챌린지 초안 구성. LLM(루틴매칭·설정제안) 둘 다 우회 — 설정은 정적 기본값. */
     public ChallengeRecommendationResponse recommendByTemplate(Long templateId, String title, String description) {
         RoutineRecommendationResponse routine = routineRecommendationService.recommendByTemplate(templateId, title);
-        java.time.LocalDate start = java.time.LocalDate.now().plusDays(START_OFFSET_DAYS);
-        java.time.LocalDate end = start.plusDays((long) DEFAULT_DURATION_DAYS - 1);
+        LocalDate start = LocalDate.now().plusDays(START_OFFSET_DAYS);
+        LocalDate end = start.plusDays((long) DEFAULT_DURATION_DAYS - 1);
         return new ChallengeRecommendationResponse(
                 routine.matched(), routine.templateId(), routine.title(), description, routine.category(),
                 routine.recommendedMethod(), routine.options(), routine.params(), routine.rationale(),

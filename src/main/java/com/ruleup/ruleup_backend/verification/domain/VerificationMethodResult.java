@@ -1,4 +1,5 @@
 package com.ruleup.ruleup_backend.verification.domain;
+import com.ruleup.ruleup_backend.common.verification.*;
 
 import com.ruleup.ruleup_backend.common.AssignedIdEntity;
 import com.ruleup.ruleup_backend.common.UuidGenerator;

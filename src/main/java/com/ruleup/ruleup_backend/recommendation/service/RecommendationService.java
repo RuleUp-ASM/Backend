@@ -10,7 +10,7 @@ import com.ruleup.ruleup_backend.recommendation.dto.SegmentScoreEntry;
 import com.ruleup.ruleup_backend.routine.domain.RoutineTemplate;
 import com.ruleup.ruleup_backend.routine.match.RoutineCandidate;
 import com.ruleup.ruleup_backend.routine.service.RoutineCatalog;
-import com.ruleup.ruleup_backend.user.User;
+import com.ruleup.ruleup_backend.user.domain.User;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;

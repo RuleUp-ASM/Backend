@@ -1,11 +1,10 @@
 package com.ruleup.ruleup_backend.verification.service;
+import com.ruleup.ruleup_backend.common.verification.*;
 
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus;
-import com.ruleup.ruleup_backend.challenge.domain.MemberStatus;
-import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
-import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
+import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.verification.domain.*;
@@ -46,8 +45,7 @@ public class VerificationSyncService {
     private static final Set<String> KNOWN_SIGNAL_TYPES =
             Arrays.stream(SignalType.values()).map(Enum::name).collect(Collectors.toUnmodifiableSet());
 
-    private final ChallengeMemberRepository memberRepo;
-    private final ChallengeRepository challengeRepo;
+    private final ChallengeQueryService challengeQuery;
     private final VerificationDailyRepository dailyRepo;
     private final VerificationMethodResultRepository methodResultRepo;
     private final SyncRateLimiter rateLimiter;
@@ -56,8 +54,7 @@ public class VerificationSyncService {
     private final VerificationProgressService progressService;
     private final Map<VerificationMethod, MethodEvaluator> evaluators;
 
-    public VerificationSyncService(ChallengeMemberRepository memberRepo,
-                                   ChallengeRepository challengeRepo,
+    public VerificationSyncService(ChallengeQueryService challengeQuery,
                                    VerificationDailyRepository dailyRepo,
                                    VerificationMethodResultRepository methodResultRepo,
                                    SyncRateLimiter rateLimiter,
@@ -65,8 +62,7 @@ public class VerificationSyncService {
                                    VerificationConfigFactory configFactory,
                                    VerificationProgressService progressService,
                                    List<MethodEvaluator> evaluatorList) {
-        this.memberRepo = memberRepo;
-        this.challengeRepo = challengeRepo;
+        this.challengeQuery = challengeQuery;
         this.dailyRepo = dailyRepo;
         this.methodResultRepo = methodResultRepo;
         this.rateLimiter = rateLimiter;
@@ -92,17 +88,20 @@ public class VerificationSyncService {
         LocalDate today = LocalDate.now(KST);
         Instant now = Instant.now();
 
-        List<ChallengeMember> members = memberRepo.findByUserIdAndStatus(userId, MemberStatus.ACTIVE);
+        List<ChallengeMember> members = challengeQuery.findActiveMemberships(userId);
         List<SyncResponse.UpdatedChallenge> updated = new ArrayList<>();
 
         for (ChallengeMember member : members) {
-            Challenge challenge = challengeRepo.findByIdAndDeletedAtIsNull(member.getChallengeId()).orElse(null);
+            Challenge challenge = challengeQuery.findActiveChallenge(member.getChallengeId()).orElse(null);
             if (challenge == null || challenge.getStatus() != ChallengeStatus.ACTIVE) continue;
 
             VerificationConfig config = configFactory.build(challenge);
             if (config.isManual()) continue;   // 수동 챌린지: 자동 평가 대상 아님
 
             if (member.getTargetDays() == 0) memberSetup.apply(member, challenge, config);
+
+            // v2: 셋업 전(PENDING_SETUP)이면 신호는 수용하되 평가 skip("권한 없는데 FAILED" 원천 차단, §4·§11.1)
+            if (!member.isSetupReady()) continue;
 
             VerificationDaily daily = loadOrCreateDaily(member, challenge, today);
             VerificationStatus todayStatus = processMember(member, challenge, config, daily, signals, today, now);
@@ -153,7 +152,7 @@ public class VerificationSyncService {
                 .findByVerificationDailyIdAndMethod(daily.getId(), method.name()).orElse(null);
         Map<String, Object> prior = (mr != null) ? mr.getEvidence() : null;
 
-        DayContext ctx = new DayContext(today, KST, now, config, signals, prior, null);
+        DayContext ctx = new DayContext(today, KST, now, config, signals, prior, member.getAnchors(), null);
         EvaluationOutcome outcome = evaluator.evaluate(ctx);
 
         if (mr == null) {
@@ -200,6 +199,7 @@ public class VerificationSyncService {
             case WAKE -> (config.wake() != null) ? config.wake().maxSignalLagHours() : 2;
             case SCREEN_TIME -> (config.screenTime() != null) ? config.screenTime().maxSignalLagHours() : 1;
             case GPS_PRESENCE, GPS_DISTANCE -> (config.gps() != null) ? config.gps().maxSignalLagHours() : 1;
+            case HEALTH -> (config.health() != null) ? config.health().maxSignalLagHours() : 2;
             case SLEEP -> (config.sleep() != null) ? config.sleep().maxSignalLagHours() : 12;
             default -> 1;
         };
@@ -210,6 +210,7 @@ public class VerificationSyncService {
             case WAKE -> (config.wake() != null && config.wake().polarity() != null) ? config.wake().polarity() : Polarity.ACHIEVEMENT;
             case SCREEN_TIME -> (config.screenTime() != null && config.screenTime().polarity() != null) ? config.screenTime().polarity() : Polarity.ACHIEVEMENT;
             case GPS_PRESENCE, GPS_DISTANCE -> (config.gps() != null && config.gps().polarity() != null) ? config.gps().polarity() : Polarity.ACHIEVEMENT;
+            case HEALTH -> (config.health() != null && config.health().polarity() != null) ? config.health().polarity() : Polarity.ACHIEVEMENT;
             case SLEEP -> (config.sleep() != null && config.sleep().polarity() != null) ? config.sleep().polarity() : Polarity.ACHIEVEMENT;
             default -> Polarity.ACHIEVEMENT;
         };

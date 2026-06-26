@@ -87,6 +87,15 @@ public enum ErrorCode {
     INVALID_TARGET_DATE(HttpStatus.BAD_REQUEST, "유효하지 않은 대상 날짜입니다."),
     IMAGE_REQUIRED(HttpStatus.BAD_REQUEST, "사진 인증은 이미지가 필요합니다."),
 
+    // ===== 인증 v2 — 예비 폴백 / 셋업 / 내 위치 / 장소 검색 (§9·§11) =====
+    FALLBACK_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "예비 수동 인증은 주 1회만 사용할 수 있습니다."),
+    GEOFENCE_NOT_CONFIGURED(HttpStatus.BAD_REQUEST, "인증 장소(앵커)가 설정되지 않았습니다."),
+    LOCATION_LOCKED_IN_WINDOW(HttpStatus.CONFLICT, "인증 윈도우 중에는 위치를 변경할 수 없습니다. 변경은 익일부터 적용됩니다."),
+    LOCATION_CHANGE_COOLDOWN(HttpStatus.TOO_MANY_REQUESTS, "위치 변경은 일정 기간(쿨다운) 후에 가능합니다."),
+    INVALID_ANCHOR(HttpStatus.BAD_REQUEST, "앵커 설정이 올바르지 않습니다.(반경 0.5~5km, 최대 10개)"),
+    INVALID_QUERY(HttpStatus.BAD_REQUEST, "검색어가 올바르지 않습니다."),
+    PLACE_SEARCH_RATE_LIMIT(HttpStatus.TOO_MANY_REQUESTS, "장소 검색 요청이 너무 많습니다."),
+
     // ===== 공통 =====
     TOO_MANY_REQUESTS(HttpStatus.TOO_MANY_REQUESTS, "요청이 너무 많습니다. 잠시 후 다시 시도해주세요."),
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류가 발생했습니다."),

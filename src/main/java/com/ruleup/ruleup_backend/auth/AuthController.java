@@ -4,7 +4,7 @@ import com.ruleup.ruleup_backend.auth.dto.*;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.response.ApiResponse;
-import com.ruleup.ruleup_backend.user.OAuthProvider;
+import com.ruleup.ruleup_backend.user.domain.OAuthProvider;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
