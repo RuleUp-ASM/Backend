@@ -6,6 +6,7 @@ import com.ruleup.ruleup_backend.verification.dto.ManualVerificationResponse;
 import com.ruleup.ruleup_backend.verification.dto.MemberLocationRequest;
 import com.ruleup.ruleup_backend.verification.dto.MemberLocationResponse;
 import com.ruleup.ruleup_backend.verification.dto.SetupRequest;
+import com.ruleup.ruleup_backend.verification.dto.SetupRequirementResponse;
 import com.ruleup.ruleup_backend.verification.dto.SetupResponse;
 import com.ruleup.ruleup_backend.verification.dto.VerificationDetailResponse;
 import com.ruleup.ruleup_backend.verification.service.VerificationManualService;
@@ -48,6 +49,15 @@ public class VerificationChallengeController {
                                                           @PathVariable UUID challengeId,
                                                           @RequestBody ManualVerificationRequest request) {
         return ApiResponse.ok(manualService.submit(UUID.fromString(userId), challengeId, request));
+    }
+
+    @Operation(summary = "최초 진입 셋업 요구사항 조회(§11.4)",
+            description = "가입 후 최초 진입 시, 인증을 위해 무엇을 받아/골라야 하는지 안내. "
+                    + "필요 권한·앵커 필요 여부·대상앱 필요 여부 + 내 현재 셋업 상태. 참여(ACTIVE) 멤버만.")
+    @GetMapping("/{challengeId}/setup")
+    public ApiResponse<SetupRequirementResponse> setupRequirements(@AuthenticationPrincipal String userId,
+                                                                   @PathVariable UUID challengeId) {
+        return ApiResponse.ok(setupService.getRequirements(UUID.fromString(userId), challengeId));
     }
 
     @Operation(summary = "최초 진입 셋업(§11.4)",

@@ -11,6 +11,7 @@ import com.ruleup.ruleup_backend.verification.domain.VerificationMethod;
 import com.ruleup.ruleup_backend.verification.dto.MemberLocationRequest;
 import com.ruleup.ruleup_backend.verification.dto.MemberLocationResponse;
 import com.ruleup.ruleup_backend.verification.dto.SetupRequest;
+import com.ruleup.ruleup_backend.verification.dto.SetupRequirementResponse;
 import com.ruleup.ruleup_backend.verification.dto.SetupResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -48,6 +49,30 @@ public class VerificationSetupService {
 
     private final ChallengeQueryService challengeQuery;
     private final VerificationConfigFactory configFactory;
+
+    // ===== §11.4 최초 진입 셋업 요구사항 조회 (제출 전 안내용) =====
+    @Transactional(readOnly = true)
+    public SetupRequirementResponse getRequirements(UUID userId, UUID challengeId) {
+        Challenge ch = challengeQuery.findActiveChallenge(challengeId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
+        ChallengeMember member = activeMember(challengeId, userId);
+        VerificationConfig config = configFactory.build(ch);
+
+        List<String> perms = (config.requiredPermissions() != null)
+                ? config.requiredPermissions() : List.of();
+        boolean requiresAnchors = config.hasMethod(VerificationMethod.GPS_PRESENCE);
+        boolean anchorsConfigured = member.getAnchors() != null && !member.getAnchors().isEmpty();
+        boolean requiresTargetPackages = config.hasMethod(VerificationMethod.SCREEN_TIME);
+
+        return new SetupRequirementResponse(
+                member.getSetupStatus().name(),
+                config.isManual(),
+                config.primaryMethod() != null ? config.primaryMethod().name() : null,
+                perms,
+                requiresAnchors,
+                anchorsConfigured,
+                requiresTargetPackages);
+    }
 
     // ===== §11.4 최초 진입 셋업 =====
     @Transactional

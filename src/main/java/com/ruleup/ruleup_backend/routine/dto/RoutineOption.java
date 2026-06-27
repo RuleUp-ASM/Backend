@@ -11,8 +11,8 @@ import java.util.List;
  *  - externalService    : 외부 연동 필요 시 서비스명(GitHub/RSS/WakaTime 등). 없으면 null.
  *  - requiredPermissions: AUTO 가 동작하려면 클라가 받아둬야 할 권한 목록.
  *
- * ※ 추천 단계에선 권한 "보유 여부"를 따지지 않는다. AUTO 에 필요한 권한 "목록"만 내려주고,
- *   실제 보유 확인은 생성 단계에서 한다(없으면 ROUTINE_PERMISSION_REQUIRED 로 바운스).
+ * ※ 추천·생성 단계에선 권한 "보유 여부"를 따지지 않는다. AUTO 에 필요한 권한 "목록"만 내려주고,
+ *   실제 grant·확인은 가입 후 최초 진입 셋업(§11.4 /setup)에서 한다.
  */
 public record RoutineOption(
         String method,
