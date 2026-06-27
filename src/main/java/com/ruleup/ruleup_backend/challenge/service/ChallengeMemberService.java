@@ -8,6 +8,7 @@ import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
+import com.ruleup.ruleup_backend.common.verification.SetupStatus;
 import com.ruleup.ruleup_backend.reputation.domain.ReputationScore;
 import com.ruleup.ruleup_backend.reputation.ReputationScoreRepository;
 import com.ruleup.ruleup_backend.user.domain.User;
@@ -57,17 +58,27 @@ public class ChallengeMemberService {
                     existing.getId(), List.of(MemberStatus.LEFT, MemberStatus.REMOVED), initial);
             if (updated == 0) throw new BusinessException(ErrorCode.ALREADY_JOINED);
             if (initial == MemberStatus.ACTIVE) challengeRepository.incrementParticipantCount(challengeId);
-            return new JoinResponse(initial.name());
+            // 재참여는 기존 행의 setupStatus를 그대로 둔다(이전에 셋업했으면 READY 유지).
+            return joinResponse(c, initial, existing.getSetupStatus());
         }
 
         // 최초 참여: uq_member 로 동시 INSERT는 1건만 성공, 나머지는 중복으로 변환.
+        ChallengeMember joined = ChallengeMember.join(challengeId, userId, initial);
         try {
-            memberRepository.saveAndFlush(ChallengeMember.join(challengeId, userId, initial));
+            memberRepository.saveAndFlush(joined);
         } catch (DataIntegrityViolationException dup) {
             throw new BusinessException(ErrorCode.ALREADY_JOINED);
         }
         if (initial == MemberStatus.ACTIVE) challengeRepository.incrementParticipantCount(challengeId);
-        return new JoinResponse(initial.name());
+        return joinResponse(c, initial, joined.getSetupStatus());
+    }
+
+    /** 가입 응답 조립: 멤버 상태 + 셋업 상태 + 인증 스냅샷(필요 권한·방식). */
+    private JoinResponse joinResponse(Challenge c, MemberStatus memberStatus, SetupStatus setupStatus) {
+        return JoinResponse.of(
+                memberStatus.name(),
+                (setupStatus != null ? setupStatus : SetupStatus.PENDING_SETUP).name(),
+                c.getVerificationConfig());
     }
 
     /** 그룹+기준 설정 → 매너 검증 후 PENDING. 솔로 또는 기준 미설정 → ACTIVE. */

@@ -58,9 +58,9 @@ public class ChallengeService {
         if (participationType == ParticipationType.GROUP)
             checkMinMannerNotAboveOwner(userId, req.minMannerTemperature());
 
-        // 루틴(인증) 검증 → 스냅샷 산출. AUTO 권한 부족 시 ROUTINE_PERMISSION_REQUIRED 로 바운스.
+        // 루틴(인증) 검증 → 스냅샷 산출. 권한은 보지 않는다(가입 후 §11.4 셋업에서 grant).
         ResolvedRoutine routine = routineSelectionService.resolve(
-                req.templateId(), req.selectedMethod(), req.paramsOrEmpty(), req.grantedPermissionsOrEmpty());
+                req.templateId(), req.selectedMethod(), req.paramsOrEmpty());
 
         Challenge challenge = Challenge.create(
                 userId, req.title(), req.description(), req.imageUrl(),
