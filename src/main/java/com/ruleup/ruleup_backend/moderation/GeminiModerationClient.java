@@ -53,7 +53,18 @@ public class GeminiModerationClient implements ContentModerationClient {
         if (imageUrl == null || imageUrl.isBlank()) return ModerationResult.APPROVED;
         byte[] bytes = fetchImage(imageUrl);
         if (bytes == null) return ModerationResult.UNAVAILABLE;   // 못 가져오면 보류
-        String content = gemini.generateText(buildImagePrompt(), bytes, guessMimeType(imageUrl));
+        return moderateImageBytes(bytes, guessMimeType(imageUrl));
+    }
+
+    @Override
+    public ModerationResult moderateImageBytes(byte[] bytes, String mimeType) {
+        if (bytes == null || bytes.length == 0) return ModerationResult.UNAVAILABLE;
+        if (bytes.length > MAX_IMAGE_BYTES) {
+            log.warn("이미지가 너무 커서 검수를 보류합니다(size={} bytes).", bytes.length);
+            return ModerationResult.UNAVAILABLE;
+        }
+        String mime = (mimeType != null && !mimeType.isBlank()) ? mimeType : "image/jpeg";
+        String content = gemini.generateText(buildImagePrompt(), bytes, mime);
         return toResult(content);
     }
 

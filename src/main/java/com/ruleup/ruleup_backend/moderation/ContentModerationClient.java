@@ -13,6 +13,12 @@ public interface ContentModerationClient {
     /** 챌린지 이름 텍스트 검수(§5.1 비동기 게이트). 검수 불가 시 UNAVAILABLE(보류). */
     ModerationResult moderateChallengeName(String title);
 
-    /** 프로필 사진 검수(멀티모달). 이미지를 가져오지 못하면 UNAVAILABLE(보류). */
+    /** 프로필 사진 검수(멀티모달, URL). 이미지를 가져오지 못하면 UNAVAILABLE(보류). */
     ModerationResult moderateImage(String imageUrl);
+
+    /**
+     * 이미지 바이트 동기 검수(업로드 핫패스, §9 SafeSearch 게이트).
+     * 명백 위반이면 REJECTED, 문제없으면 APPROVED, 검수 불가(AI 미설정/실패)면 UNAVAILABLE(=업로드 허용).
+     */
+    ModerationResult moderateImageBytes(byte[] bytes, String mimeType);
 }

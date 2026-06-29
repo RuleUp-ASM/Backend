@@ -36,6 +36,7 @@ public enum ErrorCode {
     IMAGE_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "이미지 크기는 10MB를 초과할 수 없습니다."),
     IMAGE_INVALID_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "jpg 또는 png 이미지만 업로드할 수 있습니다."),
     IMAGE_CORRUPTED(HttpStatus.BAD_REQUEST, "이미지 파일이 손상되었습니다."),
+    IMAGE_REJECTED(HttpStatus.UNPROCESSABLE_ENTITY, "부적절한 이미지로 업로드가 차단되었습니다."),
 
     // ===== 챌린지 - 추천/생성 입력 검증 (3.1 / 3.2) =====
     TITLE_REQUIRED(HttpStatus.BAD_REQUEST, "챌린지 이름을 입력해주세요."),
