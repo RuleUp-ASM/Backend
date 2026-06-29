@@ -8,6 +8,8 @@ public enum NotificationType {
     PROFILE_IMAGE_REJECTED,
     /** 챌린지 이름이 검수에서 거절됨 → "챌린지 이름을 바꿔주세요"(1시간 수정창) */
     CHALLENGE_NAME_REJECTED,
+    /** 거절된 챌린지가 1시간 내 미수정으로 영구 닫힘 → "챌린지가 닫혔어요" */
+    CHALLENGE_CLOSED,
     /** 기타 시스템 알림 */
     SYSTEM
 }
