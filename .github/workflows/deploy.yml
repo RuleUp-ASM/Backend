@@ -40,7 +40,7 @@ jobs:
           ./gradlew bootJar -x test
 
       - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::961178969292:role/ruleup-stg-gha-deploy
           aws-region: ${{ env.AWS_REGION }}
@@ -50,11 +50,11 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       # 미리 빌드한 jar만 arm64 런타임 이미지에 복사 → 에뮬레이션 없이 빠름.
       - name: Build & push image (arm64)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.deploy
