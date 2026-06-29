@@ -101,6 +101,21 @@ public enum ErrorCode {
     INVALID_QUERY(HttpStatus.BAD_REQUEST, "검색어가 올바르지 않습니다."),
     PLACE_SEARCH_RATE_LIMIT(HttpStatus.TOO_MANY_REQUESTS, "장소 검색 요청이 너무 많습니다."),
 
+    // ===== 감시자(watcher) (§5.9 / §11.4) =====
+    WATCHER_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "무료 감시자 한도(3명)를 초과했습니다."),
+    WATCHER_BLOCKED(HttpStatus.CONFLICT, "수신거부 이력으로 30일간 재초대할 수 없습니다."),
+    WATCHER_NOT_FOUND(HttpStatus.NOT_FOUND, "감시자를 찾을 수 없습니다."),
+    INVITATION_NOT_FOUND(HttpStatus.NOT_FOUND, "초대를 찾을 수 없습니다."),
+    INVITATION_EXPIRED(HttpStatus.GONE, "초대가 만료되었습니다."),
+    ALREADY_CONSENTED(HttpStatus.CONFLICT, "이미 수락한 초대입니다."),
+    OTP_INVALID(HttpStatus.BAD_REQUEST, "인증번호가 일치하지 않습니다."),
+    OTP_EXPIRED(HttpStatus.GONE, "인증번호가 만료되었습니다."),
+    OTP_RESEND_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "잠시 후 다시 인증번호를 요청해주세요."),
+    INVALID_PHONE(HttpStatus.BAD_REQUEST, "휴대폰 번호 형식이 올바르지 않습니다."),
+    CONSENT_REQUIRED(HttpStatus.BAD_REQUEST, "수신 동의가 필요합니다."),
+    UNSUBSCRIBE_TOKEN_INVALID(HttpStatus.NOT_FOUND, "유효하지 않은 수신거부 링크입니다."),
+    UNSUBSCRIBE_TOKEN_EXPIRED(HttpStatus.GONE, "만료된 수신거부 링크입니다."),
+
     // ===== 공통 =====
     TOO_MANY_REQUESTS(HttpStatus.TOO_MANY_REQUESTS, "요청이 너무 많습니다. 잠시 후 다시 시도해주세요."),
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류가 발생했습니다."),

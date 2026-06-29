@@ -56,6 +56,13 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(PUBLIC).permitAll()
                         .requestMatchers(SWAGGER).permitAll()
+                        // 감시자(§11.4): 공개 진입/비유저 동의 경로. 초대 진입(GET)은 로그인 선택(토큰 있으면 viewerIsUser).
+                        // accept(유저 수락)는 공개 목록에서 제외 → 인증 필요(anyRequest).
+                        .requestMatchers(HttpMethod.GET,  "/api/v1/watchers/invitations/*").permitAll()
+                        .requestMatchers(HttpMethod.POST,
+                                "/api/v1/watchers/invitations/*/otp",
+                                "/api/v1/watchers/invitations/*/consent",
+                                "/api/v1/watchers/unsubscribe").permitAll()
                         // 4.5 로그아웃은 명세상 "로그인 O" → 인증 필요(공개 목록에서 제외)
                         .requestMatchers(HttpMethod.POST, "/api/v1/account/logout").authenticated()
                         .anyRequest().authenticated()
