@@ -6,6 +6,8 @@ public enum NotificationType {
     NICKNAME_REJECTED,
     /** 프로필 사진이 검수에서 거절됨 → "프로필 사진을 바꿔주세요" */
     PROFILE_IMAGE_REJECTED,
+    /** 챌린지 이름이 검수에서 거절됨 → "챌린지 이름을 바꿔주세요"(1시간 수정창) */
+    CHALLENGE_NAME_REJECTED,
     /** 기타 시스템 알림 */
     SYSTEM
 }

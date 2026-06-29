@@ -58,6 +58,11 @@ public enum ErrorCode {
     CHALLENGE_NOT_FOUND(HttpStatus.NOT_FOUND, "챌린지를 찾을 수 없습니다."),
     NOT_CHALLENGE_OWNER(HttpStatus.FORBIDDEN, "챌린지 생성자만 수행할 수 있습니다."),
     CHALLENGE_NOT_EDITABLE(HttpStatus.CONFLICT, "시작된 챌린지는 수정/삭제할 수 없습니다."),
+    // 모더레이션 게이트(§5.1) / 삭제 정책(§5.8)
+    CHALLENGE_UNDER_REVIEW(HttpStatus.CONFLICT, "검수 중인 챌린지에는 참여할 수 없습니다."),
+    CHALLENGE_HAS_MEMBERS(HttpStatus.CONFLICT, "다른 참여자가 있는 챌린지는 삭제할 수 없습니다."),
+    DELETE_LOCKED(HttpStatus.CONFLICT, "생성 후 7일 이내이거나 계획 기간이 7일 미만이면 삭제할 수 없습니다."),
+    CHALLENGE_NAME_REJECTED(HttpStatus.UNPROCESSABLE_ENTITY, "사용할 수 없는 챌린지 이름입니다."),
 
     // ===== 챌린지 - 참여/멤버 (3.6 / 3.7 / 3.8) =====
     MANNER_TEMPERATURE_BELOW_MINIMUM(HttpStatus.FORBIDDEN, "참여 기준 매너 온도를 충족하지 못했습니다."),

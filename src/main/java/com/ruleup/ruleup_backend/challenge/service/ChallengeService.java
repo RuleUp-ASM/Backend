@@ -2,6 +2,8 @@ package com.ruleup.ruleup_backend.challenge.service;
 
 import com.ruleup.ruleup_backend.challenge.domain.*;
 import com.ruleup.ruleup_backend.challenge.dto.*;
+import com.ruleup.ruleup_backend.challenge.moderation.ChallengeModerationRequested;
+import com.ruleup.ruleup_backend.challenge.moderation.ChallengeNameBlocklist;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
@@ -14,12 +16,15 @@ import com.ruleup.ruleup_backend.user.domain.InterestCategory;
 import com.ruleup.ruleup_backend.user.domain.User;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
 
@@ -38,18 +43,26 @@ public class ChallengeService {
     private final UserRepository userRepository;
     private final ReputationScoreRepository reputationScoreRepository;
     private final RoutineSelectionService routineSelectionService;
+    private final ChallengeNameBlocklist nameBlocklist;
+    private final ApplicationEventPublisher eventPublisher;
+
+    /** 하루 경계·삭제 차감 계산의 사용자 로컬 = MVP는 KST 고정(§4.4). */
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    /** 삭제 잠금 해제 시점 = 생성 후 7일(§5.8). */
+    private static final int DELETE_UNLOCK_DAYS = 7;
 
     // ===== 3.2 생성 =====
     @Transactional
     public ChallengeResponse create(UUID userId, CreateChallengeRequest req) {
         validateTitle(req.title());
+        nameBlocklist.validate(req.title());     // 명백 비속어는 동기 차단(§5.1, 선택)
         if (req.description() != null && req.description().length() > 200)
             throw new BusinessException(ErrorCode.DESCRIPTION_TOO_LONG);
 
         String category = validateCategory(req.category());
         ParticipationType participationType = validateParticipationType(req.participationType());
-        // 익명(ANONYMOUS) 기능은 보류 — 입력값과 무관하게 항상 실명(REAL)로 저장한다(스키마는 유지).
-        Anonymity anonymity = Anonymity.REAL;
+        // 익명/실명은 입력값 그대로 저장(§11.2 — silently-drop 금지). 익명이면 응답에서 닉네임 마스킹.
+        Anonymity anonymity = validateAnonymity(req.anonymity());
         List<String> repeatDays = validateRepeatDays(req.repeatDays());
         int durationDays = validateDuration(req.durationDays());
         LocalDate startDate = validateStartDate(req.startDate());
@@ -76,6 +89,9 @@ public class ChallengeService {
         memberRepository.save(ChallengeMember.owner(challenge.getId(), userId));
         challenge.increaseParticipantCount();
 
+        // 이름 LLM 검수는 비동기(§5.1) — 커밋 후 AFTER_COMMIT 리스너가 APPROVED/REJECTED 결정.
+        eventPublisher.publishEvent(new ChallengeModerationRequested(challenge.getId()));
+
         // 추천 세그먼트 점수는 여기서 즉시 갱신하지 않는다(매 생성마다 바뀌면 추천 캐시 효율↓).
         // SegmentScoreService 가 주기적으로 누적 챌린지를 재집계한다.
         return ChallengeResponse.from(challenge);
@@ -93,10 +109,12 @@ public class ChallengeService {
     @Transactional(readOnly = true)
     public ChallengeDetailResponse getDetail(UUID userId, UUID challengeId) {
         Challenge c = loadActive(challengeId);
+        // 가시성 게이트(§5.1): 비-OWNER는 APPROVED만 조회 가능. 그 외는 존재 자체를 숨겨 404.
+        if (!c.isVisibleTo(userId)) throw new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND);
 
-        // 생성자 닉네임 (검수 전/거절이면 타인에게 임시 닉네임)
+        // 생성자 닉네임: 검수 전/거절이면 임시 닉네임(visibleNicknameTo) + 익명이면 추가 마스킹(§11.2).
         String ownerNickname = userRepository.findById(c.getCreatorId())
-                .map(u -> u.visibleNicknameTo(userId))
+                .map(u -> c.getAnonymity().maskNickname(u.visibleNicknameTo(userId)))
                 .orElse(null);
 
         // 통계
@@ -114,9 +132,14 @@ public class ChallengeService {
         var eligibility = new ChallengeDetailResponse.Eligibility(
                 canJoin, myManner, c.getMinMannerTemperature());
 
+        // fixDeadline 은 OWNER에게만 의미(REJECTED 1시간 수정창). 타인에겐 항상 null.
+        String fixDeadline = (c.isOwner(userId) && c.getFixDeadline() != null)
+                ? c.getFixDeadline().toString() : null;
+
         return new ChallengeDetailResponse(
                 c.getId().toString(), c.getTitle(), c.getDescription(), c.getImageUrl(),
                 c.getCategory(), c.getParticipationType().name(), c.getStatus().name(),
+                c.getModerationStatus().name(), fixDeadline, c.getAnonymity().name(),
                 new ChallengeDetailResponse.Owner(ownerNickname),
                 c.getRepeatDays(), c.getDurationDays(),
                 c.getStartDate().toString(), c.getEndDate().toString(),
@@ -132,11 +155,20 @@ public class ChallengeService {
         ensureOwner(c, userId);
         ensureEditable(c, challengeId);
 
-        if (req.title() != null) validateTitle(req.title());
+        if (req.title() != null) {
+            validateTitle(req.title());
+            nameBlocklist.validate(req.title());     // 명백 비속어 동기 차단(§5.1)
+        }
         if (req.description() != null && req.description().length() > 200)
             throw new BusinessException(ErrorCode.DESCRIPTION_TOO_LONG);
 
+        // title/imageUrl 이 실제로 바뀌면 재검수(§5.1) — 바꾸기 "전" 값과 비교.
+        boolean nameOrImageChanged =
+                (req.title() != null && !req.title().equals(c.getTitle()))
+                        || (req.imageUrl() != null && !req.imageUrl().equals(c.getImageUrl()));
+
         c.changeTitle(req.title());
+        c.changeImageUrl(req.imageUrl());
         c.changeDescription(req.description());
         if (req.category() != null)   c.changeCategory(validateCategory(req.category()));
         if (req.repeatDays() != null) c.changeRepeatDays(validateRepeatDays(req.repeatDays()));
@@ -153,16 +185,50 @@ public class ChallengeService {
         LocalDate start = (req.startDate() != null) ? validateStartDate(req.startDate()) : null;
         c.changeSchedule(duration, start);
 
+        // 이름/이미지가 바뀌었으면 PENDING_REVIEW 로 되돌리고 재검수(REJECTED 1h 수정 경로 포함).
+        if (nameOrImageChanged) {
+            c.resubmitModeration();
+            eventPublisher.publishEvent(new ChallengeModerationRequested(c.getId()));
+        }
+
         return ChallengeResponse.from(c);
     }
 
-    // ===== 3.5 삭제 (소프트, OWNER만) =====
+    // ===== 3.5 삭제 (소프트, OWNER만) — §5.8 판정 순서 고정 =====
     @Transactional
-    public void delete(UUID userId, UUID challengeId) {
+    public DeleteChallengeResponse delete(UUID userId, UUID challengeId) {
         Challenge c = loadActive(challengeId);
+        // ① OWNER 확인
         ensureOwner(c, userId);
-        ensureEditable(c, challengeId);
+        // ② 나 외 ACTIVE 멤버가 있으면 불가(PENDING 신청자는 제외 — ACTIVE만 카운트).
+        long activeCount = memberRepository.countByChallengeIdAndStatus(challengeId, MemberStatus.ACTIVE);
+        if (activeCount > 1)   // 생성자 본인(ACTIVE) 1명 제외하고 더 있으면
+            throw new BusinessException(ErrorCode.CHALLENGE_HAS_MEMBERS);
+        // ③ 잠금: 생성 후 7일 이내 또는 계획 기간 7일 미만
+        Instant now = Instant.now();
+        Instant unlock = c.getCreatedAt().plus(DELETE_UNLOCK_DAYS, java.time.temporal.ChronoUnit.DAYS);
+        if (now.isBefore(unlock) || c.getDurationDays() < DELETE_UNLOCK_DAYS)
+            throw new BusinessException(ErrorCode.DELETE_LOCKED);
+        // ④ 차감 계산 후 소프트 삭제. 실제 매너 가감은 평판 스펙 소관 — 여기선 트리거 + 값 반환만.
+        BigDecimal mannerPenalty = computeMannerPenalty(c, now, unlock);
         c.softDelete();
+        return new DeleteChallengeResponse(mannerPenalty);
+    }
+
+    /**
+     * §5.8 차감량: mannerPenalty = round(basePenalty × max(0,(endDate−now)/(endDate−unlock)), 1).
+     *  - basePenalty = 챌린지 패널티 설정의 mannerDeduction.
+     *  - 진행할수록(now가 endDate에 가까울수록) 차감이 작아지고, 계획 종료 시 0.
+     *  - 하루 경계는 KST(§4.4). endDate(로컬 날짜)는 그 날 끝(다음날 자정)으로 환산해 비교.
+     */
+    private BigDecimal computeMannerPenalty(Challenge c, Instant now, Instant unlock) {
+        BigDecimal base = (c.getPenalty() != null && c.getPenalty().mannerDeduction() != null)
+                ? c.getPenalty().mannerDeduction() : BigDecimal.ZERO;
+        Instant end = c.getEndDate().plusDays(1).atStartOfDay(KST).toInstant();
+        double span = (double) (end.getEpochSecond() - unlock.getEpochSecond());
+        double remain = (double) (end.getEpochSecond() - now.getEpochSecond());
+        double ratio = (span <= 0) ? 0.0 : Math.max(0.0, Math.min(1.0, remain / span));
+        return base.multiply(BigDecimal.valueOf(ratio)).setScale(1, RoundingMode.HALF_UP);
     }
 
     // ====================== 내부 헬퍼 ======================
@@ -246,6 +312,16 @@ public class ChallengeService {
             return ParticipationType.valueOf(v);
         } catch (Exception e) {
             throw new BusinessException(ErrorCode.INVALID_PARTICIPATION_TYPE);
+        }
+    }
+
+    /** 익명/실명 파싱. 미전송이면 기본 REAL, 허용값 외엔 INVALID_ANONYMITY. */
+    private Anonymity validateAnonymity(String v) {
+        if (v == null || v.isBlank()) return Anonymity.REAL;
+        try {
+            return Anonymity.valueOf(v);
+        } catch (Exception e) {
+            throw new BusinessException(ErrorCode.INVALID_ANONYMITY);
         }
     }
 

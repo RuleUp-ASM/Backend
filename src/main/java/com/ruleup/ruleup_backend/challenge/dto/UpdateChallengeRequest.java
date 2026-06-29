@@ -15,6 +15,7 @@ import java.util.Map;
 public record UpdateChallengeRequest(
         String title,
         String description,
+        String imageUrl,
         String category,
         List<String> repeatDays,
         Integer durationDays,

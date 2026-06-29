@@ -96,6 +96,17 @@ public class Challenge extends AssignedIdEntity {
     @Column(name = "status", nullable = false)
     private ChallengeStatus status;
 
+    // ===== 모더레이션(가시성) 게이트 (§5.1) — lifecycle status 와 독립 축 =====
+    @Enumerated(EnumType.STRING)
+    @Column(name = "moderationStatus", nullable = false)
+    private ChallengeModerationStatus moderationStatus;
+
+    @Column(name = "moderationDecidedAt")
+    private Instant moderationDecidedAt;       // APPROVED/REJECTED 확정 시각
+
+    @Column(name = "fixDeadline")
+    private Instant fixDeadline;               // REJECTED 1시간 수정창 마감(§5.1)
+
     @Column(name = "aiAssisted", nullable = false)
     private boolean aiAssisted;
 
@@ -145,6 +156,8 @@ public class Challenge extends AssignedIdEntity {
         c.reward = reward;
         c.anonymity = anonymity;
         c.status = ChallengeStatus.RECRUITING;
+        // 생성은 항상 성공하되 타인에겐 비노출 → 비동기 LLM 검수 후 APPROVED 전환(§5.1).
+        c.moderationStatus = ChallengeModerationStatus.PENDING_REVIEW;
         c.aiAssisted = aiAssisted;
         c.participantCount = 0;
         return c;
@@ -152,7 +165,35 @@ public class Challenge extends AssignedIdEntity {
 
     public boolean isEditable() { return status.isEditable(); }
 
+    // ===== 모더레이션 게이트 (§5.1) =====
+    public boolean isApproved() { return moderationStatus == ChallengeModerationStatus.APPROVED; }
+
+    /** 조회 가시성: OWNER는 항상, 그 외는 APPROVED만(아니면 호출부에서 404 처리). */
+    public boolean isVisibleTo(UUID viewerId) { return isOwner(viewerId) || isApproved(); }
+
+    /** 검수 통과 → 공개·가입 허용. */
+    public void approveModeration(Instant at) {
+        this.moderationStatus = ChallengeModerationStatus.APPROVED;
+        this.moderationDecidedAt = at;
+        this.fixDeadline = null;
+    }
+
+    /** 검수 거절 → 1시간 수정창 부여(§5.1). 미수정·경과 시 배치가 영구 닫는다. */
+    public void rejectModeration(Instant at, Instant fixDeadline) {
+        this.moderationStatus = ChallengeModerationStatus.REJECTED;
+        this.moderationDecidedAt = at;
+        this.fixDeadline = fixDeadline;
+    }
+
+    /** title/imageUrl 변경 시 재검수를 위해 PENDING_REVIEW로 되돌린다(§5.1). */
+    public void resubmitModeration() {
+        this.moderationStatus = ChallengeModerationStatus.PENDING_REVIEW;
+        this.moderationDecidedAt = null;
+        this.fixDeadline = null;
+    }
+
     public void changeTitle(String v)        { if (v != null) this.title = v; }
+    public void changeImageUrl(String v)     { if (v != null) this.imageUrl = v; }
     public void changeDescription(String v)  { this.description = v; }
     public void changeCategory(String v)     { if (v != null) this.category = v; }
     public void changeRepeatDays(List<String> v) { if (v != null) this.repeatDays = new ArrayList<>(v); }

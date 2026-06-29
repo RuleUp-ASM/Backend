@@ -44,6 +44,8 @@ public class ChallengeMemberService {
     @Transactional
     public JoinResponse join(UUID userId, UUID challengeId) {
         Challenge c = loadActive(challengeId);
+        // 모더레이션 게이트(§5.1): APPROVED 가 아니면 가입 차단.
+        if (!c.isApproved()) throw new BusinessException(ErrorCode.CHALLENGE_UNDER_REVIEW);
 
         // 한 챌린지 1회 멤버십(uq_member). 기존 행이 ACTIVE/PENDING이면 중복, LEFT/REMOVED면 재참여 허용.
         ChallengeMember existing = memberRepository.findByChallengeIdAndUserId(challengeId, userId).orElse(null);

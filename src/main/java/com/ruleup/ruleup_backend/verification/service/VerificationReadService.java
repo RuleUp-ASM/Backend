@@ -146,7 +146,7 @@ public class VerificationReadService {
 
     private String overallStatus(ChallengeMember m, Challenge ch) {
         BigDecimal rate = m.getProgressRate();
-        if (ch.getStatus() == ChallengeStatus.ENDED) {
+        if (ch.getStatus() == ChallengeStatus.COMPLETED) {
             return (rate != null && rate.compareTo(BigDecimal.valueOf(100)) >= 0) ? "COMPLETED" : "FAILED";
         }
         if (m.getFailDays() > 0 || m.getTodayStatus() == VerificationStatus.FAILED) return "AT_RISK";

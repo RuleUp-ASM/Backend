@@ -69,12 +69,13 @@ public class ChallengeController {
         return ApiResponse.ok(challengeService.update(UUID.fromString(userId), UUID.fromString(challengeId), request));
     }
 
-    @Operation(summary = "챌린지 삭제", description = "생성자만, 소프트 삭제(deleted_at 기록). 시작 전만 허용.")
+    @Operation(summary = "챌린지 삭제",
+            description = "생성자만, 소프트 삭제. §5.8 판정 순서: OWNER → 나 외 ACTIVE 멤버(CHALLENGE_HAS_MEMBERS) "
+                    + "→ 잠금(생성 7일 이내·기간 7일 미만 DELETE_LOCKED) → 차감 계산 후 삭제. mannerPenalty 반환.")
     @DeleteMapping("/{challengeId}")
-    public ApiResponse<Void> delete(@AuthenticationPrincipal String userId,
-                                    @PathVariable String challengeId) {
-        challengeService.delete(UUID.fromString(userId), UUID.fromString(challengeId));
-        return ApiResponse.ok();
+    public ApiResponse<DeleteChallengeResponse> delete(@AuthenticationPrincipal String userId,
+                                                       @PathVariable String challengeId) {
+        return ApiResponse.ok(challengeService.delete(UUID.fromString(userId), UUID.fromString(challengeId)));
     }
 
     @Operation(summary = "추천 선택 → 초안(LLM 우회)", description = "추천 버튼에서 고른 templateId로 챌린지 초안을 바로 구성. LLM 안 거침.")
