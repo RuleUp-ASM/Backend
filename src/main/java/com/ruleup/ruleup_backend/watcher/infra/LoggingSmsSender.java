@@ -18,4 +18,9 @@ public class LoggingSmsSender implements SmsSender {
         // 운영성 본문 + 발신번호 사전등록 준수를 가정. 로컬에선 코드를 로그로 확인.
         log.info("[SMS-FAKE] to={} body=[룰업] 인증번호 {} (3분 내 입력)", PhoneNumbers.mask(phone), code);
     }
+
+    @Override
+    public void sendFailureNotice(String phone, String message, String unsubscribeUrl) {
+        log.info("[SMS-FAKE] to={} body=[룰업] {} 수신거부 {}", PhoneNumbers.mask(phone), message, unsubscribeUrl);
+    }
 }

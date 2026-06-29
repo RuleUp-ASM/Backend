@@ -51,6 +51,7 @@ class WatcherFlowIT {
         volatile String lastPhone;
         volatile String lastCode;
         public void sendOtp(String phone, String code) { this.lastPhone = phone; this.lastCode = code; }
+        public void sendFailureNotice(String phone, String message, String unsubscribeUrl) { }
     }
 
     @TestConfiguration

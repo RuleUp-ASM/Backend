@@ -7,7 +7,9 @@ import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
 import com.ruleup.ruleup_backend.verification.domain.*;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationMethodResultRepository;
+import com.ruleup.ruleup_backend.common.event.RoutineFailureConfirmed;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,6 +38,7 @@ public class VerificationFinalizeService {
     private final ChallengeQueryService challengeQuery;
     private final VerificationConfigFactory configFactory;
     private final VerificationProgressService progressService;
+    private final ApplicationEventPublisher eventPublisher;
 
     /** 1분마다: 유예 끝난 PENDING 확정. */
     @Scheduled(fixedDelay = 60_000)
@@ -58,6 +61,7 @@ public class VerificationFinalizeService {
         VerificationMethod method = config.primaryMethod();
         Polarity polarity = polarityOf(config, method);
 
+        boolean failed = false;
         if (polarity == Polarity.CONSTRAINT) {
             // 제약형(MAX·AVOID): 위반이면 sync에서 이미 FAILED 잠김 → 여기 온 건 무위반 → SUCCESS
             daily.recordResult(VerificationStatus.SUCCESS, method.name(), null, now);
@@ -73,10 +77,17 @@ public class VerificationFinalizeService {
                 reason = failureReasonFor(method, config);
             }
             daily.recordResult(VerificationStatus.FAILED, null, reason, now);
+            failed = true;
         }
 
         ChallengeMember member = challengeQuery.findMember(daily.getChallengeMemberId()).orElse(null);
         if (member != null) progressService.recount(member);
+
+        // 실패 확정 → 감시자 통지 적재(§9). watcher 리스너가 같은 트랜잭션에서 큐만 적재(외부 발송은 별도 스윕).
+        if (failed && member != null) {
+            eventPublisher.publishEvent(new RoutineFailureConfirmed(
+                    daily.getChallengeId(), member.getUserId(), daily.getTargetDate(), now));
+        }
     }
 
     /**

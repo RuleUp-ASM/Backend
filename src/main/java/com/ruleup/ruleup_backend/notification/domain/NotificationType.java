@@ -10,6 +10,8 @@ public enum NotificationType {
     CHALLENGE_NAME_REJECTED,
     /** 거절된 챌린지가 1시간 내 미수정으로 영구 닫힘 → "챌린지가 닫혔어요" */
     CHALLENGE_CLOSED,
+    /** 감시 대상이 루틴을 실패함 → 감시자(유저)에게 인앱 통지 */
+    WATCHER_ROUTINE_FAILED,
     /** 기타 시스템 알림 */
     SYSTEM
 }

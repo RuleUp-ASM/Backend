@@ -19,4 +19,7 @@ public interface WatcherRepository extends JpaRepository<Watcher, UUID> {
 
     /** 목록(생성자): 상태 필터(ACTIVE/INVITED 등). */
     List<Watcher> findByChallengeIdAndStatusOrderByInvitedAtAsc(UUID challengeId, WatcherStatus status);
+
+    /** 실패 통지 대상: 그 챌린지에서 그 사용자(=inviter)를 감시하는 ACTIVE 감시자들. */
+    List<Watcher> findByChallengeIdAndInviterUserIdAndStatus(UUID challengeId, UUID inviterUserId, WatcherStatus status);
 }
