@@ -27,9 +27,9 @@ public class SecurityConfig {
     // 로그인 없이 접근 가능한 공개 경로
     private static final String[] PUBLIC = {
             "/intro",                        // 앱 인트로/버전 게이트 (로그인 전 스플래시에서 호출)
-            "/api/v1/account/login/**",      // 4.1 / 4.2 소셜 로그인
-            "/api/v1/account/signup",        // 4.3 가입
-            "/api/v1/account/token/refresh", // 4.4 토큰 재발급 (refreshToken 사용)
+            "/api/v1/auth/oauth/**",         // 4.1 / 4.2 소셜 로그인 (+ /callback)
+            "/api/v1/auth/signup",           // 4.3 가입
+            "/api/v1/auth/refresh",          // 4.4 토큰 재발급 (refreshToken 사용)
             "/api/v1/nicknames/**",          // 4.6 닉네임 검사
             "/api/v1/categories",            // 4.7 카테고리 마스터
             "/files/**",                     // 정적 이미지 서빙
@@ -64,7 +64,7 @@ public class SecurityConfig {
                                 "/api/v1/watchers/invitations/*/consent",
                                 "/api/v1/watchers/unsubscribe").permitAll()
                         // 4.5 로그아웃은 명세상 "로그인 O" → 인증 필요(공개 목록에서 제외)
-                        .requestMatchers(HttpMethod.POST, "/api/v1/account/logout").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").authenticated()
                         .anyRequest().authenticated()
                 )
                 .exceptionHandling(ex -> ex.authenticationEntryPoint(entryPoint))

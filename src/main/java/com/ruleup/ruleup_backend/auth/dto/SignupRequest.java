@@ -3,7 +3,7 @@ package com.ruleup.ruleup_backend.auth.dto;
 import java.util.List;
 
 /**
- * POST /api/v1/account/signup 요청 바디 (스펙 4.3).
+ * POST /api/v1/auth/signup 요청 바디 (스펙 4.3).
  * 명세 구조에 맞춰 약관(agreements)은 clientProperties 안에 중첩된다.
  *
  * {
