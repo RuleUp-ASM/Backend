@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -27,6 +28,18 @@ public interface ChallengeRepository extends JpaRepository<Challenge, UUID> {
             "AND deletedAt IS NULL " +
             "ORDER BY fixDeadline LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
     List<Challenge> findRejectedFixWindowExpiredForUpdate(@Param("now") Instant now, @Param("limit") int limit);
+
+    /**
+     * 활성화 배치(§5.7): 시작일(startDate)이 도달한 RECRUITING·APPROVED 챌린지를
+     * FOR UPDATE SKIP LOCKED 로 선점. 모더레이션 미승인(PENDING_REVIEW/REJECTED) 챌린지는
+     * 가입·노출이 막혀 있으므로 활성화 대상에서 제외한다.
+     * 모더레이션 마감 배치와 동일한 DB 멱등 패턴(다중 인스턴스에서도 중복 전환 불가).
+     */
+    @Query(value = "SELECT * FROM Challenge " +
+            "WHERE status = 'RECRUITING' AND moderationStatus = 'APPROVED' AND startDate <= :today " +
+            "AND deletedAt IS NULL " +
+            "ORDER BY startDate LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
+    List<Challenge> findRecruitingDueForActivationForUpdate(@Param("today") LocalDate today, @Param("limit") int limit);
 
     /**
      * participant_count 원자적 +1 (동시 참여 시 read-modify-write 유실 방지).

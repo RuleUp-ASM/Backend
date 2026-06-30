@@ -165,6 +165,16 @@ public class Challenge extends AssignedIdEntity {
 
     public boolean isEditable() { return status.isEditable(); }
 
+    /**
+     * 시작일 도달 → 진행 개시(§5.7). RECRUITING 일 때만 ACTIVE 로 전환(멱등·방어).
+     * ACTIVE 가 되어야 인증 sync(§3.1)가 평가 대상으로 삼는다(VerificationSyncService).
+     */
+    public void activate() {
+        if (this.status == ChallengeStatus.RECRUITING) {
+            this.status = ChallengeStatus.ACTIVE;
+        }
+    }
+
     // ===== 모더레이션 게이트 (§5.1) =====
     public boolean isApproved() { return moderationStatus == ChallengeModerationStatus.APPROVED; }
 

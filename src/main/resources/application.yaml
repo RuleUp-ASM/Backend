@@ -68,7 +68,7 @@ app:
       api-key: ${GEMINI_API_KEY:}                  # 비밀키만 env (없어도 기동은 됨, 호출 시에만 필요)
       model: gemini-2.5-flash-lite
       base-url: https://generativelanguage.googleapis.com/v1beta
-      timeout-ms: 5000
+      timeout-ms: ${GEMINI_TIMEOUT_MS:10000}       # connect·read 공통(재시도와 곱해지므로 과도하게 올리지 말 것)
       max-retries: ${GEMINI_MAX_RETRIES:2}         # 503(UNAVAILABLE)·429·타임아웃 시 재시도 횟수
       retry-backoff-ms: ${GEMINI_RETRY_BACKOFF_MS:300}  # 지수 백오프 base (300→600→1200ms)
 
