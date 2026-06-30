@@ -52,7 +52,7 @@ public class ProfileService {
             if (!NicknamePolicy.isValid(req.nickname()))
                 throw new BusinessException(ErrorCode.NICKNAME_FORMAT_INVALID);
             if (userRepository.existsByNickname(req.nickname()))
-                throw new BusinessException(ErrorCode.NICKNAME_TAKEN);
+                throw new BusinessException(ErrorCode.NICKNAME_DUPLICATED);
             user.changeNickname(req.nickname());   // 상태를 PENDING으로 되돌림 → 재검수 필요
             needsModeration = true;
         }

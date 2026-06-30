@@ -38,7 +38,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class AuthService {
 
-    private static final String AGREEMENT_VERSION = "1.0";   // W1 약관 버전
+    private static final String DEFAULT_AGREEMENT_VERSION = "1.0";   // 클라가 version 미전송 시 폴백
 
     private final OAuthClientResolver resolver;
     private final UserRepository userRepository;
@@ -58,6 +58,9 @@ public class AuthService {
     // 그래서 "느린 외부 호출"은 트랜잭션 밖에서 하고,
     // "빠른 DB 쓰기"만 TokenService.issueTokenPair()의 짧은 트랜잭션으로 처리한다.
     public OAuthLoginResponse oauthLogin(OAuthProvider provider, OAuthLoginRequest req) {
+        // deviceInfo는 로그인·가입 양쪽 필수(계약). 외부 호출 전에 빠르게 거부.
+        requireValidDeviceInfo(req.deviceInfo());
+
         OAuthClient client = resolver.resolve(provider);
 
         // 1) 외부 IdP 호출 (트랜잭션 밖)
@@ -124,7 +127,7 @@ public class AuthService {
         if (!NicknamePolicy.isValid(req.nickname()))
             throw new BusinessException(ErrorCode.NICKNAME_FORMAT_INVALID);
         if (userRepository.existsByNickname(req.nickname()))
-            throw new BusinessException(ErrorCode.NICKNAME_TAKEN);
+            throw new BusinessException(ErrorCode.NICKNAME_DUPLICATED);
 
         // 관심 카테고리: 개수(1~6) → 코드 유효성
         List<String> categories = (req.interestCategories() != null) ? req.interestCategories() : List.of();
@@ -133,14 +136,19 @@ public class AuthService {
         if (!InterestCategory.allValid(categories))
             throw new BusinessException(ErrorCode.CATEGORY_INVALID);
 
-        // 약관: terms·privacy 필수
-        SignupRequest.Agreements ag = req.agreementsOrNull();
-        if (ag == null || !ag.terms() || !ag.privacy())
+        // 약관: terms·privacy 필수(동의 true)
+        SignupRequest.Agreements ag = req.agreements();
+        if (ag == null
+                || ag.termsOfService() == null || !ag.termsOfService().agreed()
+                || ag.privacyPolicy() == null || !ag.privacyPolicy().agreed())
             throw new BusinessException(ErrorCode.AGREEMENT_REQUIRED);
+
+        // deviceInfo는 가입에도 필수(계약).
+        requireValidDeviceInfo(req.deviceInfo());
 
         User user = User.create(provider, oauthSubject, email,
                 req.nickname(), req.profileImageUrl(), new ArrayList<>(categories));
-        applyDeviceInfo(user, req.deviceInfoOrNull());        // 가입 시 기기 정보 최초 수집(있으면)
+        applyDeviceInfo(user, req.deviceInfo());              // 가입 시 기기 정보 최초 저장
         user.updateCountryCode(countryResolver.resolve());   // 국가 코드는 서버가 요청에서 해석
         userRepository.save(user);
         reputationScoreRepository.save(ReputationScore.createDefault(user));
@@ -154,18 +162,31 @@ public class AuthService {
         return SignupResponse.from(pair, user, ReputationScore.INITIAL_TEMPERATURE);
     }
 
-    /** 기기 정보(선택값)를 유저에 반영. 가입·로그인 공용. null이면 무시(기존값 보존). */
+    /** deviceInfo는 로그인·가입 양쪽 필수. 누락/형식오류면 INVALID_DEVICE_INFO. */
+    private void requireValidDeviceInfo(DeviceInfoRequest device) {
+        if (device == null || !device.isValid())
+            throw new BusinessException(ErrorCode.INVALID_DEVICE_INFO);
+    }
+
+    /** 기기 정보를 유저에 반영(최신 1건 갱신). 호출 전 requireValidDeviceInfo 로 검증됨. */
     private void applyDeviceInfo(User user, DeviceInfoRequest device) {
         if (device == null) return;
-        user.updateDeviceInfo(device.toPlatform(), device.appVersionCode(), device.appVersionName());
+        user.updateDeviceInfo(device.toPlatform(), device.versionCode(), device.versionName());
     }
 
     private void saveAgreements(User user, SignupRequest.Agreements ag) {
-        userAgreementRepository.save(UserAgreement.agree(user, AgreementType.TERMS, AGREEMENT_VERSION));
-        userAgreementRepository.save(UserAgreement.agree(user, AgreementType.PRIVACY, AGREEMENT_VERSION));
-        if (ag.marketing()) {
-            userAgreementRepository.save(UserAgreement.agree(user, AgreementType.MARKETING, AGREEMENT_VERSION));
+        userAgreementRepository.save(UserAgreement.agree(user, AgreementType.TERMS, versionOf(ag.termsOfService())));
+        userAgreementRepository.save(UserAgreement.agree(user, AgreementType.PRIVACY, versionOf(ag.privacyPolicy())));
+        if (ag.marketing() != null && ag.marketing().agreed()) {
+            userAgreementRepository.save(UserAgreement.agree(user, AgreementType.MARKETING, versionOf(ag.marketing())));
         }
+    }
+
+    /** 클라가 보낸 약관 버전을 쓰되, 미전송이면 기본 버전으로 폴백. */
+    private String versionOf(SignupRequest.Agreement agreement) {
+        if (agreement == null || agreement.version() == null || agreement.version().isBlank())
+            return DEFAULT_AGREEMENT_VERSION;
+        return agreement.version();
     }
 
     // ===== 토큰 재발급 (회전) =====
@@ -204,9 +225,9 @@ public class AuthService {
 
     // ===== 토큰 파싱 헬퍼 =====
     private Claims parseSignupToken(String token) {
-        Claims claims = parseOrThrow(token, ErrorCode.SIGNUP_SESSION_EXPIRED, ErrorCode.SIGNUP_SESSION_INVALID);
+        Claims claims = parseOrThrow(token, ErrorCode.INVALID_SIGNUP_TOKEN, ErrorCode.INVALID_SIGNUP_TOKEN);
         if (!TokenType.SIGNUP.name().equals(claims.get("type")))
-            throw new BusinessException(ErrorCode.SIGNUP_SESSION_INVALID);
+            throw new BusinessException(ErrorCode.INVALID_SIGNUP_TOKEN);
         return claims;
     }
 

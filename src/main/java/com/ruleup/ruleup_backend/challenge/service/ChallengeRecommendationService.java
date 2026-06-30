@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.challenge.service;
 
+import com.ruleup.ruleup_backend.challenge.domain.Anonymity;
 import com.ruleup.ruleup_backend.challenge.domain.ParticipationType;
 import com.ruleup.ruleup_backend.challenge.domain.PenaltyConfig;
 import com.ruleup.ruleup_backend.challenge.domain.RepeatDay;
@@ -75,7 +76,8 @@ public class ChallengeRecommendationService {
                 start.toString(),
                 end.toString(),
                 new PenaltyConfig(deduction, new PenaltyConfig.SnsShare(false, null), false),
-                new RewardConfig(gain));
+                new RewardConfig(gain),
+                Anonymity.REAL.name());        // 초안 기본은 실명(§11.2 — 응답 누락 금지)
     }
 
     // ===== LLM 값 검증·폴백 (신뢰 경계) =====
@@ -114,6 +116,7 @@ public class ChallengeRecommendationService {
                 DEFAULT_PARTICIPATION.name(), null, DEFAULT_REPEAT_DAYS, DEFAULT_DURATION_DAYS,
                 start.toString(), end.toString(),
                 new PenaltyConfig(DEFAULT_MANNER_DEDUCTION, new PenaltyConfig.SnsShare(false, null), false),
-                new RewardConfig(DEFAULT_MANNER_GAIN));
+                new RewardConfig(DEFAULT_MANNER_GAIN),
+                Anonymity.REAL.name());
     }
 }

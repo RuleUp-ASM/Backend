@@ -31,6 +31,7 @@ public record ChallengeRecommendationResponse(
         String startDate,
         String endDate,
         PenaltyConfig penalty,
-        RewardConfig reward
+        RewardConfig reward,
+        String anonymity        // REAL / ANONYMOUS — 응답에서 누락 금지(§11.2)
 ) {
 }

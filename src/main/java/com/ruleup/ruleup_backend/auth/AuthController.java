@@ -16,7 +16,7 @@ import java.net.URI;
 
 /**
  * 계정/인증 API (스펙 4.1 ~ 4.6).
- * 경로 prefix는 명세에 맞춰 /api/v1/account, /api/v1/nicknames 를 사용한다.
+ * 경로 prefix는 API 계약(§0)에 맞춰 /api/v1/auth, /api/v1/nicknames 를 사용한다.
  */
 @Tag(name = "Account", description = "로그인 · 가입 · 토큰 · 닉네임")
 @RestController
@@ -31,7 +31,7 @@ public class AuthController {
      * {provider} path 변수 하나로 받는다. (kakao | google)
      */
     @Operation(summary = "소셜 로그인", description = "Kakao/Google 인가코드 검증 후 기존/신규 분기")
-    @PostMapping("/api/v1/account/login/{provider}")
+    @PostMapping("/api/v1/auth/oauth/{provider}")
     public ApiResponse<OAuthLoginResponse> login(@PathVariable String provider,
                                                  @RequestBody OAuthLoginRequest request) {
         return ApiResponse.ok(authService.oauthLogin(parseProvider(provider), request));
@@ -44,7 +44,7 @@ public class AuthController {
      * 앱은 그 code로 POST /login/{provider} 를 호출해 토큰을 받는다.
      */
     @Operation(summary = "소셜 로그인 서버 콜백(iOS)", description = "https redirect로 받은 인가코드를 앱 딥링크로 중계")
-    @GetMapping("/api/v1/account/login/{provider}/callback")
+    @GetMapping("/api/v1/auth/oauth/{provider}/callback")
     public ResponseEntity<Void> loginCallback(@PathVariable String provider,
                                               @RequestParam(required = false) String code,
                                               @RequestParam(required = false) String state,
@@ -55,19 +55,19 @@ public class AuthController {
     }
 
     @Operation(summary = "신규 가입 완료", description = "signupToken으로 가입을 마치고 앱 토큰 발급")
-    @PostMapping("/api/v1/account/signup")
+    @PostMapping("/api/v1/auth/signup")
     public ApiResponse<SignupResponse> signup(@RequestBody SignupRequest request) {
         return ApiResponse.ok(authService.signup(request));
     }
 
     @Operation(summary = "앱 토큰 재발급", description = "refreshToken 회전")
-    @PostMapping("/api/v1/account/token/refresh")
+    @PostMapping("/api/v1/auth/refresh")
     public ApiResponse<TokenResponse> refresh(@RequestBody RefreshRequest request) {
         return ApiResponse.ok(authService.refresh(request.refreshToken()));
     }
 
     @Operation(summary = "로그아웃", description = "현재 기기 refreshToken revoke")
-    @PostMapping("/api/v1/account/logout")
+    @PostMapping("/api/v1/auth/logout")
     public ApiResponse<Void> logout(@RequestBody LogoutRequest request) {
         authService.logout(request.refreshToken());
         return ApiResponse.ok();        // 200 + {success:true, data:null, error:null}

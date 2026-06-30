@@ -28,11 +28,17 @@ public record CreateChallengeRequest(
         Long templateId,
         String selectedMethod,
         Map<String, Object> params,
+        List<String> grantedPermissions,
         PenaltyConfig penalty,
         RewardConfig reward,
         String anonymity
 ) {
     public Map<String, Object> paramsOrEmpty() {
         return (params != null) ? params : Map.of();
+    }
+
+    /** AUTO 선택 시 클라가 확보했다고 보낸 권한 목록(검증용, 저장 안 함 §5.6). */
+    public List<String> grantedPermissionsOrEmpty() {
+        return (grantedPermissions != null) ? grantedPermissions : List.of();
     }
 }

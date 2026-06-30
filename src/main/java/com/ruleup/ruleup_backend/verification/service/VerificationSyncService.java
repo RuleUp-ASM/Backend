@@ -17,6 +17,8 @@ import com.ruleup.ruleup_backend.verification.repository.VerificationDailyReposi
 import com.ruleup.ruleup_backend.verification.repository.VerificationMethodResultRepository;
 import com.ruleup.ruleup_backend.verification.signal.SignalType;
 import com.ruleup.ruleup_backend.verification.signal.SyncSignal;
+import com.ruleup.ruleup_backend.common.event.RoutineFailureConfirmed;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -52,6 +54,7 @@ public class VerificationSyncService {
     private final VerificationMemberSetup memberSetup;
     private final VerificationConfigFactory configFactory;
     private final VerificationProgressService progressService;
+    private final ApplicationEventPublisher eventPublisher;
     private final Map<VerificationMethod, MethodEvaluator> evaluators;
 
     public VerificationSyncService(ChallengeQueryService challengeQuery,
@@ -61,6 +64,7 @@ public class VerificationSyncService {
                                    VerificationMemberSetup memberSetup,
                                    VerificationConfigFactory configFactory,
                                    VerificationProgressService progressService,
+                                   ApplicationEventPublisher eventPublisher,
                                    List<MethodEvaluator> evaluatorList) {
         this.challengeQuery = challengeQuery;
         this.dailyRepo = dailyRepo;
@@ -69,6 +73,7 @@ public class VerificationSyncService {
         this.memberSetup = memberSetup;
         this.configFactory = configFactory;
         this.progressService = progressService;
+        this.eventPublisher = eventPublisher;
         this.evaluators = evaluatorList.stream()
                 .collect(Collectors.toMap(MethodEvaluator::method, e -> e, (a, b) -> a));
     }
@@ -175,6 +180,11 @@ public class VerificationSyncService {
 
         if (config.isFrequency() && outcome.status() == VerificationStatus.SUCCESS && !wasSuccess) {
             member.incrementPeriodCompleted();   // 빈도형: 주기 완료 +1 (전이 시 1회)
+        }
+        // 제약형 위반 등으로 이 날이 FAILED 로 잠기면 감시자 통지 적재(§9). 다음 sync는 line 126에서 스킵되어 중복 없음.
+        if (outcome.status() == VerificationStatus.FAILED) {
+            eventPublisher.publishEvent(new RoutineFailureConfirmed(
+                    member.getChallengeId(), member.getUserId(), today, now));
         }
         return outcome.status();
     }

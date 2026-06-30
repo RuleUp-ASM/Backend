@@ -37,7 +37,7 @@ public class IntroController {
                     헤더 누락 시에는 표준 400(INVALID_REQUEST) 봉투를 내려준다.
                     """
     )
-    @GetMapping("/intro")
+    @GetMapping("/api/v1/intro")
     public ApiResponse<IntroResponse> intro(
             @Parameter(description = "클라이언트 앱 버전 코드(안드로이드 versionCode)", example = "2")
             @RequestHeader(value = "appVersionCode", required = false) Integer appVersionCode

@@ -7,7 +7,9 @@ import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
 import com.ruleup.ruleup_backend.verification.domain.*;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationMethodResultRepository;
+import com.ruleup.ruleup_backend.common.event.RoutineFailureConfirmed;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,6 +38,7 @@ public class VerificationFinalizeService {
     private final ChallengeQueryService challengeQuery;
     private final VerificationConfigFactory configFactory;
     private final VerificationProgressService progressService;
+    private final ApplicationEventPublisher eventPublisher;
 
     /** 1분마다: 유예 끝난 PENDING 확정. */
     @Scheduled(fixedDelay = 60_000)
@@ -58,6 +61,7 @@ public class VerificationFinalizeService {
         VerificationMethod method = config.primaryMethod();
         Polarity polarity = polarityOf(config, method);
 
+        boolean failed = false;
         if (polarity == Polarity.CONSTRAINT) {
             // 제약형(MAX·AVOID): 위반이면 sync에서 이미 FAILED 잠김 → 여기 온 건 무위반 → SUCCESS
             daily.recordResult(VerificationStatus.SUCCESS, method.name(), null, now);
@@ -73,25 +77,21 @@ public class VerificationFinalizeService {
                 reason = failureReasonFor(method, config);
             }
             daily.recordResult(VerificationStatus.FAILED, null, reason, now);
+            failed = true;
         }
 
         ChallengeMember member = challengeQuery.findMember(daily.getChallengeMemberId()).orElse(null);
         if (member != null) progressService.recount(member);
-    }
 
-    /**
-     * 예비 폴백 잠정성공 확정(침묵=동의, §9.2). 이의 윈도우가 지난 MANUAL_FALLBACK 잠정 행을 lock.
-     * (신고 시 무효화 플로우는 PN/RP 스펙 범위 — 여기선 무신고 확정만.)
-     */
-    @Scheduled(fixedDelay = 60_000)
-    @Transactional
-    public void confirmFallbackDisputes() {
-        Instant now = Instant.now();
-        List<VerificationDaily> due = dailyRepo.findFallbackDisputeDue(now, CLAIM_LIMIT);
-        for (VerificationDaily daily : due) {
-            daily.confirmFallback(now);   // disputeClosesAt 해제 + verifiedAt 세팅(진행률은 이미 SUCCESS로 반영됨)
+        // 실패 확정 → 감시자 통지 적재(§9). watcher 리스너가 같은 트랜잭션에서 큐만 적재(외부 발송은 별도 스윕).
+        if (failed && member != null) {
+            eventPublisher.publishEvent(new RoutineFailureConfirmed(
+                    daily.getChallengeId(), member.getUserId(), daily.getTargetDate(), now));
         }
     }
+
+    // (제거) 예비 폴백 "침묵=동의" 자동확정 sweeper — 방장 승인 모델(§9.2)로 전환되어 더는 필요 없다.
+    // 폴백 확정은 VerificationApprovalService(.../approval) 에서 방장 승인/거절로만 일어난다.
 
     /** 매일 00:05 KST: 종료된 빈도형 주기 정산 + 롤오버. */
     @Scheduled(cron = "0 5 0 * * *", zone = "Asia/Seoul")

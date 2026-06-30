@@ -10,11 +10,11 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
-import com.ruleup.ruleup_backend.common.image.ImageStorageService;
 import org.springframework.http.MediaType;
 import org.springframework.web.multipart.MultipartFile;
 import com.ruleup.ruleup_backend.common.image.UploadRateLimiter;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeRecommendationService;
+import com.ruleup.ruleup_backend.challenge.service.ChallengeImageService;
 
 import java.util.UUID;
 
@@ -27,7 +27,7 @@ public class ChallengeController {
 
     private final ChallengeRecommendationService challengeRecommendationService;
     private final ChallengeService challengeService;
-    private final ImageStorageService imageStorageService;
+    private final ChallengeImageService challengeImageService;
     private final UploadRateLimiter uploadRateLimiter;
 
     @Operation(summary = "챌린지 추천", description = "제목/설명을 루틴 템플릿과 매칭해 인증·목표값을 추천하고, "
@@ -45,13 +45,14 @@ public class ChallengeController {
     }
 
     @Operation(summary = "챌린지 대표 이미지 업로드",
-            description = "jpg/png, 최대 10MB. 반환된 imageUrl을 생성/수정 요청 body의 imageUrl에 넣는다.")
+            description = "jpg/png, 최대 10MB. 업로드 시 SafeSearch 동기 검수로 명백 위반은 422 IMAGE_REJECTED 차단. "
+                    + "반환된 imageUrl을 생성/수정 요청 body의 imageUrl에 넣는다.")
     @PostMapping(value = "/image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ApiResponse<ChallengeImageResponse> uploadImage(
             @AuthenticationPrincipal String userId,
             @RequestPart("image") MultipartFile image) {
         uploadRateLimiter.check(userId);
-        return ApiResponse.ok(new ChallengeImageResponse(imageStorageService.storeAndGetUrl(image)));
+        return ApiResponse.ok(new ChallengeImageResponse(challengeImageService.upload(image)));
     }
 
     @Operation(summary = "챌린지 상세 + 참여 자격")
@@ -69,12 +70,13 @@ public class ChallengeController {
         return ApiResponse.ok(challengeService.update(UUID.fromString(userId), UUID.fromString(challengeId), request));
     }
 
-    @Operation(summary = "챌린지 삭제", description = "생성자만, 소프트 삭제(deleted_at 기록). 시작 전만 허용.")
+    @Operation(summary = "챌린지 삭제",
+            description = "생성자만, 소프트 삭제. §5.8 판정 순서: OWNER → 나 외 ACTIVE 멤버(CHALLENGE_HAS_MEMBERS) "
+                    + "→ 잠금(생성 7일 이내·기간 7일 미만 DELETE_LOCKED) → 차감 계산 후 삭제. mannerPenalty 반환.")
     @DeleteMapping("/{challengeId}")
-    public ApiResponse<Void> delete(@AuthenticationPrincipal String userId,
-                                    @PathVariable String challengeId) {
-        challengeService.delete(UUID.fromString(userId), UUID.fromString(challengeId));
-        return ApiResponse.ok();
+    public ApiResponse<DeleteChallengeResponse> delete(@AuthenticationPrincipal String userId,
+                                                       @PathVariable String challengeId) {
+        return ApiResponse.ok(challengeService.delete(UUID.fromString(userId), UUID.fromString(challengeId)));
     }
 
     @Operation(summary = "추천 선택 → 초안(LLM 우회)", description = "추천 버튼에서 고른 templateId로 챌린지 초안을 바로 구성. LLM 안 거침.")

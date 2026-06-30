@@ -22,9 +22,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -43,12 +41,13 @@ public class VerificationSetupService {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final int MAX_ANCHORS = 10;
-    private static final int MIN_RADIUS_M = 20;       // 지오펜스 현실 하한(헬스장·카페 핀)
+    private static final int MIN_RADIUS_M = 500;      // 계약 하한(반경 500~5000m)
     private static final int MAX_RADIUS_M = 5000;     // 상한
     private static final Duration CHANGE_COOLDOWN = Duration.ofDays(7); // §11.5 잦은 변경 방지
 
     private final ChallengeQueryService challengeQuery;
     private final VerificationConfigFactory configFactory;
+    private final com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository dailyRepo;
 
     // ===== §11.4 최초 진입 셋업 요구사항 조회 (제출 전 안내용) =====
     @Transactional(readOnly = true)
@@ -84,32 +83,25 @@ public class VerificationSetupService {
 
         List<String> missing = new ArrayList<>();
 
-        // (1) 권한: config가 요구하는 권한 중 grant 안 된 것.
-        Set<String> granted = new HashSet<>();
-        if (req != null && req.grantedPermissions() != null) granted.addAll(req.grantedPermissions());
-        if (config.requiredPermissions() != null) {
-            for (String need : config.requiredPermissions()) {
-                if (need != null && !granted.contains(need)) missing.add("PERMISSION:" + need);
-            }
-        }
+        // §5.6/§9: 셋업은 OS 권한을 받지 않는다(권한 보유 상태 미저장). 바인딩(앵커·대상앱)만 검증한다.
 
-        // (2) GPS_PRESENCE: 바인딩 앵커 필요. 형식 오류는 즉시 400, "아직 없음"은 missing(소프트).
+        // (1) GPS_PRESENCE: 바인딩 앵커 필요. 형식 오류는 즉시 400, "아직 없음"은 missing(소프트).
         boolean gps = config.hasMethod(VerificationMethod.GPS_PRESENCE);
         List<GeoAnchor> anchors = null;
         if (gps) {
             SetupRequest.LocationBinding loc = (req != null) ? req.location() : null;
             List<SetupRequest.AnchorDto> raw = (loc != null) ? loc.anchors() : null;
             if (raw == null || raw.isEmpty()) {
-                missing.add("ANCHORS");
+                missing.add("ANCHORS_REQUIRED");
             } else {
                 anchors = toAnchors(raw);   // 형식 위반 시 INVALID_ANCHOR throw
             }
         }
 
-        // (3) SCREEN_TIME: 대상 앱 선택 필요. (멤버에 별도 컬럼 없음 → 현재는 존재 여부만 검증, 영속화는 후속 과제로 flag.)
+        // (2) SCREEN_TIME: 대상 앱 선택 필요. (멤버에 별도 컬럼 없음 → 현재는 존재 여부만 검증, 영속화는 후속 과제로 flag.)
         if (config.hasMethod(VerificationMethod.SCREEN_TIME)) {
             List<String> pkgs = (req != null) ? req.targetPackages() : null;
-            if (pkgs == null || pkgs.isEmpty()) missing.add("TARGET_PACKAGES");
+            if (pkgs == null || pkgs.isEmpty()) missing.add("TARGET_PACKAGES_REQUIRED");
         }
 
         Instant now = Instant.now();
@@ -133,8 +125,16 @@ public class VerificationSetupService {
             throw new BusinessException(ErrorCode.GEOFENCE_NOT_CONFIGURED);
         }
 
-        // 쿨다운: 최근 7일 내 변경 이력이 있으면 차단.
         Instant now = Instant.now();
+
+        // 인증 윈도우 중에는 위치 변경 거부(§11.5) → 익일 재시도. 오늘 인증 행의 창이 아직 안 닫혔으면 잠금.
+        LocalDate today = LocalDate.now(KST);
+        dailyRepo.findByChallengeMemberIdAndTargetDate(member.getId(), today).ifPresent(d -> {
+            if (d.getWindowClosesAt() != null && now.isBefore(d.getWindowClosesAt()))
+                throw new BusinessException(ErrorCode.LOCATION_LOCKED_IN_WINDOW);
+        });
+
+        // 쿨다운: 최근 7일 내 변경 이력이 있으면 차단.
         Instant last = member.getAnchorUpdatedAt();
         if (last != null && last.isAfter(now.minus(CHANGE_COOLDOWN))) {
             throw new BusinessException(ErrorCode.LOCATION_CHANGE_COOLDOWN);
@@ -146,9 +146,8 @@ public class VerificationSetupService {
         if (!member.isSetupReady()) member.markSetupReady();
         challengeQuery.saveMember(member);
 
-        // 즉시 적용. (윈도우-락 "익일부터" 단계 적용은 staged anchors 스키마 도입 후속 과제.)
-        String appliedFrom = LocalDate.now(KST).toString();
-        return new MemberLocationResponse(req.anchors(), appliedFrom);
+        // 성공 시 항상 즉시 적용(계약: appliedFrom="IMMEDIATE").
+        return new MemberLocationResponse(req.anchors(), "IMMEDIATE");
     }
 
     // ===== 헬퍼 =====

@@ -12,11 +12,13 @@ import java.util.Map;
 public record ChallengeResponse(
         String challengeId,
         String status,
+        String moderationStatus,
         String title,
         String description,
         String imageUrl,
         String category,
         String participationType,
+        String anonymity,
         BigDecimal minMannerTemperature,
         List<String> repeatDays,
         Integer durationDays,
@@ -30,8 +32,10 @@ public record ChallengeResponse(
 ) {
     public static ChallengeResponse from(Challenge c) {
         return new ChallengeResponse(
-                c.getId().toString(), c.getStatus().name(), c.getTitle(), c.getDescription(),
+                c.getId().toString(), c.getStatus().name(), c.getModerationStatus().name(),
+                c.getTitle(), c.getDescription(),
                 c.getImageUrl(), c.getCategory(), c.getParticipationType().name(),
+                c.getAnonymity().name(),
                 c.getMinMannerTemperature(), c.getRepeatDays(), c.getDurationDays(),
                 c.getStartDate().toString(), c.getEndDate().toString(),
                 c.getTemplateId(), c.getVerificationConfig(), c.getParams(),

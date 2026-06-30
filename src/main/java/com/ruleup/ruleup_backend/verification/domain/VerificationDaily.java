@@ -74,7 +74,11 @@ public class VerificationDaily extends AssignedIdEntity {
     private VerifiedVia verifiedVia;     // AUTO / MANUAL / MANUAL_FALLBACK (없으면 미확정)
 
     @Column(name = "disputeClosesAt")
-    private Instant disputeClosesAt;     // 예비 폴백 잠정성공의 이의 윈도우 종료(침묵=동의 확정 시각)
+    private Instant disputeClosesAt;     // (레거시) 예비 폴백 이의 윈도우 — 방장 승인 모델로 전환되며 미사용
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "fallbackApprovalStatus", length = 20)
+    private FallbackApprovalStatus fallbackApprovalStatus;   // 예비 폴백 방장 승인 상태(null=폴백 아님)
 
     @Generated(event = EventType.INSERT)
     @Column(name = "createdAt", nullable = false, updatable = false)
@@ -124,26 +128,39 @@ public class VerificationDaily extends AssignedIdEntity {
     }
 
     /**
-     * 예비 폴백 잠정 성공(§9.2). 상태는 SUCCESS로 보이되 verifiedVia=MANUAL_FALLBACK + disputeClosesAt 마킹.
-     * 이의 윈도우 동안 신고 없으면 확정 배치가 lock(verifiedAt 세팅·disputeClosesAt 해제).
+     * 예비 폴백 제출(§9.2, 방장 승인 모델). 상태는 PENDING 유지(진행률 미반영) + 승인 대기 마킹.
+     * 방장이 승인/거절할 때까지 SUCCESS/FAILED 로 확정되지 않는다.
      */
-    public void recordFallbackProvisional(String method, Instant disputeClosesAt) {
-        this.status = VerificationStatus.SUCCESS;
+    public void recordFallbackPending(String method) {
+        this.status = VerificationStatus.PENDING;
         this.method = method;
         this.failureReason = null;
+        this.verifiedVia = null;
+        this.verifiedAt = null;
+        this.fallbackApprovalStatus = FallbackApprovalStatus.PENDING;
+    }
+
+    /** 방장 승인 → SUCCESS 확정(verifiedVia=MANUAL_FALLBACK). */
+    public void approveFallback(Instant verifiedAt) {
+        this.status = VerificationStatus.SUCCESS;
+        this.failureReason = null;
         this.verifiedVia = VerifiedVia.MANUAL_FALLBACK;
-        this.disputeClosesAt = disputeClosesAt;
-        this.verifiedAt = null;   // 아직 확정 전(잠정)
-    }
-
-    /** 폴백 이의 윈도우 종료 → 확정(침묵=동의). */
-    public void confirmFallback(Instant verifiedAt) {
         this.verifiedAt = verifiedAt;
-        this.disputeClosesAt = null;
+        this.fallbackApprovalStatus = FallbackApprovalStatus.APPROVED;
     }
 
-    public boolean isFallbackPendingDispute() {
-        return verifiedVia == VerifiedVia.MANUAL_FALLBACK && verifiedAt == null && disputeClosesAt != null;
+    /** 방장 거절 → FAILED 확정(failureReason=FALLBACK_REJECTED). */
+    public void rejectFallback(Instant verifiedAt) {
+        this.status = VerificationStatus.FAILED;
+        this.failureReason = "FALLBACK_REJECTED";
+        this.verifiedVia = null;
+        this.verifiedAt = verifiedAt;
+        this.fallbackApprovalStatus = FallbackApprovalStatus.REJECTED;
+    }
+
+    /** 방장 결정 대기 중인 폴백 제출인지. */
+    public boolean isFallbackPendingApproval() {
+        return fallbackApprovalStatus == FallbackApprovalStatus.PENDING;
     }
 
     public boolean isPending() { return status == VerificationStatus.PENDING; }

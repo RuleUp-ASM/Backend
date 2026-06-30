@@ -32,7 +32,18 @@ public class ImageStorageService {
         }
     }
 
-    public String store(MultipartFile file) {
+    /**
+     * 검증 통과한 이미지 바이트 + 확장자. "검증"과 "저장"을 분리해, 그 사이에 동기 모더레이션
+     * (SafeSearch §9) 을 끼울 수 있게 한다.
+     */
+    public record ValidatedImage(byte[] bytes, String ext) {
+        public String mimeType() {
+            return "png".equals(ext) ? "image/png" : "image/jpeg";
+        }
+    }
+
+    /** 크기·매직넘버 검증만(저장 X). 실패 시 413/415/400. */
+    public ValidatedImage validate(MultipartFile file) {
         if (file == null || file.isEmpty()) throw new BusinessException(ErrorCode.IMAGE_CORRUPTED);
         if (file.getSize() > MAX_BYTES) throw new BusinessException(ErrorCode.IMAGE_TOO_LARGE);
 
@@ -42,15 +53,29 @@ public class ImageStorageService {
         } catch (IOException e) {
             throw new BusinessException(ErrorCode.IMAGE_CORRUPTED);
         }
-
         String ext = detectExtension(bytes);                 // 매직넘버로 판별 (헤더 신뢰 X)
-        String filename = UuidGenerator.generate() + "." + ext;
+        return new ValidatedImage(bytes, ext);
+    }
+
+    /** 검증된 바이트를 디스크에 저장하고 파일명 반환. */
+    public String storeValidated(ValidatedImage image) {
+        String filename = UuidGenerator.generate() + "." + image.ext();
         try {
-            Files.write(uploadDir.resolve(filename), bytes);
+            Files.write(uploadDir.resolve(filename), image.bytes());
         } catch (IOException e) {
             throw new BusinessException(ErrorCode.IMAGE_CORRUPTED);
         }
         return filename;
+    }
+
+    /** 정적 서빙 URL(/files/{파일명}) 생성. */
+    public String urlOf(String filename) {
+        return ServletUriComponentsBuilder.fromCurrentContextPath()
+                .path("/files/").path(filename).toUriString();
+    }
+
+    public String store(MultipartFile file) {
+        return storeValidated(validate(file));
     }
 
     /** 파일 앞부분 바이트(매직넘버)로 jpg/png 판별. 그 외엔 거부. */
@@ -65,8 +90,6 @@ public class ImageStorageService {
 
     /** 저장 후 정적 서빙 URL(/files/{파일명})까지 만들어 반환. 프로필·챌린지 공용. */
     public String storeAndGetUrl(MultipartFile file) {
-        String filename = store(file);
-        return ServletUriComponentsBuilder.fromCurrentContextPath()
-                .path("/files/").path(filename).toUriString();
+        return urlOf(store(file));
     }
 }

@@ -17,12 +17,15 @@ public enum ErrorCode {
     LOGIN_PROVIDER_UNAVAILABLE(HttpStatus.BAD_GATEWAY, "소셜 로그인 제공자에 연결할 수 없습니다."),
 
     // ===== 가입 세션 토큰 (signupToken) (4.3) =====
-    SIGNUP_SESSION_INVALID(HttpStatus.UNAUTHORIZED, "유효하지 않은 가입 세션입니다."),
-    SIGNUP_SESSION_EXPIRED(HttpStatus.UNAUTHORIZED, "가입 세션이 만료되었습니다. 처음부터 다시 진행해주세요."),
+    // 계약: 만료/위조 모두 400 INVALID_SIGNUP_TOKEN 로 단일화.
+    INVALID_SIGNUP_TOKEN(HttpStatus.BAD_REQUEST, "유효하지 않거나 만료된 가입 세션입니다. 처음부터 다시 진행해주세요."),
+
+    // ===== 기기 정보 (deviceInfo) (4.1 / 4.3) =====
+    INVALID_DEVICE_INFO(HttpStatus.BAD_REQUEST, "기기 정보(deviceInfo)가 누락되었거나 형식이 올바르지 않습니다."),
 
     // ===== 닉네임 / 카테고리 / 약관 (4.3 / 4.6 / 4.9) =====
     NICKNAME_FORMAT_INVALID(HttpStatus.BAD_REQUEST, "닉네임 형식이 올바르지 않습니다."),
-    NICKNAME_TAKEN(HttpStatus.CONFLICT, "이미 사용 중인 닉네임입니다."),
+    NICKNAME_DUPLICATED(HttpStatus.CONFLICT, "이미 사용 중인 닉네임입니다."),
     NICKNAME_CHANGE_LOCKED(HttpStatus.FORBIDDEN, "닉네임은 30일에 한 번만 변경할 수 있습니다."),
     CATEGORY_INVALID(HttpStatus.BAD_REQUEST, "유효하지 않은 관심 카테고리입니다."),
     CATEGORY_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "관심 카테고리는 1~6개까지 선택할 수 있습니다."),
@@ -36,6 +39,7 @@ public enum ErrorCode {
     IMAGE_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "이미지 크기는 10MB를 초과할 수 없습니다."),
     IMAGE_INVALID_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "jpg 또는 png 이미지만 업로드할 수 있습니다."),
     IMAGE_CORRUPTED(HttpStatus.BAD_REQUEST, "이미지 파일이 손상되었습니다."),
+    IMAGE_REJECTED(HttpStatus.UNPROCESSABLE_ENTITY, "부적절한 이미지로 업로드가 차단되었습니다."),
 
     // ===== 챌린지 - 추천/생성 입력 검증 (3.1 / 3.2) =====
     TITLE_REQUIRED(HttpStatus.BAD_REQUEST, "챌린지 이름을 입력해주세요."),
@@ -58,6 +62,11 @@ public enum ErrorCode {
     CHALLENGE_NOT_FOUND(HttpStatus.NOT_FOUND, "챌린지를 찾을 수 없습니다."),
     NOT_CHALLENGE_OWNER(HttpStatus.FORBIDDEN, "챌린지 생성자만 수행할 수 있습니다."),
     CHALLENGE_NOT_EDITABLE(HttpStatus.CONFLICT, "시작된 챌린지는 수정/삭제할 수 없습니다."),
+    // 모더레이션 게이트(§5.1) / 삭제 정책(§5.8)
+    CHALLENGE_UNDER_REVIEW(HttpStatus.CONFLICT, "검수 중인 챌린지에는 참여할 수 없습니다."),
+    CHALLENGE_HAS_MEMBERS(HttpStatus.CONFLICT, "다른 참여자가 있는 챌린지는 삭제할 수 없습니다."),
+    DELETE_LOCKED(HttpStatus.CONFLICT, "생성 후 7일 이내이거나 계획 기간이 7일 미만이면 삭제할 수 없습니다."),
+    CHALLENGE_NAME_REJECTED(HttpStatus.UNPROCESSABLE_ENTITY, "사용할 수 없는 챌린지 이름입니다."),
 
     // ===== 챌린지 - 참여/멤버 (3.6 / 3.7 / 3.8) =====
     MANNER_TEMPERATURE_BELOW_MINIMUM(HttpStatus.FORBIDDEN, "참여 기준 매너 온도를 충족하지 못했습니다."),
@@ -72,6 +81,7 @@ public enum ErrorCode {
     ROUTINE_TEMPLATE_NOT_FOUND(HttpStatus.BAD_REQUEST, "선택한 루틴 템플릿을 찾을 수 없습니다."),
     ROUTINE_METHOD_REQUIRED(HttpStatus.BAD_REQUEST, "인증 방식(AUTO/MANUAL)을 선택해주세요."),
     ROUTINE_AUTO_NOT_SUPPORTED(HttpStatus.BAD_REQUEST, "이 루틴은 자동 인증을 지원하지 않습니다."),
+    ROUTINE_PERMISSION_REQUIRED(HttpStatus.BAD_REQUEST, "자동 인증에 필요한 권한이 모두 허용되지 않았습니다."),
     INVALID_ROUTINE_PARAM(HttpStatus.BAD_REQUEST, "목표값이 올바르지 않습니다."),
 
     // ===== 알림 =====
@@ -83,6 +93,11 @@ public enum ErrorCode {
 
     NOT_CHALLENGE_MEMBER(HttpStatus.FORBIDDEN, "챌린지 참여자만 접근할 수 있습니다."),
     ALREADY_VERIFIED(HttpStatus.CONFLICT, "이미 인증된 날짜입니다."),
+
+    // ===== 예비 폴백 방장 승인 (§9.2 / API: .../verifications/{id}/approval) =====
+    VERIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "인증 제출을 찾을 수 없습니다."),
+    ALREADY_DECIDED(HttpStatus.CONFLICT, "이미 승인/거절된 제출입니다."),
+    NOT_PENDING_APPROVAL(HttpStatus.CONFLICT, "승인 대상(예비 폴백)이 아닙니다."),
     INVALID_TARGET_DATE(HttpStatus.BAD_REQUEST, "유효하지 않은 대상 날짜입니다."),
     IMAGE_REQUIRED(HttpStatus.BAD_REQUEST, "사진 인증은 이미지가 필요합니다."),
 
@@ -94,6 +109,21 @@ public enum ErrorCode {
     INVALID_ANCHOR(HttpStatus.BAD_REQUEST, "앵커 설정이 올바르지 않습니다.(반경 0.5~5km, 최대 10개)"),
     INVALID_QUERY(HttpStatus.BAD_REQUEST, "검색어가 올바르지 않습니다."),
     PLACE_SEARCH_RATE_LIMIT(HttpStatus.TOO_MANY_REQUESTS, "장소 검색 요청이 너무 많습니다."),
+
+    // ===== 감시자(watcher) (§5.9 / §11.4) =====
+    WATCHER_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "무료 감시자 한도(3명)를 초과했습니다."),
+    WATCHER_BLOCKED(HttpStatus.CONFLICT, "수신거부 이력으로 30일간 재초대할 수 없습니다."),
+    WATCHER_NOT_FOUND(HttpStatus.NOT_FOUND, "감시자를 찾을 수 없습니다."),
+    INVITATION_NOT_FOUND(HttpStatus.NOT_FOUND, "초대를 찾을 수 없습니다."),
+    INVITATION_EXPIRED(HttpStatus.GONE, "초대가 만료되었습니다."),
+    ALREADY_CONSENTED(HttpStatus.CONFLICT, "이미 수락한 초대입니다."),
+    OTP_INVALID(HttpStatus.BAD_REQUEST, "인증번호가 일치하지 않습니다."),
+    OTP_EXPIRED(HttpStatus.GONE, "인증번호가 만료되었습니다."),
+    OTP_RESEND_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "잠시 후 다시 인증번호를 요청해주세요."),
+    INVALID_PHONE(HttpStatus.BAD_REQUEST, "휴대폰 번호 형식이 올바르지 않습니다."),
+    CONSENT_REQUIRED(HttpStatus.BAD_REQUEST, "수신 동의가 필요합니다."),
+    UNSUBSCRIBE_TOKEN_INVALID(HttpStatus.NOT_FOUND, "유효하지 않은 수신거부 링크입니다."),
+    UNSUBSCRIBE_TOKEN_EXPIRED(HttpStatus.GONE, "만료된 수신거부 링크입니다."),
 
     // ===== 공통 =====
     TOO_MANY_REQUESTS(HttpStatus.TOO_MANY_REQUESTS, "요청이 너무 많습니다. 잠시 후 다시 시도해주세요."),
