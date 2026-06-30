@@ -17,7 +17,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -37,7 +36,6 @@ public class VerificationManualService {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final int FALLBACK_WEEKLY_LIMIT = 1;       // 주 1회(롤링 7일, §9.2)
-    private static final Duration DISPUTE_WINDOW = Duration.ofHours(24); // 이의 윈도우(§9.2: 24h, 다음 새벽과 맞물림)
 
     private final ChallengeQueryService challengeQuery;
     private final VerificationDailyRepository dailyRepo;
@@ -95,25 +93,26 @@ public class VerificationManualService {
         Map<String, Object> evidence = new HashMap<>();
         if (isPhoto) evidence.put("imageUrl", req.imageUrl()); else evidence.put("selfCheck", true);
         if (fallback) evidence.put("fallback", true);
-        mr.evaluate(VerificationStatus.SUCCESS, evidence, now);
+        // 폴백은 방장 승인 전이라 잠정. 방식 결과도 PENDING으로 두고, 승인 시 SUCCESS로 확정.
+        mr.evaluate(fallback ? VerificationStatus.PENDING : VerificationStatus.SUCCESS, evidence, now);
         methodResultRepo.save(mr);
 
-        Instant disputeClosesAt = null;
         if (fallback) {
-            disputeClosesAt = now.plus(DISPUTE_WINDOW);
-            daily.recordFallbackProvisional(method, disputeClosesAt);   // 잠정 SUCCESS + 이의윈도우
-        } else {
-            daily.recordManual(method, now);                            // 정규 수동 = 즉시 확정 SUCCESS
+            // 방장 승인 모델(§9.2): PENDING_APPROVAL 로 적재, 진행률은 승인 전이라 현재값 유지.
+            daily.recordFallbackPending(method);
+            progressService.recount(member);   // PENDING은 성공 미집계 → 진행률 유지
+            return new ManualVerificationResponse(
+                    daily.getId().toString(), targetDate.toString(), "PENDING_APPROVAL",
+                    "PENDING", null, member.getProgressRate());
         }
 
+        // 정규 수동 = 즉시 확정 SUCCESS.
+        daily.recordManual(method, now);
         if (targetDate.equals(today)) progressService.updateAfterSync(member, VerificationStatus.SUCCESS, now);
         else progressService.recount(member);
-
         return new ManualVerificationResponse(
-                targetDate.toString(), "SUCCESS",
-                fallback ? "MANUAL_FALLBACK" : "MANUAL",
-                (disputeClosesAt != null) ? disputeClosesAt.toString() : null,
-                method, member.getProgressRate());
+                daily.getId().toString(), targetDate.toString(), "SUCCESS",
+                null, "MANUAL", member.getProgressRate());
     }
 
     private LocalDate parseTargetDate(String raw, LocalDate today) {

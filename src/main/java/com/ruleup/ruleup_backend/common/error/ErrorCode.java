@@ -17,12 +17,15 @@ public enum ErrorCode {
     LOGIN_PROVIDER_UNAVAILABLE(HttpStatus.BAD_GATEWAY, "소셜 로그인 제공자에 연결할 수 없습니다."),
 
     // ===== 가입 세션 토큰 (signupToken) (4.3) =====
-    SIGNUP_SESSION_INVALID(HttpStatus.UNAUTHORIZED, "유효하지 않은 가입 세션입니다."),
-    SIGNUP_SESSION_EXPIRED(HttpStatus.UNAUTHORIZED, "가입 세션이 만료되었습니다. 처음부터 다시 진행해주세요."),
+    // 계약: 만료/위조 모두 400 INVALID_SIGNUP_TOKEN 로 단일화.
+    INVALID_SIGNUP_TOKEN(HttpStatus.BAD_REQUEST, "유효하지 않거나 만료된 가입 세션입니다. 처음부터 다시 진행해주세요."),
+
+    // ===== 기기 정보 (deviceInfo) (4.1 / 4.3) =====
+    INVALID_DEVICE_INFO(HttpStatus.BAD_REQUEST, "기기 정보(deviceInfo)가 누락되었거나 형식이 올바르지 않습니다."),
 
     // ===== 닉네임 / 카테고리 / 약관 (4.3 / 4.6 / 4.9) =====
     NICKNAME_FORMAT_INVALID(HttpStatus.BAD_REQUEST, "닉네임 형식이 올바르지 않습니다."),
-    NICKNAME_TAKEN(HttpStatus.CONFLICT, "이미 사용 중인 닉네임입니다."),
+    NICKNAME_DUPLICATED(HttpStatus.CONFLICT, "이미 사용 중인 닉네임입니다."),
     NICKNAME_CHANGE_LOCKED(HttpStatus.FORBIDDEN, "닉네임은 30일에 한 번만 변경할 수 있습니다."),
     CATEGORY_INVALID(HttpStatus.BAD_REQUEST, "유효하지 않은 관심 카테고리입니다."),
     CATEGORY_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "관심 카테고리는 1~6개까지 선택할 수 있습니다."),
@@ -78,6 +81,7 @@ public enum ErrorCode {
     ROUTINE_TEMPLATE_NOT_FOUND(HttpStatus.BAD_REQUEST, "선택한 루틴 템플릿을 찾을 수 없습니다."),
     ROUTINE_METHOD_REQUIRED(HttpStatus.BAD_REQUEST, "인증 방식(AUTO/MANUAL)을 선택해주세요."),
     ROUTINE_AUTO_NOT_SUPPORTED(HttpStatus.BAD_REQUEST, "이 루틴은 자동 인증을 지원하지 않습니다."),
+    ROUTINE_PERMISSION_REQUIRED(HttpStatus.BAD_REQUEST, "자동 인증에 필요한 권한이 모두 허용되지 않았습니다."),
     INVALID_ROUTINE_PARAM(HttpStatus.BAD_REQUEST, "목표값이 올바르지 않습니다."),
 
     // ===== 알림 =====
@@ -89,6 +93,11 @@ public enum ErrorCode {
 
     NOT_CHALLENGE_MEMBER(HttpStatus.FORBIDDEN, "챌린지 참여자만 접근할 수 있습니다."),
     ALREADY_VERIFIED(HttpStatus.CONFLICT, "이미 인증된 날짜입니다."),
+
+    // ===== 예비 폴백 방장 승인 (§9.2 / API: .../verifications/{id}/approval) =====
+    VERIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "인증 제출을 찾을 수 없습니다."),
+    ALREADY_DECIDED(HttpStatus.CONFLICT, "이미 승인/거절된 제출입니다."),
+    NOT_PENDING_APPROVAL(HttpStatus.CONFLICT, "승인 대상(예비 폴백)이 아닙니다."),
     INVALID_TARGET_DATE(HttpStatus.BAD_REQUEST, "유효하지 않은 대상 날짜입니다."),
     IMAGE_REQUIRED(HttpStatus.BAD_REQUEST, "사진 인증은 이미지가 필요합니다."),
 

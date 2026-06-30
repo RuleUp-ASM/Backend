@@ -3,16 +3,26 @@ package com.ruleup.ruleup_backend.auth.dto;
 import com.ruleup.ruleup_backend.user.domain.Platform;
 
 /**
- * 클라이언트 기기 정보. 가입(signup.clientProperties.deviceInfo) 시 최초 수집,
- * 로그인(login.deviceInfo) 시마다 갱신한다. 전부 선택값(미전송 시 기존값 보존).
+ * 공통 deviceInfo 객체 (계약: 로그인·가입 양쪽 동반). 필드명은 intro 요청바디와 동일하게 맞춘다(§11.1).
+ * 로그인·가입마다 최신 1건으로 갱신한다. 누락/형식오류는 INVALID_DEVICE_INFO 로 거부한다.
  *
- * <p>저장된 platform 은 추천 PLATFORM 세그먼트 축으로 사용된다.
+ * <p>MVP 저장 대상은 {@code platform / versionCode / versionName}(추천 PLATFORM 세그먼트 + 버전).
+ * 나머지(osVersion·sdkInt·deviceModel·manufacturer·lowRam)는 계약 호환을 위해 수신만 하고 저장하지 않는다.
  *
  * <pre>
- * { "platform": "ANDROID", "appVersionCode": 12, "appVersionName": "1.2.0" }
+ * { "platform":"ANDROID", "osVersion":"14", "sdkInt":34, "deviceModel":"SM-S921N",
+ *   "manufacturer":"samsung", "lowRam":false, "versionName":"1.0.0", "versionCode":100 }
  * </pre>
  */
-public record DeviceInfoRequest(String platform, Integer appVersionCode, String appVersionName) {
+public record DeviceInfoRequest(
+        String platform,
+        String osVersion,
+        Integer sdkInt,
+        String deviceModel,
+        String manufacturer,
+        Boolean lowRam,
+        String versionName,
+        Integer versionCode) {
 
     /** 문자열 platform 을 enum 으로(대소문자 무시, 알 수 없거나 비면 null). */
     public Platform toPlatform() {
@@ -20,7 +30,15 @@ public record DeviceInfoRequest(String platform, Integer appVersionCode, String 
         try {
             return Platform.valueOf(platform.trim().toUpperCase());
         } catch (IllegalArgumentException e) {
-            return null;   // 알 수 없는 플랫폼은 무시(기존값 보존)
+            return null;
         }
+    }
+
+    /**
+     * 계약상 deviceInfo는 로그인·가입에 필수. 최소 필드(platform·versionCode)가 유효해야 한다.
+     * 형식 위반 시 호출부에서 INVALID_DEVICE_INFO 로 거부.
+     */
+    public boolean isValid() {
+        return toPlatform() != null && versionCode != null;
     }
 }

@@ -71,9 +71,12 @@ public class ChallengeService {
         if (participationType == ParticipationType.GROUP)
             checkMinMannerNotAboveOwner(userId, req.minMannerTemperature());
 
-        // 루틴(인증) 검증 → 스냅샷 산출. 권한은 보지 않는다(가입 후 §11.4 셋업에서 grant).
+        // 루틴(인증) 검증 → 스냅샷 산출.
         ResolvedRoutine routine = routineSelectionService.resolve(
                 req.templateId(), req.selectedMethod(), req.paramsOrEmpty());
+
+        // AUTO면 필요한 권한이 모두 grant됐는지 생성 시점 1회 검증(§11.2). 보유 상태는 저장하지 않는다(§5.6).
+        validateGrantedPermissions(routine.verification(), req.grantedPermissionsOrEmpty());
 
         Challenge challenge = Challenge.create(
                 userId, req.title(), req.description(), req.imageUrl(),
@@ -95,6 +98,19 @@ public class ChallengeService {
         // 추천 세그먼트 점수는 여기서 즉시 갱신하지 않는다(매 생성마다 바뀌면 추천 캐시 효율↓).
         // SegmentScoreService 가 주기적으로 누적 챌린지를 재집계한다.
         return ChallengeResponse.from(challenge);
+    }
+
+    /**
+     * AUTO 인증이면 스냅샷의 requiredPermissions 가 모두 grantedPermissions 에 포함돼야 한다(§11.2).
+     * 미충족이면 ROUTINE_PERMISSION_REQUIRED. (보유 상태는 저장하지 않음 — 생성 시점 검증만, §5.6)
+     */
+    private void validateGrantedPermissions(com.ruleup.ruleup_backend.routine.domain.VerificationConfig v,
+                                            List<String> granted) {
+        if (v.selectedMethod() != com.ruleup.ruleup_backend.routine.domain.SelectedMethod.AUTO) return;
+        List<String> required = v.requiredPermissions();
+        if (required == null || required.isEmpty()) return;
+        if (granted == null || !granted.containsAll(required))
+            throw new BusinessException(ErrorCode.ROUTINE_PERMISSION_REQUIRED);
     }
 
     /** 그룹 기준 매너 온도가 생성자 본인 온도보다 높으면 거부 (생성/수정 공용). */

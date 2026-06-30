@@ -2,12 +2,17 @@ package com.ruleup.ruleup_backend.verification.dto;
 
 import java.math.BigDecimal;
 
-/** §11.6 응답. 정규 수동=즉시 SUCCESS / 폴백=잠정 SUCCESS + disputeClosesAt. */
+/**
+ * 수동 인증 제출 응답(API 계약).
+ *  - 정규 수동(asFallback=false): status=SUCCESS, approvalStatus=null, verifiedVia=MANUAL.
+ *  - 예비 폴백(asFallback=true): status=PENDING_APPROVAL, approvalStatus=PENDING, verifiedVia=null,
+ *    진행률은 승인 전이라 현재값 유지.
+ */
 public record ManualVerificationResponse(
+        String verificationId,    // 제출 식별자(방장 승인 시 참조)
         String targetDate,
-        String status,            // SUCCESS (폴백이면 잠정)
-        String verifiedVia,       // MANUAL / MANUAL_FALLBACK
-        String disputeClosesAt,   // 폴백 이의 윈도우 종료(없으면 null)
-        String method,
+        String status,            // SUCCESS / PENDING_APPROVAL
+        String approvalStatus,    // 폴백이면 PENDING, 정규 수동이면 null
+        String verifiedVia,       // MANUAL(정규, 즉시) / null(폴백, 승인 전)
         BigDecimal progressRate
 ) {}

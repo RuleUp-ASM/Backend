@@ -26,7 +26,7 @@ public class SecurityConfig {
 
     // 로그인 없이 접근 가능한 공개 경로
     private static final String[] PUBLIC = {
-            "/intro",                        // 앱 인트로/버전 게이트 (로그인 전 스플래시에서 호출)
+            "/api/v1/intro",                 // 앱 인트로/버전 게이트 (로그인 전 스플래시에서 호출)
             "/api/v1/auth/oauth/**",         // 4.1 / 4.2 소셜 로그인 (+ /callback)
             "/api/v1/auth/signup",           // 4.3 가입
             "/api/v1/auth/refresh",          // 4.4 토큰 재발급 (refreshToken 사용)

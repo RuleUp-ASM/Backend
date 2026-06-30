@@ -133,6 +133,8 @@ public class ChallengeMemberService {
     @Transactional(readOnly = true)
     public MemberListResponse listMembers(UUID viewerId, UUID challengeId, String statusFilter) {
         Challenge c = loadActive(challengeId);
+        // 가시성 게이트(§5.1): 비-OWNER는 APPROVED 챌린지만 접근, 그 외는 존재 자체를 숨겨 404.
+        if (!c.isVisibleTo(viewerId)) throw new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND);
 
         String filter = (statusFilter == null || statusFilter.isBlank())
                 ? "ACTIVE" : statusFilter.toUpperCase();
@@ -158,8 +160,11 @@ public class ChallengeMemberService {
         List<MemberListResponse.Member> dto = members.stream().map(m -> {
             User u = userMap.get(m.getUserId());
             // 검수 전/거절이면 타인에게는 임시 닉네임·사진 숨김(본인이 볼 땐 본인 값).
-            String nickname = (u != null) ? u.visibleNicknameTo(viewerId) : null;
-            String profile = (u != null) ? u.visibleProfileImageTo(viewerId) : null;
+            // 추가로 익명 챌린지(§11.2)면 닉네임 마스킹 + 프로필 사진 숨김.
+            String visibleNick = (u != null) ? u.visibleNicknameTo(viewerId) : null;
+            String nickname = c.getAnonymity().maskNickname(visibleNick);
+            String profile = (u != null && !c.getAnonymity().isAnonymous())
+                    ? u.visibleProfileImageTo(viewerId) : null;
             BigDecimal manner = mannerMap.getOrDefault(m.getUserId(), ReputationScore.INITIAL_TEMPERATURE);
             return new MemberListResponse.Member(
                     m.getUserId().toString(), nickname, profile,

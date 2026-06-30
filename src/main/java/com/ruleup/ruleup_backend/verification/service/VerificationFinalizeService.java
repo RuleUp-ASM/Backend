@@ -90,19 +90,8 @@ public class VerificationFinalizeService {
         }
     }
 
-    /**
-     * 예비 폴백 잠정성공 확정(침묵=동의, §9.2). 이의 윈도우가 지난 MANUAL_FALLBACK 잠정 행을 lock.
-     * (신고 시 무효화 플로우는 PN/RP 스펙 범위 — 여기선 무신고 확정만.)
-     */
-    @Scheduled(fixedDelay = 60_000)
-    @Transactional
-    public void confirmFallbackDisputes() {
-        Instant now = Instant.now();
-        List<VerificationDaily> due = dailyRepo.findFallbackDisputeDue(now, CLAIM_LIMIT);
-        for (VerificationDaily daily : due) {
-            daily.confirmFallback(now);   // disputeClosesAt 해제 + verifiedAt 세팅(진행률은 이미 SUCCESS로 반영됨)
-        }
-    }
+    // (제거) 예비 폴백 "침묵=동의" 자동확정 sweeper — 방장 승인 모델(§9.2)로 전환되어 더는 필요 없다.
+    // 폴백 확정은 VerificationApprovalService(.../approval) 에서 방장 승인/거절로만 일어난다.
 
     /** 매일 00:05 KST: 종료된 빈도형 주기 정산 + 롤오버. */
     @Scheduled(cron = "0 5 0 * * *", zone = "Asia/Seoul")

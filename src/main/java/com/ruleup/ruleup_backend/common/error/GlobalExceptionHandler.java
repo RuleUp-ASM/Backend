@@ -61,7 +61,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleConflict(DataIntegrityViolationException e) {
         String constraint = extractConstraint(e);
         if (constraint != null && constraint.contains("uq_users_nickname")) {
-            ErrorCode code = ErrorCode.NICKNAME_TAKEN;        // 409
+            ErrorCode code = ErrorCode.NICKNAME_DUPLICATED;   // 409
             return ResponseEntity.status(code.getStatus()).body(ApiResponse.fail(ErrorResponse.of(code)));
         }
         // 닉네임 외의 무결성 위반(예: 같은 소셜계정 동시 가입 uq_users_oauth)은

@@ -1,6 +1,8 @@
 package com.ruleup.ruleup_backend.verification.controller;
 
 import com.ruleup.ruleup_backend.common.response.ApiResponse;
+import com.ruleup.ruleup_backend.verification.dto.FallbackApprovalRequest;
+import com.ruleup.ruleup_backend.verification.dto.FallbackApprovalResponse;
 import com.ruleup.ruleup_backend.verification.dto.ManualVerificationRequest;
 import com.ruleup.ruleup_backend.verification.dto.ManualVerificationResponse;
 import com.ruleup.ruleup_backend.verification.dto.MemberLocationRequest;
@@ -9,6 +11,7 @@ import com.ruleup.ruleup_backend.verification.dto.SetupRequest;
 import com.ruleup.ruleup_backend.verification.dto.SetupRequirementResponse;
 import com.ruleup.ruleup_backend.verification.dto.SetupResponse;
 import com.ruleup.ruleup_backend.verification.dto.VerificationDetailResponse;
+import com.ruleup.ruleup_backend.verification.service.VerificationApprovalService;
 import com.ruleup.ruleup_backend.verification.service.VerificationManualService;
 import com.ruleup.ruleup_backend.verification.service.VerificationReadService;
 import com.ruleup.ruleup_backend.verification.service.VerificationSetupService;
@@ -31,6 +34,7 @@ public class VerificationChallengeController {
 
     private final VerificationReadService readService;
     private final VerificationManualService manualService;
+    private final VerificationApprovalService approvalService;
     private final VerificationSetupService setupService;
 
     @Operation(summary = "챌린지 인증 여부 판단(§3.3)",
@@ -43,12 +47,25 @@ public class VerificationChallengeController {
     }
 
     @Operation(summary = "수동 인증 제출(§3.4)",
-            description = "자동 판정 불가 방식의 당일 인증 직접 제출 = 자기증명. 제출 즉시 SUCCESS.")
+            description = "정규 수동(asFallback=false)은 제출 즉시 SUCCESS. 예비 폴백(asFallback=true)은 "
+                    + "PENDING_APPROVAL 로 적재되어 방장 승인 후 확정.")
     @PostMapping("/{challengeId}/verifications")
     public ApiResponse<ManualVerificationResponse> submit(@AuthenticationPrincipal String userId,
                                                           @PathVariable UUID challengeId,
                                                           @RequestBody ManualVerificationRequest request) {
         return ApiResponse.ok(manualService.submit(UUID.fromString(userId), challengeId, request));
+    }
+
+    @Operation(summary = "예비 폴백 승인/거절(§9.2)",
+            description = "방장이 PENDING_APPROVAL 폴백 제출을 승인/거절. APPROVE→SUCCESS(MANUAL_FALLBACK), "
+                    + "REJECT→FAILED(FALLBACK_REJECTED). 정규 수동은 승인 대상이 아니다.")
+    @PostMapping("/{challengeId}/verifications/{verificationId}/approval")
+    public ApiResponse<FallbackApprovalResponse> approve(@AuthenticationPrincipal String userId,
+                                                         @PathVariable UUID challengeId,
+                                                         @PathVariable UUID verificationId,
+                                                         @RequestBody FallbackApprovalRequest request) {
+        return ApiResponse.ok(approvalService.decide(
+                UUID.fromString(userId), challengeId, verificationId, request));
     }
 
     @Operation(summary = "최초 진입 셋업 요구사항 조회(§11.4)",
