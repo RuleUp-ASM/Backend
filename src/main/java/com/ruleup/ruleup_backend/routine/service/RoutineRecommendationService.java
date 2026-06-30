@@ -47,7 +47,30 @@ public class RoutineRecommendationService {
                 ? RoutineMatch.none()
                 : matchClient.match(req.title(), req.description(), candidates);
 
-        // (3) LLM 이 고른 templateId 가 서버 카탈로그에 실재할 때만 "매칭 성공"으로 인정.
+        return buildFromMatch(req, match);
+    }
+
+    /**
+     * 이미 확보한 매칭 결과로 추천 응답을 만든다(LLM 재호출 없음).
+     * 챌린지 추천이 통합 LLM 호출({@code ChallengeDraftClient})에서 받은 매칭 결과를 그대로 넘길 때 쓴다.
+     */
+    public RoutineRecommendationResponse recommendFromMatch(RoutineRecommendationRequest req, RoutineMatch match) {
+        validateInput(req);
+        return buildFromMatch(req, (match != null) ? match : RoutineMatch.none());
+    }
+
+    /** LLM 에 줄 후보 템플릿 목록(통합 호출 측에서 프롬프트에 싣는다). */
+    public List<RoutineCandidate> candidates() {
+        return catalog.candidates();
+    }
+
+    /** 요청 검증만 분리 공개(통합 호출 측이 LLM 호출 전에 먼저 막을 수 있게). */
+    public void validate(RoutineRecommendationRequest req) {
+        validateInput(req);
+    }
+
+    // (3) LLM 이 고른 templateId 가 서버 카탈로그에 실재할 때만 "매칭 성공"으로 인정.
+    private RoutineRecommendationResponse buildFromMatch(RoutineRecommendationRequest req, RoutineMatch match) {
         RoutineTemplate template = match.matched()
                 ? catalog.findById(match.templateId()).orElse(null)
                 : null;

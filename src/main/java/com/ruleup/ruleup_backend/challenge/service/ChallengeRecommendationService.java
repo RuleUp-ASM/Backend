@@ -6,8 +6,9 @@ import com.ruleup.ruleup_backend.challenge.domain.PenaltyConfig;
 import com.ruleup.ruleup_backend.challenge.domain.RepeatDay;
 import com.ruleup.ruleup_backend.challenge.domain.RewardConfig;
 import com.ruleup.ruleup_backend.challenge.dto.ChallengeRecommendationResponse;
+import com.ruleup.ruleup_backend.challenge.recommendation.ChallengeDraftClient;
+import com.ruleup.ruleup_backend.challenge.recommendation.ChallengeDraftSuggestion;
 import com.ruleup.ruleup_backend.challenge.recommendation.ChallengeSettings;
-import com.ruleup.ruleup_backend.challenge.recommendation.ChallengeSettingsClient;
 import com.ruleup.ruleup_backend.routine.dto.RoutineRecommendationRequest;
 import com.ruleup.ruleup_backend.routine.dto.RoutineRecommendationResponse;
 import com.ruleup.ruleup_backend.routine.service.RoutineRecommendationService;
@@ -20,8 +21,9 @@ import java.util.List;
 
 /**
  * 챌린지 추천 = "전체 초안 만들기".
- *  - 인증·목표값(카테고리 포함)은 루틴 매칭(RoutineRecommendationService)에서,
- *  - 참여방식·일정·패널티·보상·익명은 LLM(ChallengeSettingsClient)이 제목 보고 제안한다.
+ *  - 루틴 매칭(인증·목표값·카테고리)과 챌린지 설정(참여방식·일정·패널티·보상)을
+ *    LLM 한 번 호출({@link ChallengeDraftClient})로 함께 받는다(예전엔 직렬 두 번 → 지연 두 배였다).
+ *  - 매칭 결과의 응답 구성(옵션·인증방식·목표값 검증)은 RoutineRecommendationService 가 그대로 맡는다.
  * 사용자는 이 초안을 클라에서 수정한 뒤 생성으로 보낸다(별도 수정 API 없음).
  *
  * LLM 값은 신뢰 경계 밖 → 서버가 전부 sanitize(유효하면 사용, 아니면 정적 기본값으로 폴백).
@@ -32,7 +34,7 @@ import java.util.List;
 public class ChallengeRecommendationService {
 
     private final RoutineRecommendationService routineRecommendationService;
-    private final ChallengeSettingsClient settingsClient;
+    private final ChallengeDraftClient draftClient;
 
     // ===== 폴백 기본값 (LLM 실패/이상값일 때) =====
     private static final ParticipationType DEFAULT_PARTICIPATION = ParticipationType.SOLO;
@@ -44,12 +46,19 @@ public class ChallengeRecommendationService {
     private static final BigDecimal DEFAULT_MANNER_GAIN = new BigDecimal("1.0");
 
     public ChallengeRecommendationResponse recommend(RoutineRecommendationRequest req) {
-        // 1) 루틴 매칭(인증·목표값) — LLM 호출 1
-        RoutineRecommendationResponse routine = routineRecommendationService.recommend(req);
+        // 입력 검증을 LLM 호출보다 먼저(잘못된 요청에 토큰/지연 낭비 안 하도록)
+        routineRecommendationService.validate(req);
 
-        // 2) 챌린지 설정 제안 — LLM 호출 2 (실패 시 empty → 전부 폴백)
-        ChallengeSettings s = settingsClient.suggest(req.title(), req.description());
+        // 루틴 매칭 + 챌린지 설정 — LLM 한 번만 호출(실패 시 empty → 전부 폴백)
+        ChallengeDraftSuggestion draft = draftClient.suggest(
+                req.title(), req.description(), routineRecommendationService.candidates());
 
+        // 매칭분은 RoutineRecommendationService 가 카탈로그/스키마로 검증해 응답을 만든다(LLM 재호출 없음)
+        RoutineRecommendationResponse routine =
+                routineRecommendationService.recommendFromMatch(req, draft.matchOrNone());
+
+        // 설정분은 신뢰 경계 밖 → 전부 sanitize
+        ChallengeSettings s = draft.settingsOrEmpty();
         String participation = sanitizeParticipation(s.participationType());
         List<String> repeatDays = sanitizeRepeatDays(s.repeatDays());
         int duration = sanitizeDuration(s.durationDays());
