@@ -49,7 +49,12 @@ public class ChallengeModerationService {
         ModerationResult r = moderationClient.moderateChallengeName(c.getTitle());
         Instant now = Instant.now();
         switch (r) {
-            case APPROVED -> c.approveModeration(now);
+            case APPROVED -> {
+                c.approveModeration(now);
+                notificationService.notify(c.getCreatorId(), NotificationType.CHALLENGE_APPROVED,
+                        "챌린지가 공개되었어요",
+                        "[" + c.getTitle() + "] 챌린지가 검수를 통과해 공개되었습니다. 이제 다른 사람이 참여할 수 있어요.");
+            }
             case REJECTED -> {
                 c.rejectModeration(now, now.plus(FIX_WINDOW));
                 notificationService.notify(c.getCreatorId(), NotificationType.CHALLENGE_NAME_REJECTED,

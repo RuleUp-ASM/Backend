@@ -2,6 +2,12 @@ spring:
   application:
     name: ruleup-backend
 
+  # Jackson 3 기본은 누락/null 원시값(boolean 등) 역직렬화 실패. 계약상 일부 필드(예: penalty.groupShare)는
+  # 생략 가능하므로, 누락/null 원시값은 기본값으로 받아들이도록 완화한다(요청 본문 호환).
+  jackson:
+    deserialization:
+      fail-on-null-for-primitives: false
+
   datasource:
     url: jdbc:mysql://localhost:3306/ruleup?serverTimezone=UTC&characterEncoding=UTF-8&rewriteBatchedStatements=true
     username: ${DB_USERNAME}

@@ -6,6 +6,8 @@ import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
+import com.ruleup.ruleup_backend.notification.NotificationService;
+import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.verification.domain.FallbackApprovalStatus;
 import com.ruleup.ruleup_backend.verification.domain.VerificationDaily;
 import com.ruleup.ruleup_backend.verification.domain.VerificationMethodResult;
@@ -38,6 +40,7 @@ public class VerificationApprovalService {
     private final VerificationDailyRepository dailyRepo;
     private final VerificationMethodResultRepository methodResultRepo;
     private final VerificationProgressService progressService;
+    private final NotificationService notificationService;
 
     @Transactional
     public FallbackApprovalResponse decide(UUID ownerId, UUID challengeId, UUID verificationId,
@@ -71,10 +74,16 @@ public class VerificationApprovalService {
                 progressService.updateAfterSync(member, VerificationStatus.SUCCESS, now);
             else
                 progressService.recount(member);
+            notificationService.notify(member.getUserId(), NotificationType.FALLBACK_APPROVED,
+                    "예비 인증이 승인되었어요",
+                    daily.getTargetDate() + " 예비 인증이 방장 승인으로 인정되었어요.");
         } else {
             daily.rejectFallback(now);
             if (mr != null) mr.evaluate(VerificationStatus.FAILED, mr.getEvidence(), now);
             progressService.recount(member);   // 거절은 성공 미반영 → 진행률 현재값 유지
+            notificationService.notify(member.getUserId(), NotificationType.FALLBACK_REJECTED,
+                    "예비 인증이 거절되었어요",
+                    daily.getTargetDate() + " 예비 인증이 방장에 의해 거절되었어요.");
         }
 
         return new FallbackApprovalResponse(

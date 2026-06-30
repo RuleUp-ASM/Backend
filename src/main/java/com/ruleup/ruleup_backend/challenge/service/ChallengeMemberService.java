@@ -9,6 +9,8 @@ import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.verification.SetupStatus;
+import com.ruleup.ruleup_backend.notification.NotificationService;
+import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.reputation.domain.ReputationScore;
 import com.ruleup.ruleup_backend.reputation.ReputationScoreRepository;
 import com.ruleup.ruleup_backend.user.domain.User;
@@ -39,6 +41,7 @@ public class ChallengeMemberService {
     private final ChallengeMemberRepository memberRepository;
     private final UserRepository userRepository;
     private final ReputationScoreRepository reputationScoreRepository;
+    private final NotificationService notificationService;
 
     // ===== 3.6 참여 신청 =====
     @Transactional
@@ -60,6 +63,7 @@ public class ChallengeMemberService {
                     existing.getId(), List.of(MemberStatus.LEFT, MemberStatus.REMOVED), initial);
             if (updated == 0) throw new BusinessException(ErrorCode.ALREADY_JOINED);
             if (initial == MemberStatus.ACTIVE) challengeRepository.incrementParticipantCount(challengeId);
+            notifyOwnerOnPendingJoin(c, initial);
             // 재참여는 기존 행의 setupStatus를 그대로 둔다(이전에 셋업했으면 READY 유지).
             return joinResponse(c, initial, existing.getSetupStatus());
         }
@@ -72,7 +76,16 @@ public class ChallengeMemberService {
             throw new BusinessException(ErrorCode.ALREADY_JOINED);
         }
         if (initial == MemberStatus.ACTIVE) challengeRepository.incrementParticipantCount(challengeId);
+        notifyOwnerOnPendingJoin(c, initial);
         return joinResponse(c, initial, joined.getSetupStatus());
+    }
+
+    /** 그룹 승인제 가입(PENDING)일 때만 방장에게 새 신청 알림. ACTIVE 즉시가입은 알림 없음. */
+    private void notifyOwnerOnPendingJoin(Challenge c, MemberStatus initial) {
+        if (initial != MemberStatus.PENDING) return;
+        notificationService.notify(c.getCreatorId(), NotificationType.CHALLENGE_JOIN_REQUESTED,
+                "새 참여 신청이 있어요",
+                "[" + c.getTitle() + "] 챌린지에 새 참여 신청이 도착했어요. 멤버 목록에서 승인/거절할 수 있어요.");
     }
 
     /** 가입 응답 조립: 멤버 상태 + 셋업 상태 + 인증 스냅샷(필요 권한·방식). */
@@ -106,25 +119,31 @@ public class ChallengeMemberService {
         if (action == null) throw new BusinessException(ErrorCode.INVALID_MEMBER_ACTION);
         return switch (action) {
             // 둘 다 PENDING 신청에 대한 처리. CAS로 동시 처리 시 1회만 성사(참여자 수 중복 증가 방지).
-            case "APPROVE" -> transitionFromPending(challengeId, targetUserId, member, MemberStatus.ACTIVE, true);
-            case "REJECT"  -> transitionFromPending(challengeId, targetUserId, member, MemberStatus.REMOVED, false);
+            case "APPROVE" -> transitionFromPending(c, targetUserId, member, MemberStatus.ACTIVE, true,
+                    NotificationType.CHALLENGE_MEMBER_APPROVED, "참여가 승인되었어요",
+                    " 챌린지 참여가 승인되었어요. 이제 인증을 시작할 수 있어요.");
+            case "REJECT"  -> transitionFromPending(c, targetUserId, member, MemberStatus.REMOVED, false,
+                    NotificationType.CHALLENGE_MEMBER_REJECTED, "참여가 거절되었어요",
+                    " 챌린지 참여 신청이 거절되었어요.");
             default -> throw new BusinessException(ErrorCode.INVALID_MEMBER_ACTION);
         };
     }
 
     /**
-     * PENDING → to 로 원자적 전이. 성사(1행)면 (옵션) 참여자 수 증가 후 to 반환.
-     * 이미 처리됐으면(0행) 현재 상태를 재조회해 멱등 응답.
+     * PENDING → to 로 원자적 전이. 성사(1행)면 (옵션) 참여자 수 증가 + 신청자 알림 후 to 반환.
+     * 이미 처리됐으면(0행) 현재 상태를 재조회해 멱등 응답(중복 알림 없음).
      */
-    private MemberActionResponse transitionFromPending(UUID challengeId, UUID targetUserId,
-                                                       ChallengeMember member, MemberStatus to, boolean bumpCount) {
+    private MemberActionResponse transitionFromPending(Challenge c, UUID targetUserId,
+                                                       ChallengeMember member, MemberStatus to, boolean bumpCount,
+                                                       NotificationType notifyType, String title, String tail) {
         int updated = memberRepository.compareAndSetStatus(
                 member.getId(), List.of(MemberStatus.PENDING), to);
         if (updated == 1) {
-            if (bumpCount) challengeRepository.incrementParticipantCount(challengeId);
+            if (bumpCount) challengeRepository.incrementParticipantCount(c.getId());
+            notificationService.notify(targetUserId, notifyType, title, "[" + c.getTitle() + "]" + tail);
             return new MemberActionResponse(to.name());
         }
-        MemberStatus current = memberRepository.findByChallengeIdAndUserId(challengeId, targetUserId)
+        MemberStatus current = memberRepository.findByChallengeIdAndUserId(c.getId(), targetUserId)
                 .map(ChallengeMember::getStatus).orElse(member.getStatus());
         return new MemberActionResponse(current.name());
     }
