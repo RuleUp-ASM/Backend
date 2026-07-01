@@ -88,7 +88,7 @@ public class VerificationChallengeController {
 
     @Operation(summary = "내 인증 장소(앵커) 조회(§11.5)",
             description = "내가 바인딩한 앵커 목록을 반환. 위치 셋업/수정 화면 재진입 시 지도에 기존 핀 복원용. "
-                    + "앵커가 없으면 빈 배열. 참여(ACTIVE) 멤버만.")
+                    + "앵커가 하나도 없으면 GEOFENCE_NOT_CONFIGURED 실패 응답(success=false). 참여(ACTIVE) 멤버만.")
     @GetMapping("/{challengeId}/my-location")
     public ApiResponse<MemberLocationResponse> getLocation(@AuthenticationPrincipal String userId,
                                                            @PathVariable UUID challengeId) {
