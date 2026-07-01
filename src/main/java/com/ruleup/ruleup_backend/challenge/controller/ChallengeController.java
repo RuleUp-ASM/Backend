@@ -82,7 +82,7 @@ public class ChallengeController {
     @Operation(summary = "챌린지 삭제",
             description = "생성자만, 소프트 삭제. §5.8 판정 순서: OWNER → 나 외 ACTIVE 멤버(CHALLENGE_HAS_MEMBERS) "
                     + "→ 잠금(생성 7일 이내·기간 7일 미만 DELETE_LOCKED) → 차감 계산 후 삭제. mannerPenalty 반환.")
-    @정DeleteMapping("/{challengeId}")
+    @DeleteMapping("/{challengeId}")
     public ApiResponse<DeleteChallengeResponse> delete(@AuthenticationPrincipal String userId,
                                                        @PathVariable String challengeId) {
         return ApiResponse.ok(challengeService.delete(UUID.fromString(userId), UUID.fromString(challengeId)));
