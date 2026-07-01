@@ -64,9 +64,7 @@ class AuthChallengeVerificationE2EIT {
         // ── 2) 가입 완료 → accessToken (+ nicknameStatus=PENDING 계약 확인) ──
         MvcResult signup = postJson("/api/v1/auth/signup", """
                 {"signupToken":"%s","nickname":"도전왕E2E","interestCategories":["EXERCISE"],
-                 "agreements":{"termsOfService":{"agreed":true,"version":"1.0"},
-                               "privacyPolicy":{"agreed":true,"version":"1.0"},
-                               "marketing":{"agreed":false,"version":"1.0"}},
+                 "clientProperties":{"agreements":{"terms":true,"privacy":true,"marketing":false}},
                  "deviceInfo":%s}""".formatted(signupToken, DEVICE_INFO));
         assertThat((Boolean) read(signup, "$.data.isNewUser")).isTrue();
         assertThat((String) read(signup, "$.data.user.nicknameStatus")).isEqualTo("PENDING");
@@ -135,9 +133,7 @@ class AuthChallengeVerificationE2EIT {
         String signupToken = read(postJson("/api/v1/auth/oauth/kakao", loginBody), "$.data.signupToken");
         postJson("/api/v1/auth/signup", """
                 {"signupToken":"%s","nickname":"%s","interestCategories":["EXERCISE"],
-                 "agreements":{"termsOfService":{"agreed":true,"version":"1.0"},
-                               "privacyPolicy":{"agreed":true,"version":"1.0"},
-                               "marketing":{"agreed":false,"version":"1.0"}},
+                 "clientProperties":{"agreements":{"terms":true,"privacy":true,"marketing":false}},
                  "deviceInfo":%s}""".formatted(signupToken, nickname, DEVICE_INFO));
         return read(postJson("/api/v1/auth/oauth/kakao", loginBody), "$.data.accessToken");
     }

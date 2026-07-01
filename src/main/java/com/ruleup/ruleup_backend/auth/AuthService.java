@@ -139,8 +139,8 @@ public class AuthService {
         // 약관: terms·privacy 필수(동의 true)
         SignupRequest.Agreements ag = req.agreements();
         if (ag == null
-                || ag.termsOfService() == null || !ag.termsOfService().agreed()
-                || ag.privacyPolicy() == null || !ag.privacyPolicy().agreed())
+                || !Boolean.TRUE.equals(ag.terms())
+                || !Boolean.TRUE.equals(ag.privacy()))
             throw new BusinessException(ErrorCode.AGREEMENT_REQUIRED);
 
         // deviceInfo는 가입에도 필수(계약).
@@ -175,18 +175,11 @@ public class AuthService {
     }
 
     private void saveAgreements(User user, SignupRequest.Agreements ag) {
-        userAgreementRepository.save(UserAgreement.agree(user, AgreementType.TERMS, versionOf(ag.termsOfService())));
-        userAgreementRepository.save(UserAgreement.agree(user, AgreementType.PRIVACY, versionOf(ag.privacyPolicy())));
-        if (ag.marketing() != null && ag.marketing().agreed()) {
-            userAgreementRepository.save(UserAgreement.agree(user, AgreementType.MARKETING, versionOf(ag.marketing())));
+        userAgreementRepository.save(UserAgreement.agree(user, AgreementType.TERMS, DEFAULT_AGREEMENT_VERSION));
+        userAgreementRepository.save(UserAgreement.agree(user, AgreementType.PRIVACY, DEFAULT_AGREEMENT_VERSION));
+        if (Boolean.TRUE.equals(ag.marketing())) {
+            userAgreementRepository.save(UserAgreement.agree(user, AgreementType.MARKETING, DEFAULT_AGREEMENT_VERSION));
         }
-    }
-
-    /** 클라가 보낸 약관 버전을 쓰되, 미전송이면 기본 버전으로 폴백. */
-    private String versionOf(SignupRequest.Agreement agreement) {
-        if (agreement == null || agreement.version() == null || agreement.version().isBlank())
-            return DEFAULT_AGREEMENT_VERSION;
-        return agreement.version();
     }
 
     // ===== 토큰 재발급 (회전) =====

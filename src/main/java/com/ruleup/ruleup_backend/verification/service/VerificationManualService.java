@@ -103,7 +103,7 @@ public class VerificationManualService {
             progressService.recount(member);   // PENDING은 성공 미집계 → 진행률 유지
             return new ManualVerificationResponse(
                     daily.getId().toString(), targetDate.toString(), "PENDING_APPROVAL",
-                    "PENDING", null, member.getProgressRate());
+                    method, "PENDING", null, null, member.getProgressRate());
         }
 
         // 정규 수동 = 즉시 확정 SUCCESS.
@@ -112,7 +112,7 @@ public class VerificationManualService {
         else progressService.recount(member);
         return new ManualVerificationResponse(
                 daily.getId().toString(), targetDate.toString(), "SUCCESS",
-                null, "MANUAL", member.getProgressRate());
+                method, null, "MANUAL", null, member.getProgressRate());
     }
 
     private LocalDate parseTargetDate(String raw, LocalDate today) {
