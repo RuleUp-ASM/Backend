@@ -17,10 +17,6 @@ import com.ruleup.ruleup_backend.user.domain.User;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +25,7 @@ import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -55,39 +52,27 @@ public class ChallengeService {
     /** 삭제 잠금 해제 시점 = 생성 후 7일(§5.8). */
     private static final int DELETE_UNLOCK_DAYS = 7;
 
-    /** 전체 조회 페이지 크기 상한(과도한 size 방어). */
-    private static final int MAX_PAGE_SIZE = 50;
-
-    // ===== 3.x 전체 조회(탐색/목록) =====
+    // ===== 내 챌린지 목록(내가 참여 중인 챌린지) =====
 
     /**
-     * 챌린지 전체 조회. 모더레이션 APPROVED·미삭제만 노출한다.
-     *  - category : 카테고리 필터(InterestCategory name). null/blank 면 전체.
-     *  - status   : RECRUITING/ACTIVE/COMPLETED 필터. null/blank 면 RECRUITING+ACTIVE.
-     *  - page/size: 0-base 페이지네이션. size 는 1~50 로 클램프.
-     * 정렬은 최신 생성순(createdAt desc) 고정.
+     * 내가 참여 중인 챌린지 목록. 멤버십 기준이라 페이지네이션 없이 전량 반환한다.
+     *  - scope=ACTIVE(기본) : ACTIVE 멤버십(실제 참여 중)만.
+     *  - scope=ALL          : 전체 멤버십(PENDING 승인 대기 포함).
+     * 소프트 삭제된 챌린지는 제외. 항목마다 내 멤버십 상태(memberStatus)를 함께 내려준다.
      */
     @Transactional(readOnly = true)
-    public ChallengeListResponse list(String category, String status, int page, int size) {
-        int safeSize = Math.min(Math.max(size, 1), MAX_PAGE_SIZE);
-        int safePage = Math.max(page, 0);
-        Pageable pageable = PageRequest.of(safePage, safeSize, Sort.by(Sort.Direction.DESC, "createdAt"));
+    public ChallengeListResponse myChallenges(UUID userId, String scope) {
+        List<ChallengeMember> memberships = "ALL".equalsIgnoreCase(scope)
+                ? memberRepository.findByUserId(userId)
+                : memberRepository.findByUserIdAndStatus(userId, MemberStatus.ACTIVE);
 
-        String categoryFilter = (category != null && !category.isBlank()) ? category.trim() : null;
-        ChallengeStatus statusFilter = parseStatusOrNull(status);
-
-        Page<Challenge> result = challengeRepository.findVisibleForList(categoryFilter, statusFilter, pageable);
-        return ChallengeListResponse.from(result);
-    }
-
-    /** status 쿼리 파라미터 → enum. 알 수 없는 값이면 필터 없음(null)으로 처리(400 대신 관대하게). */
-    private ChallengeStatus parseStatusOrNull(String status) {
-        if (status == null || status.isBlank()) return null;
-        try {
-            return ChallengeStatus.valueOf(status.trim().toUpperCase());
-        } catch (IllegalArgumentException e) {
-            return null;
+        List<ChallengeListResponse.Item> items = new ArrayList<>();
+        for (ChallengeMember m : memberships) {
+            Challenge ch = challengeRepository.findByIdAndDeletedAtIsNull(m.getChallengeId()).orElse(null);
+            if (ch == null) continue;   // 소프트 삭제/정합성 깨진 멤버십은 건너뜀
+            items.add(ChallengeListResponse.Item.of(ch, m.getStatus().name()));
         }
+        return new ChallengeListResponse(items);
     }
 
     // ===== 3.2 생성 =====
