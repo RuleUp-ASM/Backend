@@ -3,7 +3,7 @@ package com.ruleup.ruleup_backend.verification.controller;
 import com.ruleup.ruleup_backend.common.response.ApiResponse;
 import com.ruleup.ruleup_backend.verification.dto.SyncRequest;
 import com.ruleup.ruleup_backend.verification.dto.SyncResponse;
-import com.ruleup.ruleup_backend.verification.dto.ProgressListResponse;
+import com.ruleup.ruleup_backend.verification.dto.ChallengeProgress;
 import com.ruleup.ruleup_backend.verification.dto.VerificationIntroRequest;
 import com.ruleup.ruleup_backend.verification.dto.VerificationIntroResponse;
 import com.ruleup.ruleup_backend.verification.service.VerificationIntroService;
@@ -21,7 +21,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /** 인증 API(§3). 현재: 3.1 sync. (3.2 progress / 3.3 detail / 3.4 manual 은 다음 단계) */
@@ -55,10 +55,8 @@ public class VerificationController {
     @Operation(summary = "진행률 일괄 조회(§3.2)",
             description = "내 챌린지 진행률을 한 번에. 홈/리스트 렌더용. status=ACTIVE(기본)/ALL.")
     @GetMapping("/progress")
-    public ApiResponse<ProgressListResponse> progress(@AuthenticationPrincipal String userId,
-                                                      @RequestParam(defaultValue = "ACTIVE") String status) {
-        return ApiResponse.ok(new ProgressListResponse(
-                Instant.now().toString(),
-                readService.progress(UUID.fromString(userId), status)));
+    public ApiResponse<List<ChallengeProgress>> progress(@AuthenticationPrincipal String userId,
+                                                         @RequestParam(defaultValue = "ACTIVE") String status) {
+        return ApiResponse.ok(readService.progress(UUID.fromString(userId), status));
     }
 }
