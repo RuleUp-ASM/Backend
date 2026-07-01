@@ -18,6 +18,8 @@ import com.ruleup.ruleup_backend.verification.repository.VerificationMethodResul
 import com.ruleup.ruleup_backend.verification.signal.SignalType;
 import com.ruleup.ruleup_backend.verification.signal.SyncSignal;
 import com.ruleup.ruleup_backend.common.event.RoutineFailureConfirmed;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,6 +32,7 @@ import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * 인증 sync 처리(§3.1) — 인증 엔진의 심장.
@@ -42,10 +45,14 @@ import java.util.stream.Collectors;
 @Service
 public class VerificationSyncService {
 
+    private static final Logger log = LoggerFactory.getLogger(VerificationSyncService.class);
+
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final int NEXT_SYNC_SEC = 1800;   // 30분
-    private static final Set<String> KNOWN_SIGNAL_TYPES =
-            Arrays.stream(SignalType.values()).map(Enum::name).collect(Collectors.toUnmodifiableSet());
+    private static final Set<String> KNOWN_SIGNAL_TYPES = Stream.concat(
+            Arrays.stream(SignalType.values()).map(Enum::name),
+            Stream.of("GEOFENCE_TRANSITION")   // Android 와이어 별칭
+    ).collect(Collectors.toUnmodifiableSet());
 
     private final ChallengeQueryService challengeQuery;
     private final VerificationDailyRepository dailyRepo;
@@ -81,7 +88,7 @@ public class VerificationSyncService {
     @Transactional
     public SyncResponse sync(UUID userId, SyncRequest req) {
         rateLimiter.check(userId.toString());
-        if (req == null || req.collectedAt() == null || req.collectedAt().isBlank()) {
+        if (req == null || req.deviceTimeMillis() == null) {
             throw new BusinessException(ErrorCode.INVALID_SIGNAL_PAYLOAD);
         }
         List<SyncSignal> signals = (req.signals() != null) ? req.signals() : List.of();
@@ -114,6 +121,10 @@ public class VerificationSyncService {
             progressService.updateAfterSync(member, todayStatus, now);
             updated.add(new SyncResponse.UpdatedChallenge(
                     member.getChallengeId().toString(), todayStatus.name(), member.getProgressRate()));
+        }
+        if (log.isDebugEnabled()) {
+            log.debug("sync userId={} signals={} ignored={} activeMembers={} updated={}",
+                    userId, signals.size(), ignored, members.size(), updated.size());
         }
         return new SyncResponse(now.toString(), NEXT_SYNC_SEC, updated, ignored);
     }

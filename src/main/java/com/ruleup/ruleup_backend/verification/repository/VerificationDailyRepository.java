@@ -2,12 +2,14 @@ package com.ruleup.ruleup_backend.verification.repository;
 
 import com.ruleup.ruleup_backend.verification.domain.VerificationDaily;
 import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -37,4 +39,14 @@ public interface VerificationDailyRepository extends JpaRepository<VerificationD
             "AND fallbackApprovalStatus IS NULL " +
             "ORDER BY finalizeAfter LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
     List<VerificationDaily> findDuePendingForUpdate(@Param("now") Instant now, @Param("limit") int limit);
+
+    /**
+     * 추천 아웃컴 수집(RoutineOutcomeCollector): 확정 시각이 워터마크 이후인 종결(SUCCESS/FAILED) 행.
+     * verifiedAt 오름차순 → 페이지 상한(Pageable)으로 한 배치 처리량을 제한한다.
+     */
+    @Query("SELECT d FROM VerificationDaily d " +
+            "WHERE d.status IN :statuses AND d.verifiedAt IS NOT NULL AND d.verifiedAt >= :since " +
+            "ORDER BY d.verifiedAt ASC")
+    List<VerificationDaily> findTerminalSince(@Param("statuses") Collection<VerificationStatus> statuses,
+                                              @Param("since") Instant since, Pageable pageable);
 }

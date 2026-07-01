@@ -1,7 +1,8 @@
 package com.ruleup.ruleup_backend.verification.signal;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
-/** 앱 사용 이벤트(§2.13). type = RESUMED|PAUSED. 페어링해 구간 복원. */
+/** 앱 사용 이벤트(§2.13). type = RESUMED|PAUSED. 페어링해 구간 복원. Android 와이어: eventType. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public record UsageEvent(String packageName, String type, String at) {}
+public record UsageEvent(String packageName, @JsonAlias("eventType") String type, String at) {}

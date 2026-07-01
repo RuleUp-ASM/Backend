@@ -90,7 +90,8 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
         List<GeofenceTransition> out = new ArrayList<>();
         if (signals == null) return out;
         for (SyncSignal s : signals) {
-            if (SignalType.GEOFENCE.name().equals(s.type()) && s.transitions() != null) out.addAll(s.transitions());
+            if (("GEOFENCE".equals(s.type()) || "GEOFENCE_TRANSITION".equals(s.type()))
+                    && s.transitions() != null) out.addAll(s.transitions());
         }
         return out;
     }

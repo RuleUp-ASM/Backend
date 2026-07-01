@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.verification.signal;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 import java.util.List;
@@ -13,8 +14,8 @@ import java.util.List;
 public record SyncSignal(
         String type,                          // SignalType 문자열(미지원이면 무시)
         String observedAt,                    // 신호 관측 시각 ISO
-        // GEOFENCE
-        List<GeofenceTransition> transitions,
+        // GEOFENCE (Android 와이어: events)
+        @JsonAlias("events") List<GeofenceTransition> transitions,
         // LOCATION / RUNNING_SESSION
         List<GeoPoint> points,
         Boolean isMock,
@@ -26,7 +27,7 @@ public record SyncSignal(
         String detectedActivity,              // RUNNING / WALKING
         // SCREEN_TIME / HEALTH
         String date,                          // 대상 날짜 YYYY-MM-DD
-        List<UsageEvent> usageEvents,
+        @JsonAlias("appEvents") List<UsageEvent> usageEvents,
         List<ScreenEvent> screenEvents,
         // SLEEP
         List<SleepSegment> segments

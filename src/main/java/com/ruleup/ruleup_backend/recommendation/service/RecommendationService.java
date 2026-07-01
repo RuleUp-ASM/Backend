@@ -13,6 +13,8 @@ import com.ruleup.ruleup_backend.routine.service.RoutineCatalog;
 import com.ruleup.ruleup_backend.user.domain.User;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,6 +32,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class RecommendationService {
+
+    private static final Logger log = LoggerFactory.getLogger(RecommendationService.class);
 
     private static final double INTEREST_WEIGHT = 5.0;
     /** 생성화면 추천 태그는 최대 3건만 노출. limit 파라미터가 더 커도 여기서 자른다. */
@@ -61,7 +65,7 @@ public class RecommendationService {
         Set<Long> active = activeTemplateIds(userId);
 
         int cap = Math.min(Math.max(limit, 1), MAX_RECOMMENDATIONS);
-        return catalog.candidates().stream()
+        List<RecommendedRoutine> result = catalog.candidates().stream()
                 .filter(c -> !active.contains(c.id()))
                 .map(c -> {
                     double seg = segScore.getOrDefault(c.id(), 0.0);
@@ -81,6 +85,14 @@ public class RecommendationService {
                         s.candidate.category(),
                         s.reason))
                 .toList();
+
+        if (log.isDebugEnabled()) {
+            log.debug("발견 추천 userId={} → {}건 [{}] (관심사 {}개, 진행중 제외 {}개)",
+                    userId, result.size(),
+                    result.stream().map(r -> r.templateId() + ":" + r.reason()).toList(),
+                    interests.size(), active.size());
+        }
+        return result;
     }
 
     private Set<Long> activeTemplateIds(UUID userId) {

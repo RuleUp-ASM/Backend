@@ -9,6 +9,8 @@ import com.ruleup.ruleup_backend.verification.repository.VerificationDailyReposi
 import com.ruleup.ruleup_backend.verification.repository.VerificationMethodResultRepository;
 import com.ruleup.ruleup_backend.common.event.RoutineFailureConfirmed;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -30,6 +32,8 @@ import java.util.List;
 @RequiredArgsConstructor
 public class VerificationFinalizeService {
 
+    private static final Logger log = LoggerFactory.getLogger(VerificationFinalizeService.class);
+
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final int CLAIM_LIMIT = 200;
 
@@ -48,6 +52,9 @@ public class VerificationFinalizeService {
         List<VerificationDaily> due = dailyRepo.findDuePendingForUpdate(now, CLAIM_LIMIT);
         for (VerificationDaily daily : due) {
             finalizeOne(daily, now);
+        }
+        if (!due.isEmpty()) {
+            log.info("인증 확정 배치: 유예 끝난 PENDING {}건 확정 처리", due.size());
         }
     }
 
@@ -104,6 +111,9 @@ public class VerificationFinalizeService {
             if (ch == null) continue;
             rolloverMember(m, ch, today);
             progressService.recount(m);
+        }
+        if (!members.isEmpty()) {
+            log.info("빈도형 주기 롤오버: 대상 {}건 정산", members.size());
         }
     }
 

@@ -55,6 +55,15 @@ public class ChallengeController {
         return ApiResponse.ok(new ChallengeImageResponse(challengeImageService.upload(image)));
     }
 
+    @Operation(summary = "내 챌린지 목록", description = "내가 참여 중인 챌린지 목록(멤버십 기준, 페이지네이션 없음). "
+            + "scope=ACTIVE(기본, 실제 참여 중)/ALL(승인 대기 PENDING 포함). 소프트 삭제 제외.")
+    @GetMapping
+    public ApiResponse<ChallengeListResponse> myChallenges(
+            @AuthenticationPrincipal String userId,
+            @RequestParam(defaultValue = "ACTIVE") String scope) {
+        return ApiResponse.ok(challengeService.myChallenges(UUID.fromString(userId), scope));
+    }
+
     @Operation(summary = "챌린지 상세 + 참여 자격")
     @GetMapping("/{challengeId}")
     public ApiResponse<ChallengeDetailResponse> getDetail(@AuthenticationPrincipal String userId,
