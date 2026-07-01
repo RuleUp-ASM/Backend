@@ -1,6 +1,9 @@
 package com.ruleup.ruleup_backend.challenge.repository;
 
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
+import com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -17,6 +20,29 @@ public interface ChallengeRepository extends JpaRepository<Challenge, UUID> {
 
     /** 삭제되지 않은 챌린지 1건 */
     Optional<Challenge> findByIdAndDeletedAtIsNull(UUID id);
+
+    /**
+     * 챌린지 전체 조회(탐색/목록, §3.x). 노출 조건: 모더레이션 APPROVED · 미삭제.
+     * PENDING_REVIEW/REJECTED 는 타인에게 비노출이므로 목록에서 제외(§5.1).
+     *  - category : null 이면 전체, 값이 있으면 해당 카테고리만(InterestCategory name).
+     *  - status   : null 이면 RECRUITING+ACTIVE 노출, 값이 있으면 해당 status 만.
+     * 정렬은 호출 측 Pageable(기본 createdAt desc)로 제어.
+     */
+    @Query("""
+            SELECT c FROM Challenge c
+            WHERE c.deletedAt IS NULL
+              AND c.moderationStatus = com.ruleup.ruleup_backend.challenge.domain.ChallengeModerationStatus.APPROVED
+              AND (:category IS NULL OR c.category = :category)
+              AND (
+                   (:status IS NULL AND c.status IN (
+                        com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus.RECRUITING,
+                        com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus.ACTIVE))
+                OR (:status IS NOT NULL AND c.status = :status)
+              )
+            """)
+    Page<Challenge> findVisibleForList(@Param("category") String category,
+                                       @Param("status") ChallengeStatus status,
+                                       Pageable pageable);
 
     /**
      * 모더레이션 마감 배치(§5.1/§8): REJECTED 상태로 1시간 수정창(fixDeadline)이 지난 챌린지를

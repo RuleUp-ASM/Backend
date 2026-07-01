@@ -4,6 +4,7 @@ import com.ruleup.ruleup_backend.common.response.ApiResponse;
 import com.ruleup.ruleup_backend.verification.dto.SyncRequest;
 import com.ruleup.ruleup_backend.verification.dto.SyncResponse;
 import com.ruleup.ruleup_backend.verification.dto.ChallengeProgress;
+import com.ruleup.ruleup_backend.verification.dto.ProgressListResponse;
 import com.ruleup.ruleup_backend.verification.dto.VerificationIntroRequest;
 import com.ruleup.ruleup_backend.verification.dto.VerificationIntroResponse;
 import com.ruleup.ruleup_backend.verification.service.VerificationIntroService;
@@ -21,6 +22,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.UUID;
 
@@ -53,10 +58,14 @@ public class VerificationController {
     }
 
     @Operation(summary = "진행률 일괄 조회(§3.2)",
-            description = "내 챌린지 진행률을 한 번에. 홈/리스트 렌더용. status=ACTIVE(기본)/ALL.")
+            description = "내 챌린지 진행률을 한 번에. 홈/리스트 렌더용. status=ACTIVE(기본)/ALL. "
+                    + "응답은 {asOf, challenges[]} 봉투(안드 ProgressResponse 계약).")
     @GetMapping("/progress")
-    public ApiResponse<List<ChallengeProgress>> progress(@AuthenticationPrincipal String userId,
-                                                         @RequestParam(defaultValue = "ACTIVE") String status) {
-        return ApiResponse.ok(readService.progress(UUID.fromString(userId), status));
+    public ApiResponse<ProgressListResponse> progress(@AuthenticationPrincipal String userId,
+                                                      @RequestParam(defaultValue = "ACTIVE") String status) {
+        List<ChallengeProgress> challenges = readService.progress(UUID.fromString(userId), status);
+        String asOf = ZonedDateTime.ofInstant(Instant.now(), ZoneId.of("Asia/Seoul"))
+                .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+        return ApiResponse.ok(new ProgressListResponse(asOf, challenges));
     }
 }

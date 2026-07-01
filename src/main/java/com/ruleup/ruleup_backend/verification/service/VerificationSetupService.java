@@ -116,6 +116,27 @@ public class VerificationSetupService {
         return new SetupResponse(member.getSetupStatus().name(), missing);
     }
 
+    // ===== §11.5 내 인증 장소(앵커) 조회 =====
+    /**
+     * 내 바인딩 앵커 조회. 위치 셋업/수정 화면 재진입 시 지도에 기존 핀을 다시 그리기 위함.
+     * (기존엔 GET /setup 의 anchorsConfigured(boolean)만 있어 좌표를 되읽을 수 없었다.)
+     *  - anchors     : 저장된 앵커 목록. 없으면 빈 배열.
+     *  - appliedFrom : 마지막 적용 시각(ISO) 또는 null. 쿨다운 표시용.
+     */
+    @Transactional(readOnly = true)
+    public MemberLocationResponse getMyLocation(UUID userId, UUID challengeId) {
+        ChallengeMember member = activeMember(challengeId, userId);
+        List<GeoAnchor> stored = member.getAnchors();
+        List<SetupRequest.AnchorDto> anchors = (stored == null)
+                ? List.of()
+                : stored.stream()
+                        .map(a -> new SetupRequest.AnchorDto(a.lat(), a.lng(), a.radiusM(), a.label()))
+                        .toList();
+        String appliedFrom = (member.getAnchorUpdatedAt() != null)
+                ? member.getAnchorUpdatedAt().toString() : null;
+        return new MemberLocationResponse(anchors, appliedFrom);
+    }
+
     // ===== §11.5 내 인증 장소 수정 =====
     @Transactional
     public MemberLocationResponse updateLocation(UUID userId, UUID challengeId, MemberLocationRequest req) {

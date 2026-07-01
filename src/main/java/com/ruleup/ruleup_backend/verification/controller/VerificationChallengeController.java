@@ -86,6 +86,15 @@ public class VerificationChallengeController {
         return ApiResponse.ok(setupService.setup(UUID.fromString(userId), challengeId, request));
     }
 
+    @Operation(summary = "내 인증 장소(앵커) 조회(§11.5)",
+            description = "내가 바인딩한 앵커 목록을 반환. 위치 셋업/수정 화면 재진입 시 지도에 기존 핀 복원용. "
+                    + "앵커가 없으면 빈 배열. 참여(ACTIVE) 멤버만.")
+    @GetMapping("/{challengeId}/my-location")
+    public ApiResponse<MemberLocationResponse> getLocation(@AuthenticationPrincipal String userId,
+                                                           @PathVariable UUID challengeId) {
+        return ApiResponse.ok(setupService.getMyLocation(UUID.fromString(userId), challengeId));
+    }
+
     @Operation(summary = "내 인증 장소 수정(§11.5)",
             description = "본인 앵커 교체. 최근 변경 후 쿨다운 동안은 재변경 불가. 즉시 적용.")
     @PutMapping("/{challengeId}/my-location")

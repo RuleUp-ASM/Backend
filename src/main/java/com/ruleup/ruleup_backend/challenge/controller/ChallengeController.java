@@ -55,6 +55,17 @@ public class ChallengeController {
         return ApiResponse.ok(new ChallengeImageResponse(challengeImageService.upload(image)));
     }
 
+    @Operation(summary = "챌린지 전체 조회", description = "탐색/목록용. 모더레이션 APPROVED·미삭제만 노출. "
+            + "category(선택)·status(선택, 기본 RECRUITING+ACTIVE) 필터, page/size 페이지네이션(최신순).")
+    @GetMapping
+    public ApiResponse<ChallengeListResponse> list(
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ApiResponse.ok(challengeService.list(category, status, page, size));
+    }
+
     @Operation(summary = "챌린지 상세 + 참여 자격")
     @GetMapping("/{challengeId}")
     public ApiResponse<ChallengeDetailResponse> getDetail(@AuthenticationPrincipal String userId,
