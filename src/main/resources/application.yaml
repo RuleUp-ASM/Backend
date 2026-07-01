@@ -51,6 +51,14 @@ app:
   # 추천 세그먼트 점수 윈도우 배치 튜닝(SegmentScoreService, 매일 04:00 KST).
   recommendation:
     segment-window-days: ${RECO_SEGMENT_WINDOW_DAYS:30}        # 최근 N일 생성 챌린지만 인기도 집계
+    # 루틴 아웃컴 수집 배치(RoutineOutcomeCollector, 매일 03:30 KST). 첫 수집 시 최근 N일치 소급.
+    outcome-lookback-days: ${RECO_OUTCOME_LOOKBACK_DAYS:30}
+
+  # 시스템 자원 지표 샘플러(SystemMetricsSampler, 개발기간 관찰용). test 프로파일에선 비활성.
+  observability:
+    metrics:
+      sample-interval-ms: ${SYS_METRICS_INTERVAL_MS:60000}     # 수집 주기(기본 60초)
+      retention-days: ${SYS_METRICS_RETENTION_DAYS:14}         # 스냅샷 보관 일수(초과분 정리)
   oauth:
     kakao:
       client-id: ${KAKAO_REST_API_KEY}

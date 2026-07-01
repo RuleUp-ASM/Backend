@@ -44,6 +44,10 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
 
+	// OS/하드웨어 지표(OSHI). JVM/Actuator로는 못 얻는 CPU iowait·디스크 IOPS·네트워크 대역폭·Swap·연결 수를
+	// 순수 자바(크로스플랫폼)로 수집한다. Spring Boot가 버전 관리하지 않으므로 명시. jna는 transitive.
+	implementation 'com.github.oshi:oshi-core:6.6.5'
+
 	implementation 'org.springframework.boot:spring-boot-starter-cache'
 	// 추천 세그먼트 점수 캐시(Redis). 캐시 매니저는 CacheConfig에서 RedisCacheManager로 구성.
 	implementation 'org.springframework.boot:spring-boot-starter-data-redis'

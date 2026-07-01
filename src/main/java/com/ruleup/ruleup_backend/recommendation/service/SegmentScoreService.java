@@ -8,6 +8,8 @@ import com.ruleup.ruleup_backend.recommendation.repository.TemplateSegmentScoreR
 import com.ruleup.ruleup_backend.user.domain.User;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -48,6 +50,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class SegmentScoreService {
 
+    private static final Logger log = LoggerFactory.getLogger(SegmentScoreService.class);
+
     private final ChallengeRepository challengeRepository;
     private final UserRepository userRepository;
     private final SegmentResolver segmentResolver;
@@ -63,6 +67,7 @@ public class SegmentScoreService {
     @Transactional
     public void rebuild() {
         Instant since = Instant.now().minus(Duration.ofDays(windowDays));
+        log.info("세그먼트 점수 재집계 시작(윈도우 {}일, since={})", windowDays, since);
 
         Map<Key, Long> counts = new HashMap<>();
         Map<UUID, Optional<User>> userCache = new HashMap<>();   // 생성자 1명이 여러 챌린지 → 조회 캐시
@@ -85,6 +90,7 @@ public class SegmentScoreService {
             rows.add(TemplateSegmentScore.rebuilt(k.type(), k.value(), k.templateId(), e.getValue()));
         }
         scoreRepository.saveAll(rows);
+        log.info("세그먼트 점수 재집계 완료: {}개 (segment,template) 행 재작성", rows.size());
 
         // 커밋된 뒤에만 캐시 무효화 → 다음 조회가 최신 점수로 다시 채워진다.
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {

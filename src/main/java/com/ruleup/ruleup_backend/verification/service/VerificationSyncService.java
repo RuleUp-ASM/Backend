@@ -18,6 +18,8 @@ import com.ruleup.ruleup_backend.verification.repository.VerificationMethodResul
 import com.ruleup.ruleup_backend.verification.signal.SignalType;
 import com.ruleup.ruleup_backend.verification.signal.SyncSignal;
 import com.ruleup.ruleup_backend.common.event.RoutineFailureConfirmed;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,6 +44,8 @@ import java.util.stream.Stream;
  */
 @Service
 public class VerificationSyncService {
+
+    private static final Logger log = LoggerFactory.getLogger(VerificationSyncService.class);
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final int NEXT_SYNC_SEC = 1800;   // 30분
@@ -117,6 +121,10 @@ public class VerificationSyncService {
             progressService.updateAfterSync(member, todayStatus, now);
             updated.add(new SyncResponse.UpdatedChallenge(
                     member.getChallengeId().toString(), todayStatus.name(), member.getProgressRate()));
+        }
+        if (log.isDebugEnabled()) {
+            log.debug("sync userId={} signals={} ignored={} activeMembers={} updated={}",
+                    userId, signals.size(), ignored, members.size(), updated.size());
         }
         return new SyncResponse(now.toString(), NEXT_SYNC_SEC, updated, ignored);
     }

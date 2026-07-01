@@ -4,6 +4,8 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.ruleup.ruleup_backend.llm.GeminiClient;
 import com.ruleup.ruleup_backend.routine.match.RoutineCandidate;
 import com.ruleup.ruleup_backend.routine.match.RoutineMatch;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -23,6 +25,8 @@ import java.util.stream.Collectors;
 @Component
 public class GeminiChallengeDraftClient implements ChallengeDraftClient {
 
+    private static final Logger log = LoggerFactory.getLogger(GeminiChallengeDraftClient.class);
+
     private final GeminiClient gemini;
 
     public GeminiChallengeDraftClient(GeminiClient gemini) {
@@ -32,9 +36,17 @@ public class GeminiChallengeDraftClient implements ChallengeDraftClient {
     @Override
     public ChallengeDraftSuggestion suggest(String title, String description, List<RoutineCandidate> candidates) {
         String content = gemini.generateText(buildPrompt(title, description, candidates));
-        if (content == null) return ChallengeDraftSuggestion.empty();
+        if (content == null) {
+            log.debug("챌린지 초안 제안: Gemini 응답 없음 → 폴백 (후보 {}개)", candidates.size());
+            return ChallengeDraftSuggestion.empty();
+        }
         Draft d = gemini.parseJson(content, Draft.class);
-        if (d == null) return ChallengeDraftSuggestion.empty();
+        if (d == null) {
+            log.debug("챌린지 초안 제안: JSON 파싱 실패 → 폴백");
+            return ChallengeDraftSuggestion.empty();
+        }
+        log.debug("챌린지 초안 제안: templateId={} participationType={} durationDays={}",
+                d.templateId(), d.participationType(), d.durationDays());
         return new ChallengeDraftSuggestion(
                 new RoutineMatch(d.templateId(), d.params()),
                 new ChallengeSettings(d.participationType(), d.repeatDays(),
