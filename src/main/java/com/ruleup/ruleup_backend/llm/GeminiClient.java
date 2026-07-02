@@ -24,7 +24,7 @@ import java.util.Set;
  * Google Gemini(generateContent) 공용 호출기.
  * 루틴 매칭 / 챌린지 설정 추천 / 콘텐츠 검수가 모두 이 클라이언트를 통해 Gemini를 부른다.
  *
- * - JSON 강제: generationConfig.responseMimeType=application/json
+ * - JSON 강제: generationConfig.responseMimeType=application/json (+ 필요 시 responseSchema 로 타입·enum 강제)
  * - 멀티모달: 이미지 바이트를 inlineData로 함께 보낼 수 있어 사진 검수도 가능
  * - 실패/미설정은 예외 없이 null 반환 → 호출 측이 각자 폴백(none/empty/UNAVAILABLE)
  */
@@ -77,6 +77,27 @@ public class GeminiClient {
     /** 텍스트 프롬프트 → 모델이 돌려준 텍스트(보통 JSON 문자열). 실패/미설정이면 null. */
     public String generateText(String prompt) {
         return generate(GeminiRequest.text(prompt));
+    }
+
+    /**
+     * 텍스트 프롬프트 + 응답 스키마 강제 → 모델 텍스트. 실패/미설정이면 null.
+     * responseSchema 는 Gemini 의 OpenAPI 서브셋(대문자 타입: STRING/OBJECT/INTEGER/ARRAY/BOOLEAN)
+     * JSON 문자열로 준다. enum·타입·필수 필드를 프롬프트가 아니라 API 레벨에서 강제한다.
+     * 스키마가 null/파싱불가면 스키마 없이(기존과 동일하게) 진행한다.
+     */
+    public String generateStructured(String prompt, String responseSchemaJson) {
+        return generate(GeminiRequest.text(prompt, parseSchema(responseSchemaJson)));
+    }
+
+    /** responseSchema JSON 문자열 → 요청 바디에 실을 객체 트리. 실패 시 null(스키마 미적용). */
+    private Object parseSchema(String json) {
+        if (json == null || json.isBlank()) return null;
+        try {
+            return jsonMapper.readValue(json, Object.class);
+        } catch (Exception e) {
+            log.warn("responseSchema 파싱 실패 — 스키마 없이 진행: {}", e.getMessage());
+            return null;
+        }
     }
 
     /** 텍스트 + 이미지(멀티모달) → 모델 텍스트. 실패/미설정이면 null. */
@@ -191,6 +212,13 @@ public class GeminiClient {
                     GenerationConfig.json());
         }
 
+        static GeminiRequest text(String prompt, Object responseSchema) {
+            return new GeminiRequest(
+                    List.of(new Content("user", List.of(Part.text(prompt)))),
+                    (responseSchema == null) ? GenerationConfig.json()
+                            : GenerationConfig.json(responseSchema));
+        }
+
         static GeminiRequest textAndImage(String prompt, byte[] image, String mimeType) {
             String b64 = java.util.Base64.getEncoder().encodeToString(image);
             return new GeminiRequest(
@@ -213,8 +241,10 @@ public class GeminiClient {
 
         @JsonInclude(JsonInclude.Include.NON_NULL)
         record GenerationConfig(Double temperature,
-                                @JsonProperty("responseMimeType") String responseMimeType) {
-            static GenerationConfig json() { return new GenerationConfig(0.0, "application/json"); }
+                                @JsonProperty("responseMimeType") String responseMimeType,
+                                @JsonProperty("responseSchema") Object responseSchema) {
+            static GenerationConfig json() { return new GenerationConfig(0.0, "application/json", null); }
+            static GenerationConfig json(Object schema) { return new GenerationConfig(0.0, "application/json", schema); }
         }
     }
 
