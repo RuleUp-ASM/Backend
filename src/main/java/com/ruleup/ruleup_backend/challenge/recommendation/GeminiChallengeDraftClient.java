@@ -34,6 +34,14 @@ public class GeminiChallengeDraftClient implements ChallengeDraftClient {
      * 응답 스키마(Gemini OpenAPI 서브셋). enum(participationType·repeatDays)·타입·usable 필수를
      * API 레벨에서 강제한다. params 는 free-form 맵이라 스키마로 못 박기 어려워 공식 권장 우회인
      * key/value 문자열 객체 배열로 받는다(값은 서버 ParamSpec 이 숫자/시간으로 강제).
+     *
+     * participationType·repeatDays·params 는 required(non-null)로 둔다: optional 로 두면 flash-lite 가
+     * 최소 출력으로 이들을 통째로 생략한다. 실측 결과 —
+     *   - participationType/repeatDays 누락 → 사용자 의도(예: "주말만")가 서버 기본 '매일'로 덮여 사라짐.
+     *   - params 누락 → 명시한 목표("5km")가 버려지고 템플릿 기본값으로 대체됨(추출 기능이 무력화).
+     * required 는 정상 경로에서만 강제되고(부적합 판정 시엔 모델이 생략, 어차피 버리므로 무해),
+     * params 는 배열이라 미언급 시 []({@code 언급 없으면 빈 배열} 프롬프트 지시)로 채워 hallucination 을 막는다.
+     * rejectReason·templateId 는 optional(부적합/미매칭 때 null).
      */
     private static final String RESPONSE_SCHEMA = """
         {
@@ -44,7 +52,6 @@ public class GeminiChallengeDraftClient implements ChallengeDraftClient {
             "templateId":   {"type": "INTEGER", "nullable": true},
             "params": {
               "type": "ARRAY",
-              "nullable": true,
               "items": {
                 "type": "OBJECT",
                 "properties": {
@@ -54,14 +61,13 @@ public class GeminiChallengeDraftClient implements ChallengeDraftClient {
                 "required": ["key", "value"]
               }
             },
-            "participationType": {"type": "STRING", "nullable": true, "enum": ["SOLO", "GROUP"]},
+            "participationType": {"type": "STRING", "enum": ["SOLO", "GROUP"]},
             "repeatDays": {
               "type": "ARRAY",
-              "nullable": true,
               "items": {"type": "STRING", "enum": ["MON","TUE","WED","THU","FRI","SAT","SUN"]}
             }
           },
-          "required": ["usable"]
+          "required": ["usable", "participationType", "repeatDays", "params"]
         }
         """;
 
