@@ -46,7 +46,7 @@ app:
   jwt:
     secret: ${JWT_SECRET}
     access-token-ttl: 1800        # 30분 (초)
-    refresh-token-ttl: 1209600    # 14일 (60*60*24*14)
+    refresh-token-ttl: 604800    # 7일 (60*60*24*7)
     signup-token-ttl: 300         # 5분
   # 추천 세그먼트 점수 윈도우 배치 튜닝(SegmentScoreService, 매일 04:00 KST).
   recommendation:
