@@ -2,13 +2,14 @@ package com.ruleup.ruleup_backend.challenge.recommendation;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.ruleup.ruleup_backend.llm.GeminiClient;
+import com.ruleup.ruleup_backend.llm.PromptLibrary;
 import com.ruleup.ruleup_backend.routine.match.RoutineCandidate;
 import com.ruleup.ruleup_backend.routine.match.RoutineMatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import java.math.BigDecimal;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -27,10 +28,55 @@ public class GeminiChallengeDraftClient implements ChallengeDraftClient {
 
     private static final Logger log = LoggerFactory.getLogger(GeminiChallengeDraftClient.class);
 
-    private final GeminiClient gemini;
+    private static final String PROMPT = "challenge-draft";
 
-    public GeminiChallengeDraftClient(GeminiClient gemini) {
+    /**
+     * 응답 스키마(Gemini OpenAPI 서브셋). enum(participationType·repeatDays)·타입·usable 필수를
+     * API 레벨에서 강제한다. params 는 free-form 맵이라 스키마로 못 박기 어려워 공식 권장 우회인
+     * key/value 문자열 객체 배열로 받는다(값은 서버 ParamSpec 이 숫자/시간으로 강제).
+     *
+     * participationType·repeatDays·params 는 required(non-null)로 둔다: optional 로 두면 flash-lite 가
+     * 최소 출력으로 이들을 통째로 생략한다. 실측 결과 —
+     *   - participationType/repeatDays 누락 → 사용자 의도(예: "주말만")가 서버 기본 '매일'로 덮여 사라짐.
+     *   - params 누락 → 명시한 목표("5km")가 버려지고 템플릿 기본값으로 대체됨(추출 기능이 무력화).
+     * required 는 정상 경로에서만 강제되고(부적합 판정 시엔 모델이 생략, 어차피 버리므로 무해),
+     * params 는 배열이라 미언급 시 []({@code 언급 없으면 빈 배열} 프롬프트 지시)로 채워 hallucination 을 막는다.
+     * rejectReason·templateId 는 optional(부적합/미매칭 때 null).
+     */
+    private static final String RESPONSE_SCHEMA = """
+        {
+          "type": "OBJECT",
+          "properties": {
+            "usable":       {"type": "BOOLEAN"},
+            "rejectReason": {"type": "STRING", "nullable": true},
+            "templateId":   {"type": "INTEGER", "nullable": true},
+            "params": {
+              "type": "ARRAY",
+              "items": {
+                "type": "OBJECT",
+                "properties": {
+                  "key":   {"type": "STRING"},
+                  "value": {"type": "STRING"}
+                },
+                "required": ["key", "value"]
+              }
+            },
+            "participationType": {"type": "STRING", "enum": ["SOLO", "GROUP"]},
+            "repeatDays": {
+              "type": "ARRAY",
+              "items": {"type": "STRING", "enum": ["MON","TUE","WED","THU","FRI","SAT","SUN"]}
+            }
+          },
+          "required": ["usable", "participationType", "repeatDays", "params"]
+        }
+        """;
+
+    private final GeminiClient gemini;
+    private final PromptLibrary prompts;
+
+    public GeminiChallengeDraftClient(GeminiClient gemini, PromptLibrary prompts) {
         this.gemini = gemini;
+        this.prompts = prompts;
     }
 
     @Override
@@ -41,7 +87,7 @@ public class GeminiChallengeDraftClient implements ChallengeDraftClient {
             return ChallengeDraftSuggestion.empty();
         }
 
-        String content = gemini.generateText(buildPrompt(title, description, candidates));
+        String content = gemini.generateStructured(buildPrompt(title, description, candidates), RESPONSE_SCHEMA);
         if (content == null) {
             log.debug("챌린지 초안 제안: Gemini 응답 없음 → 폴백 (후보 {}개)", candidates.size());
             return ChallengeDraftSuggestion.empty();
@@ -56,12 +102,23 @@ public class GeminiChallengeDraftClient implements ChallengeDraftClient {
             log.debug("챌린지 초안 제안: LLM 이 부적합 입력으로 판정(reason={}) → 폴백", d.rejectReason());
             return ChallengeDraftSuggestion.empty();
         }
-        log.debug("챌린지 초안 제안: templateId={} participationType={} durationDays={}",
-                d.templateId(), d.participationType(), d.durationDays());
+        log.debug("챌린지 초안 제안: templateId={} participationType={}",
+                d.templateId(), d.participationType());
         return new ChallengeDraftSuggestion(
-                new RoutineMatch(d.templateId(), d.params()),
-                new ChallengeSettings(d.participationType(), d.repeatDays(),
-                        d.durationDays(), d.mannerDeduction(), d.mannerGain()));
+                new RoutineMatch(d.templateId(), toParamsMap(d.params())),
+                new ChallengeSettings(d.participationType(), d.repeatDays()));
+    }
+
+    /** LLM 이 key/value 배열로 준 목표값을 서버가 쓰는 Map 으로 변환(값은 문자열 그대로, 검증은 ParamSpec). */
+    private Map<String, Object> toParamsMap(List<ParamKV> list) {
+        if (list == null || list.isEmpty()) return Map.of();
+        Map<String, Object> m = new LinkedHashMap<>();
+        for (ParamKV kv : list) {
+            if (kv != null && kv.key() != null && !kv.key().isBlank()) {
+                m.put(kv.key().trim(), kv.value());
+            }
+        }
+        return m;
     }
 
     /**
@@ -81,7 +138,7 @@ public class GeminiChallengeDraftClient implements ChallengeDraftClient {
         return !hasLetter;
     }
 
-    /** 후보 목록을 주고 [1]루틴 매칭 + [2]챌린지 설정을 하나의 JSON 으로 받게 한다. */
+    /** 후보 목록을 주고 [1]루틴 매칭 + [2]챌린지 설정을 하나의 JSON 으로 받게 한다(프롬프트 본문은 resources/prompts). */
     private String buildPrompt(String title, String description, List<RoutineCandidate> candidates) {
         String list = candidates.stream()
                 .map(c -> "%d. %s%s".formatted(
@@ -89,52 +146,10 @@ public class GeminiChallengeDraftClient implements ChallengeDraftClient {
                         c.paramKeys().isEmpty() ? "" : " (목표값: " + String.join(", ", c.paramKeys()) + ")"))
                 .collect(Collectors.joining("\n"));
 
-        return """
-            너는 습관 챌린지 초안 도우미다. 사용자의 제목/설명을 보고 초안을 JSON 하나로 만든다.
-            아래 STEP 을 순서대로 수행하되, 최종 출력은 JSON 객체 하나뿐이다(설명·주석·마크다운 금지).
-
-            [입력]
-            제목: %s
-            설명: %s
-
-            후보 루틴(id. 이름 (목표값 키)):
-            %s
-
-            ────────────────────────────────
-            STEP 1. 입력 적합성 판정 (잘못된 입력 빠른 감지)
-              먼저 이 입력이 "반복 실천 가능한 습관 챌린지"로 성립하는지 본다.
-              아래 중 하나라도 해당하면 부적합 → STEP 2~4 를 건너뛰고 즉시 아래만 출력:
-                {"usable": false, "rejectReason": "<사유 한 줄>"}
-              부적합 예:
-                - 의미 없는 문자열/무작위 키 입력(예: "asdf", "ㅁㄴㅇㄹ", "123")
-                - 습관과 무관(단순 질문·잡담·욕설·광고·부적절/유해 내용)
-                - 일회성이라 반복 불가(예: "여권 재발급", "이사하기")
-              적합하면 {"usable": true, ...} 로 STEP 2 로 진행한다.
-
-            STEP 2. 루틴 매칭
-              - templateId: 후보 중 의미가 가장 가까운 루틴의 id(숫자). 적절한 게 없으면 null.
-                후보에 없는 id 를 지어내지 말 것.
-              - params: 사용자가 "명시한" 목표값만 채운다. 키는 매칭된 후보의 "목표값 키"만 사용.
-                숫자는 숫자로(예: 5), 시간은 "HH:mm" 문자열로(예: "07:00").
-                언급이 없으면 비운다({}). 임의로 추측해 새 키를 만들지 말 것.
-
-            STEP 3. 챌린지 설정
-              - participationType: "SOLO"(혼자) 또는 "GROUP"(같이 하는 게 자연스러움).
-              - repeatDays: ["MON","TUE","WED","THU","FRI","SAT","SUN"] 중 골라 배열로. 매일이면 7개 전부.
-              - durationDays: 챌린지 기간(일). 보통 7~30.
-              - mannerDeduction: 실패 시 매너 차감(0 이상 숫자, 보통 0.5~3.0).
-              - mannerGain: 성공 시 매너 가산(0 이상 숫자, 보통 0.5~3.0).
-
-            STEP 4. 자체 점검 후 출력
-              - templateId 가 후보에 실재하는 id 인지, params 키가 그 후보 키인지 다시 확인.
-              - 모든 필드를 담아 JSON 하나로만 출력.
-
-            ────────────────────────────────
-            출력 스키마(적합):
-            {"usable":true,"templateId":2,"params":{"distance_km":5},"participationType":"SOLO","repeatDays":["MON","TUE","WED","THU","FRI"],"durationDays":14,"mannerDeduction":1.0,"mannerGain":1.0}
-            출력 스키마(부적합):
-            {"usable":false,"rejectReason":"의미 없는 입력"}
-            """.formatted(title, description == null ? "" : description, list);
+        return prompts.render(PROMPT, Map.of(
+                "title", title == null ? "" : title,
+                "description", description == null ? "" : description,
+                "candidates", list));
     }
 
     /** 통합 응답(날것). 적합성 플래그 + 루틴 매칭분 + 설정분을 한 JSON 으로 받는다. */
@@ -143,11 +158,12 @@ public class GeminiChallengeDraftClient implements ChallengeDraftClient {
             Boolean usable,             // STEP 1 판정. false 면 초안 폐기(폴백). null(누락)은 관대하게 usable 취급.
             String rejectReason,        // usable=false 일 때 사유(로깅용)
             Long templateId,
-            Map<String, Object> params,
+            List<ParamKV> params,       // 목표값 key/value 배열(스키마 강제). toParamsMap 으로 Map 변환.
             String participationType,
-            List<String> repeatDays,
-            Integer durationDays,
-            BigDecimal mannerDeduction,
-            BigDecimal mannerGain
+            List<String> repeatDays
     ) {}
+
+    /** 목표값 한 쌍(스키마상 value 는 문자열; 숫자/시간 강제는 서버 ParamSpec 이 한다). */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record ParamKV(String key, Object value) {}
 }

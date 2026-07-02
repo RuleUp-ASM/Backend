@@ -11,10 +11,13 @@ import com.ruleup.ruleup_backend.routine.match.RoutineCandidate;
 import com.ruleup.ruleup_backend.routine.match.RoutineMatch;
 import com.ruleup.ruleup_backend.routine.match.RoutineMatchClient;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 1단계 추천 (제목 → 템플릿 매칭 → 지원 인증 방식 안내). 상태 저장 없음.
@@ -34,6 +37,8 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 public class RoutineRecommendationService {
+
+    private static final Logger log = LoggerFactory.getLogger(RoutineRecommendationService.class);
 
     private final RoutineMatchClient matchClient;
     private final RoutineCatalog catalog;
@@ -71,12 +76,14 @@ public class RoutineRecommendationService {
 
     // (3) LLM 이 고른 templateId 가 서버 카탈로그에 실재할 때만 "매칭 성공"으로 인정.
     private RoutineRecommendationResponse buildFromMatch(RoutineRecommendationRequest req, RoutineMatch match) {
-        RoutineTemplate template = match.matched()
-                ? catalog.findById(match.templateId()).orElse(null)
-                : null;
-
+        if (!match.matched()) {
+            return noMatchResponse(req.title());           // LLM 이 매칭 못 함 = 직접 입력(수동만) — 정상 폴백
+        }
+        RoutineTemplate template = catalog.findById(match.templateId()).orElse(null);
         if (template == null) {
-            return noMatchResponse(req.title());           // 직접 입력 = 수동만
+            // LLM 이 후보에 없는 id 를 냈다(hallucination) — 출력 형식 실패로 집계.
+            log.info("llm_fail class=VALIDATION reason=unknown_template templateId={}", match.templateId());
+            return noMatchResponse(req.title());
         }
         return matchedResponse(req, template, match);      // 자동/수동 안내
     }
@@ -114,11 +121,28 @@ public class RoutineRecommendationService {
     }
 
     // ===== 목표값: LLM 값이 범위 안이면 그 값, 아니면 템플릿 기본값(신뢰 경계 보정) =====
+    // 탈락 사유(존재하지 않는 키·타입/범위 불일치)는 llm_fail class=VALIDATION 으로 남겨 집계한다.
     private List<RoutineParam> resolveParams(RoutineTemplate template, RoutineMatch match) {
+        Map<String, Object> provided = match.paramsOrEmpty();
         List<RoutineParam> result = new ArrayList<>();
+        List<String> known = new ArrayList<>();
         for (ParamSpec spec : template.paramSpecs()) {
-            Object value = spec.clampOrDefault(match.paramsOrEmpty().get(spec.key()));
-            result.add(RoutineParam.of(spec, value));
+            known.add(spec.key());
+            Object raw = provided.get(spec.key());
+            if (raw != null) {
+                try {
+                    spec.validate(raw);   // 통과 여부만 확인(값은 아래 clampOrDefault 결과 사용)
+                } catch (RuntimeException e) {
+                    log.info("llm_fail class=VALIDATION reason=param_value template={} key={} raw={}",
+                            template.getId(), spec.key(), raw);
+                }
+            }
+            result.add(RoutineParam.of(spec, spec.clampOrDefault(raw)));
+        }
+        for (String key : provided.keySet()) {
+            if (!known.contains(key)) {
+                log.info("llm_fail class=VALIDATION reason=unknown_key template={} key={}", template.getId(), key);
+            }
         }
         return result;
     }

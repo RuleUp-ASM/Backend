@@ -57,13 +57,14 @@ public class ChallengeRecommendationService {
         RoutineRecommendationResponse routine =
                 routineRecommendationService.recommendFromMatch(req, draft.matchOrNone());
 
-        // 설정분은 신뢰 경계 밖 → 전부 sanitize
+        // LLM 이 제안하는 설정은 참여방식·반복요일뿐 → 신뢰 경계 밖이라 sanitize.
+        // 기간·매너 점수는 LLM 이 추측할 근거가 없어 서버 정적 기본값으로 고정한다.
         ChallengeSettings s = draft.settingsOrEmpty();
         String participation = sanitizeParticipation(s.participationType());
         List<String> repeatDays = sanitizeRepeatDays(s.repeatDays());
-        int duration = sanitizeDuration(s.durationDays());
-        BigDecimal deduction = sanitizeNonNegative(s.mannerDeduction(), DEFAULT_MANNER_DEDUCTION);
-        BigDecimal gain = sanitizeNonNegative(s.mannerGain(), DEFAULT_MANNER_GAIN);
+        int duration = DEFAULT_DURATION_DAYS;
+        BigDecimal deduction = DEFAULT_MANNER_DEDUCTION;
+        BigDecimal gain = DEFAULT_MANNER_GAIN;
 
         LocalDate start = LocalDate.now().plusDays(START_OFFSET_DAYS);
         LocalDate end = start.plusDays((long) duration - 1);
@@ -104,14 +105,6 @@ public class ChallengeRecommendationService {
         if (days == null || days.isEmpty()) return DEFAULT_REPEAT_DAYS;
         List<String> upper = days.stream().filter(d -> d != null).map(d -> d.trim().toUpperCase()).toList();
         return (RepeatDay.allValid(upper) && !upper.isEmpty()) ? upper : DEFAULT_REPEAT_DAYS;
-    }
-
-    private int sanitizeDuration(Integer d) {
-        return (d != null && d >= 1) ? d : DEFAULT_DURATION_DAYS;
-    }
-
-    private BigDecimal sanitizeNonNegative(BigDecimal v, BigDecimal fallback) {
-        return (v != null && v.compareTo(BigDecimal.ZERO) >= 0) ? v : fallback;
     }
 
     /** 추천 선택 경로(Path A): templateId로 챌린지 초안 구성. LLM(루틴매칭·설정제안) 둘 다 우회 — 설정은 정적 기본값. */
