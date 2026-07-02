@@ -143,7 +143,9 @@ public class GeminiClient {
                     if (!backoff(attempt)) return null;
                     continue;
                 }
-                log.warn("Gemini 호출 실패: status={} body={}", status.value(), errorBody(resp.getBody()));
+                // 최종 실패 — 분류 태그를 남겨(llm_fail class=…) staging 에서 "쿼터 계열 vs 출력 형식" 실패율 집계.
+                log.warn("llm_fail class={} status={} body={}",
+                        failClass(status.value()), status.value(), errorBody(resp.getBody()));
                 return null;
 
             } catch (ResourceAccessException timeout) {
@@ -153,11 +155,11 @@ public class GeminiClient {
                     if (!backoff(attempt)) return null;
                     continue;
                 }
-                log.warn("Gemini 호출 실패(타임아웃): {}", timeout.getMessage());
+                log.warn("llm_fail class=TIMEOUT msg={}", timeout.getMessage());
                 return null;
             } catch (Exception e) {
-                // 직렬화·파싱 등 재시도해도 같을 오류는 즉시 폴백.
-                log.warn("Gemini 호출 실패: {}", e.getMessage());
+                // 직렬화·전송 등 재시도해도 같을 오류는 즉시 폴백.
+                log.warn("llm_fail class=TRANSPORT msg={}", e.getMessage());
                 return null;
             }
         }
@@ -174,6 +176,19 @@ public class GeminiClient {
             Thread.currentThread().interrupt();
             return false;
         }
+    }
+
+    /**
+     * 실패 원인을 greppable 클래스로 분류(llm_fail class=…). 두 갈래로 크게 나눠 보면 된다:
+     *  - 쿼터/인프라 계열(재시도로 흡수 가능): QUOTA(429)·UNAVAILABLE(503)·SERVER(500/502/504)·TIMEOUT·TRANSPORT
+     *  - 요청/형식 계열(재시도 무의미): CLIENT(4xx — 잘못된 스키마·키 등)·FORMAT(응답 JSON 파싱 실패)
+     * responseSchema 가 거부되면 400 → class=CLIENT 로 뜨므로 스키마 문제도 이 로그로 잡힌다.
+     */
+    private static String failClass(int status) {
+        if (status == 429) return "QUOTA";
+        if (status == 503) return "UNAVAILABLE";
+        if (status >= 500) return "SERVER";     // 500 / 502 / 504
+        return "CLIENT";                         // 그 외 4xx
     }
 
     /** 에러 응답 바이트를 로그용 문자열로(앞부분만). */
@@ -196,7 +211,8 @@ public class GeminiClient {
         try {
             return jsonMapper.readValue(extractJson(content), type);
         } catch (Exception e) {
-            log.warn("Gemini 응답 JSON 파싱 실패: {}", e.getMessage());
+            // 출력 형식 실패(모델이 준 텍스트가 스키마/타입에 안 맞음) — 쿼터 계열과 구분해 집계.
+            log.warn("llm_fail class=FORMAT msg={}", e.getMessage());
             return null;
         }
     }
