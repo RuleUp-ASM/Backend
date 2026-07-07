@@ -13,7 +13,7 @@ import java.util.List;
 
 /**
  * 세그먼트별 점수 읽기 + 캐시 경계.
- *  - scoresFor: (세그먼트축, 값) 단위로 Redis 캐싱. 점수는 배치 시점에만 바뀌므로 TTL이 길어도 안전.
+ *  - scoresFor: (세그먼트축, 값) 단위로 캐싱(Caffeine). 점수는 배치 시점에만 바뀌므로 TTL이 길어도 안전.
  *  - evictAll : 배치 재계산 커밋 후 호출 → 캐시 무효화. 변경 시점 = 무효화 시점이라 thrash 없음.
  * RecommendationService와 별도 빈으로 둔 이유: @Cacheable/@CacheEvict는 자기-호출(self-invocation)에선
  * 프록시를 안 타기 때문에, 캐시 경계는 반드시 다른 빈에 둬야 한다.

@@ -49,8 +49,9 @@ dependencies {
 	implementation 'com.github.oshi:oshi-core:6.6.5'
 
 	implementation 'org.springframework.boot:spring-boot-starter-cache'
-	// 추천 세그먼트 점수 캐시(Redis). 캐시 매니저는 CacheConfig에서 RedisCacheManager로 구성.
-	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+	// 추천 세그먼트 점수·카테고리 마스터 캐시(JVM 로컬). 캐시 매니저는 CacheConfig에서 CaffeineCacheManager로 구성.
+	// Spring Boot가 버전 관리하므로 버전 명시 불필요.
+	implementation 'com.github.ben-manes.caffeine:caffeine'
 
 	// 커넥션 풀(keep-alive) 지원 HTTP 클라이언트 (OAuth 외부 호출 재사용용)
 	// Spring Boot가 버전 관리하므로 버전 명시 불필요.

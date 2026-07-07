@@ -23,7 +23,7 @@ spring:
   datasource:
     username: test
     password: test
-  # 테스트는 Redis를 띄우지 않는다 → 인메모리(ConcurrentMap) 캐시로 폴백.
-  # (CacheConfig의 RedisCacheManager 빈은 @Profile("!test")로 빠진다.)
+  # 테스트는 인메모리(ConcurrentMap) 캐시를 쓴다.
+  # (CacheConfig의 CaffeineCacheManager 빈은 @Profile("!test")로 빠진다.)
   cache:
     type: simple

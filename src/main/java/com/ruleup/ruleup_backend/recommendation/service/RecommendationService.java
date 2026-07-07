@@ -50,7 +50,7 @@ public class RecommendationService {
         User user = userRepo.findById(userId).orElse(null);
         if (user == null) return List.of();
 
-        // 1) 세그먼트 점수 합 (배치가 채운 Redis 캐시에서 읽음 — DB 직격 없음)
+        // 1) 세그먼트 점수 합 (배치가 채운 캐시(Caffeine)에서 읽음 — DB 직격 없음)
         Map<Long, Double> segScore = new HashMap<>();
         for (Segment seg : segmentResolver.resolve(user)) {
             for (SegmentScoreEntry e : segmentScoreReader.scoresFor(seg.type(), seg.value())) {
