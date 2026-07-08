@@ -42,13 +42,6 @@ public class GeminiModerationClient implements ContentModerationClient {
     }
 
     @Override
-    public ModerationResult moderateChallengeName(String title) {
-        if (title == null || title.isBlank()) return ModerationResult.APPROVED;
-        String content = gemini.generateText(buildChallengeNamePrompt(title));
-        return toResult(content);
-    }
-
-    @Override
     public ModerationResult moderateImage(String imageUrl) {
         if (imageUrl == null || imageUrl.isBlank()) return ModerationResult.APPROVED;
         byte[] bytes = fetchImage(imageUrl);
@@ -115,26 +108,6 @@ public class GeminiModerationClient implements ContentModerationClient {
             출력 JSON 예: {"flagged": false, "reason": ""}
             또는: {"flagged": true, "reason": "욕설 포함"}
             """.formatted(nickname);
-    }
-
-    private String buildChallengeNamePrompt(String title) {
-        return """
-            너는 그룹 습관 챌린지 플랫폼의 챌린지 이름 검수자다.
-            아래 챌린지 이름이 모든 사용자에게 공개되어도 되는지 판단하라.
-            다음 중 하나라도 해당하면 문제 있음(flagged=true)이다:
-            - 정치적 선동/특정 정당·정치인 비방
-            - 음란/성적 표현
-            - 욕설/혐오/비난/차별
-            - 타인 사칭, 광고/스팸, 불법 행위 조장
-
-            애매하면 통과(flagged=false)시키되, 명백히 문제면 막아라.
-            반드시 JSON으로만 답하라(설명 금지).
-
-            챌린지 이름: "%s"
-
-            출력 JSON 예: {"flagged": false, "reason": ""}
-            또는: {"flagged": true, "reason": "욕설 포함"}
-            """.formatted(title);
     }
 
     private String buildImagePrompt() {

@@ -42,7 +42,6 @@ class ChallengeImageServiceTest {
         ModerationResult imageResult = ModerationResult.APPROVED;
         boolean imageBytesCalled = false;
         public ModerationResult moderateNickname(String n) { return ModerationResult.APPROVED; }
-        public ModerationResult moderateChallengeName(String t) { return ModerationResult.APPROVED; }
         public ModerationResult moderateImage(String url) { return ModerationResult.APPROVED; }
         public ModerationResult moderateImageBytes(byte[] b, String mime) {
             imageBytesCalled = true;

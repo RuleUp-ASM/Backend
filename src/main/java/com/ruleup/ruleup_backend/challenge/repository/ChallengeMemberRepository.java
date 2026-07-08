@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import com.ruleup.ruleup_backend.common.verification.ScheduleType;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
@@ -40,6 +41,22 @@ public interface ChallengeMemberRepository extends JpaRepository<ChallengeMember
 
     /** 내 모든 멤버십(상태 무관) — 진행률 status=ALL */
     List<ChallengeMember> findByUserId(UUID userId);
+
+    /** 내 멤버십 중 여러 상태 — 내 챌린지 목록 scope=ALL(ACTIVE+PENDING만, LEFT/REMOVED 제외) */
+    List<ChallengeMember> findByUserIdAndStatusIn(UUID userId, Collection<MemberStatus> statuses);
+
+    /**
+     * 고스트(무음) 푸시 대상 선점(§고스트 푸시): 셋업 미완료(권한 없음) ACTIVE 멤버를
+     * FOR UPDATE SKIP LOCKED 로 집는다. 쿨다운(ghostPushedAt) 지난 것만 — 스팸 방지.
+     * AUTO/소프트삭제 판정은 호출부가 챌린지를 로드해 걸러낸다(멤버 행만 잠가 다른 배치와 락 간섭 없음).
+     * 다중 인스턴스에서도 잠긴 행은 건너뛰어 중복 발송 없음(활성화/완료 배치와 동일 DB 멱등 패턴).
+     */
+    @Query(value = "SELECT * FROM ChallengeMember " +
+            "WHERE status = 'ACTIVE' AND setupStatus = 'PENDING_SETUP' " +
+            "AND (ghostPushedAt IS NULL OR ghostPushedAt <= :cooldownThreshold) " +
+            "ORDER BY joinedAt LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
+    List<ChallengeMember> findSetupPendingForGhostPushForUpdate(@Param("cooldownThreshold") Instant cooldownThreshold,
+                                                                @Param("limit") int limit);
 
     /**
      * 멤버 상태 원자적 전이(CAS): 현재 status가 {@code from} 중 하나일 때만 {@code to}로 변경.

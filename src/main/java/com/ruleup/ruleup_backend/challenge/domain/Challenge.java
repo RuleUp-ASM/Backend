@@ -156,8 +156,13 @@ public class Challenge extends AssignedIdEntity {
         c.reward = reward;
         c.anonymity = anonymity;
         c.status = ChallengeStatus.RECRUITING;
-        // 생성은 항상 성공하되 타인에겐 비노출 → 비동기 LLM 검수 후 APPROVED 전환(§5.1).
-        c.moderationStatus = ChallengeModerationStatus.PENDING_REVIEW;
+        // 가시성 게이트는 "이미지" 기준(§5.1): 이미지가 있으면 비동기 SafeSearch 검수 후 공개(PENDING_REVIEW),
+        // 이미지가 없으면 검수 대상이 없어 즉시 공개(APPROVED). 텍스트(이름)는 생성 시 blocklist(동기) +
+        // 추천 시 draft 게이트로 거른다(별도 이름 LLM 검수 없음).
+        boolean hasImage = imageUrl != null && !imageUrl.isBlank();
+        c.moderationStatus = hasImage
+                ? ChallengeModerationStatus.PENDING_REVIEW
+                : ChallengeModerationStatus.APPROVED;
         c.aiAssisted = aiAssisted;
         c.participantCount = 0;
         return c;
@@ -172,6 +177,16 @@ public class Challenge extends AssignedIdEntity {
     public void activate() {
         if (this.status == ChallengeStatus.RECRUITING) {
             this.status = ChallengeStatus.ACTIVE;
+        }
+    }
+
+    /**
+     * 종료일 경과 → 종료(§5.5). ACTIVE 일 때만 COMPLETED 로 전환(멱등·방어).
+     * 완주율 집계·정산은 인증(VF)/평판 스펙 소관 — 여기선 lifecycle 상태만 마감한다.
+     */
+    public void complete() {
+        if (this.status == ChallengeStatus.ACTIVE) {
+            this.status = ChallengeStatus.COMPLETED;
         }
     }
 

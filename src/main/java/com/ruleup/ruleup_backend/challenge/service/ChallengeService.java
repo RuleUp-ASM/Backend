@@ -57,13 +57,13 @@ public class ChallengeService {
     /**
      * 내가 참여 중인 챌린지 목록. 멤버십 기준이라 페이지네이션 없이 전량 반환한다.
      *  - scope=ACTIVE(기본) : ACTIVE 멤버십(실제 참여 중)만.
-     *  - scope=ALL          : 전체 멤버십(PENDING 승인 대기 포함).
-     * 소프트 삭제된 챌린지는 제외. 항목마다 내 멤버십 상태(memberStatus)를 함께 내려준다.
+     *  - scope=ALL          : ACTIVE + PENDING(승인 대기) 멤버십. 탈퇴/거절(LEFT/REMOVED)은 제외.
+     * 소프트 삭제된 챌린지는 제외. 항목마다 내 멤버십 상태(memberStatus: ACTIVE/PENDING)를 함께 내려준다.
      */
     @Transactional(readOnly = true)
     public ChallengeListResponse myChallenges(UUID userId, String scope) {
         List<ChallengeMember> memberships = "ALL".equalsIgnoreCase(scope)
-                ? memberRepository.findByUserId(userId)
+                ? memberRepository.findByUserIdAndStatusIn(userId, List.of(MemberStatus.ACTIVE, MemberStatus.PENDING))
                 : memberRepository.findByUserIdAndStatus(userId, MemberStatus.ACTIVE);
 
         List<ChallengeListResponse.Item> items = new ArrayList<>();
@@ -116,8 +116,11 @@ public class ChallengeService {
         memberRepository.save(ChallengeMember.owner(challenge.getId(), userId));
         challenge.increaseParticipantCount();
 
-        // 이름 LLM 검수는 비동기(§5.1) — 커밋 후 AFTER_COMMIT 리스너가 APPROVED/REJECTED 결정.
-        eventPublisher.publishEvent(new ChallengeModerationRequested(challenge.getId()));
+        // 이미지 검수만 비동기(§5.1) — 이미지가 있어 PENDING_REVIEW 인 경우에만 커밋 후 리스너가 검수.
+        // 이미지가 없으면 create()에서 이미 APPROVED(즉시 공개)라 검수 이벤트를 내지 않는다.
+        if (challenge.getModerationStatus() == ChallengeModerationStatus.PENDING_REVIEW) {
+            eventPublisher.publishEvent(new ChallengeModerationRequested(challenge.getId()));
+        }
 
         // 추천 세그먼트 점수는 여기서 즉시 갱신하지 않는다(매 생성마다 바뀌면 추천 캐시 효율↓).
         // SegmentScoreService 가 주기적으로 누적 챌린지를 재집계한다.
@@ -125,14 +128,16 @@ public class ChallengeService {
     }
 
     /**
-     * AUTO 인증이면 스냅샷의 requiredPermissions 가 모두 grantedPermissions 에 포함돼야 한다(§11.2).
+     * AUTO 인증이면 스냅샷의 "즉시형" 권한이 모두 grantedPermissions 에 포함돼야 한다(§5.1/§11.2).
+     *  - 즉시형(알림·FINE위치·활동인식·HC·카메라 등)은 생성 버튼 시점 팝업으로 받으므로 여기서 강제.
+     *  - 설정형(백그라운드 위치·사용정보 접근)은 셋업(§11.4 /setup)으로 이연 → 생성 시 검증 제외.
      * 미충족이면 ROUTINE_PERMISSION_REQUIRED. (보유 상태는 저장하지 않음 — 생성 시점 검증만, §5.6)
      */
     private void validateGrantedPermissions(com.ruleup.ruleup_backend.routine.domain.VerificationConfig v,
                                             List<String> granted) {
         if (v.selectedMethod() != com.ruleup.ruleup_backend.routine.domain.SelectedMethod.AUTO) return;
-        List<String> required = v.requiredPermissions();
-        if (required == null || required.isEmpty()) return;
+        List<String> required = v.immediateRequiredPermissions();
+        if (required.isEmpty()) return;
         if (granted == null || !granted.containsAll(required))
             throw new BusinessException(ErrorCode.ROUTINE_PERMISSION_REQUIRED);
     }
@@ -202,10 +207,9 @@ public class ChallengeService {
         if (req.description() != null && req.description().length() > 200)
             throw new BusinessException(ErrorCode.DESCRIPTION_TOO_LONG);
 
-        // title/imageUrl 이 실제로 바뀌면 재검수(§5.1) — 바꾸기 "전" 값과 비교.
-        boolean nameOrImageChanged =
-                (req.title() != null && !req.title().equals(c.getTitle()))
-                        || (req.imageUrl() != null && !req.imageUrl().equals(c.getImageUrl()));
+        // imageUrl 이 실제로 바뀌면 재검수(§5.1) — 바꾸기 "전" 값과 비교. 이름 변경은 검수 트리거가 아니다
+        // (이름은 blocklist 동기 차단 + 추천 draft 게이트로만 거른다).
+        boolean imageChanged = req.imageUrl() != null && !req.imageUrl().equals(c.getImageUrl());
 
         c.changeTitle(req.title());
         c.changeImageUrl(req.imageUrl());
@@ -225,8 +229,8 @@ public class ChallengeService {
         LocalDate start = (req.startDate() != null) ? validateStartDate(req.startDate()) : null;
         c.changeSchedule(duration, start);
 
-        // 이름/이미지가 바뀌었으면 PENDING_REVIEW 로 되돌리고 재검수(REJECTED 1h 수정 경로 포함).
-        if (nameOrImageChanged) {
+        // 이미지가 바뀌었으면 PENDING_REVIEW 로 되돌리고 재검수(REJECTED 1h 수정 경로 포함).
+        if (imageChanged) {
             c.resubmitModeration();
             eventPublisher.publishEvent(new ChallengeModerationRequested(c.getId()));
         }

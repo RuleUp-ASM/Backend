@@ -138,18 +138,23 @@ public class GeminiChallengeDraftClient implements ChallengeDraftClient {
         return !hasLetter;
     }
 
-    /** 후보 목록을 주고 [1]루틴 매칭 + [2]챌린지 설정을 하나의 JSON 으로 받게 한다(프롬프트 본문은 resources/prompts). */
+    /**
+     * 자동 인증 가능 루틴 전체(<100개)를 목업 룩업 테이블로 렌더링해 프롬프트에 싣는다.
+     * 컬럼: id | 이름 | 카테고리 | 목표값키 | 설명. 카탈로그 순서가 고정이라 이 블록은 요청마다 동일 →
+     * 고정 프리픽스로 캐시된다(민감한 인증/권한 필드는 넣지 않는다).
+     */
     private String buildPrompt(String title, String description, List<RoutineCandidate> candidates) {
-        String list = candidates.stream()
-                .map(c -> "%d. %s%s".formatted(
-                        c.id(), c.name(),
-                        c.paramKeys().isEmpty() ? "" : " (목표값: " + String.join(", ", c.paramKeys()) + ")"))
-                .collect(Collectors.joining("\n"));
+        StringBuilder table = new StringBuilder("id | 이름 | 카테고리 | 목표값키 | 설명");
+        for (RoutineCandidate c : candidates) {
+            String keys = c.paramKeys().isEmpty() ? "-" : String.join(",", c.paramKeys());
+            String desc = (c.description() == null || c.description().isBlank()) ? "-" : c.description();
+            table.append("\n%d | %s | %s | %s | %s".formatted(c.id(), c.name(), c.category(), keys, desc));
+        }
 
         return prompts.render(PROMPT, Map.of(
                 "title", title == null ? "" : title,
                 "description", description == null ? "" : description,
-                "candidates", list));
+                "candidates", table.toString()));
     }
 
     /** 통합 응답(날것). 적합성 플래그 + 루틴 매칭분 + 설정분을 한 JSON 으로 받는다. */

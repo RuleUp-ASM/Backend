@@ -171,7 +171,9 @@ public class AuthService {
     /** 기기 정보를 유저에 반영(최신 1건 갱신). 호출 전 requireValidDeviceInfo 로 검증됨. */
     private void applyDeviceInfo(User user, DeviceInfoRequest device) {
         if (device == null) return;
-        user.updateDeviceInfo(device.toPlatform(), device.versionCode(), device.versionName());
+        user.updateDeviceInfo(device.toPlatform(), device.versionCode(), device.versionName(),
+                device.osVersion(), device.sdkInt(), device.deviceModel(),
+                device.manufacturer(), device.lowRam());
     }
 
     private void saveAgreements(User user, SignupRequest.Agreements ag) {

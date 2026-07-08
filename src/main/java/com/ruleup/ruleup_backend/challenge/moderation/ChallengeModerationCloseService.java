@@ -45,8 +45,8 @@ public class ChallengeModerationCloseService {
             c.softDelete();   // 영구 닫힘
             notificationService.notify(c.getCreatorId(), NotificationType.CHALLENGE_CLOSED,
                     "챌린지가 닫혔어요",
-                    "이름이 커뮤니티 기준에 맞지 않아 1시간 안에 수정되지 않은 챌린지가 닫혔습니다. "
-                            + "새로 만들 때는 이름을 다시 확인해주세요.");
+                    "대표 이미지가 커뮤니티 기준에 맞지 않아 1시간 안에 수정되지 않은 챌린지가 닫혔습니다. "
+                            + "새로 만들 때는 이미지를 다시 확인해주세요.");
         }
         if (!expired.isEmpty()) {
             log.info("모더레이션 수정창 마감으로 닫은 챌린지 {}건", expired.size());

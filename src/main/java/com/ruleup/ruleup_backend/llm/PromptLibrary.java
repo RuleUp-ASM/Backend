@@ -31,7 +31,7 @@ public class PromptLibrary {
     private static final String BASE = "prompts/";
 
     /** 시작 시 미리 로드해 존재를 검증할 프롬프트 이름들. */
-    private static final List<String> KNOWN = List.of("challenge-draft", "routine-match");
+    private static final List<String> KNOWN = List.of("challenge-draft");
 
     private final Map<String, String> cache = new ConcurrentHashMap<>();
 
