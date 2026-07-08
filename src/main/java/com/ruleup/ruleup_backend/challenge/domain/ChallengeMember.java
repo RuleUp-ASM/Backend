@@ -128,6 +128,13 @@ public class ChallengeMember extends AssignedIdEntity {
     @Column(name = "fallbackUsedCount", nullable = false)
     private int fallbackUsedCount = 0;
 
+    /**
+     * 셋업 미완료 고스트(무음) 푸시를 마지막으로 보낸 시각. 재발송 쿨다운 기준(스팸 방지).
+     * NULL = 아직 보낸 적 없음. 셋업이 READY 되면 더는 대상이 아니라 이 값은 자연히 의미를 잃는다.
+     */
+    @Column(name = "ghostPushedAt")
+    private Instant ghostPushedAt;
+
     private static ChallengeMember of(UUID challengeId, UUID userId, MemberRole role, MemberStatus status) {
         ChallengeMember m = new ChallengeMember();
         m.id = UuidGenerator.generate();
@@ -209,6 +216,9 @@ public class ChallengeMember extends AssignedIdEntity {
 
     /** 최초 진입 셋업 완료 → READY(평가 대상 진입). */
     public void markSetupReady() { this.setupStatus = SetupStatus.READY; }
+
+    /** 셋업 유도 고스트 푸시 발송 기록(쿨다운 기준 갱신). */
+    public void markGhostPushed(Instant at) { this.ghostPushedAt = at; }
 
     public boolean isSetupReady() { return setupStatus == SetupStatus.READY; }
 
