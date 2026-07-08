@@ -69,7 +69,7 @@ app:
   llm:
     gemini:
       api-key: ${GEMINI_API_KEY:}                  # 비밀키만 env (없어도 기동은 됨, 호출 시에만 필요)
-      model: gemini-2.5-flash-lite
+      model: ${GEMINI_MODEL:gemini-3.1-flash-lite} # 모델 업그레이드는 코드 변경 없이 env 로(예: 최신 Flash/Flash-Lite)
       base-url: https://generativelanguage.googleapis.com/v1beta
       timeout-ms: ${GEMINI_TIMEOUT_MS:10000}       # connect·read 공통(재시도와 곱해지므로 과도하게 올리지 말 것)
       max-retries: ${GEMINI_MAX_RETRIES:2}         # 503(UNAVAILABLE)·429·타임아웃 시 재시도 횟수

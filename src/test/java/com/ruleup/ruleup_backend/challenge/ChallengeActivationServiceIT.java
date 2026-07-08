@@ -50,8 +50,13 @@ class ChallengeActivationServiceIT {
     }
 
     private Challenge challengeStartingOn(UUID ownerId, LocalDate startDate) {
+        return challengeStartingOn(ownerId, startDate, null);
+    }
+
+    /** imageUrl 이 있으면 생성 시 PENDING_REVIEW(검수 전), 없으면 즉시 APPROVED(§5.1 이미지 기준 게이트). */
+    private Challenge challengeStartingOn(UUID ownerId, LocalDate startDate, String imageUrl) {
         return Challenge.create(
-                ownerId, "테스트 챌린지", null, null,
+                ownerId, "테스트 챌린지", null, imageUrl,
                 "EXERCISE", ParticipationType.SOLO, null, List.of("MON"),
                 14, startDate,
                 null, VerificationConfig.manual(null), new LinkedHashMap<>(),
@@ -91,7 +96,8 @@ class ChallengeActivationServiceIT {
     @DisplayName("시작일이 도달해도 미승인(PENDING_REVIEW)이면 활성화하지 않는다")
     void ignoresUnapprovedChallenge() {
         User owner = newOwner();
-        Challenge c = challengeStartingOn(owner.getId(), LocalDate.now());   // 오늘 시작이지만 검수 전
+        // 이미지가 있어 PENDING_REVIEW(검수 전) — approveModeration 을 부르지 않아 미승인 상태.
+        Challenge c = challengeStartingOn(owner.getId(), LocalDate.now(), "https://cdn.ruleup.com/a.jpg");
         challengeRepository.saveAndFlush(c);
 
         activationService.activateDueChallenges();

@@ -14,10 +14,10 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * 챌린지 이름 검수 재시도 배치 (CLAUDE.md §5.1 / §8 — AI 미가용 복구).
+ * 챌린지 이미지 검수 재시도 배치 (CLAUDE.md §5.1 / §8 — AI 미가용 복구).
  *
- * <p>이름 검수는 생성/이름변경 직후 {@link ChallengeModerationEventListener}(AFTER_COMMIT·@Async)가
- * 즉시 1회 시도한다. 그런데 그 시점에 LLM/AI API 가 죽어 있으면({@code UNAVAILABLE}) 챌린지는
+ * <p>이미지 검수는 생성/이미지변경 직후 {@link ChallengeModerationEventListener}(AFTER_COMMIT·@Async)가
+ * 즉시 1회 시도한다. 그런데 그 시점에 SafeSearch/AI API 가 죽어 있으면({@code UNAVAILABLE}) 챌린지는
  * PENDING_REVIEW 로 남고 — 이 상태는 타인에게 비노출·가입 불가라 — 방치하면 영원히 공개되지 않는다.
  *
  * <p>이 배치가 그 공백을 메운다: 마지막 변경 후 일정 시간이 지나도록 PENDING_REVIEW 인 챌린지를

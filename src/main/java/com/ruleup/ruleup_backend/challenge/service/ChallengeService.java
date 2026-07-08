@@ -116,8 +116,11 @@ public class ChallengeService {
         memberRepository.save(ChallengeMember.owner(challenge.getId(), userId));
         challenge.increaseParticipantCount();
 
-        // 이름 LLM 검수는 비동기(§5.1) — 커밋 후 AFTER_COMMIT 리스너가 APPROVED/REJECTED 결정.
-        eventPublisher.publishEvent(new ChallengeModerationRequested(challenge.getId()));
+        // 이미지 검수만 비동기(§5.1) — 이미지가 있어 PENDING_REVIEW 인 경우에만 커밋 후 리스너가 검수.
+        // 이미지가 없으면 create()에서 이미 APPROVED(즉시 공개)라 검수 이벤트를 내지 않는다.
+        if (challenge.getModerationStatus() == ChallengeModerationStatus.PENDING_REVIEW) {
+            eventPublisher.publishEvent(new ChallengeModerationRequested(challenge.getId()));
+        }
 
         // 추천 세그먼트 점수는 여기서 즉시 갱신하지 않는다(매 생성마다 바뀌면 추천 캐시 효율↓).
         // SegmentScoreService 가 주기적으로 누적 챌린지를 재집계한다.
@@ -204,10 +207,9 @@ public class ChallengeService {
         if (req.description() != null && req.description().length() > 200)
             throw new BusinessException(ErrorCode.DESCRIPTION_TOO_LONG);
 
-        // title/imageUrl 이 실제로 바뀌면 재검수(§5.1) — 바꾸기 "전" 값과 비교.
-        boolean nameOrImageChanged =
-                (req.title() != null && !req.title().equals(c.getTitle()))
-                        || (req.imageUrl() != null && !req.imageUrl().equals(c.getImageUrl()));
+        // imageUrl 이 실제로 바뀌면 재검수(§5.1) — 바꾸기 "전" 값과 비교. 이름 변경은 검수 트리거가 아니다
+        // (이름은 blocklist 동기 차단 + 추천 draft 게이트로만 거른다).
+        boolean imageChanged = req.imageUrl() != null && !req.imageUrl().equals(c.getImageUrl());
 
         c.changeTitle(req.title());
         c.changeImageUrl(req.imageUrl());
@@ -227,8 +229,8 @@ public class ChallengeService {
         LocalDate start = (req.startDate() != null) ? validateStartDate(req.startDate()) : null;
         c.changeSchedule(duration, start);
 
-        // 이름/이미지가 바뀌었으면 PENDING_REVIEW 로 되돌리고 재검수(REJECTED 1h 수정 경로 포함).
-        if (nameOrImageChanged) {
+        // 이미지가 바뀌었으면 PENDING_REVIEW 로 되돌리고 재검수(REJECTED 1h 수정 경로 포함).
+        if (imageChanged) {
             c.resubmitModeration();
             eventPublisher.publishEvent(new ChallengeModerationRequested(c.getId()));
         }

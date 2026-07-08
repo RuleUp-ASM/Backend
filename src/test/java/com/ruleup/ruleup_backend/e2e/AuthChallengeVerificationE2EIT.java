@@ -76,7 +76,7 @@ class AuthChallengeVerificationE2EIT {
         assertThat((Boolean) read(login, "$.data.isNewUser")).isFalse();
         String ownerToken = read(login, "$.data.accessToken");
 
-        // ── 4) 챌린지 생성(MANUAL) → RECRUITING / PENDING_REVIEW ────────────
+        // ── 4) 챌린지 생성(MANUAL, 이미지 없음) → RECRUITING / APPROVED(이미지 없어 즉시 공개) ──
         String today = LocalDate.now(KST).toString();
         MvcResult created = postJsonAuth("/api/v1/challenges", ownerToken, """
                 {"title":"아침 7시 기상","description":null,"imageUrl":null,"category":"EXERCISE",
@@ -87,14 +87,15 @@ class AuthChallengeVerificationE2EIT {
                 .formatted(today));
         String challengeId = read(created, "$.data.challengeId");
         assertThat((String) read(created, "$.data.status")).isEqualTo("RECRUITING");
-        assertThat((String) read(created, "$.data.moderationStatus")).isEqualTo("PENDING_REVIEW");
+        // 이미지가 없어 검수 대상이 없으므로 생성 즉시 APPROVED(공개). (이미지 있을 때의 비공개 게이트는 ChallengeModerationGateTest)
+        assertThat((String) read(created, "$.data.moderationStatus")).isEqualTo("APPROVED");
 
-        // ── 5) 조회: OWNER는 200(미승인이어도) / 타인은 404 가시성 게이트 ────
+        // ── 5) 조회: APPROVED라 OWNER·타인 모두 200 ─────────────────────────
         mvc.perform(get("/api/v1/challenges/" + challengeId).header("Authorization", "Bearer " + ownerToken))
                 .andExpect(status().isOk());
         String otherToken = signupAndLogin("e2e-other", "구경꾼E2E");
         mvc.perform(get("/api/v1/challenges/" + challengeId).header("Authorization", "Bearer " + otherToken))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isOk());
 
         // ── 6) 자동인증: 정규 수동 SELF_CHECK(오늘) → 즉시 SUCCESS ───────────
         MvcResult manual = postJsonAuth("/api/v1/challenges/" + challengeId + "/verifications", ownerToken, """

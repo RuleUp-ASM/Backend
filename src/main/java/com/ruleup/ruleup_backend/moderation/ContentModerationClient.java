@@ -10,9 +10,6 @@ public interface ContentModerationClient {
     /** 닉네임 텍스트 검수. */
     ModerationResult moderateNickname(String nickname);
 
-    /** 챌린지 이름 텍스트 검수(§5.1 비동기 게이트). 검수 불가 시 UNAVAILABLE(보류). */
-    ModerationResult moderateChallengeName(String title);
-
     /** 프로필 사진 검수(멀티모달, URL). 이미지를 가져오지 못하면 UNAVAILABLE(보류). */
     ModerationResult moderateImage(String imageUrl);
 

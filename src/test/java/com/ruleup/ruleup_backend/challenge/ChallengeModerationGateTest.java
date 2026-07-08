@@ -16,15 +16,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * 챌린지 모더레이션 게이트 불변식(CLAUDE.md §5.1) — DB 없이 도메인 레벨로 고정.
- *  - 생성은 항상 PENDING_REVIEW(타인 비노출).
+ *  - 가시성 게이트는 "이미지" 기준: 이미지 없으면 생성 즉시 APPROVED(공개), 있으면 PENDING_REVIEW(검수 후 공개).
  *  - 비-OWNER는 APPROVED만 가시.
  *  - REJECTED는 1시간 수정창(fixDeadline) 부여, 재제출 시 PENDING_REVIEW로 복귀.
  */
 class ChallengeModerationGateTest {
 
-    private Challenge newChallenge(UUID owner) {
+    private Challenge newChallenge(UUID owner, String imageUrl) {
         return Challenge.create(
-                owner, "아침 7시 기상", null, null,
+                owner, "아침 7시 기상", null, imageUrl,
                 "WAKE_UP", ParticipationType.SOLO, null, List.of("MON"),
                 14, LocalDate.now(),
                 null, null, null,
@@ -33,11 +33,15 @@ class ChallengeModerationGateTest {
     }
 
     @Test
-    @DisplayName("생성 직후 moderationStatus=PENDING_REVIEW")
-    void create_isPendingReview() {
-        Challenge c = newChallenge(UUID.randomUUID());
-        assertThat(c.getModerationStatus()).isEqualTo(ChallengeModerationStatus.PENDING_REVIEW);
-        assertThat(c.isApproved()).isFalse();
+    @DisplayName("이미지 없으면 즉시 APPROVED, 이미지 있으면 PENDING_REVIEW")
+    void create_moderationStatus_dependsOnImage() {
+        Challenge noImage = newChallenge(UUID.randomUUID(), null);
+        assertThat(noImage.getModerationStatus()).isEqualTo(ChallengeModerationStatus.APPROVED);
+        assertThat(noImage.isApproved()).isTrue();
+
+        Challenge withImage = newChallenge(UUID.randomUUID(), "https://cdn.ruleup.com/a.jpg");
+        assertThat(withImage.getModerationStatus()).isEqualTo(ChallengeModerationStatus.PENDING_REVIEW);
+        assertThat(withImage.isApproved()).isFalse();
     }
 
     @Test
@@ -45,7 +49,7 @@ class ChallengeModerationGateTest {
     void visibility_gate() {
         UUID owner = UUID.randomUUID();
         UUID other = UUID.randomUUID();
-        Challenge c = newChallenge(owner);
+        Challenge c = newChallenge(owner, "https://cdn.ruleup.com/a.jpg");   // 이미지 있음 → PENDING
 
         assertThat(c.isVisibleTo(owner)).isTrue();   // OWNER는 PENDING이어도 가시
         assertThat(c.isVisibleTo(other)).isFalse();  // 타인은 미승인 → 비가시(404)
@@ -58,7 +62,7 @@ class ChallengeModerationGateTest {
     @Test
     @DisplayName("REJECTED는 fixDeadline 부여, 재제출 시 PENDING_REVIEW로 복귀")
     void reject_then_resubmit() {
-        Challenge c = newChallenge(UUID.randomUUID());
+        Challenge c = newChallenge(UUID.randomUUID(), "https://cdn.ruleup.com/a.jpg");
         Instant now = Instant.now();
         Instant deadline = now.plusSeconds(3600);
 

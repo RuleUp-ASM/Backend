@@ -41,7 +41,7 @@ public class RoutineCatalog {
     public List<RoutineCandidate> candidates() {
         return cache().values().stream()
                 .map(t -> new RoutineCandidate(
-                        t.getId(), t.getName(), t.getCategory().name(),
+                        t.getId(), t.getName(), t.getCategory().name(), t.getDescription(),
                         t.paramSpecs().stream().map(s -> s.key()).toList()))
                 .toList();
     }

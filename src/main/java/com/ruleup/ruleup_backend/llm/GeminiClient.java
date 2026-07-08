@@ -258,9 +258,21 @@ public class GeminiClient {
         @JsonInclude(JsonInclude.Include.NON_NULL)
         record GenerationConfig(Double temperature,
                                 @JsonProperty("responseMimeType") String responseMimeType,
-                                @JsonProperty("responseSchema") Object responseSchema) {
-            static GenerationConfig json() { return new GenerationConfig(0.0, "application/json", null); }
-            static GenerationConfig json(Object schema) { return new GenerationConfig(0.0, "application/json", schema); }
+                                @JsonProperty("responseSchema") Object responseSchema,
+                                @JsonProperty("thinkingConfig") ThinkingConfig thinkingConfig) {
+            // temperature=0.0 + thinkingBudget=0 → 지연↓·결정성↑(추론 토큰 없이 스키마대로 즉답).
+            // 매칭/검수/추천은 "후보 중 선택 + 값 추출"이라 사고과정이 필요 없다.
+            static GenerationConfig json() {
+                return new GenerationConfig(0.0, "application/json", null, ThinkingConfig.off());
+            }
+            static GenerationConfig json(Object schema) {
+                return new GenerationConfig(0.0, "application/json", schema, ThinkingConfig.off());
+            }
+        }
+
+        /** Gemini 2.5+/3.x thinking 제어. budget=0 → 사고(reasoning) 토큰 비활성(flash-lite 계열 최속·최결정). */
+        record ThinkingConfig(@JsonProperty("thinkingBudget") Integer thinkingBudget) {
+            static ThinkingConfig off() { return new ThinkingConfig(0); }
         }
     }
 

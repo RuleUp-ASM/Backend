@@ -9,7 +9,6 @@ import com.ruleup.ruleup_backend.routine.domain.WearableRequirement;
 import com.ruleup.ruleup_backend.routine.dto.*;
 import com.ruleup.ruleup_backend.routine.match.RoutineCandidate;
 import com.ruleup.ruleup_backend.routine.match.RoutineMatch;
-import com.ruleup.ruleup_backend.routine.match.RoutineMatchClient;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,20 +41,7 @@ public class RoutineRecommendationService {
 
     private static final Logger log = LoggerFactory.getLogger(RoutineRecommendationService.class);
 
-    private final RoutineMatchClient matchClient;
     private final RoutineCatalog catalog;
-
-    public RoutineRecommendationResponse recommend(RoutineRecommendationRequest req) {
-        validateInput(req);
-
-        // (2) LLM 매칭 — 한 번만 호출. 실패 시 RoutineMatch.none() 이 와서 자연히 수동 폴백된다.
-        List<RoutineCandidate> candidates = catalog.candidates();
-        RoutineMatch match = candidates.isEmpty()
-                ? RoutineMatch.none()
-                : matchClient.match(req.title(), req.description(), candidates);
-
-        return buildFromMatch(req, match);
-    }
 
     /**
      * 이미 확보한 매칭 결과로 추천 응답을 만든다(LLM 재호출 없음).
