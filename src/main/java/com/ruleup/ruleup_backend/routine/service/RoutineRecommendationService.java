@@ -27,12 +27,14 @@ import java.util.Map;
  *   2) LLM 으로 "후보 템플릿 중 하나 선택 + 목표값 추출"      ← LLM 책임은 여기까지
  *   3) 서버 검증: templateId 가 카탈로그에 실재하는가, 목표값이 범위 안인가(아니면 기본값으로)
  *   4) 인증 방식 안내:
- *        - 템플릿에 자동 옵션 있으면 → AUTO(기본) + MANUAL
- *        - 없으면                  → MANUAL 만
+ *        - 매칭됨(카탈로그는 자동 인증 가능 루틴만) → AUTO(기본) + MANUAL
+ *        - 매칭 실패 = 자동 인증 불가            → 체크형(SELF_CHECK) 수동 1개만, AUTO 선택 불가
  *
+ * ※ 카탈로그(RoutineTemplate)에는 자동 인증이 가능한 루틴만 있다(V18). 그래서 매칭되면 곧 "자동 인증 가능",
+ *   매칭 실패는 "루틴을 못 찾음"이 아니라 "자동 인증이 불가능함"을 뜻하고 수동 체크형으로만 진행한다.
  * ※ 추천 단계에서는 권한 보유 여부를 보지 않는다. AUTO 옵션엔 필요한 권한 "목록"만 실어주고,
  *   실제 보유 확인/요청은 생성(2단계, RoutineService)에서 한다.
- *   매칭 실패하거나 LLM 이 죽어도 항상 "수동 인증" 추천을 돌려준다(폴백).
+ *   매칭 실패하거나 LLM 이 죽어도 항상 "체크형 수동 인증" 추천을 돌려준다(폴백).
  */
 @Service
 @RequiredArgsConstructor
@@ -111,13 +113,15 @@ public class RoutineRecommendationService {
                 recommendedMethod, options, params, template.getRationale());
     }
 
-    // ===== 매칭 실패(직접 입력): 수동 1개 =====
+    // ===== 매칭 실패 = 자동 인증 불가 → 체크형(수동) 1개만, AUTO 선택 불가 =====
+    // "루틴을 못 찾음"이 아니라 "자동 인증이 가능한 루틴이 아님"이 사용자 메시지의 핵심.
     private RoutineRecommendationResponse noMatchResponse(String title) {
-        RoutineOption manual = new RoutineOption(
-                "MANUAL", true, "MANUAL", SignalSource.PHOTO.name(), "NONE",
-                null, List.of("CAMERA"));
+        RoutineOption selfCheck = new RoutineOption(
+                "MANUAL", true, "MANUAL", SignalSource.SELF_CHECK.name(), "NONE",
+                null, List.of());   // 체크형 = 사진/권한 없이 직접 체크
         return new RoutineRecommendationResponse(
-                false, null, title, null, "MANUAL", List.of(manual), List.of(), null);
+                false, null, title, null, "MANUAL", List.of(selfCheck), List.of(),
+                "자동 인증이 가능한 루틴이 아니에요. 직접 체크(수동 인증)로만 진행할 수 있어요.");
     }
 
     // ===== 목표값: LLM 값이 범위 안이면 그 값, 아니면 템플릿 기본값(신뢰 경계 보정) =====

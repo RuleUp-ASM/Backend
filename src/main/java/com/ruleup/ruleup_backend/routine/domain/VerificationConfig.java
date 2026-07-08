@@ -51,9 +51,13 @@ public record VerificationConfig(
                 t.getAutoExternalService());
     }
 
-    /** 수동 인증. template 은 null 가능(매칭 실패 = 직접 입력). 사진이면 카메라 권한 필요. */
+    /**
+     * 수동 인증. template 은 null 가능(매칭 실패 = 자동 인증 불가).
+     * 매칭 실패 시 기본은 체크형(SELF_CHECK) — 자동 인증이 가능한 루틴이 아니므로 사진 없이 직접 체크로 진행.
+     * 매칭된 템플릿의 수동 방식이 PHOTO 면 카메라 권한 필요.
+     */
     public static VerificationConfig manual(RoutineTemplate t) {
-        SignalSource signal = (t != null) ? t.getManualSignalSource() : SignalSource.PHOTO;
+        SignalSource signal = (t != null) ? t.getManualSignalSource() : SignalSource.SELF_CHECK;
         List<String> perms = (signal == SignalSource.PHOTO)
                 ? new ArrayList<>(List.of("CAMERA")) : new ArrayList<>();
         return new VerificationConfig(

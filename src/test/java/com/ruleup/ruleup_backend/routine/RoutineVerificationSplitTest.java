@@ -24,8 +24,12 @@ class RoutineVerificationSplitTest {
     RoutineCatalog catalog;
 
     @Test
-    void 시드_105개_모두_로드되고_위임게터가_동작한다() {
-        assertThat(catalog.candidates()).hasSize(105);
+    void 자동인증_가능_루틴만_로드되고_위임게터가_동작한다() {
+        // V18: 자동 인증 불가 템플릿(autoVerificationType NULL) 40개를 제거 → 자동 가능 65개만 남는다.
+        assertThat(catalog.candidates()).hasSize(65);
+        // 카탈로그에 남은 건 전부 자동 인증 가능해야 한다.
+        assertThat(catalog.candidates()).allSatisfy(c ->
+                assertThat(catalog.findById(c.id()).orElseThrow().supportsAuto()).isTrue());
 
         // id 1: '헬스장 가서 1시간 운동' — 자동(지오펜스), 수동 PHOTO, method GPS_PRESENCE
         RoutineTemplate gym = catalog.findById(1L).orElseThrow();
@@ -36,12 +40,8 @@ class RoutineVerificationSplitTest {
         assertThat(gym.getAutoRequiredPermissions()).contains("ACCESS_FINE_LOCATION");
         assertThat(gym.getVerificationMethod()).isEqualTo("GPS_PRESENCE");
 
-        // id 4: '홈트 30분' — 자동 불가(전부 NULL), 수동 PHOTO, method PHOTO
-        RoutineTemplate home = catalog.findById(4L).orElseThrow();
-        assertThat(home.supportsAuto()).isFalse();
-        assertThat(home.getAutoVerificationType()).isNull();
-        assertThat(home.getManualSignalSource()).isEqualTo(SignalSource.PHOTO);
-        assertThat(home.getVerificationMethod()).isEqualTo("PHOTO");
+        // id 4: '홈트 30분'(자동 불가)은 V18 에서 제거됐다.
+        assertThat(catalog.findById(4L)).isEmpty();
 
         // id 99: '1일 1커밋' — EXTERNAL/GitHub
         RoutineTemplate commit = catalog.findById(99L).orElseThrow();
