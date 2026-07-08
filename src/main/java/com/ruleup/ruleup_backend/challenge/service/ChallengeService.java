@@ -57,13 +57,13 @@ public class ChallengeService {
     /**
      * 내가 참여 중인 챌린지 목록. 멤버십 기준이라 페이지네이션 없이 전량 반환한다.
      *  - scope=ACTIVE(기본) : ACTIVE 멤버십(실제 참여 중)만.
-     *  - scope=ALL          : 전체 멤버십(PENDING 승인 대기 포함).
-     * 소프트 삭제된 챌린지는 제외. 항목마다 내 멤버십 상태(memberStatus)를 함께 내려준다.
+     *  - scope=ALL          : ACTIVE + PENDING(승인 대기) 멤버십. 탈퇴/거절(LEFT/REMOVED)은 제외.
+     * 소프트 삭제된 챌린지는 제외. 항목마다 내 멤버십 상태(memberStatus: ACTIVE/PENDING)를 함께 내려준다.
      */
     @Transactional(readOnly = true)
     public ChallengeListResponse myChallenges(UUID userId, String scope) {
         List<ChallengeMember> memberships = "ALL".equalsIgnoreCase(scope)
-                ? memberRepository.findByUserId(userId)
+                ? memberRepository.findByUserIdAndStatusIn(userId, List.of(MemberStatus.ACTIVE, MemberStatus.PENDING))
                 : memberRepository.findByUserIdAndStatus(userId, MemberStatus.ACTIVE);
 
         List<ChallengeListResponse.Item> items = new ArrayList<>();
@@ -125,14 +125,16 @@ public class ChallengeService {
     }
 
     /**
-     * AUTO 인증이면 스냅샷의 requiredPermissions 가 모두 grantedPermissions 에 포함돼야 한다(§11.2).
+     * AUTO 인증이면 스냅샷의 "즉시형" 권한이 모두 grantedPermissions 에 포함돼야 한다(§5.1/§11.2).
+     *  - 즉시형(알림·FINE위치·활동인식·HC·카메라 등)은 생성 버튼 시점 팝업으로 받으므로 여기서 강제.
+     *  - 설정형(백그라운드 위치·사용정보 접근)은 셋업(§11.4 /setup)으로 이연 → 생성 시 검증 제외.
      * 미충족이면 ROUTINE_PERMISSION_REQUIRED. (보유 상태는 저장하지 않음 — 생성 시점 검증만, §5.6)
      */
     private void validateGrantedPermissions(com.ruleup.ruleup_backend.routine.domain.VerificationConfig v,
                                             List<String> granted) {
         if (v.selectedMethod() != com.ruleup.ruleup_backend.routine.domain.SelectedMethod.AUTO) return;
-        List<String> required = v.requiredPermissions();
-        if (required == null || required.isEmpty()) return;
+        List<String> required = v.immediateRequiredPermissions();
+        if (required.isEmpty()) return;
         if (granted == null || !granted.containsAll(required))
             throw new BusinessException(ErrorCode.ROUTINE_PERMISSION_REQUIRED);
     }

@@ -175,6 +175,16 @@ public class Challenge extends AssignedIdEntity {
         }
     }
 
+    /**
+     * 종료일 경과 → 종료(§5.5). ACTIVE 일 때만 COMPLETED 로 전환(멱등·방어).
+     * 완주율 집계·정산은 인증(VF)/평판 스펙 소관 — 여기선 lifecycle 상태만 마감한다.
+     */
+    public void complete() {
+        if (this.status == ChallengeStatus.ACTIVE) {
+            this.status = ChallengeStatus.COMPLETED;
+        }
+    }
+
     // ===== 모더레이션 게이트 (§5.1) =====
     public boolean isApproved() { return moderationStatus == ChallengeModerationStatus.APPROVED; }
 

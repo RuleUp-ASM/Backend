@@ -41,6 +41,9 @@ public interface ChallengeMemberRepository extends JpaRepository<ChallengeMember
     /** 내 모든 멤버십(상태 무관) — 진행률 status=ALL */
     List<ChallengeMember> findByUserId(UUID userId);
 
+    /** 내 멤버십 중 여러 상태 — 내 챌린지 목록 scope=ALL(ACTIVE+PENDING만, LEFT/REMOVED 제외) */
+    List<ChallengeMember> findByUserIdAndStatusIn(UUID userId, Collection<MemberStatus> statuses);
+
     /**
      * 멤버 상태 원자적 전이(CAS): 현재 status가 {@code from} 중 하나일 때만 {@code to}로 변경.
      * 반환값(영향 행 수)이 1이면 이 호출이 전이를 성사시킨 것 → 참여자 수 증감 등 후속 처리를 1회만 수행.
