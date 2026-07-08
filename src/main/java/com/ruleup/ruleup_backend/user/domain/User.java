@@ -103,6 +103,26 @@ public class User extends AssignedIdEntity {
     @Column(name = "appVersionName", length = 32)
     private String appVersionName;
 
+    /** OS 버전(표시용, 예: 안드로이드 "14"). */
+    @Column(name = "osVersion", length = 32)
+    private String osVersion;
+
+    /** 안드로이드 SDK Int(예: 34). iOS는 null. */
+    @Column(name = "sdkInt")
+    private Integer sdkInt;
+
+    /** 기기 모델(예: "SM-S921N"). */
+    @Column(name = "deviceModel", length = 64)
+    private String deviceModel;
+
+    /** 제조사(예: "samsung"). */
+    @Column(name = "manufacturer", length = 64)
+    private String manufacturer;
+
+    /** 저사양(RAM) 기기 여부. */
+    @Column(name = "lowRam")
+    private Boolean lowRam;
+
     /** 기기 정보 마지막 갱신 시각(로그인마다 갱신). */
     @Column(name = "deviceInfoUpdatedAt")
     private Instant deviceInfoUpdatedAt;
@@ -155,11 +175,19 @@ public class User extends AssignedIdEntity {
     /**
      * 기기 정보 갱신(가입 시 최초 수집, 로그인마다 갱신).
      * 전달된 값만 덮어쓴다(부분 전송 시 기존값 보존). 추천 PLATFORM 세그먼트에 platform 사용.
+     * 전체 디바이스 스펙(osVersion·sdkInt·deviceModel·manufacturer·lowRam)을 저장해 로그인 응답에 되돌려준다.
      */
-    public void updateDeviceInfo(Platform platform, Integer appVersionCode, String appVersionName) {
+    public void updateDeviceInfo(Platform platform, Integer appVersionCode, String appVersionName,
+                                 String osVersion, Integer sdkInt, String deviceModel,
+                                 String manufacturer, Boolean lowRam) {
         if (platform != null) this.platform = platform;
         if (appVersionCode != null) this.appVersionCode = appVersionCode;
         if (appVersionName != null) this.appVersionName = appVersionName;
+        if (osVersion != null) this.osVersion = osVersion;
+        if (sdkInt != null) this.sdkInt = sdkInt;
+        if (deviceModel != null) this.deviceModel = deviceModel;
+        if (manufacturer != null) this.manufacturer = manufacturer;
+        if (lowRam != null) this.lowRam = lowRam;
         this.deviceInfoUpdatedAt = Instant.now();
     }
 

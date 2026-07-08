@@ -6,8 +6,8 @@ import com.ruleup.ruleup_backend.user.domain.Platform;
  * 공통 deviceInfo 객체 (계약: 로그인·가입 양쪽 동반). 필드명은 intro 요청바디와 동일하게 맞춘다(§11.1).
  * 로그인·가입마다 최신 1건으로 갱신한다. 누락/형식오류는 INVALID_DEVICE_INFO 로 거부한다.
  *
- * <p>MVP 저장 대상은 {@code platform / versionCode / versionName}(추천 PLATFORM 세그먼트 + 버전).
- * 나머지(osVersion·sdkInt·deviceModel·manufacturer·lowRam)는 계약 호환을 위해 수신만 하고 저장하지 않는다.
+ * <p>전체 스펙({@code platform / versionCode / versionName / osVersion / sdkInt / deviceModel /
+ * manufacturer / lowRam})을 저장한다(로그인 응답에 그대로 되돌려줌). platform 은 추천 PLATFORM 세그먼트로도 사용.
  *
  * <pre>
  * { "platform":"ANDROID", "osVersion":"14", "sdkInt":34, "deviceModel":"SM-S921N",
