@@ -51,6 +51,12 @@ public class CacheConfig {
                 .expireAfterWrite(Duration.ofHours(24))
                 .build());
 
+        // 홈 카테고리 그리드 진행 중 수(탐색 §2.2) — 표시용, 10분 지연 허용.
+        manager.registerCustomCache("challengeCategories", Caffeine.newBuilder()
+                .maximumSize(10)
+                .expireAfterWrite(Duration.ofMinutes(10))
+                .build());
+
         return manager;
     }
 }
