@@ -6,6 +6,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.ruleup.ruleup_backend.config.AppProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -27,9 +28,13 @@ import java.util.Set;
  * - JSON 강제: generationConfig.responseMimeType=application/json (+ 필요 시 responseSchema 로 타입·enum 강제)
  * - 멀티모달: 이미지 바이트를 inlineData로 함께 보낼 수 있어 사진 검수도 가능
  * - 실패/미설정은 예외 없이 null 반환 → 호출 측이 각자 폴백(none/empty/UNAVAILABLE)
+ *
+ * <p>{@code app.llm.provider} 가 gemini(기본)일 때만 활성화된다. bedrock 으로 바꾸면
+ * {@link BedrockNovaClient} 가 대신 주입된다(코드는 그대로 두고 스위치만).
  */
 @Component
-public class GeminiClient {
+@ConditionalOnProperty(name = "app.llm.provider", havingValue = "gemini", matchIfMissing = true)
+public class GeminiClient implements LlmClient {
 
     private static final Logger log = LoggerFactory.getLogger(GeminiClient.class);
     private static final String DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";

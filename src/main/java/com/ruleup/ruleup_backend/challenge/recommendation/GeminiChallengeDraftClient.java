@@ -1,7 +1,7 @@
 package com.ruleup.ruleup_backend.challenge.recommendation;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.ruleup.ruleup_backend.llm.GeminiClient;
+import com.ruleup.ruleup_backend.llm.LlmClient;
 import com.ruleup.ruleup_backend.llm.PromptLibrary;
 import com.ruleup.ruleup_backend.routine.match.RoutineCandidate;
 import com.ruleup.ruleup_backend.routine.match.RoutineMatch;
@@ -71,11 +71,11 @@ public class GeminiChallengeDraftClient implements ChallengeDraftClient {
         }
         """;
 
-    private final GeminiClient gemini;
+    private final LlmClient llm;
     private final PromptLibrary prompts;
 
-    public GeminiChallengeDraftClient(GeminiClient gemini, PromptLibrary prompts) {
-        this.gemini = gemini;
+    public GeminiChallengeDraftClient(LlmClient llm, PromptLibrary prompts) {
+        this.llm = llm;
         this.prompts = prompts;
     }
 
@@ -87,12 +87,12 @@ public class GeminiChallengeDraftClient implements ChallengeDraftClient {
             return ChallengeDraftSuggestion.empty();
         }
 
-        String content = gemini.generateStructured(buildPrompt(title, description, candidates), RESPONSE_SCHEMA);
+        String content = llm.generateStructured(buildPrompt(title, description, candidates), RESPONSE_SCHEMA);
         if (content == null) {
             log.debug("챌린지 초안 제안: Gemini 응답 없음 → 폴백 (후보 {}개)", candidates.size());
             return ChallengeDraftSuggestion.empty();
         }
-        Draft d = gemini.parseJson(content, Draft.class);
+        Draft d = llm.parseJson(content, Draft.class);
         if (d == null) {
             log.debug("챌린지 초안 제안: JSON 파싱 실패 → 폴백");
             return ChallengeDraftSuggestion.empty();

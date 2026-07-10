@@ -23,9 +23,13 @@ public record AppProperties(Jwt jwt, Oauth oauth, Llm llm, Client client) {
     }
 
     /** LLM(챌린지 기본값 추천·루틴 매칭·콘텐츠 검수). 실패 시 각 기능별 폴백. */
-    public record Llm(Gemini gemini) {
+    /**
+     * LLM 설정. provider 로 활성 구현을 고른다(gemini 기본 / bedrock). 각 provider 코드는 지우지 않고
+     * 조건부 빈으로 스위치만 한다 — 토큰 대비 성능 비교 후 최적 모델 채택.
+     */
+    public record Llm(String provider, Gemini gemini, Bedrock bedrock) {
 
-        /** Google Gemini. 현재 사용 중(멀티모달 → 텍스트·이미지 검수 모두 가능). */
+        /** Google Gemini(멀티모달 → 텍스트·이미지 검수 모두 가능). provider=gemini(기본)일 때 활성. */
         public record Gemini(
                 String apiKey,
                 String model,       // 예: gemini-2.5-flash-lite
@@ -33,6 +37,15 @@ public record AppProperties(Jwt jwt, Oauth oauth, Llm llm, Client client) {
                 long timeoutMs,     // 동기 호출 타임아웃 (스펙 2.3: 예 5000)
                 int maxRetries,     // 일시 오류(503/429/타임아웃) 재시도 횟수. 0/미설정 → 기본값
                 long retryBackoffMs // 재시도 사이 대기(지수 백오프 base, ms). 0/미설정 → 기본값
+        ) {}
+
+        /** AWS Bedrock Nova(Converse API). provider=bedrock 일 때 활성. 자격증명은 ECS 태스크 역할. */
+        public record Bedrock(
+                String region,      // 예: us-east-1 (미설정 시 기본 us-east-1)
+                String modelId,     // 예: us.amazon.nova-lite-v1:0 (온디맨드 크로스리전 추론 프로파일)
+                long timeoutMs,     // Converse 호출 총 타임아웃(ms). 0/미설정 → 기본값
+                int maxRetries,     // 쓰로틀 재시도 횟수. 0/미설정 → 기본값
+                long retryBackoffMs // 재시도 백오프 base(ms). 0/미설정 → 기본값
         ) {}
     }
 
