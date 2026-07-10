@@ -6,10 +6,14 @@ import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.verification.GeoAnchor;
+import com.ruleup.ruleup_backend.common.verification.ScreenApp;
 import com.ruleup.ruleup_backend.verification.domain.VerificationConfig;
 import com.ruleup.ruleup_backend.verification.domain.VerificationMethod;
 import com.ruleup.ruleup_backend.verification.dto.MemberLocationRequest;
 import com.ruleup.ruleup_backend.verification.dto.MemberLocationResponse;
+import com.ruleup.ruleup_backend.verification.dto.ScreenAppsResponse;
+import com.ruleup.ruleup_backend.verification.dto.ScreenAppsUpdateRequest;
+import com.ruleup.ruleup_backend.verification.dto.ScreenAppsUpdateResponse;
 import com.ruleup.ruleup_backend.verification.dto.SetupRequest;
 import com.ruleup.ruleup_backend.verification.dto.SetupRequirementResponse;
 import com.ruleup.ruleup_backend.verification.dto.SetupResponse;
@@ -21,9 +25,14 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 /**
  * 최초 진입 셋업(§11.4) + 내 인증 장소 수정(§11.5).
@@ -44,6 +53,13 @@ public class VerificationSetupService {
     private static final int MIN_RADIUS_M = 500;      // 계약 하한(반경 500~5000m)
     private static final int MAX_RADIUS_M = 5000;     // 상한
     private static final Duration CHANGE_COOLDOWN = Duration.ofDays(7); // §11.5 잦은 변경 방지
+
+    // ===== my-screen-apps =====
+    private static final int MAX_SCREEN_APPS = 10;    // 1~10개
+    private static final Duration SCREEN_APPS_COOLDOWN = Duration.ofDays(1); // 최근 변경 쿨다운(같은 날 재요청은 예외)
+    private static final DateTimeFormatter ISO_OFFSET = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
+    /** Android 패키지명: 소문자/숫자/밑줄 세그먼트 2개 이상(a.b). */
+    private static final Pattern PACKAGE_NAME = Pattern.compile("^[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z][a-zA-Z0-9_]*)+$");
 
     private final ChallengeQueryService challengeQuery;
     private final VerificationConfigFactory configFactory;
@@ -98,15 +114,28 @@ public class VerificationSetupService {
             }
         }
 
-        // (2) SCREEN_TIME: 대상 앱 선택 필요. (멤버에 별도 컬럼 없음 → 현재는 존재 여부만 검증, 영속화는 후속 과제로 flag.)
-        if (config.hasMethod(VerificationMethod.SCREEN_TIME)) {
-            List<String> pkgs = (req != null) ? req.targetPackages() : null;
-            if (pkgs == null || pkgs.isEmpty()) missing.add("TARGET_PACKAGES_REQUIRED");
+        // (2) SCREEN_TIME: 대상 앱 선택 필요. 최초 셋업은 대기 없이 즉시 현재 세트로 적용(이후 변경은 my-screen-apps PUT로 익일 적용).
+        Instant now = Instant.now();
+        boolean screenTime = config.hasMethod(VerificationMethod.SCREEN_TIME);
+        List<ScreenApp> screenApps = null;
+        if (screenTime) {
+            List<ScreenAppsUpdateRequest.AppDto> raw = (req != null) ? req.screenApps() : null;
+            if (raw == null || raw.isEmpty()) {
+                // 레거시 폴백: targetPackages(문자열) → appName 스냅샷 없이 바인딩.
+                List<String> pkgs = (req != null) ? req.targetPackages() : null;
+                raw = (pkgs != null) ? pkgs.stream()
+                        .map(p -> new ScreenAppsUpdateRequest.AppDto(p, null)).toList() : null;
+            }
+            if (raw == null || raw.isEmpty()) {
+                missing.add("TARGET_PACKAGES_REQUIRED");
+            } else {
+                screenApps = toScreenApps(raw);   // 형식 위반 시 INVALID_APP throw
+            }
         }
 
-        Instant now = Instant.now();
         // 유효 앵커가 들어왔으면 모자란 항목과 무관하게 저장(부분 진행 보존).
         if (anchors != null) member.replaceAnchors(anchors, now);
+        if (screenApps != null) member.setScreenAppsInitial(screenApps, now);
 
         if (missing.isEmpty()) {
             member.markSetupReady();
@@ -173,6 +202,75 @@ public class VerificationSetupService {
         return new MemberLocationResponse(req.anchors(), "IMMEDIATE");
     }
 
+    // ===== my-screen-apps: 내 측정 대상 앱 조회 =====
+    /**
+     * 내 스크린타임 측정 대상 앱 조회. 현재 적용 세트(apps) + 익일 적용 대기 세트(pending)를 함께 반환.
+     * 도래한 대기 세트는 조회 시점에 현재 세트로 승격(persist)한다. 바인딩된 앱이 없으면 SCREENTIME_NOT_CONFIGURED.
+     */
+    @Transactional
+    public ScreenAppsResponse getMyScreenApps(UUID userId, UUID challengeId) {
+        ChallengeMember member = activeMember(challengeId, userId);
+        LocalDate today = LocalDate.now(KST);
+        if (member.promoteScreenAppsIfDue(today, KST)) {   // 대기 세트 적용일 도래 → 승격
+            challengeQuery.saveMember(member);
+        }
+
+        List<ScreenApp> apps = member.getScreenApps();
+        if (apps == null || apps.isEmpty()) {
+            throw new BusinessException(ErrorCode.SCREENTIME_NOT_CONFIGURED);
+        }
+
+        String appliedFrom = (member.getScreenAppsAppliedFrom() != null)
+                ? formatKst(member.getScreenAppsAppliedFrom()) : null;
+
+        ScreenAppsResponse.Pending pending = null;
+        if (member.hasPendingScreenApps(today) && member.getPendingScreenApps() != null) {
+            String effectiveFrom = member.getPendingScreenAppsEffectiveDate()
+                    .atStartOfDay(KST).format(ISO_OFFSET);
+            pending = new ScreenAppsResponse.Pending(toAppDtos(member.getPendingScreenApps()), effectiveFrom);
+        }
+        return new ScreenAppsResponse(toAppDtos(apps), appliedFrom, pending);
+    }
+
+    // ===== my-screen-apps: 내 측정 대상 앱 교체 =====
+    /**
+     * 본인 측정 대상 앱 세트 교체. 항상 익일 00:00부터 적용(당일 교체로 인증 조작 방지).
+     * 같은 날 재요청 시 대기 세트를 덮어쓴다(마지막 요청 승리). 최근 변경 쿨다운 중에는 SCREENTIME_CHANGE_COOLDOWN.
+     */
+    @Transactional
+    public ScreenAppsUpdateResponse updateScreenApps(UUID userId, UUID challengeId, ScreenAppsUpdateRequest req) {
+        Challenge ch = challengeQuery.findActiveChallenge(challengeId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
+        ChallengeMember member = activeMember(challengeId, userId);
+
+        VerificationConfig config = configFactory.build(ch);
+        if (!config.hasMethod(VerificationMethod.SCREEN_TIME)) {
+            throw new BusinessException(ErrorCode.SCREENTIME_NOT_CONFIGURED);   // 스크린타임 인증 챌린지가 아님
+        }
+        if (req == null || req.apps() == null || req.apps().isEmpty()) {
+            throw new BusinessException(ErrorCode.INVALID_APP);
+        }
+        List<ScreenApp> apps = toScreenApps(req.apps());   // 형식·중복·개수 검증 → INVALID_APP
+
+        LocalDate today = LocalDate.now(KST);
+        member.promoteScreenAppsIfDue(today, KST);   // 도래한 대기 세트 먼저 승격(쿨다운/pending 판정 정확도)
+        LocalDate effectiveDate = today.plusDays(1);       // 익일 00:00부터 적용
+
+        // 쿨다운: 같은 날 재요청(이미 익일 대기 세트를 stage한 상태)은 덮어쓰기 허용, 그 외 최근 변경은 차단.
+        Instant now = Instant.now();
+        boolean sameDayOverwrite = member.hasPendingScreenApps(today);
+        Instant last = member.getScreenAppsUpdatedAt();
+        if (!sameDayOverwrite && last != null && last.isAfter(now.minus(SCREEN_APPS_COOLDOWN))) {
+            throw new BusinessException(ErrorCode.SCREENTIME_CHANGE_COOLDOWN);
+        }
+
+        member.stagePendingScreenApps(apps, effectiveDate, now);
+        challengeQuery.saveMember(member);
+
+        String appliedFrom = effectiveDate.atStartOfDay(KST).format(ISO_OFFSET);
+        return new ScreenAppsUpdateResponse(toAppDtos(apps), appliedFrom);
+    }
+
     // ===== 헬퍼 =====
     private ChallengeMember activeMember(UUID challengeId, UUID userId) {
         ChallengeMember member = challengeQuery.findMembership(challengeId, userId).orElse(null);
@@ -197,5 +295,32 @@ public class VerificationSetupService {
             out.add(new GeoAnchor(a.lat(), a.lng(), a.radiusM(), a.label()));
         }
         return out;
+    }
+
+    /** AppDto[] → ScreenApp[]. 개수(1~10)·패키지명 형식·중복 검증. 위반 시 INVALID_APP. */
+    private List<ScreenApp> toScreenApps(List<ScreenAppsUpdateRequest.AppDto> raw) {
+        if (raw.isEmpty() || raw.size() > MAX_SCREEN_APPS) throw new BusinessException(ErrorCode.INVALID_APP);
+        Set<String> seen = new LinkedHashSet<>();
+        List<ScreenApp> out = new ArrayList<>(raw.size());
+        for (ScreenAppsUpdateRequest.AppDto a : raw) {
+            if (a == null || a.packageName() == null
+                    || !PACKAGE_NAME.matcher(a.packageName().trim()).matches()) {
+                throw new BusinessException(ErrorCode.INVALID_APP);
+            }
+            String pkg = a.packageName().trim();
+            if (!seen.add(pkg)) throw new BusinessException(ErrorCode.INVALID_APP);   // 중복 불가
+            out.add(new ScreenApp(pkg, a.appName()));
+        }
+        return out;
+    }
+
+    private List<ScreenAppsResponse.AppDto> toAppDtos(List<ScreenApp> apps) {
+        return apps.stream()
+                .map(a -> new ScreenAppsResponse.AppDto(a.packageName(), a.appName()))
+                .toList();
+    }
+
+    private String formatKst(Instant instant) {
+        return ZonedDateTime.ofInstant(instant, KST).format(ISO_OFFSET);
     }
 }

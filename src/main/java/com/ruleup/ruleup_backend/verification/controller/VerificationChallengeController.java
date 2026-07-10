@@ -7,6 +7,9 @@ import com.ruleup.ruleup_backend.verification.dto.ManualVerificationRequest;
 import com.ruleup.ruleup_backend.verification.dto.ManualVerificationResponse;
 import com.ruleup.ruleup_backend.verification.dto.MemberLocationRequest;
 import com.ruleup.ruleup_backend.verification.dto.MemberLocationResponse;
+import com.ruleup.ruleup_backend.verification.dto.ScreenAppsResponse;
+import com.ruleup.ruleup_backend.verification.dto.ScreenAppsUpdateRequest;
+import com.ruleup.ruleup_backend.verification.dto.ScreenAppsUpdateResponse;
 import com.ruleup.ruleup_backend.verification.dto.SetupRequest;
 import com.ruleup.ruleup_backend.verification.dto.SetupRequirementResponse;
 import com.ruleup.ruleup_backend.verification.dto.SetupResponse;
@@ -102,5 +105,24 @@ public class VerificationChallengeController {
                                                               @PathVariable UUID challengeId,
                                                               @RequestBody MemberLocationRequest request) {
         return ApiResponse.ok(setupService.updateLocation(UUID.fromString(userId), challengeId, request));
+    }
+
+    @Operation(summary = "내 스크린타임 대상 앱 조회",
+            description = "앱 셋업/수정 화면 재진입 시 바인딩한 앱 목록 복원. 현재 적용 세트(apps)와 익일 적용 대기 세트(pending)를 함께 반환. "
+                    + "바인딩된 앱이 없으면 SCREENTIME_NOT_CONFIGURED 실패 응답. 참여(ACTIVE) 멤버만.")
+    @GetMapping("/{challengeId}/my-screen-apps")
+    public ApiResponse<ScreenAppsResponse> getScreenApps(@AuthenticationPrincipal String userId,
+                                                         @PathVariable UUID challengeId) {
+        return ApiResponse.ok(setupService.getMyScreenApps(UUID.fromString(userId), challengeId));
+    }
+
+    @Operation(summary = "내 스크린타임 대상 앱 수정",
+            description = "본인 측정 대상 앱 세트 교체. 항상 익일 00:00부터 적용(당일 조작 방지). 같은 날 재요청은 대기 세트 덮어쓰기. "
+                    + "최근 변경 쿨다운 중에는 SCREENTIME_CHANGE_COOLDOWN.")
+    @PutMapping("/{challengeId}/my-screen-apps")
+    public ApiResponse<ScreenAppsUpdateResponse> updateScreenApps(@AuthenticationPrincipal String userId,
+                                                                  @PathVariable UUID challengeId,
+                                                                  @RequestBody ScreenAppsUpdateRequest request) {
+        return ApiResponse.ok(setupService.updateScreenApps(UUID.fromString(userId), challengeId, request));
     }
 }

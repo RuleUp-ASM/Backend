@@ -34,7 +34,11 @@ public class ScreenTimeEvaluator implements MethodEvaluator {
         if (cfg == null) return EvaluationOutcome.pending(null, null);
 
         Window window = resolveWindow(cfg.timeWindow(), ctx.targetDate(), ctx.zone());
-        Set<String> targets = (cfg.targetPackages() != null) ? new HashSet<>(cfg.targetPackages()) : Set.of();
+        // 대상 앱은 멤버 바인딩(오늘 0시 기준 세트)이 우선, 없으면 config.targetPackages 폴백.
+        List<String> memberApps = ctx.memberScreenApps();
+        Set<String> targets = (memberApps != null && !memberApps.isEmpty())
+                ? new HashSet<>(memberApps)
+                : (cfg.targetPackages() != null ? new HashSet<>(cfg.targetPackages()) : Set.of());
 
         // 직전 상태 복원
         long accSec = priorSeconds(ctx.priorEvidence());

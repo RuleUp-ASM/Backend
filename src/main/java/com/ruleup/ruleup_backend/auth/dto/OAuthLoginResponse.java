@@ -12,7 +12,9 @@ import java.math.BigDecimal;
 public record OAuthLoginResponse(
         boolean isNewUser,
         // 기존 사용자
-        String accessToken, String refreshToken, String tokenType, Long expiresIn, UserResponse user,
+        String accessToken, String refreshToken, String tokenType, Long expiresIn,
+        Integer flushIntervalSec,       // sync 주기 부트스트랩(기기 스펙 기반 산정) — 기존 회원 즉시 반환
+        UserResponse user,
         DeviceSpecResponse device,
         // 신규 사용자
         String signupToken, Long signupTokenExpiresIn, OAuthProfileResponse oauthProfile) {
@@ -33,9 +35,11 @@ public record OAuthLoginResponse(
         }
     }
 
-    public static OAuthLoginResponse existing(TokenService.TokenPair pair, User user, BigDecimal temp) {
+    public static OAuthLoginResponse existing(TokenService.TokenPair pair, User user, BigDecimal temp,
+                                              int flushIntervalSec) {
         return new OAuthLoginResponse(false,
                 pair.accessToken(), pair.refreshToken(), "Bearer", pair.expiresIn(),
+                flushIntervalSec,
                 UserResponse.from(user, temp),
                 DeviceSpecResponse.from(user),
                 null, null, null);
@@ -43,7 +47,7 @@ public record OAuthLoginResponse(
 
     public static OAuthLoginResponse newUser(String signupToken, long expiresIn, String email, String imageHint) {
         return new OAuthLoginResponse(true,
-                null, null, null, null, null, null,
+                null, null, null, null, null, null, null,
                 signupToken, expiresIn, new OAuthProfileResponse(email, imageHint));
     }
 }

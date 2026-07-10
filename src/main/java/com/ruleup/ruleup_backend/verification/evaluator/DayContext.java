@@ -15,6 +15,7 @@ import java.util.Map;
  *  - signals: 이번 sync로 들어온 신호 전부(델타). 평가기가 자기 type만 골라 씀.
  *  - priorEvidence: 직전까지 누적된 method_result.evidence(없으면 null). 신호가 델타라 prior+이번 신호 합쳐 누적.
  *  - memberAnchors: 멤버 바인딩 앵커(PER_MEMBER, v2 §5). GPS 평가의 fallback 반경 판정에 사용(없으면 빈 리스트).
+ *  - memberScreenApps: 멤버 바인딩 SCREEN_TIME 대상 앱 패키지명(오늘 0시 기준 적용 세트). 비면 config.targetPackages 폴백.
  *  - anchorFirstUnlockAt: windowAnchor(base=WAKE) 종속 창용 앵커(없으면 null).
  */
 public record DayContext(
@@ -25,9 +26,11 @@ public record DayContext(
         List<SyncSignal> signals,
         Map<String, Object> priorEvidence,
         List<GeoAnchor> memberAnchors,
+        List<String> memberScreenApps,
         Instant anchorFirstUnlockAt
 ) {
     public DayContext withAnchor(Instant firstUnlockAt) {
-        return new DayContext(targetDate, zone, now, config, signals, priorEvidence, memberAnchors, firstUnlockAt);
+        return new DayContext(targetDate, zone, now, config, signals, priorEvidence,
+                memberAnchors, memberScreenApps, firstUnlockAt);
     }
 }
