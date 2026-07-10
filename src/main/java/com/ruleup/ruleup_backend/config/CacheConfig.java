@@ -39,6 +39,12 @@ public class CacheConfig {
                 .expireAfterWrite(Duration.ofHours(6))
                 .build());
 
+        // 특성 가중치(§8.1) — 5행. 점수와 같은 배치가 evict하므로 TTL은 백스톱.
+        manager.registerCustomCache("segmentWeights", Caffeine.newBuilder()
+                .maximumSize(100)
+                .expireAfterWrite(Duration.ofHours(6))
+                .build());
+
         // 관심 카테고리 마스터 — 거의 안 변함.
         manager.registerCustomCache("categories", Caffeine.newBuilder()
                 .maximumSize(100)

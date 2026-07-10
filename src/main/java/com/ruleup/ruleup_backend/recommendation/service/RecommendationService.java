@@ -23,10 +23,12 @@ import java.util.stream.Collectors;
 
 /**
  * 발견 추천(④) — rule-based 3단계 블렌딩.
- *  1) 세그먼트 점수(웜업): 유저 COUNTRY·GENDER·AGE_BAND의 TemplateSegmentScore 합.
+ *  1) 세그먼트 점수(웜업): 유저 세그먼트별 TemplateSegmentScore 를 특성 가중치 w(type)로 곱해 합(§6·§8.1).
  *  2) 관심사 보너스(콜드스타트): User.interestCategories ∋ template.category 면 가산(데이터 0이어도 추천).
  *  3) 진행 중 템플릿 제외.
  * 정렬: score desc, tie는 templateId asc. (LLM/임베딩은 후순위)
+ *
+ * <p>가중치의 값은 배치가 학습해 저장하고(§8.1), 조회는 저장 가중치를 곱하기만 한다(학습은 배치, 곱셈은 조회).
  */
 @Service
 @RequiredArgsConstructor
@@ -41,6 +43,7 @@ public class RecommendationService {
 
     private final UserRepository userRepo;
     private final SegmentScoreReader segmentScoreReader;
+    private final SegmentTypeWeightReader segmentTypeWeightReader;
     private final SegmentResolver segmentResolver;
     private final RoutineCatalog catalog;
     private final ChallengeMemberRepository memberRepo;
@@ -51,10 +54,12 @@ public class RecommendationService {
         if (user == null) return List.of();
 
         // 1) 세그먼트 점수 합 (배치가 채운 캐시(Caffeine)에서 읽음 — DB 직격 없음)
+        //    특성 가중치 w(type)를 곱해 합산: 전체 인기(GLOBAL)가 개인 특성을 덮지 않게 축별로 가중(§6·§8.1).
         Map<Long, Double> segScore = new HashMap<>();
         for (Segment seg : segmentResolver.resolve(user)) {
+            double w = segmentTypeWeightReader.of(seg.type());
             for (SegmentScoreEntry e : segmentScoreReader.scoresFor(seg.type(), seg.value())) {
-                segScore.merge(e.templateId(), e.score(), Double::sum);
+                segScore.merge(e.templateId(), w * e.score(), Double::sum);
             }
         }
         // 2) 관심사(정규화: WAKE_UP→WAKEUP)
