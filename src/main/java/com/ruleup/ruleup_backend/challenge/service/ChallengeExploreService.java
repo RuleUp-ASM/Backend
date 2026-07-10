@@ -77,7 +77,9 @@ public class ChallengeExploreService {
         // 행 계산(정렬 값 + 표시 값).
         List<Row> rows = new ArrayList<>(candidates.size());
         for (Challenge c : candidates) {
-            rows.add(buildRow(c, myTemp, today, sortKey, statsByTemplate.get(c.getTemplateId())));
+            // templateId 가 null 이면 조회하지 않는다(Map.of()는 null 키 get 에서 NPE).
+            TemplateStats stats = (c.getTemplateId() != null) ? statsByTemplate.get(c.getTemplateId()) : null;
+            rows.add(buildRow(c, myTemp, today, sortKey, stats));
         }
 
         boolean desc = sortKey.isDescending();
@@ -108,7 +110,11 @@ public class ChallengeExploreService {
                          ExploreSort sortKey, TemplateStats stats) {
         int participantCount = c.getParticipantCount();
 
-        Integer templateUsage = (stats != null) ? (int) stats.getUsageCount() : (c.getTemplateId() != null ? 0 : null);
+        // 주의: int/Integer 혼합 삼항은 null 브랜치를 언박싱해 NPE → 명시적 분기로 Integer 유지.
+        Integer templateUsage;
+        if (stats != null) templateUsage = (int) stats.getUsageCount();
+        else if (c.getTemplateId() != null) templateUsage = 0;
+        else templateUsage = null;
         Double completionRate = (stats != null && stats.getCompletionRate() != null)
                 ? stats.getCompletionRate().doubleValue() : null;
         ExploreResponse.SuccessFailRatio successFail = successFailRatio(c, today);
@@ -116,14 +122,15 @@ public class ChallengeExploreService {
         boolean joinable = c.getMinMannerTemperature() == null
                 || c.getMinMannerTemperature().compareTo(myTemp) <= 0;
 
+        // 모든 브랜치를 Double(박싱)로 통일 — 혼합 시 switch 가 double 로 언박싱해 null 브랜치에서 NPE 나는 것 방지.
         Double sortValue = switch (sortKey) {
-            case TRENDING -> c.getTrendingScore();
-            case TEMPLATE_USAGE -> (templateUsage != null) ? (double) templateUsage : 0.0;
-            case PARTICIPANTS -> (double) participantCount;
+            case TRENDING -> Double.valueOf(c.getTrendingScore());
+            case TEMPLATE_USAGE -> Double.valueOf(templateUsage != null ? templateUsage : 0);
+            case PARTICIPANTS -> Double.valueOf(participantCount);
             case COMPLETION_RATE -> completionRate;                                   // null → 최하위
             case SUCCESS_FAIL_RATIO -> (successFail != null) ? successFail.successRate() : null;
-            case RECENT -> (double) c.getCreatedAt().toEpochMilli();
-            case DEADLINE -> (double) c.getEndDate().toEpochDay();                    // 오름차순
+            case RECENT -> Double.valueOf(c.getCreatedAt().toEpochMilli());
+            case DEADLINE -> Double.valueOf(c.getEndDate().toEpochDay());             // 오름차순
         };
 
         ExploreResponse.Item item = new ExploreResponse.Item(
