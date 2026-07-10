@@ -18,7 +18,7 @@ import java.util.stream.Collectors;
  *
  * 템플릿은 자동 인증 가능 루틴만 남긴 65개 수준의 정적 데이터라 매 요청마다 DB 를 칠 이유가 없다(V18).
  * 처음 쓸 때 한 번 통째로 읽어 캐시하고, 이후엔 메모리에서 본다(목표 2만 사용자 규모에 충분).
- * 시드를 갱신했으면 앱 재시작 또는 reload() 로 캐시를 비운다.
+ * 시드를 갱신했으면 앱 재시작으로 캐시를 비운다.
  *
  * (의미 기반 매칭으로 키우려면: 여기서 FULLTEXT/임베딩으로 후보를 좁힌 뒤 LLM 에 넘기면 된다.
  *  지금은 전체를 후보로 준다 — 105개면 프롬프트도 작고 매칭 품질이 더 안정적이다.)
@@ -44,11 +44,6 @@ public class RoutineCatalog {
                         t.getId(), t.getName(), t.getCategory().name(), t.getDescription(),
                         t.paramSpecs().stream().map(s -> s.key()).toList()))
                 .toList();
-    }
-
-    /** 캐시 비우기(시드 갱신 후 호출). */
-    public void reload() {
-        this.byId = null;
     }
 
     private Map<Long, RoutineTemplate> cache() {

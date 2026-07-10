@@ -18,7 +18,7 @@ import java.util.Map;
  *  - 창: [하루 시작, beforeTime]. beforeTime에 창이 닫힌다(자정 아님).
  *  - 판정: firstUnlockAt ≤ beforeTime → SUCCESS / 창 닫힘·미발생 → FAILED(WOKE_UP_LATE) / 그 외 → PENDING.
  *  - 신호가 델타라 priorEvidence.firstUnlockAt과 이번 신호의 최솟값을 누적(멱등·증분).
- *  - firstUnlockAt은 windowAnchor(base=WAKE) 종속 창의 앵커로도 outcome에 실어 보낸다.
+ *  - firstUnlockAt은 evidence에 담아 다음 sync의 prior로 재사용한다.
  */
 @Component
 public class WakeEvaluator implements MethodEvaluator {
@@ -52,7 +52,7 @@ public class WakeEvaluator implements MethodEvaluator {
         } else {
             outcome = EvaluationOutcome.pending(evidence, windowCloses);        // 아직 대기
         }
-        return outcome.withFirstUnlockAt(firstUnlock);
+        return outcome;   // firstUnlockAt은 evidence에 담겨 다음 sync prior로 재사용됨
     }
 
     private Instant priorFirstUnlock(Map<String, Object> prior) {

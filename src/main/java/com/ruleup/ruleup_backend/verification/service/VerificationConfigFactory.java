@@ -55,10 +55,10 @@ public class VerificationConfigFactory {
                     timeParam(params, "target_time", "07:00"), Polarity.ACHIEVEMENT, 1);
             case "SCREEN_TIME_MIN" -> screenTime = new ScreenTimeConfig(
                     ScreenTimeMode.MIN, Polarity.ACHIEVEMENT,
-                    packages(params), intParam(params, "duration_min", 30), timeWindow(params), null, 1);
+                    packages(params), intParam(params, "duration_min", 30), timeWindow(params), 1);
             case "SCREEN_TIME_MAX" -> screenTime = new ScreenTimeConfig(
                     ScreenTimeMode.MAX, Polarity.CONSTRAINT,
-                    packages(params), intParam(params, "duration_min", 30), timeWindow(params), null, 1);
+                    packages(params), intParam(params, "duration_min", 30), timeWindow(params), 1);
             case "GPS_PRESENCE" -> gps = buildGps(params);
             // 움직임: 레거시 GPS_DISTANCE/ACTIVITY 태그도 v2에서는 HEALTH로 라우팅.
             case "HEALTH", "GPS_DISTANCE", "ACTIVITY" -> health = buildHealth(params);
@@ -87,7 +87,7 @@ public class VerificationConfigFactory {
                 strParam(params, "brand_keyword"), intParam(params, "nearby_radius_m", 1500),
                 dbl(params, "lat"), dbl(params, "lng"),       // 레거시 단일앵커(보통 null) — 평가는 멤버 anchors[] 우선
                 intParam(params, "radius_m", 80), dwell, dwell,
-                null, timeWindow(params), null,
+                null, timeWindow(params),
                 polarity, 1, 100, 50, List.of());
     }
 

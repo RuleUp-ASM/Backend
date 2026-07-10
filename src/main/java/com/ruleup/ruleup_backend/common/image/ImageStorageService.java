@@ -87,9 +87,4 @@ public class ImageStorageService {
             return "png";                                     // PNG: 89 50 4E 47
         throw new BusinessException(ErrorCode.IMAGE_INVALID_TYPE);
     }
-
-    /** 저장 후 정적 서빙 URL(/files/{파일명})까지 만들어 반환. 프로필·챌린지 공용. */
-    public String storeAndGetUrl(MultipartFile file) {
-        return urlOf(store(file));
-    }
 }
