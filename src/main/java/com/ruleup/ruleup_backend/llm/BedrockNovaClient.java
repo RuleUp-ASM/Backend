@@ -37,8 +37,8 @@ public class BedrockNovaClient implements LlmClient {
 
     private static final Logger log = LoggerFactory.getLogger(BedrockNovaClient.class);
 
-    private static final String DEFAULT_REGION = "us-east-1";
-    private static final String DEFAULT_MODEL_ID = "us.amazon.nova-lite-v1:0";   // 온디맨드 크로스리전 추론 프로파일
+    private static final String DEFAULT_REGION = "ap-northeast-2";                // 서울
+    private static final String DEFAULT_MODEL_ID = "apac.amazon.nova-lite-v1:0";  // APAC 온디맨드 크로스리전 추론 프로파일
     private static final long DEFAULT_TIMEOUT_MS = 8000L;
     private static final int DEFAULT_MAX_RETRIES = 2;
     private static final long DEFAULT_RETRY_BACKOFF_MS = 300L;

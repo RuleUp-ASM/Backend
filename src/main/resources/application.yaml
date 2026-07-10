@@ -82,8 +82,8 @@ app:
       max-retries: ${GEMINI_MAX_RETRIES:2}         # 503(UNAVAILABLE)·429·타임아웃 시 재시도 횟수
       retry-backoff-ms: ${GEMINI_RETRY_BACKOFF_MS:300}  # 지수 백오프 base (300→600→1200ms)
     bedrock:
-      region: ${BEDROCK_REGION:us-east-1}          # Bedrock·모델 승인이 된 리전
-      model-id: ${BEDROCK_MODEL_ID:us.amazon.nova-lite-v1:0}  # Nova Lite 온디맨드 크로스리전 추론 프로파일
+      region: ${BEDROCK_REGION:ap-northeast-2}     # 서울(Bedrock·모델 승인이 된 리전)
+      model-id: ${BEDROCK_MODEL_ID:apac.amazon.nova-lite-v1:0}  # Nova Lite APAC 크로스리전 추론 프로파일
       timeout-ms: ${BEDROCK_TIMEOUT_MS:8000}       # Converse 총 호출 타임아웃
       max-retries: ${BEDROCK_MAX_RETRIES:2}        # 쓰로틀 재시도 횟수
       retry-backoff-ms: ${BEDROCK_RETRY_BACKOFF_MS:300}
