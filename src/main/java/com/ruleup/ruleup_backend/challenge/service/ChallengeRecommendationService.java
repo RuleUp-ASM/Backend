@@ -62,12 +62,9 @@ public class ChallengeRecommendationService {
         ChallengeSettings s = draft.settingsOrEmpty();
         String participation = sanitizeParticipation(s.participationType());
         List<String> repeatDays = sanitizeRepeatDays(s.repeatDays());
-        int duration = DEFAULT_DURATION_DAYS;
-        BigDecimal deduction = DEFAULT_MANNER_DEDUCTION;
-        BigDecimal gain = DEFAULT_MANNER_GAIN;
 
         LocalDate start = LocalDate.now().plusDays(START_OFFSET_DAYS);
-        LocalDate end = start.plusDays((long) duration - 1);
+        LocalDate end = start.plusDays((long) DEFAULT_DURATION_DAYS - 1);
 
         return new ChallengeRecommendationResponse(
                 routine.matched(),
@@ -82,11 +79,11 @@ public class ChallengeRecommendationService {
                 participation,
                 null,                       // minMannerTemperature: 그룹 선택 시 클라에서 설정
                 repeatDays,
-                duration,
+                DEFAULT_DURATION_DAYS,
                 start.toString(),
                 end.toString(),
-                new PenaltyConfig(deduction, new PenaltyConfig.SnsShare(false, null), false),
-                new RewardConfig(gain),
+                new PenaltyConfig(DEFAULT_MANNER_DEDUCTION, new PenaltyConfig.SnsShare(false, null), false),
+                new RewardConfig(DEFAULT_MANNER_GAIN),
                 Anonymity.REAL.name());        // 초안 기본은 실명(§11.2 — 응답 누락 금지)
     }
 

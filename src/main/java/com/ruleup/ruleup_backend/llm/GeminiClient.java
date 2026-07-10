@@ -203,24 +203,7 @@ public class GeminiClient implements LlmClient {
         return (s.length() > 300) ? s.substring(0, 300) : s;
     }
 
-    /** 응답 텍스트에서 JSON 객체 부분만 추출(혹시 펜스/설명이 섞여 와도 대비). */
-    public String extractJson(String raw) {
-        if (raw == null) return null;
-        int start = raw.indexOf('{');
-        int end = raw.lastIndexOf('}');
-        return (start >= 0 && end > start) ? raw.substring(start, end + 1) : raw;
-    }
-
-    /** 호출 측에서 모델 텍스트를 원하는 타입으로 파싱할 때 사용. 실패 시 null. */
-    public <T> T parseJson(String content, Class<T> type) {
-        try {
-            return jsonMapper.readValue(extractJson(content), type);
-        } catch (Exception e) {
-            // 출력 형식 실패(모델이 준 텍스트가 스키마/타입에 안 맞음) — 쿼터 계열과 구분해 집계.
-            log.warn("llm_fail class=FORMAT msg={}", e.getMessage());
-            return null;
-        }
-    }
+    // extractJson/parseJson 은 LlmClient 기본 메서드(LlmJson 위임)를 상속 — provider 공통 처리로 단일화.
 
     // ===== Gemini generateContent 요청/응답 매핑 =====
     @JsonInclude(JsonInclude.Include.NON_NULL)

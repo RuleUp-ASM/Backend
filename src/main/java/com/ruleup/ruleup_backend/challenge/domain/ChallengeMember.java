@@ -106,12 +106,6 @@ public class ChallengeMember extends AssignedIdEntity {
     @Column(name = "curPeriodCompleted")
     private Integer curPeriodCompleted;
 
-    @Column(name = "periodsTotal")
-    private Integer periodsTotal;
-
-    @Column(name = "periodsMet")
-    private Integer periodsMet;
-
     // ===== v2: 셋업 상태 + 멤버 바인딩 앵커(PER_MEMBER) + 예비 폴백 카운터 (테크스펙 v2 §4·§5·§9) =====
     @Enumerated(EnumType.STRING)
     @Column(name = "setupStatus", nullable = false)
@@ -176,9 +170,7 @@ public class ChallengeMember extends AssignedIdEntity {
         return of(challengeId, userId, MemberRole.MEMBER, initialStatus);
     }
 
-    public void leave()   { this.status = MemberStatus.LEFT; }
-
-    // 참여/승인/거절/재참여 상태 전이는 동시성 안전을 위해
+    // 참여/승인/거절/재참여/탈퇴 상태 전이는 동시성 안전을 위해
     // ChallengeMemberRepository.compareAndSetStatus(CAS)로 처리한다(엔티티 직접 변경 X).
 
     public boolean isPending() { return status == MemberStatus.PENDING; }
@@ -191,15 +183,13 @@ public class ChallengeMember extends AssignedIdEntity {
     }
 
     public void setupFrequency(PeriodUnit unit, int periodTarget, LocalDate curStart,
-                               LocalDate curEnd, int periodsTotal, int targetDays) {
+                               LocalDate curEnd, int targetDays) {
         this.scheduleType = ScheduleType.FREQUENCY;
         this.periodUnit = unit;
         this.periodTarget = periodTarget;
         this.curPeriodStart = curStart;
         this.curPeriodEnd = curEnd;
         this.curPeriodCompleted = 0;
-        this.periodsTotal = periodsTotal;
-        this.periodsMet = 0;
         this.targetDays = targetDays;
     }
 
@@ -225,9 +215,8 @@ public class ChallengeMember extends AssignedIdEntity {
     }
 
     /** 빈도형 주기 롤오버: 미달분 정산 + 다음 주기로. */
-    public void rolloverPeriod(LocalDate nextStart, LocalDate nextEnd, int shortfall, boolean met) {
+    public void rolloverPeriod(LocalDate nextStart, LocalDate nextEnd, int shortfall) {
         this.failDays += shortfall;
-        if (met) this.periodsMet = (this.periodsMet == null ? 0 : this.periodsMet) + 1;
         this.curPeriodStart = nextStart;
         this.curPeriodEnd = nextEnd;
         this.curPeriodCompleted = 0;

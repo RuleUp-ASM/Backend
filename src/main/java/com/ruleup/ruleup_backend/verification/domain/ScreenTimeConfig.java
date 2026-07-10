@@ -14,6 +14,5 @@ public record ScreenTimeConfig(
         List<String> targetPackages,
         Integer goalMinutes,          // MAX·goalMinutes=0 이면 폰 금지창
         String timeWindow,            // "HH:mm-HH:mm" (없으면 하루)
-        WindowAnchor windowAnchor,
         int maxSignalLagHours
 ) {}

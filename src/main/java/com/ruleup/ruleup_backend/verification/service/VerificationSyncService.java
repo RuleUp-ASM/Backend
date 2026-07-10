@@ -181,7 +181,7 @@ public class VerificationSyncService {
                 .map(com.ruleup.ruleup_backend.common.verification.ScreenApp::packageName)
                 .toList();
         DayContext ctx = new DayContext(today, KST, now, config, signals, prior,
-                member.getAnchors(), memberScreenApps, null);
+                member.getAnchors(), memberScreenApps);
         EvaluationOutcome outcome = evaluator.evaluate(ctx);
 
         if (mr == null) {
@@ -190,8 +190,7 @@ public class VerificationSyncService {
         mr.evaluate(outcome.status(), outcome.evidence(), now);
         methodResultRepo.save(mr);
 
-        boolean wasSuccess = daily.getStatus() == VerificationStatus.SUCCESS;
-
+        // 이 지점 도달 시 daily 는 아직 SUCCESS/FAILED 로 잠기지 않음(잠긴 경우 processMember 초입에서 early-return).
         Instant windowCloses = outcome.windowClosesAt();
         Instant finalizeAfter = (windowCloses != null)
                 ? windowCloses.plus(maxLagHours(config), ChronoUnit.HOURS) : null;
@@ -202,8 +201,8 @@ public class VerificationSyncService {
                 || outcome.status() == VerificationStatus.FAILED) ? now : null;
         daily.recordResult(outcome.status(), contributing, outcome.failureReason(), verifiedAt);
 
-        if (config.isFrequency() && outcome.status() == VerificationStatus.SUCCESS && !wasSuccess) {
-            member.incrementPeriodCompleted();   // 빈도형: 주기 완료 +1 (전이 시 1회)
+        if (config.isFrequency() && outcome.status() == VerificationStatus.SUCCESS) {
+            member.incrementPeriodCompleted();   // 빈도형: 주기 완료 +1 (미잠금 상태에서 첫 SUCCESS 전이 1회)
         }
         // 제약형 위반 등으로 이 날이 FAILED 로 잠기면 감시자 통지 적재(§9). 다음 sync는 line 126에서 스킵되어 중복 없음.
         if (outcome.status() == VerificationStatus.FAILED) {

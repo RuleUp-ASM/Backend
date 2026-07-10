@@ -124,18 +124,17 @@ public class VerificationFinalizeService {
             int need = (m.getPeriodTarget() != null) ? m.getPeriodTarget() : 0;
             int done = (m.getCurPeriodCompleted() != null) ? m.getCurPeriodCompleted() : 0;
             int shortfall = Math.max(need - done, 0);
-            boolean met = done >= need;
 
             LocalDate nextStart = m.getCurPeriodEnd().plusDays(1);
             if (nextStart.isAfter(ch.getEndDate())) {
                 // 챌린지 종료: 마지막 주기 미달만 정산하고 advance 안 함(루프 종료)
-                m.rolloverPeriod(m.getCurPeriodStart(), m.getCurPeriodEnd(), shortfall, met);
+                m.rolloverPeriod(m.getCurPeriodStart(), m.getCurPeriodEnd(), shortfall);
                 break;
             }
             int periodDays = (m.getPeriodUnit() == PeriodUnit.WEEK) ? 7 : 30;
             LocalDate nextEnd = nextStart.plusDays(periodDays - 1L);
             if (nextEnd.isAfter(ch.getEndDate())) nextEnd = ch.getEndDate();
-            m.rolloverPeriod(nextStart, nextEnd, shortfall, met);
+            m.rolloverPeriod(nextStart, nextEnd, shortfall);
         }
     }
 

@@ -23,11 +23,11 @@ public class GeminiModerationClient implements ContentModerationClient {
     private static final Logger log = LoggerFactory.getLogger(GeminiModerationClient.class);
     private static final int MAX_IMAGE_BYTES = 10 * 1024 * 1024;   // 프로필 사진 10MB 제한과 동일
 
-    private final LlmClient gemini;
+    private final LlmClient llm;
     private final RestClient imageFetcher;
 
-    public GeminiModerationClient(LlmClient gemini) {
-        this.gemini = gemini;
+    public GeminiModerationClient(LlmClient llm) {
+        this.llm = llm;
         var factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(Duration.ofSeconds(3));
         factory.setReadTimeout(Duration.ofSeconds(5));
@@ -37,7 +37,7 @@ public class GeminiModerationClient implements ContentModerationClient {
     @Override
     public ModerationResult moderateNickname(String nickname) {
         if (nickname == null || nickname.isBlank()) return ModerationResult.APPROVED;
-        String content = gemini.generateText(buildNicknamePrompt(nickname));
+        String content = llm.generateText(buildNicknamePrompt(nickname));
         return toResult(content);
     }
 
@@ -57,14 +57,14 @@ public class GeminiModerationClient implements ContentModerationClient {
             return ModerationResult.UNAVAILABLE;
         }
         String mime = (mimeType != null && !mimeType.isBlank()) ? mimeType : "image/jpeg";
-        String content = gemini.generateText(buildImagePrompt(), bytes, mime);
+        String content = llm.generateText(buildImagePrompt(), bytes, mime);
         return toResult(content);
     }
 
     /** 모델 JSON({"flagged":bool}) → 검수 결과. 파싱 실패/응답 없음은 보류. */
     private ModerationResult toResult(String content) {
         if (content == null) return ModerationResult.UNAVAILABLE;
-        Verdict verdict = gemini.parseJson(content, Verdict.class);
+        Verdict verdict = llm.parseJson(content, Verdict.class);
         if (verdict == null) return ModerationResult.UNAVAILABLE;
         return verdict.flagged() ? ModerationResult.REJECTED : ModerationResult.APPROVED;
     }

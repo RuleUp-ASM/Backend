@@ -27,7 +27,9 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * 챌린지 생성/조회/수정/삭제 (스펙 3.2 ~ 3.5).
@@ -317,20 +319,14 @@ public class ChallengeService {
         if (actives.isEmpty()) return null;
 
         List<UUID> userIds = actives.stream().map(ChallengeMember::getUserId).toList();
-        List<ReputationScore> scores = reputationScoreRepository.findAllById(userIds);
+        Map<UUID, BigDecimal> tempByUser = reputationScoreRepository.findAllById(userIds).stream()
+                .collect(Collectors.toMap(ReputationScore::getUserId, ReputationScore::getMannerTemperature));
 
         BigDecimal sum = BigDecimal.ZERO;
-        int n = 0;
         for (UUID id : userIds) {
-            BigDecimal t = scores.stream()
-                    .filter(s -> s.getUserId().equals(id))
-                    .map(ReputationScore::getMannerTemperature)
-                    .findFirst()
-                    .orElse(ReputationScore.INITIAL_TEMPERATURE);
-            sum = sum.add(t);
-            n++;
+            sum = sum.add(tempByUser.getOrDefault(id, ReputationScore.INITIAL_TEMPERATURE));
         }
-        return sum.divide(BigDecimal.valueOf(n), 1, RoundingMode.HALF_UP);
+        return sum.divide(BigDecimal.valueOf(userIds.size()), 1, RoundingMode.HALF_UP);
     }
 
     private BigDecimal mannerTemp(UUID userId) {

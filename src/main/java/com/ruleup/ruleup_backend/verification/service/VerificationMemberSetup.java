@@ -46,12 +46,11 @@ public class VerificationMemberSetup {
         int fullPeriods = (int) (totalDays / periodDays);
         int remainder = (int) (totalDays % periodDays);
         int lastPartial = (remainder > 0) ? (int) Math.ceil((double) n * remainder / periodDays) : 0;
-        int periodsTotal = fullPeriods + (remainder > 0 ? 1 : 0);
         int targetCompletions = n * fullPeriods + lastPartial;
 
         LocalDate curEnd = start.plusDays(periodDays - 1L);
         if (curEnd.isAfter(end)) curEnd = end;
 
-        member.setupFrequency(f.unit(), n, start, curEnd, Math.max(periodsTotal, 1), Math.max(targetCompletions, 1));
+        member.setupFrequency(f.unit(), n, start, curEnd, Math.max(targetCompletions, 1));
     }
 }

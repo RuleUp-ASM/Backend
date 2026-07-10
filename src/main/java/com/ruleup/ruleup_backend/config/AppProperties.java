@@ -22,10 +22,10 @@ public record AppProperties(Jwt jwt, Oauth oauth, Llm llm, Client client) {
         // (카카오는 https redirect만 허용 → iOS 앱이 https를 직접 못 잡으므로 서버가 중계)
     }
 
-    /** LLM(챌린지 기본값 추천·루틴 매칭·콘텐츠 검수). 실패 시 각 기능별 폴백. */
     /**
-     * LLM 설정. provider 로 활성 구현을 고른다(gemini 기본 / bedrock). 각 provider 코드는 지우지 않고
-     * 조건부 빈으로 스위치만 한다 — 토큰 대비 성능 비교 후 최적 모델 채택.
+     * LLM 설정(챌린지 기본값 추천·루틴 매칭·콘텐츠 검수. 실패 시 각 기능별 폴백). provider 로 활성 구현을
+     * 고른다(gemini 기본 / bedrock). 각 provider 코드는 지우지 않고 조건부 빈으로 스위치만 한다 —
+     * 토큰 대비 성능 비교 후 최적 모델 채택.
      */
     public record Llm(String provider, Gemini gemini, Bedrock bedrock) {
 

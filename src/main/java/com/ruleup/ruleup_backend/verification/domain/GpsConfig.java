@@ -26,7 +26,6 @@ public record GpsConfig(
         Integer loiteringDelayMin,
         BigDecimal goalKm,             // DISTANCE(Phase 2 보존)
         String timeWindow,             // "HH:mm-HH:mm" (없으면 null)
-        WindowAnchor windowAnchor,
         Polarity polarity,             // VISIT=ACHIEVEMENT / AVOID=CONSTRAINT
         int maxSignalLagHours,
         Integer accuracyMaxM,

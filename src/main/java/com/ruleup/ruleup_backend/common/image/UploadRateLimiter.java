@@ -23,6 +23,8 @@ public class UploadRateLimiter {
 
     public void check(String userId) {
         long now = Instant.now().toEpochMilli();
+        // 만료된 다른 사용자 윈도우를 이참에 정리 — 인메모리 맵이 distinct 업로더 수만큼 무한 증가하는 것 방지.
+        windows.values().removeIf(w -> now - w.startMillis >= WINDOW_MILLIS);
         Window w = windows.compute(userId, (key, old) -> {
             if (old == null || now - old.startMillis >= WINDOW_MILLIS) {
                 return new Window(now, 1);   // 새 윈도우 시작
