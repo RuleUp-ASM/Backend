@@ -1,7 +1,7 @@
 package com.ruleup.ruleup_backend.moderation;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.ruleup.ruleup_backend.llm.GeminiClient;
+import com.ruleup.ruleup_backend.llm.LlmClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -23,10 +23,10 @@ public class GeminiModerationClient implements ContentModerationClient {
     private static final Logger log = LoggerFactory.getLogger(GeminiModerationClient.class);
     private static final int MAX_IMAGE_BYTES = 10 * 1024 * 1024;   // 프로필 사진 10MB 제한과 동일
 
-    private final GeminiClient gemini;
+    private final LlmClient gemini;
     private final RestClient imageFetcher;
 
-    public GeminiModerationClient(GeminiClient gemini) {
+    public GeminiModerationClient(LlmClient gemini) {
         this.gemini = gemini;
         var factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(Duration.ofSeconds(3));

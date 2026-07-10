@@ -1,11 +1,15 @@
 package com.ruleup.ruleup_backend.challenge.repository;
 
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
+import com.ruleup.ruleup_backend.challenge.domain.ChallengeModerationStatus;
+import com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus;
+import com.ruleup.ruleup_backend.challenge.domain.ParticipationType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -77,4 +81,52 @@ public interface ChallengeRepository extends JpaRepository<Challenge, UUID> {
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("UPDATE Challenge c SET c.participantCount = c.participantCount - 1 WHERE c.id = :id AND c.participantCount > 0")
     void decrementParticipantCount(@Param("id") UUID id);
+
+    // ===== 탐색(search 스펙) =====
+
+    /**
+     * 탐색 후보(= 인기 후보 = 목록 후보): 소프트삭제 X · 모더레이션 APPROVED · 종료 전(endDate ≥ today).
+     * 인기 배치·failCount 배치가 순회 대상으로 쓴다.
+     */
+    @Query("SELECT c FROM Challenge c WHERE c.deletedAt IS NULL " +
+            "AND c.moderationStatus = com.ruleup.ruleup_backend.challenge.domain.ChallengeModerationStatus.APPROVED " +
+            "AND c.endDate >= :today")
+    List<Challenge> findExploreCandidates(@Param("today") LocalDate today);
+
+    /**
+     * 목록 화면(§3): 공통 제외(삭제·COMPLETED·미승인·종료) 후 필터(AND)를 적용해 후보를 가져온다.
+     * 정렬·커서 페이지네이션은 앱단(ChallengeExploreService)에서 역정규화 값으로 처리한다.
+     * 필터 파라미터가 null 이면 그 조건은 건너뛴다(전체). applyManner=true 면 "내가 들어갈 수 있는 것"만.
+     */
+    @Query("SELECT c FROM Challenge c WHERE c.deletedAt IS NULL " +
+            "AND c.moderationStatus = com.ruleup.ruleup_backend.challenge.domain.ChallengeModerationStatus.APPROVED " +
+            "AND c.status <> com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus.COMPLETED " +
+            "AND c.endDate >= :today " +
+            "AND (:category IS NULL OR c.category = :category) " +
+            "AND (:participationType IS NULL OR c.participationType = :participationType) " +
+            "AND (:verificationType IS NULL OR c.verificationType = :verificationType) " +
+            "AND (:applyManner = false OR c.minMannerTemperature IS NULL OR c.minMannerTemperature <= :myTemp)")
+    List<Challenge> findExploreList(@Param("today") LocalDate today,
+                                    @Param("category") String category,
+                                    @Param("participationType") ParticipationType participationType,
+                                    @Param("verificationType") String verificationType,
+                                    @Param("applyManner") boolean applyManner,
+                                    @Param("myTemp") BigDecimal myTemp);
+
+    /** 템플릿별 사용자 수(§3.2.1): 파생된 모든(삭제 제외) 챌린지의 현재 참여자 수 합. */
+    @Query("SELECT c.templateId, SUM(c.participantCount) FROM Challenge c " +
+            "WHERE c.deletedAt IS NULL AND c.templateId IS NOT NULL GROUP BY c.templateId")
+    List<Object[]> sumParticipantsByTemplate();
+
+    /** 카테고리별 진행 중(종료 전) 챌린지 수(§2.2): 삭제 X · APPROVED · endDate ≥ today. */
+    @Query("SELECT c.category, COUNT(c) FROM Challenge c WHERE c.deletedAt IS NULL " +
+            "AND c.moderationStatus = com.ruleup.ruleup_backend.challenge.domain.ChallengeModerationStatus.APPROVED " +
+            "AND c.endDate >= :today GROUP BY c.category")
+    List<Object[]> countActiveByCategory(@Param("today") LocalDate today);
+
+    /** 완주율 집계 대상: 완료(COMPLETED)·삭제 X·템플릿 기반 챌린지의 (id, templateId). */
+    @Query("SELECT c.id, c.templateId FROM Challenge c " +
+            "WHERE c.status = com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus.COMPLETED " +
+            "AND c.deletedAt IS NULL AND c.templateId IS NOT NULL")
+    List<Object[]> findCompletedTemplateChallenges();
 }

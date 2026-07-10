@@ -32,6 +32,7 @@ public class SecurityConfig {
             "/api/v1/auth/refresh",          // 4.4 토큰 재발급 (refreshToken 사용)
             "/api/v1/nicknames/**",          // 4.6 닉네임 검사
             "/api/v1/categories",            // 4.7 카테고리 마스터
+            "/api/v1/challenge-categories",  // 탐색 §2.2 홈 카테고리 그리드(공개 표시용 수치)
             "/files/**",                     // 정적 이미지 서빙
             "/actuator/health"
     };

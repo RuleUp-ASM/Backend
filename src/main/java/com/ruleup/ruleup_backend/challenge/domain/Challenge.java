@@ -113,6 +113,16 @@ public class Challenge extends AssignedIdEntity {
     @Column(name = "participantCount", nullable = false)
     private int participantCount;
 
+    // ===== 탐색 역정규화(탐색 스펙 §4) — 배치가 유지, 질의 시점 집계 없음 =====
+    @Column(name = "trendingScore", nullable = false)
+    private double trendingScore;          // 최근 24h 참여 지수감쇠 합(§2.1, 10분 배치)
+
+    @Column(name = "failCount", nullable = false)
+    private int failCount;                 // 방 확정 실패 인원(§3.2.4, 배치)
+
+    @Column(name = "verificationType", length = 10)
+    private String verificationType;       // AUTO / MANUAL — verificationConfig.selectedMethod 승격(정렬·필터용)
+
     @Column(name = "deletedAt")
     private Instant deletedAt;
 
@@ -165,8 +175,17 @@ public class Challenge extends AssignedIdEntity {
                 : ChallengeModerationStatus.APPROVED;
         c.aiAssisted = aiAssisted;
         c.participantCount = 0;
+        // 탐색 정렬·필터용 승격 컬럼(인증 방식). verificationConfig 스냅샷의 selectedMethod 를 그대로 반영.
+        c.verificationType = (verificationConfig != null && verificationConfig.selectedMethod() != null)
+                ? verificationConfig.selectedMethod().name() : null;
+        c.trendingScore = 0.0;
+        c.failCount = 0;
         return c;
     }
+
+    // ===== 탐색 역정규화 갱신(배치 전용) =====
+    public void applyTrendingScore(double score) { this.trendingScore = Math.max(0.0, score); }
+    public void applyFailCount(int count) { this.failCount = Math.max(0, count); }
 
     public boolean isEditable() { return status.isEditable(); }
 

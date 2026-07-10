@@ -57,6 +57,11 @@ dependencies {
 	// Spring Boot가 버전 관리하므로 버전 명시 불필요.
 	implementation 'org.apache.httpcomponents.client5:httpclient5'
 
+	// AWS Bedrock Runtime — 대체 LLM provider(Amazon Nova Lite 등)를 Converse API로 호출.
+	// 자격증명은 ECS 태스크 역할(기본 provider 체인). BOM으로 버전 고정.
+	implementation platform('software.amazon.awssdk:bom:2.31.0')
+	implementation 'software.amazon.awssdk:bedrockruntime'
+
 	// JDK 25 대응: Lombok 1.18.40+ 필요 (그 이전 버전은 JDK25 bytecode 미지원)
 	compileOnly 'org.projectlombok:lombok:1.18.46'
 	annotationProcessor 'org.projectlombok:lombok:1.18.46'

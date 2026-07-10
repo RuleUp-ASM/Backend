@@ -68,4 +68,29 @@ public interface ChallengeMemberRepository extends JpaRepository<ChallengeMember
     int compareAndSetStatus(@Param("id") UUID id,
                             @Param("from") Collection<MemberStatus> from,
                             @Param("to") MemberStatus to);
+
+    // ===== 탐색(search 스펙) 집계 =====
+
+    /** 최근 24h 참여(인기 스코어 §2.1): joinedAt 이 since 이후인 멤버(상태 무관 join 이벤트 근사). */
+    List<ChallengeMember> findByJoinedAtAfter(Instant since);
+
+    /**
+     * 방별 확정 실패 인원(§3.2.4): 남은 날을 다 성공해도 90% 날 달성이 불가능해진 ACTIVE 멤버 수.
+     *  (완주 하한 = ceil(0.9·targetDays) → 허용 실패 상한 = targetDays − 하한, 이를 초과하면 확정 실패)
+     */
+    @Query("SELECT m.challengeId, " +
+            "SUM(CASE WHEN m.targetDays > 0 AND m.failDays > (m.targetDays - CEILING(0.9 * m.targetDays)) THEN 1 ELSE 0 END) " +
+            "FROM ChallengeMember m WHERE m.status = :status GROUP BY m.challengeId")
+    List<Object[]> aggregateConfirmedFailByChallenge(@Param("status") MemberStatus status);
+
+    /**
+     * 완주율(§3.2.3) 집계: 주어진 챌린지들의 (참여자 수, 완주자 수)를 방별로.
+     *  완주 = successDays ≥ ceil(0.9·targetDays). ACTIVE·targetDays>0 멤버만 표본.
+     */
+    @Query("SELECT m.challengeId, COUNT(m), " +
+            "SUM(CASE WHEN m.successDays >= CEILING(0.9 * m.targetDays) THEN 1 ELSE 0 END) " +
+            "FROM ChallengeMember m WHERE m.challengeId IN :challengeIds " +
+            "AND m.status = :status AND m.targetDays > 0 GROUP BY m.challengeId")
+    List<Object[]> aggregateCompletionByChallenge(@Param("challengeIds") Collection<UUID> challengeIds,
+                                                  @Param("status") MemberStatus status);
 }
