@@ -48,7 +48,8 @@ public class VerificationSyncService {
     private static final Logger log = LoggerFactory.getLogger(VerificationSyncService.class);
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
-    private static final int NEXT_SYNC_SEC = 1800;   // 30분
+    /** 누적 일괄 상한: 신호 배열 총 개수(초과 시 413 SYNC_PAYLOAD_TOO_LARGE, 클라는 분할 재전송). */
+    private static final int MAX_SIGNALS_PER_SYNC = 5000;
     private static final Set<String> KNOWN_SIGNAL_TYPES = Stream.concat(
             Arrays.stream(SignalType.values()).map(Enum::name),
             Stream.of("GEOFENCE_TRANSITION")   // Android 와이어 별칭
@@ -62,6 +63,7 @@ public class VerificationSyncService {
     private final VerificationConfigFactory configFactory;
     private final VerificationProgressService progressService;
     private final ApplicationEventPublisher eventPublisher;
+    private final com.ruleup.ruleup_backend.user.UserRepository userRepository;
     private final Map<VerificationMethod, MethodEvaluator> evaluators;
 
     public VerificationSyncService(ChallengeQueryService challengeQuery,
@@ -72,6 +74,7 @@ public class VerificationSyncService {
                                    VerificationConfigFactory configFactory,
                                    VerificationProgressService progressService,
                                    ApplicationEventPublisher eventPublisher,
+                                   com.ruleup.ruleup_backend.user.UserRepository userRepository,
                                    List<MethodEvaluator> evaluatorList) {
         this.challengeQuery = challengeQuery;
         this.dailyRepo = dailyRepo;
@@ -81,6 +84,7 @@ public class VerificationSyncService {
         this.configFactory = configFactory;
         this.progressService = progressService;
         this.eventPublisher = eventPublisher;
+        this.userRepository = userRepository;
         this.evaluators = evaluatorList.stream()
                 .collect(Collectors.toMap(MethodEvaluator::method, e -> e, (a, b) -> a));
     }
@@ -92,6 +96,9 @@ public class VerificationSyncService {
             throw new BusinessException(ErrorCode.INVALID_SIGNAL_PAYLOAD);
         }
         List<SyncSignal> signals = (req.signals() != null) ? req.signals() : List.of();
+        if (signals.size() > MAX_SIGNALS_PER_SYNC) {
+            throw new BusinessException(ErrorCode.SYNC_PAYLOAD_TOO_LARGE);   // 413 — 클라는 분할 재전송
+        }
         List<String> ignored = signals.stream()
                 .map(SyncSignal::type)
                 .filter(t -> t == null || !KNOWN_SIGNAL_TYPES.contains(t))
@@ -126,7 +133,9 @@ public class VerificationSyncService {
             log.debug("sync userId={} signals={} ignored={} activeMembers={} updated={}",
                     userId, signals.size(), ignored, members.size(), updated.size());
         }
-        return new SyncResponse(now.toString(), NEXT_SYNC_SEC, updated, ignored);
+        // flushIntervalSec: 기기 스펙 기반 산정값을 매 ACK마다 전체값으로 회신(§6 제어 모델).
+        int flushIntervalSec = FlushIntervalPolicy.forUser(userRepository.findById(userId).orElse(null));
+        return new SyncResponse(now.toString(), flushIntervalSec, updated, ignored);
     }
 
     private VerificationDaily loadOrCreateDaily(ChallengeMember member, Challenge challenge, LocalDate today) {
@@ -168,7 +177,11 @@ public class VerificationSyncService {
                 .findByVerificationDailyIdAndMethod(daily.getId(), method.name()).orElse(null);
         Map<String, Object> prior = (mr != null) ? mr.getEvidence() : null;
 
-        DayContext ctx = new DayContext(today, KST, now, config, signals, prior, member.getAnchors(), null);
+        List<String> memberScreenApps = member.effectiveScreenApps(today).stream()
+                .map(com.ruleup.ruleup_backend.common.verification.ScreenApp::packageName)
+                .toList();
+        DayContext ctx = new DayContext(today, KST, now, config, signals, prior,
+                member.getAnchors(), memberScreenApps, null);
         EvaluationOutcome outcome = evaluator.evaluate(ctx);
 
         if (mr == null) {

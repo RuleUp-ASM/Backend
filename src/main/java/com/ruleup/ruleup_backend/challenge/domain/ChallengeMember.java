@@ -15,10 +15,12 @@ import com.ruleup.ruleup_backend.common.verification.ScheduleType;
 import com.ruleup.ruleup_backend.common.verification.PeriodUnit;
 import com.ruleup.ruleup_backend.common.verification.SetupStatus;
 import com.ruleup.ruleup_backend.common.verification.GeoAnchor;
+import com.ruleup.ruleup_backend.common.verification.ScreenApp;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -121,6 +123,25 @@ public class ChallengeMember extends AssignedIdEntity {
 
     @Column(name = "anchorUpdatedAt")
     private Instant anchorUpdatedAt;          // 수정 쿨다운 기준
+
+    // ===== SCREEN_TIME 측정 대상 앱(PER_MEMBER 바인딩, my-screen-apps API) =====
+    // 현재 적용 세트 + 익일 적용 대기 세트(pending). 변경은 항상 익일 00:00부터 적용(당일 조작 방지).
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "screenApps")
+    private List<ScreenApp> screenApps;               // 현재 적용 중인 세트(없으면 null)
+
+    @Column(name = "screenAppsAppliedFrom")
+    private Instant screenAppsAppliedFrom;            // 현재 세트 적용 시작 시각
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "pendingScreenApps")
+    private List<ScreenApp> pendingScreenApps;        // 익일 적용 대기 세트(없으면 null)
+
+    @Column(name = "pendingScreenAppsEffectiveDate")
+    private LocalDate pendingScreenAppsEffectiveDate; // 대기 세트 적용 시작 날짜(익일)
+
+    @Column(name = "screenAppsUpdatedAt")
+    private Instant screenAppsUpdatedAt;             // 변경 쿨다운 기준(마지막 stage 시각)
 
     @Column(name = "fallbackUsedPeriodStart")
     private LocalDate fallbackUsedPeriodStart;// 예비 폴백 주1회(롤링 7일) 윈도우 시작
@@ -226,6 +247,52 @@ public class ChallengeMember extends AssignedIdEntity {
     public void replaceAnchors(List<GeoAnchor> newAnchors, Instant at) {
         this.anchors = (newAnchors != null) ? new ArrayList<>(newAnchors) : null;
         this.anchorUpdatedAt = at;
+    }
+
+    // ===== SCREEN_TIME 측정 대상 앱 =====
+
+    /** 최초 설정: 대기 없이 즉시 현재 세트로 적용(보호할 이전 세트가 없음). */
+    public void setScreenAppsInitial(List<ScreenApp> apps, Instant at) {
+        this.screenApps = (apps != null) ? new ArrayList<>(apps) : null;
+        this.screenAppsAppliedFrom = at;
+        this.pendingScreenApps = null;
+        this.pendingScreenAppsEffectiveDate = null;
+        this.screenAppsUpdatedAt = at;
+    }
+
+    /** 변경 접수: 익일 00:00부터 적용될 대기 세트로 stage. 같은 날 재요청은 대기 세트를 덮어쓴다(마지막 승리). */
+    public void stagePendingScreenApps(List<ScreenApp> apps, LocalDate effectiveDate, Instant at) {
+        this.pendingScreenApps = (apps != null) ? new ArrayList<>(apps) : null;
+        this.pendingScreenAppsEffectiveDate = effectiveDate;
+        this.screenAppsUpdatedAt = at;
+    }
+
+    /**
+     * 대기 세트의 적용일이 도래(effectiveDate ≤ today)했으면 현재 세트로 승격(persist 대상).
+     * @return 승격이 일어났으면 true.
+     */
+    public boolean promoteScreenAppsIfDue(LocalDate today, ZoneId zone) {
+        if (pendingScreenAppsEffectiveDate == null || today.isBefore(pendingScreenAppsEffectiveDate)) {
+            return false;
+        }
+        this.screenApps = this.pendingScreenApps;
+        this.screenAppsAppliedFrom = pendingScreenAppsEffectiveDate.atStartOfDay(zone).toInstant();
+        this.pendingScreenApps = null;
+        this.pendingScreenAppsEffectiveDate = null;
+        return true;
+    }
+
+    /** 대기 세트가 아직 미래(익일 이후) 적용 대기 중인가. */
+    public boolean hasPendingScreenApps(LocalDate today) {
+        return pendingScreenAppsEffectiveDate != null && today.isBefore(pendingScreenAppsEffectiveDate);
+    }
+
+    /** {@code today} 시점에 실제 적용되는 세트(도래한 대기 세트를 반영, persist 없이 계산만). 없으면 빈 리스트. */
+    public List<ScreenApp> effectiveScreenApps(LocalDate today) {
+        if (pendingScreenAppsEffectiveDate != null && !today.isBefore(pendingScreenAppsEffectiveDate)) {
+            return (pendingScreenApps != null) ? pendingScreenApps : List.of();
+        }
+        return (screenApps != null) ? screenApps : List.of();
     }
 
     /**

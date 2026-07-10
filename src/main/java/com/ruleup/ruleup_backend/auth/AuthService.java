@@ -19,6 +19,7 @@ import com.ruleup.ruleup_backend.reputation.ReputationScoreRepository;
 import com.ruleup.ruleup_backend.security.JwtProvider;
 import com.ruleup.ruleup_backend.security.TokenType;
 import com.ruleup.ruleup_backend.user.*;
+import com.ruleup.ruleup_backend.verification.service.FlushIntervalPolicy;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
@@ -82,7 +83,8 @@ public class AuthService {
         BigDecimal temp = reputationScoreRepository.findById(user.getId())
                 .map(ReputationScore::getMannerTemperature)
                 .orElse(ReputationScore.INITIAL_TEMPERATURE);
-        return OAuthLoginResponse.existing(pair, user, temp);
+        int flushIntervalSec = FlushIntervalPolicy.forUser(user);   // 기기 스펙 기반 sync 주기 부트스트랩
+        return OAuthLoginResponse.existing(pair, user, temp, flushIntervalSec);
     }
 
     private OAuthLoginResponse issueSignupToken(OAuthProvider provider, OAuthUserInfo info) {
@@ -159,7 +161,8 @@ public class AuthService {
         eventPublisher.publishEvent(new UserModerationRequested(user.getId()));
 
         TokenService.TokenPair pair = tokenService.issueTokenPair(user);
-        return SignupResponse.from(pair, user, ReputationScore.INITIAL_TEMPERATURE);
+        int flushIntervalSec = FlushIntervalPolicy.forUser(user);   // deviceInfo 확정 저장 시점 → 주기 부트스트랩
+        return SignupResponse.from(pair, user, ReputationScore.INITIAL_TEMPERATURE, flushIntervalSec);
     }
 
     /** deviceInfo는 로그인·가입 양쪽 필수. 누락/형식오류면 INVALID_DEVICE_INFO. */

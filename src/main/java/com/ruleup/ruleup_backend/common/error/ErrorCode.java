@@ -90,6 +90,7 @@ public enum ErrorCode {
     // ===== 인증 sync (§3.1) =====
     SYNC_TOO_FREQUENT(HttpStatus.TOO_MANY_REQUESTS, "sync 요청 간격이 너무 짧습니다."),
     INVALID_SIGNAL_PAYLOAD(HttpStatus.BAD_REQUEST, "인증 신호 페이로드가 올바르지 않습니다."),
+    SYNC_PAYLOAD_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "sync 누적 일괄 상한을 초과했습니다. 분할 재전송하세요."),
 
     NOT_CHALLENGE_MEMBER(HttpStatus.FORBIDDEN, "챌린지 참여자만 접근할 수 있습니다."),
     ALREADY_VERIFIED(HttpStatus.CONFLICT, "이미 인증된 날짜입니다."),
@@ -107,6 +108,9 @@ public enum ErrorCode {
     LOCATION_LOCKED_IN_WINDOW(HttpStatus.CONFLICT, "인증 윈도우 중에는 위치를 변경할 수 없습니다. 변경은 익일부터 적용됩니다."),
     LOCATION_CHANGE_COOLDOWN(HttpStatus.TOO_MANY_REQUESTS, "위치 변경은 일정 기간(쿨다운) 후에 가능합니다."),
     INVALID_ANCHOR(HttpStatus.BAD_REQUEST, "앵커 설정이 올바르지 않습니다.(반경 0.5~5km, 최대 10개)"),
+    SCREENTIME_NOT_CONFIGURED(HttpStatus.BAD_REQUEST, "측정 대상 앱이 설정되지 않았습니다."),
+    INVALID_APP(HttpStatus.BAD_REQUEST, "대상 앱이 올바르지 않습니다.(패키지명 형식·중복·1~10개)"),
+    SCREENTIME_CHANGE_COOLDOWN(HttpStatus.TOO_MANY_REQUESTS, "대상 앱 변경은 일정 기간(쿨다운) 후에 가능합니다."),
     INVALID_QUERY(HttpStatus.BAD_REQUEST, "검색어가 올바르지 않습니다."),
     PLACE_SEARCH_RATE_LIMIT(HttpStatus.TOO_MANY_REQUESTS, "장소 검색 요청이 너무 많습니다."),
 
