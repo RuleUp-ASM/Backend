@@ -103,6 +103,7 @@ public class VerificationSyncService {
                 .map(SyncSignal::type)
                 .filter(t -> t == null || !KNOWN_SIGNAL_TYPES.contains(t))
                 .distinct().toList();
+        List<SyncRequest.Gap> gaps = (req.gaps() != null) ? req.gaps() : List.of();   // §8.5 권한 공백 소비 입력
 
         LocalDate today = LocalDate.now(KST);
         Instant now = Instant.now();
@@ -123,7 +124,7 @@ public class VerificationSyncService {
             if (!member.isSetupReady()) continue;
 
             VerificationDaily daily = loadOrCreateDaily(member, challenge, today);
-            VerificationStatus todayStatus = processMember(member, challenge, config, daily, signals, today, now);
+            VerificationStatus todayStatus = processMember(member, challenge, config, daily, signals, gaps, today, now);
 
             progressService.updateAfterSync(member, todayStatus, now);
             updated.add(new SyncResponse.UpdatedChallenge(
@@ -146,7 +147,7 @@ public class VerificationSyncService {
 
     private VerificationStatus processMember(ChallengeMember member, Challenge challenge, VerificationConfig config,
                                              VerificationDaily daily, List<SyncSignal> signals,
-                                             LocalDate today, Instant now) {
+                                             List<SyncRequest.Gap> gaps, LocalDate today, Instant now) {
         // 이미 잠김 → 멱등, 재평가 안 함(FAILED→SUCCESS 역전 금지 포함)
         if (daily.getStatus() == VerificationStatus.SUCCESS || daily.getStatus() == VerificationStatus.FAILED) {
             return daily.getStatus();
@@ -160,12 +161,12 @@ public class VerificationSyncService {
             daily.recordResult(VerificationStatus.NOT_REQUIRED, null, null, null);
             return VerificationStatus.NOT_REQUIRED;
         }
-        return evaluateAndApply(member, config, daily, signals, today, now);
+        return evaluateAndApply(member, config, daily, signals, gaps, today, now);
     }
 
     private VerificationStatus evaluateAndApply(ChallengeMember member, VerificationConfig config,
                                                 VerificationDaily daily, List<SyncSignal> signals,
-                                                LocalDate today, Instant now) {
+                                                List<SyncRequest.Gap> gaps, LocalDate today, Instant now) {
         VerificationMethod method = config.primaryMethod();
         MethodEvaluator evaluator = evaluators.get(method);
         if (evaluator == null) {
@@ -184,10 +185,18 @@ public class VerificationSyncService {
                 member.getAnchors(), memberScreenApps);
         EvaluationOutcome outcome = evaluator.evaluate(ctx);
 
+        // ③ 권한 공백(gaps) 반영: 신호 없이 PENDING이고 해당 신호타입에 비회복 권한 공백이 있으면
+        //    마감 배치가 NO_SIGNAL_RECEIVED 대신 PERMISSION_MISSING으로 확정하도록 힌트를 남긴다(§8.5).
+        Map<String, Object> evidence = outcome.evidence();
+        if (outcome.status() == VerificationStatus.PENDING && permissionGap(gaps, method, today)) {
+            evidence = (evidence != null) ? new HashMap<>(evidence) : new HashMap<>();
+            evidence.putIfAbsent("pendingReason", "PERMISSION_MISSING");
+        }
+
         if (mr == null) {
             mr = VerificationMethodResult.create(daily.getId(), method.name(), polarityOf(config), true);
         }
-        mr.evaluate(outcome.status(), outcome.evidence(), now);
+        mr.evaluate(outcome.status(), evidence, now);
         methodResultRepo.save(mr);
 
         // 이 지점 도달 시 daily 는 아직 SUCCESS/FAILED 로 잠기지 않음(잠긴 경우 processMember 초입에서 early-return).
@@ -235,6 +244,35 @@ public class VerificationSyncService {
             case HEALTH -> (config.health() != null) ? config.health().maxSignalLagHours() : 2;
             case SLEEP -> (config.sleep() != null) ? config.sleep().maxSignalLagHours() : 12;
             default -> 1;
+        };
+    }
+
+    /** 해당 method의 신호타입에 대해, 당일과 겹치는 비회복(recoverable=false) 권한 공백이 있는지(§8.5). */
+    private boolean permissionGap(List<SyncRequest.Gap> gaps, VerificationMethod method, LocalDate day) {
+        if (gaps == null || gaps.isEmpty()) return false;
+        Set<String> types = signalTypesFor(method);
+        if (types.isEmpty()) return false;
+        long dayStart = day.atStartOfDay(KST).toInstant().toEpochMilli();
+        long dayEnd = day.plusDays(1).atStartOfDay(KST).toInstant().toEpochMilli();
+        for (SyncRequest.Gap g : gaps) {
+            if (g == null || Boolean.TRUE.equals(g.recoverable())) continue;             // 회복 가능 → 유예(§0.5)
+            if (g.reason() == null || !g.reason().toUpperCase().contains("PERMISSION")) continue;
+            if (g.signalType() != null && !types.contains(g.signalType().toUpperCase())) continue;
+            if (g.fromMillis() != null && g.toMillis() != null
+                    && (g.toMillis() < dayStart || g.fromMillis() > dayEnd)) continue;    // 당일과 무겹침
+            return true;
+        }
+        return false;
+    }
+
+    /** method → 그 판정에 쓰이는 신호타입(대문자). gap.signalType 매칭용. */
+    private static Set<String> signalTypesFor(VerificationMethod method) {
+        return switch (method) {
+            case GPS_PRESENCE, GPS_DISTANCE -> Set.of("GEOFENCE", "GEOFENCE_TRANSITION", "LOCATION");
+            case HEALTH -> Set.of("HEALTH");
+            case SCREEN_TIME, WAKE -> Set.of("SCREEN_TIME", "USAGE");
+            case SLEEP -> Set.of("SLEEP");
+            default -> Set.of();
         };
     }
 
