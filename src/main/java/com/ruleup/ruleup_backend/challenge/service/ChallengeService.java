@@ -183,6 +183,9 @@ public class ChallengeService {
         String fixDeadline = (c.isOwner(userId) && c.getFixDeadline() != null)
                 ? c.getFixDeadline().toString() : null;
 
+        // 요청자의 역할: 생성자면 OWNER, ACTIVE/PENDING 멤버십이면 MEMBER, 그 외 NONE.
+        String myRole = resolveMyRole(c, userId, alreadyMember);
+
         return new ChallengeDetailResponse(
                 c.getId().toString(), c.getTitle(), c.getDescription(), c.getImageUrl(),
                 c.getCategory(), c.getParticipationType().name(), c.getStatus().name(),
@@ -192,7 +195,7 @@ public class ChallengeService {
                 c.getStartDate().toString(), c.getEndDate().toString(),
                 c.getTemplateId(), c.getVerificationConfig(), c.getParams(),
                 c.getPenalty(), c.getReward(),
-                stats, eligibility);
+                stats, eligibility, myRole);
     }
 
     // ===== 3.4 수정 (시작 전, OWNER만) =====
@@ -304,6 +307,12 @@ public class ChallengeService {
             // 생성자 본인(ACTIVE) 1명만 있으면 others == 1 → 허용. 그 이상이면 불가.
             if (others > 1) throw new BusinessException(ErrorCode.CHALLENGE_NOT_EDITABLE);
         }
+    }
+
+    /** 상세 응답의 myRole: 생성자면 OWNER, ACTIVE/PENDING 멤버십이면 MEMBER, 그 외 NONE. */
+    private String resolveMyRole(Challenge c, UUID userId, boolean alreadyMember) {
+        if (c.isOwner(userId)) return MemberRole.OWNER.name();
+        return alreadyMember ? MemberRole.MEMBER.name() : "NONE";
     }
 
     private boolean isActiveOrPending(UUID challengeId, UUID userId) {

@@ -75,11 +75,14 @@ public class VerificationFinalizeService {
         } else {
             // 도달형: 창 닫힘·미충족 → FAILED. 신호 자체가 없었으면 NO_SIGNAL_RECEIVED.
             var mr = methodResultRepo.findByVerificationDailyIdAndMethod(daily.getId(), method.name()).orElse(null);
+            Object pendingReason = (mr != null && mr.getEvidence() != null) ? mr.getEvidence().get("pendingReason") : null;
             String reason;
             if (mr == null) {
                 reason = "NO_SIGNAL_RECEIVED";
-            } else if (mr.getEvidence() != null && "UNTRUSTED_HEALTH_SOURCE".equals(mr.getEvidence().get("pendingReason"))) {
+            } else if ("UNTRUSTED_HEALTH_SOURCE".equals(pendingReason)) {
                 reason = "UNTRUSTED_HEALTH_SOURCE";   // HEALTH: 신뢰 게이트로만 막혀 통과분 0(§8.2)
+            } else if ("PERMISSION_MISSING".equals(pendingReason)) {
+                reason = "PERMISSION_MISSING";        // ③ 권한 공백(gaps)으로 신호 수집 불가(§8.5) — NO_SIGNAL과 구분
             } else {
                 reason = failureReasonFor(method, config);
             }

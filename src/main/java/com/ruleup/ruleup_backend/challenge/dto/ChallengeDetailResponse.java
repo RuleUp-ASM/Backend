@@ -30,7 +30,8 @@ public record ChallengeDetailResponse(
         PenaltyConfig penalty,
         RewardConfig reward,
         Stats stats,
-        Eligibility eligibility
+        Eligibility eligibility,
+        String myRole   // 요청자의 역할: OWNER / MEMBER / NONE
 ) {
     public record Owner(String nickname) {}
 
