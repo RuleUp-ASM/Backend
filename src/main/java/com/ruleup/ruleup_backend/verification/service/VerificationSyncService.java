@@ -18,6 +18,7 @@ import com.ruleup.ruleup_backend.verification.repository.VerificationMethodResul
 import com.ruleup.ruleup_backend.verification.signal.SignalType;
 import com.ruleup.ruleup_backend.verification.signal.SyncSignal;
 import com.ruleup.ruleup_backend.common.event.RoutineFailureConfirmed;
+import com.ruleup.ruleup_backend.common.event.PermissionGapDetected;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -191,6 +192,9 @@ public class VerificationSyncService {
         if (outcome.status() == VerificationStatus.PENDING && permissionGap(gaps, method, today)) {
             evidence = (evidence != null) ? new HashMap<>(evidence) : new HashMap<>();
             evidence.putIfAbsent("pendingReason", "PERMISSION_MISSING");
+            // 실시간 권한공백 → 고스트 푸시 큐 적재 트리거(§8.5). 리스너가 같은 트랜잭션에서 outbox만 적재(발송은 별도 스윕).
+            eventPublisher.publishEvent(new PermissionGapDetected(
+                    member.getUserId(), member.getChallengeId(), method.name(), today, now));
         }
 
         if (mr == null) {

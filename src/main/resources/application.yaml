@@ -116,6 +116,14 @@ app:
     contact-secret: ${WATCHER_CONTACT_SECRET:}
     invite-base-url: ${WATCHER_INVITE_BASE_URL:https://ruleup.app}
 
+  # 고스트(무음) 푸시 — FCM. 자격증명(서비스 계정) 없으면 enabled=false → LoggingPushSender 스텁으로 폴백
+  # (로컬/CI/테스트 기동 무영향). 활성 시 FcmPushSender(@Primary)가 실제 전송.
+  fcm:
+    enabled: ${FCM_ENABLED:false}
+    project-id: ${FCM_PROJECT_ID:}
+    credentials-path: ${FCM_CREDENTIALS_PATH:}   # 서비스계정 JSON 파일 경로(마운트)
+    credentials-json: ${FCM_CREDENTIALS_JSON:}   # 또는 원문 JSON(Secrets Manager 주입)
+
   # 앱 버전 게이트 (GET /intro). 배포 환경마다 env로 바꿔 끼운다.
   client:
     min-version-code: ${MIN_APP_VERSION_CODE:1}   # 이 코드 미만이면 강제 업데이트(400)
