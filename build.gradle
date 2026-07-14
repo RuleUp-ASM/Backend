@@ -46,7 +46,7 @@ dependencies {
 
 	// OS/하드웨어 지표(OSHI). JVM/Actuator로는 못 얻는 CPU iowait·디스크 IOPS·네트워크 대역폭·Swap·연결 수를
 	// 순수 자바(크로스플랫폼)로 수집한다. Spring Boot가 버전 관리하지 않으므로 명시. jna는 transitive.
-	implementation 'com.github.oshi:oshi-core:6.6.5'
+	implementation 'com.github.oshi:oshi-core:7.4.0'
 
 	implementation 'org.springframework.boot:spring-boot-starter-cache'
 	// 추천 세그먼트 점수·카테고리 마스터 캐시(JVM 로컬). 캐시 매니저는 CacheConfig에서 CaffeineCacheManager로 구성.
@@ -59,12 +59,12 @@ dependencies {
 
 	// AWS Bedrock Runtime — 대체 LLM provider(Amazon Nova Lite 등)를 Converse API로 호출.
 	// 자격증명은 ECS 태스크 역할(기본 provider 체인). BOM으로 버전 고정.
-	implementation platform('software.amazon.awssdk:bom:2.31.0')
+	implementation platform('software.amazon.awssdk:bom:2.47.6')
 	implementation 'software.amazon.awssdk:bedrockruntime'
 
 	// Firebase Admin SDK — 고스트(무음) 푸시 전송(FCM). 자격증명(서비스 계정)이 있을 때만 활성화되며
 	// (app.fcm.enabled), 없으면 LoggingPushSender 스텁으로 폴백해 로컬/CI 기동에 영향 없음.
-	implementation 'com.google.firebase:firebase-admin:9.4.1'
+	implementation 'com.google.firebase:firebase-admin:9.10.0'
 
 	// JDK 25 대응: Lombok 1.18.40+ 필요 (그 이전 버전은 JDK25 bytecode 미지원)
 	compileOnly 'org.projectlombok:lombok:1.18.46'
@@ -77,7 +77,7 @@ dependencies {
 
 	// 테스트 시 @SpringBootTest가 실제 MySQL을 필요로 하므로 Testcontainers로
 	// MySQL 8.4 컨테이너를 자동 기동한다(로컬·CI 동일). 모듈 버전은 testcontainers-bom으로 고정.
-	testImplementation platform('org.testcontainers:testcontainers-bom:1.20.6')
+	testImplementation platform('org.testcontainers:testcontainers-bom:2.0.5')
 	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
 	testImplementation 'org.testcontainers:junit-jupiter'
 	testImplementation 'org.testcontainers:mysql'
