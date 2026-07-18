@@ -30,46 +30,11 @@ public class GeminiChallengeDraftClient implements ChallengeDraftClient {
 
     private static final String PROMPT = "challenge-draft";
 
-    /**
-     * 응답 스키마(Gemini OpenAPI 서브셋). enum(participationType·repeatDays)·타입·usable 필수를
-     * API 레벨에서 강제한다. params 는 free-form 맵이라 스키마로 못 박기 어려워 공식 권장 우회인
-     * key/value 문자열 객체 배열로 받는다(값은 서버 ParamSpec 이 숫자/시간으로 강제).
-     *
-     * participationType·repeatDays·params 는 required(non-null)로 둔다: optional 로 두면 flash-lite 가
-     * 최소 출력으로 이들을 통째로 생략한다. 실측 결과 —
-     *   - participationType/repeatDays 누락 → 사용자 의도(예: "주말만")가 서버 기본 '매일'로 덮여 사라짐.
-     *   - params 누락 → 명시한 목표("5km")가 버려지고 템플릿 기본값으로 대체됨(추출 기능이 무력화).
-     * required 는 정상 경로에서만 강제되고(부적합 판정 시엔 모델이 생략, 어차피 버리므로 무해),
-     * params 는 배열이라 미언급 시 []({@code 언급 없으면 빈 배열} 프롬프트 지시)로 채워 hallucination 을 막는다.
-     * rejectReason·templateId 는 optional(부적합/미매칭 때 null).
-     */
-    private static final String RESPONSE_SCHEMA = """
-        {
-          "type": "OBJECT",
-          "properties": {
-            "usable":       {"type": "BOOLEAN"},
-            "rejectReason": {"type": "STRING", "nullable": true},
-            "templateId":   {"type": "INTEGER", "nullable": true},
-            "params": {
-              "type": "ARRAY",
-              "items": {
-                "type": "OBJECT",
-                "properties": {
-                  "key":   {"type": "STRING"},
-                  "value": {"type": "STRING"}
-                },
-                "required": ["key", "value"]
-              }
-            },
-            "participationType": {"type": "STRING", "enum": ["SOLO", "GROUP"]},
-            "repeatDays": {
-              "type": "ARRAY",
-              "items": {"type": "STRING", "enum": ["MON","TUE","WED","THU","FRI","SAT","SUN"]}
-            }
-          },
-          "required": ["usable", "participationType", "repeatDays", "params"]
-        }
-        """;
+    // 응답 형식은 프롬프트(STEP 5)가 강제한다 — 네이티브 responseSchema 를 쓰지 않는다.
+    // 이유: flash-lite 계열은 responseSchema 의 정수 필드(templateId:INTEGER)에서 그리디 디코딩이
+    // 폭주해("templateId": 2000000...) MAX_TOKENS 로 잘려 JSON 파싱이 실패한다(매칭되는 정상 입력마다
+    // 재현). generateText(=application/json, 스키마 없음)로 부르면 폭주가 사라지고, 100케이스×5모델
+    // 평가에서 프롬프트 강제만으로 필드 누락 없이 정확도가 더 높았다. 그래서 스키마를 제거했다.
 
     private final LlmClient llm;
     private final PromptLibrary prompts;
@@ -87,9 +52,9 @@ public class GeminiChallengeDraftClient implements ChallengeDraftClient {
             return ChallengeDraftSuggestion.empty();
         }
 
-        String content = llm.generateStructured(buildPrompt(title, description, candidates), RESPONSE_SCHEMA);
+        String content = llm.generateText(buildPrompt(title, description, candidates));
         if (content == null) {
-            log.debug("챌린지 초안 제안: Gemini 응답 없음 → 폴백 (후보 {}개)", candidates.size());
+            log.debug("챌린지 초안 제안: LLM 응답 없음 → 폴백 (후보 {}개)", candidates.size());
             return ChallengeDraftSuggestion.empty();
         }
         Draft d = llm.parseJson(content, Draft.class);

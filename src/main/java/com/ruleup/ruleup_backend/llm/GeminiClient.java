@@ -33,7 +33,7 @@ import java.util.Set;
  * {@link BedrockNovaClient} 가 대신 주입된다(코드는 그대로 두고 스위치만).
  */
 @Component
-@ConditionalOnProperty(name = "app.llm.provider", havingValue = "gemini", matchIfMissing = true)
+@ConditionalOnProperty(name = "app.llm.provider", havingValue = "gemini")
 public class GeminiClient implements LlmClient {
 
     private static final Logger log = LoggerFactory.getLogger(GeminiClient.class);

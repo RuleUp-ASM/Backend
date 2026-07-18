@@ -81,10 +81,11 @@ app:
     # iOS는 카카오가 요구하는 https redirect를 앱이 직접 못 잡으므로 서버가 중계한다.
     app-redirect-uri: ${APP_OAUTH_REDIRECT_URI:ruleup://login/callback}
   llm:
-    # 활성 LLM provider. gemini(기본) | bedrock. env(LLM_PROVIDER)로 스위치 — 코드/빌드 변경 없이 모델 교체.
-    #  · gemini  → GeminiClient 활성(Google Gemini)
-    #  · bedrock → BedrockNovaClient 활성(AWS Bedrock Nova, 자격증명=ECS 태스크 역할)
-    provider: ${LLM_PROVIDER:gemini}
+    # 활성 LLM provider. fallback(기본) | gemini | bedrock. env(LLM_PROVIDER)로 스위치.
+    #  · fallback → FallbackLlmClient 활성. Gemini 우선 호출, 실패(null) 시 Bedrock Nova 로 폴백.
+    #  · gemini   → GeminiClient 단독(Google Gemini)
+    #  · bedrock  → BedrockNovaClient 단독(AWS Bedrock Nova, 자격증명=ECS 태스크 역할)
+    provider: ${LLM_PROVIDER:fallback}
     gemini:
       api-key: ${GEMINI_API_KEY:}                  # 비밀키만 env (없어도 기동은 됨, 호출 시에만 필요)
       model: ${GEMINI_MODEL:gemini-3.1-flash-lite} # 모델 업그레이드는 코드 변경 없이 env 로(예: 최신 Flash/Flash-Lite)
