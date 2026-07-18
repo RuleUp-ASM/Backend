@@ -12,7 +12,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * LLM provider 스위치 검증: app.llm.provider=bedrock 이면 BedrockNovaClient 가 활성 LlmClient 로 주입되고
- * GeminiClient 빈은 생성되지 않는다(코드는 그대로, 조건부 빈으로 교체). 기본(gemini)은 나머지 전체 테스트가 커버.
+ * GeminiClient 빈은 생성되지 않는다(코드는 그대로, 조건부 빈으로 교체). 기본(fallback)은 나머지 전체 테스트가 커버.
  */
 @Import(TestcontainersConfiguration.class)
 @SpringBootTest(properties = "app.llm.provider=bedrock")
