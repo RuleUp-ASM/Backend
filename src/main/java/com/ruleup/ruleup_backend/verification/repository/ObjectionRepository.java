@@ -14,6 +14,9 @@ public interface ObjectionRepository extends JpaRepository<Objection, UUID> {
 
     Optional<Objection> findByIdAndChallengeId(UUID id, UUID challengeId);
 
+    /** 상세 조회에서 오늘 잠정 실패의 기제출 이의 제기(있으면). */
+    Optional<Objection> findByChallengeMemberIdAndTargetDate(UUID challengeMemberId, LocalDate targetDate);
+
     /** 동일 일자 재제출 차단(일자당 1회) — 멤버×일자 이의 제기 존재 여부. */
     boolean existsByChallengeMemberIdAndTargetDate(UUID challengeMemberId, LocalDate targetDate);
 
