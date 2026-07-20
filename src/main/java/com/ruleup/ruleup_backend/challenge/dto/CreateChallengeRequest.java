@@ -22,6 +22,7 @@ public record CreateChallengeRequest(
         String imageUrl,
         String category,
         String participationType,
+        Integer maxParticipants,
         BigDecimal minMannerTemperature,
         List<String> repeatDays,
         Integer durationDays,

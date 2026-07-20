@@ -106,7 +106,7 @@ public class ChallengeService {
 
         Challenge challenge = Challenge.create(
                 userId, req.title(), req.description(), req.imageUrl(),
-                category, participationType, req.minMannerTemperature(), repeatDays,
+                category, participationType, req.minMannerTemperature(), req.maxParticipants(), repeatDays,
                 durationDays, startDate,
                 routine.templateId(), routine.verification(), routine.params(),
                 req.penalty(), req.reward(),
@@ -300,7 +300,7 @@ public class ChallengeService {
      *    인증·운영 스펙과 함께 별도 구현 예정 (TODO).
      */
     private void ensureEditable(Challenge c, UUID challengeId) {
-        if (!c.isEditable()) throw new BusinessException(ErrorCode.CHALLENGE_NOT_EDITABLE);
+        if (!c.isUpcoming()) throw new BusinessException(ErrorCode.CHALLENGE_NOT_EDITABLE);
         if (c.isGroup()) {
             long others = memberRepository.countByChallengeIdAndStatus(challengeId, MemberStatus.ACTIVE)
                     + memberRepository.countByChallengeIdAndStatus(challengeId, MemberStatus.PENDING);

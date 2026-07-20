@@ -55,6 +55,10 @@ public class Challenge extends AssignedIdEntity {
     @Column(name = "minMannerTemperature", precision = 4, scale = 1)
     private BigDecimal minMannerTemperature;
 
+    // 최대 참여 인원(정원). SOLO는 1 고정, GROUP은 방장이 지정(§3·§4). 방장만 수정, 현재 인원 미만 축소 불가.
+    @Column(name = "maxParticipants")
+    private Integer maxParticipants;
+
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "repeatDays", nullable = false)
     private List<String> repeatDays = new ArrayList<>();
@@ -140,7 +144,7 @@ public class Challenge extends AssignedIdEntity {
 
     public static Challenge create(UUID creatorId, String title, String description, String imageUrl,
                                    String category, ParticipationType participationType,
-                                   BigDecimal minMannerTemperature, List<String> repeatDays,
+                                   BigDecimal minMannerTemperature, Integer maxParticipants, List<String> repeatDays,
                                    int durationDays, LocalDate startDate,
                                    Long templateId, VerificationConfig verificationConfig,
                                    Map<String, Object> params,
@@ -155,6 +159,8 @@ public class Challenge extends AssignedIdEntity {
         c.category = category;
         c.participationType = participationType;
         c.minMannerTemperature = (participationType == ParticipationType.GROUP) ? minMannerTemperature : null;
+        // SOLO는 정원 1 고정, GROUP은 방장이 지정한 값(생성 서비스에서 필수 검증).
+        c.maxParticipants = (participationType == ParticipationType.SOLO) ? 1 : maxParticipants;
         c.repeatDays = (repeatDays != null) ? new ArrayList<>(repeatDays) : new ArrayList<>();
         c.durationDays = durationDays;
         c.startDate = startDate;
@@ -165,14 +171,14 @@ public class Challenge extends AssignedIdEntity {
         c.penalty = penalty;
         c.reward = reward;
         c.anonymity = anonymity;
-        c.status = ChallengeStatus.RECRUITING;
-        // 가시성 게이트는 "이미지" 기준(§5.1): 이미지가 있으면 비동기 SafeSearch 검수 후 공개(PENDING_REVIEW),
-        // 이미지가 없으면 검수 대상이 없어 즉시 공개(APPROVED). 텍스트(이름)는 생성 시 blocklist(동기) +
-        // 추천 시 draft 게이트로 거른다(별도 이름 LLM 검수 없음).
+        c.status = ChallengeStatus.UPCOMING;
+        // 가시성 게이트는 "이미지" 기준(§3-3): 이미지가 있으면 비동기 SafeSearch 검수 후 공개(PENDING_REVIEW),
+        // 이미지가 없으면 검수 대상이 없어 즉시 모집 가능(NONE). 이름(제목/설명)은 별도 검수하지 않는다
+        // (LLM draft Step2가 생성 시점에 대체 — 이름 모더레이션 non-goal).
         boolean hasImage = imageUrl != null && !imageUrl.isBlank();
         c.moderationStatus = hasImage
                 ? ChallengeModerationStatus.PENDING_REVIEW
-                : ChallengeModerationStatus.APPROVED;
+                : ChallengeModerationStatus.NONE;
         c.aiAssisted = aiAssisted;
         c.participantCount = 0;
         // 탐색 정렬·필터용 승격 컬럼(인증 방식). verificationConfig 스냅샷의 selectedMethod 를 그대로 반영.
@@ -187,14 +193,14 @@ public class Challenge extends AssignedIdEntity {
     public void applyTrendingScore(double score) { this.trendingScore = Math.max(0.0, score); }
     public void applyFailCount(int count) { this.failCount = Math.max(0, count); }
 
-    public boolean isEditable() { return status.isEditable(); }
+    public boolean isUpcoming() { return status.isUpcoming(); }
 
     /**
-     * 시작일 도달 → 진행 개시(§5.7). RECRUITING 일 때만 ACTIVE 로 전환(멱등·방어).
+     * 시작일 도달 → 진행 개시(§2). UPCOMING 일 때만 ACTIVE 로 전환(멱등·방어).
      * ACTIVE 가 되어야 인증 sync(§3.1)가 평가 대상으로 삼는다(VerificationSyncService).
      */
     public void activate() {
-        if (this.status == ChallengeStatus.RECRUITING) {
+        if (this.status == ChallengeStatus.UPCOMING) {
             this.status = ChallengeStatus.ACTIVE;
         }
     }
@@ -209,11 +215,14 @@ public class Challenge extends AssignedIdEntity {
         }
     }
 
-    // ===== 모더레이션 게이트 (§5.1) =====
+    // ===== 모더레이션 게이트 (§3-3) =====
     public boolean isApproved() { return moderationStatus == ChallengeModerationStatus.APPROVED; }
 
-    /** 조회 가시성: OWNER는 항상, 그 외는 APPROVED만(아니면 호출부에서 404 처리). */
-    public boolean isVisibleTo(UUID viewerId) { return isOwner(viewerId) || isApproved(); }
+    /** 모집·노출 허용 상태: 이미지 없음(NONE) 또는 이미지 검수 통과(APPROVED). */
+    public boolean isModerationCleared() { return moderationStatus.isPublicVisible(); }
+
+    /** 조회 가시성: OWNER는 항상, 그 외는 모더레이션 통과(NONE/APPROVED)만(아니면 호출부에서 404 처리). */
+    public boolean isVisibleTo(UUID viewerId) { return isOwner(viewerId) || isModerationCleared(); }
 
     /** 검수 통과 → 공개·가입 허용. */
     public void approveModeration(Instant at) {
@@ -246,6 +255,11 @@ public class Challenge extends AssignedIdEntity {
     public void changeReward(RewardConfig v)   { if (v != null) this.reward = v; }
     public void changeMinMannerTemperature(BigDecimal v) {
         if (v != null && participationType == ParticipationType.GROUP) this.minMannerTemperature = v;
+    }
+
+    /** 최대 참여 인원 변경. SOLO(정원 1 고정)는 무시. GROUP만 반영(축소 하한 검증은 서비스에서). */
+    public void changeMaxParticipants(Integer v) {
+        if (v != null && participationType == ParticipationType.GROUP) this.maxParticipants = v;
     }
 
     public void changeSchedule(Integer durationDays, LocalDate startDate) {

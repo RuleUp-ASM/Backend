@@ -54,7 +54,7 @@ class ChallengeModerationCloseServiceIT {
     private Challenge sampleChallenge(UUID ownerId) {
         return Challenge.create(
                 ownerId, "테스트 챌린지", null, null,
-                "EXERCISE", ParticipationType.SOLO, null, List.of("MON"),
+                "EXERCISE", ParticipationType.SOLO, null, null, List.of("MON"),
                 14, LocalDate.now(),
                 null, VerificationConfig.manual(null), new LinkedHashMap<>(),
                 new PenaltyConfig(BigDecimal.ONE, null, false), new RewardConfig(BigDecimal.ONE),

@@ -86,7 +86,7 @@ class WatcherNotificationFlowIT {
 
     private UUID newChallenge(UUID ownerId) {
         Challenge c = Challenge.create(ownerId, "아침 7시 기상", null, null, "EXERCISE",
-                ParticipationType.SOLO, null, List.of("MON"), 14, LocalDate.now(),
+                ParticipationType.SOLO, null, null, List.of("MON"), 14, LocalDate.now(),
                 null, VerificationConfig.manual(null), new LinkedHashMap<>(),
                 new PenaltyConfig(BigDecimal.ONE, null, false), new RewardConfig(BigDecimal.ONE),
                 Anonymity.REAL, false);
