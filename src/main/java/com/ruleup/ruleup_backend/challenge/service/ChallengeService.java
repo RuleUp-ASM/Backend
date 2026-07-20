@@ -3,7 +3,6 @@ package com.ruleup.ruleup_backend.challenge.service;
 import com.ruleup.ruleup_backend.challenge.domain.*;
 import com.ruleup.ruleup_backend.challenge.dto.*;
 import com.ruleup.ruleup_backend.challenge.moderation.ChallengeModerationRequested;
-import com.ruleup.ruleup_backend.challenge.moderation.ChallengeNameBlocklist;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
@@ -46,7 +45,6 @@ public class ChallengeService {
     private final UserRepository userRepository;
     private final ReputationScoreRepository reputationScoreRepository;
     private final RoutineSelectionService routineSelectionService;
-    private final ChallengeNameBlocklist nameBlocklist;
     private final ApplicationEventPublisher eventPublisher;
 
     /** 하루 경계·삭제 차감 계산의 사용자 로컬 = MVP는 KST 고정(§4.4). */
@@ -80,8 +78,8 @@ public class ChallengeService {
     // ===== 3.2 생성 =====
     @Transactional
     public ChallengeResponse create(UUID userId, CreateChallengeRequest req) {
+        // 이름(제목/설명) 모더레이션은 하지 않는다(생성 및 라이프사이클 §Non-Goals — LLM draft Step2가 대체).
         validateTitle(req.title());
-        nameBlocklist.validate(req.title());     // 명백 비속어는 동기 차단(§5.1, 선택)
         if (req.description() != null && req.description().length() > 200)
             throw new BusinessException(ErrorCode.DESCRIPTION_TOO_LONG);
 
@@ -94,6 +92,8 @@ public class ChallengeService {
         LocalDate startDate = validateStartDate(req.startDate());
         validatePenalty(req.penalty());
         validateReward(req.reward());
+        // 정원: GROUP은 필수(≥1), SOLO는 도메인에서 1로 고정.
+        validateMaxParticipants(participationType, req.maxParticipants());
         if (participationType == ParticipationType.GROUP)
             checkMinMannerNotAboveOwner(userId, req.minMannerTemperature());
 
@@ -144,12 +144,19 @@ public class ChallengeService {
             throw new BusinessException(ErrorCode.ROUTINE_PERMISSION_REQUIRED);
     }
 
-    /** 그룹 기준 매너 온도가 생성자 본인 온도보다 높으면 거부 (생성/수정 공용). */
+    /** 그룹 기준 매너 온도가 생성자 본인 온도보다 높으면 거부 (생성/수정 공용, §3). */
     private void checkMinMannerNotAboveOwner(UUID ownerId, BigDecimal minManner) {
         if (minManner == null) return;
         if (mannerTemp(ownerId).compareTo(minManner) < 0) {
-            throw new BusinessException(ErrorCode.INVALID_MIN_MANNER_TEMPERATURE);
+            throw new BusinessException(ErrorCode.MIN_TEMP_EXCEEDS_OWNER);
         }
+    }
+
+    /** 정원 검증(§3·§4): GROUP은 최대 참여 인원 필수(≥1). SOLO는 1 고정이라 입력 무시. */
+    private void validateMaxParticipants(ParticipationType participationType, Integer maxParticipants) {
+        if (participationType != ParticipationType.GROUP) return;
+        if (maxParticipants == null || maxParticipants < 1)
+            throw new BusinessException(ErrorCode.MAX_PARTICIPANTS_REQUIRED);
     }
 
     // ===== 3.3 상세 + 참여 자격 =====
@@ -206,8 +213,7 @@ public class ChallengeService {
         ensureEditable(c, challengeId);
 
         if (req.title() != null) {
-            validateTitle(req.title());
-            nameBlocklist.validate(req.title());     // 명백 비속어 동기 차단(§5.1)
+            validateTitle(req.title());   // 이름 모더레이션 없음(§Non-Goals)
         }
         if (req.description() != null && req.description().length() > 200)
             throw new BusinessException(ErrorCode.DESCRIPTION_TOO_LONG);

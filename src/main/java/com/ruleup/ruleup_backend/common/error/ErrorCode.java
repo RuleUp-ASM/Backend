@@ -57,6 +57,9 @@ public enum ErrorCode {
     INVALID_REWARD(HttpStatus.BAD_REQUEST, "보상 설정이 올바르지 않습니다."),
     START_DATE_REQUIRED(HttpStatus.BAD_REQUEST, "시작일을 입력해주세요."),
     INVALID_MIN_MANNER_TEMPERATURE(HttpStatus.BAD_REQUEST, "참여 기준 매너 온도는 생성자 본인의 매너 온도보다 높을 수 없습니다."),
+    MIN_TEMP_EXCEEDS_OWNER(HttpStatus.BAD_REQUEST, "가입 기준 온도는 생성자 본인의 온도를 초과할 수 없습니다."),
+    MAX_PARTICIPANTS_REQUIRED(HttpStatus.BAD_REQUEST, "그룹 챌린지는 최대 참여 인원을 지정해야 합니다."),
+    MAX_PARTICIPANTS_BELOW_CURRENT(HttpStatus.BAD_REQUEST, "최대 참여 인원을 현재 참여 인원 미만으로 줄일 수 없습니다."),
 
     // ===== 챌린지 - 조회/수정/삭제 (3.3 / 3.4 / 3.5) =====
     CHALLENGE_NOT_FOUND(HttpStatus.NOT_FOUND, "챌린지를 찾을 수 없습니다."),
