@@ -57,7 +57,7 @@ class ChallengeActivationServiceIT {
     private Challenge challengeStartingOn(UUID ownerId, LocalDate startDate, String imageUrl) {
         return Challenge.create(
                 ownerId, "테스트 챌린지", null, imageUrl,
-                "EXERCISE", ParticipationType.SOLO, null, List.of("MON"),
+                "EXERCISE", ParticipationType.SOLO, null, null, List.of("MON"),
                 14, startDate,
                 null, VerificationConfig.manual(null), new LinkedHashMap<>(),
                 new PenaltyConfig(BigDecimal.ONE, null, false), new RewardConfig(BigDecimal.ONE),
@@ -79,8 +79,8 @@ class ChallengeActivationServiceIT {
     }
 
     @Test
-    @DisplayName("시작일이 아직 안 온 챌린지는 RECRUITING 유지")
-    void keepsRecruitingWhenStartDateNotReached() {
+    @DisplayName("시작일이 아직 안 온 챌린지는 UPCOMING 유지")
+    void keepsUpcomingWhenStartDateNotReached() {
         User owner = newOwner();
         Challenge c = challengeStartingOn(owner.getId(), LocalDate.now().plusDays(3));   // 3일 뒤 시작
         c.approveModeration(Instant.now());
@@ -89,7 +89,7 @@ class ChallengeActivationServiceIT {
         activationService.activateDueChallenges();
 
         Challenge reloaded = challengeRepository.findById(c.getId()).orElseThrow();
-        assertThat(reloaded.getStatus()).isEqualTo(ChallengeStatus.RECRUITING);
+        assertThat(reloaded.getStatus()).isEqualTo(ChallengeStatus.UPCOMING);
     }
 
     @Test
@@ -103,6 +103,6 @@ class ChallengeActivationServiceIT {
         activationService.activateDueChallenges();
 
         Challenge reloaded = challengeRepository.findById(c.getId()).orElseThrow();
-        assertThat(reloaded.getStatus()).isEqualTo(ChallengeStatus.RECRUITING);
+        assertThat(reloaded.getStatus()).isEqualTo(ChallengeStatus.UPCOMING);
     }
 }

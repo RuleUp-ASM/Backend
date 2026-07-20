@@ -25,7 +25,7 @@ class ChallengeModerationGateTest {
     private Challenge newChallenge(UUID owner, String imageUrl) {
         return Challenge.create(
                 owner, "아침 7시 기상", null, imageUrl,
-                "WAKE_UP", ParticipationType.SOLO, null, List.of("MON"),
+                "WAKE_UP", ParticipationType.SOLO, null, null, List.of("MON"),
                 14, LocalDate.now(),
                 null, null, null,
                 null, null,
@@ -33,15 +33,17 @@ class ChallengeModerationGateTest {
     }
 
     @Test
-    @DisplayName("이미지 없으면 즉시 APPROVED, 이미지 있으면 PENDING_REVIEW")
+    @DisplayName("이미지 없으면 NONE(즉시 모집), 이미지 있으면 PENDING_REVIEW")
     void create_moderationStatus_dependsOnImage() {
         Challenge noImage = newChallenge(UUID.randomUUID(), null);
-        assertThat(noImage.getModerationStatus()).isEqualTo(ChallengeModerationStatus.APPROVED);
-        assertThat(noImage.isApproved()).isTrue();
+        assertThat(noImage.getModerationStatus()).isEqualTo(ChallengeModerationStatus.NONE);
+        assertThat(noImage.isApproved()).isFalse();
+        assertThat(noImage.isModerationCleared()).isTrue();   // NONE도 모집·노출 허용
 
         Challenge withImage = newChallenge(UUID.randomUUID(), "https://cdn.ruleup.com/a.jpg");
         assertThat(withImage.getModerationStatus()).isEqualTo(ChallengeModerationStatus.PENDING_REVIEW);
         assertThat(withImage.isApproved()).isFalse();
+        assertThat(withImage.isModerationCleared()).isFalse();
     }
 
     @Test

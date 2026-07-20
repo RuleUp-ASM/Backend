@@ -170,11 +170,19 @@ public class ChallengeMember extends AssignedIdEntity {
         return of(challengeId, userId, MemberRole.MEMBER, initialStatus);
     }
 
-    // 참여/승인/거절/재참여/탈퇴 상태 전이는 동시성 안전을 위해
+    // 참여/재참여/탈퇴 상태 전이는 동시성 안전을 위해
     // ChallengeMemberRepository.compareAndSetStatus(CAS)로 처리한다(엔티티 직접 변경 X).
 
     public boolean isPending() { return status == MemberStatus.PENDING; }
     public boolean isActive()  { return status == MemberStatus.ACTIVE; }
+    public boolean isOwner()   { return role == MemberRole.OWNER; }
+    public boolean isManager() { return role == MemberRole.MANAGER; }
+
+    /** 역할 변경(임명/해제 §7-1, 위임 role swap §7-2). OWNER 정확히 1명 불변식은 호출부가 보장. */
+    public void changeRole(MemberRole role) { this.role = role; }
+
+    /** 탈퇴(§6): ACTIVE → LEFT. 재참여 금지를 위해 행은 남긴다(uq_member). */
+    public void leave() { this.status = MemberStatus.LEFT; }
 
     // ===== 인증 진행률 비정규화 갱신 (sync·배치) =====
     public void setupFixedDays(int targetDays) {

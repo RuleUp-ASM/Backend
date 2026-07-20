@@ -57,6 +57,9 @@ public enum ErrorCode {
     INVALID_REWARD(HttpStatus.BAD_REQUEST, "보상 설정이 올바르지 않습니다."),
     START_DATE_REQUIRED(HttpStatus.BAD_REQUEST, "시작일을 입력해주세요."),
     INVALID_MIN_MANNER_TEMPERATURE(HttpStatus.BAD_REQUEST, "참여 기준 매너 온도는 생성자 본인의 매너 온도보다 높을 수 없습니다."),
+    MIN_TEMP_EXCEEDS_OWNER(HttpStatus.BAD_REQUEST, "가입 기준 온도는 생성자 본인의 온도를 초과할 수 없습니다."),
+    MAX_PARTICIPANTS_REQUIRED(HttpStatus.BAD_REQUEST, "그룹 챌린지는 최대 참여 인원을 지정해야 합니다."),
+    MAX_PARTICIPANTS_BELOW_CURRENT(HttpStatus.BAD_REQUEST, "최대 참여 인원을 현재 참여 인원 미만으로 줄일 수 없습니다."),
 
     // ===== 챌린지 - 조회/수정/삭제 (3.3 / 3.4 / 3.5) =====
     CHALLENGE_NOT_FOUND(HttpStatus.NOT_FOUND, "챌린지를 찾을 수 없습니다."),
@@ -68,13 +71,29 @@ public enum ErrorCode {
     DELETE_LOCKED(HttpStatus.CONFLICT, "생성 후 7일 이내이거나 계획 기간이 7일 미만이면 삭제할 수 없습니다."),
     CHALLENGE_NAME_REJECTED(HttpStatus.UNPROCESSABLE_ENTITY, "사용할 수 없는 챌린지 이름입니다."),
 
-    // ===== 챌린지 - 참여/멤버 (3.6 / 3.7 / 3.8) =====
+    // ===== 챌린지 - 참여/탈퇴/멤버 (§5·§6·§7) =====
     MANNER_TEMPERATURE_BELOW_MINIMUM(HttpStatus.FORBIDDEN, "참여 기준 매너 온도를 충족하지 못했습니다."),
     ALREADY_JOINED(HttpStatus.CONFLICT, "이미 참여한 챌린지입니다."),
+    REJOIN_FORBIDDEN(HttpStatus.CONFLICT, "탈퇴한 챌린지에는 다시 참여할 수 없습니다."),
+    CHALLENGE_FULL(HttpStatus.CONFLICT, "정원이 가득 찼습니다."),
+    CHALLENGE_COMPLETED(HttpStatus.CONFLICT, "종료된 챌린지입니다."),
     MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "멤버를 찾을 수 없습니다."),
-    INVALID_MEMBER_ACTION(HttpStatus.BAD_REQUEST, "유효하지 않은 처리 동작입니다. (APPROVE / REJECT)"),
+    OWNER_CANNOT_LEAVE(HttpStatus.FORBIDDEN, "방장은 탈퇴할 수 없습니다. 참여자가 있으면 위임 후, 없으면 삭제로 진행하세요."),
+    // 역할 임명/해제(§7-1)
+    CANNOT_CHANGE_OWNER_ROLE(HttpStatus.BAD_REQUEST, "OWNER 역할은 이 API로 변경할 수 없습니다. 위임을 사용하세요."),
+    ALREADY_IN_ROLE(HttpStatus.CONFLICT, "이미 해당 역할입니다."),
+    INVALID_MEMBER_ACTION(HttpStatus.BAD_REQUEST, "유효하지 않은 처리 동작입니다."),
+    // 방장 위임(§7-2)
+    TARGET_NOT_MANAGER(HttpStatus.BAD_REQUEST, "위임 대상은 공동 관리자여야 합니다."),
+    DELEGATION_ALREADY_PENDING(HttpStatus.CONFLICT, "이미 진행 중인 위임 요청이 있습니다."),
+    DELEGATION_NOT_FOUND(HttpStatus.NOT_FOUND, "위임 요청을 찾을 수 없습니다."),
+    DELEGATION_EXPIRED(HttpStatus.GONE, "만료된 위임 요청입니다."),
+    DELEGATION_ALREADY_RESOLVED(HttpStatus.CONFLICT, "이미 처리된 위임 요청입니다."),
+    NOT_DELEGATION_TARGET(HttpStatus.FORBIDDEN, "위임 대상자만 수행할 수 있습니다."),
+    INVALID_DELEGATION_ACTION(HttpStatus.BAD_REQUEST, "유효하지 않은 위임 동작입니다. (ACCEPT / REJECT / CANCEL)"),
 
     // ===== 루틴 - 추천/생성 (제목→템플릿 매칭→인증방식 선택) =====
+    RECOMMENDATION_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "추천 요청이 너무 잦습니다. 잠시 후 다시 시도해주세요."),
     ROUTINE_TITLE_REQUIRED(HttpStatus.BAD_REQUEST, "루틴 제목을 입력해주세요."),
     ROUTINE_TITLE_TOO_LONG(HttpStatus.BAD_REQUEST, "루틴 제목은 100자를 초과할 수 없습니다."),
     ROUTINE_DESCRIPTION_TOO_LONG(HttpStatus.BAD_REQUEST, "루틴 설명은 255자를 초과할 수 없습니다."),

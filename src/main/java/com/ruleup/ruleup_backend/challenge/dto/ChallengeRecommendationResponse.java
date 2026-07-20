@@ -15,6 +15,7 @@ import java.util.List;
  *  - 챌린지 기본값(사용자 수정): participationType ~ reward (현재 정적 baseline)
  */
 public record ChallengeRecommendationResponse(
+        boolean fallback,       // true면 Step1·2 차단 — 나머지 필드는 의미 없음, 클라는 최초 생성 화면으로 복귀
         boolean matched,
         Long templateId,
         String title,
@@ -26,6 +27,8 @@ public record ChallengeRecommendationResponse(
         String rationale,
         String participationType,
         BigDecimal minMannerTemperature,
+        BigDecimal maxMannerTemperature,   // 가입 기준 상한(= 생성자 현재 온도)
+        Integer maxParticipants,           // 최대 참여 인원 초안
         List<String> repeatDays,
         Integer durationDays,
         String startDate,
@@ -34,4 +37,10 @@ public record ChallengeRecommendationResponse(
         RewardConfig reward,
         String anonymity        // REAL / ANONYMOUS — 응답에서 누락 금지(§11.2)
 ) {
+    /** Step1·2 차단: fallback:true, 나머지는 null/기본. 클라는 최초 생성 화면으로 복귀. */
+    public static ChallengeRecommendationResponse blocked() {
+        return new ChallengeRecommendationResponse(
+                true, false, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null);
+    }
 }

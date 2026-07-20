@@ -3,11 +3,11 @@ package com.ruleup.ruleup_backend.challenge.service;
 import com.ruleup.ruleup_backend.challenge.domain.*;
 import com.ruleup.ruleup_backend.challenge.dto.*;
 import com.ruleup.ruleup_backend.challenge.moderation.ChallengeModerationRequested;
-import com.ruleup.ruleup_backend.challenge.moderation.ChallengeNameBlocklist;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
+import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
 import com.ruleup.ruleup_backend.routine.service.ResolvedRoutine;
 import com.ruleup.ruleup_backend.routine.service.RoutineSelectionService;
 import com.ruleup.ruleup_backend.reputation.domain.ReputationScore;
@@ -15,14 +15,19 @@ import com.ruleup.ruleup_backend.reputation.ReputationScoreRepository;
 import com.ruleup.ruleup_backend.user.domain.InterestCategory;
 import com.ruleup.ruleup_backend.user.domain.User;
 import com.ruleup.ruleup_backend.user.UserRepository;
+import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.Instant;
+import java.nio.ByteBuffer;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -41,38 +46,38 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ChallengeService {
 
+    private static final Logger log = LoggerFactory.getLogger(ChallengeService.class);
+
     private final ChallengeRepository challengeRepository;
     private final ChallengeMemberRepository memberRepository;
     private final UserRepository userRepository;
     private final ReputationScoreRepository reputationScoreRepository;
     private final RoutineSelectionService routineSelectionService;
-    private final ChallengeNameBlocklist nameBlocklist;
+    private final VerificationDailyRepository verificationDailyRepository;
     private final ApplicationEventPublisher eventPublisher;
 
-    /** 하루 경계·삭제 차감 계산의 사용자 로컬 = MVP는 KST 고정(§4.4). */
+    @PersistenceContext
+    private EntityManager entityManager;
+
+    /** 하루 경계 계산의 사용자 로컬 = MVP는 KST 고정. */
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
-    /** 삭제 잠금 해제 시점 = 생성 후 7일(§5.8). */
-    private static final int DELETE_UNLOCK_DAYS = 7;
 
     // ===== 내 챌린지 목록(내가 참여 중인 챌린지) =====
 
     /**
      * 내가 참여 중인 챌린지 목록. 멤버십 기준이라 페이지네이션 없이 전량 반환한다.
-     *  - scope=ACTIVE(기본) : ACTIVE 멤버십(실제 참여 중)만.
-     *  - scope=ALL          : ACTIVE + PENDING(승인 대기) 멤버십. 탈퇴/거절(LEFT/REMOVED)은 제외.
-     * 소프트 삭제된 챌린지는 제외. 항목마다 내 멤버십 상태(memberStatus: ACTIVE/PENDING)를 함께 내려준다.
+     * 승인제 폐기로 멤버십은 항상 확정(ACTIVE) — scope/memberStatus 개념 없음. 탈퇴(LEFT)는 제외.
+     * 항목마다 내 역할(myRole: OWNER/MANAGER/MEMBER)을 함께 내려준다.
      */
     @Transactional(readOnly = true)
-    public ChallengeListResponse myChallenges(UUID userId, String scope) {
-        List<ChallengeMember> memberships = "ALL".equalsIgnoreCase(scope)
-                ? memberRepository.findByUserIdAndStatusIn(userId, List.of(MemberStatus.ACTIVE, MemberStatus.PENDING))
-                : memberRepository.findByUserIdAndStatus(userId, MemberStatus.ACTIVE);
+    public ChallengeListResponse myChallenges(UUID userId) {
+        List<ChallengeMember> memberships = memberRepository.findByUserIdAndStatus(userId, MemberStatus.ACTIVE);
 
         List<ChallengeListResponse.Item> items = new ArrayList<>();
         for (ChallengeMember m : memberships) {
             Challenge ch = challengeRepository.findByIdAndDeletedAtIsNull(m.getChallengeId()).orElse(null);
-            if (ch == null) continue;   // 소프트 삭제/정합성 깨진 멤버십은 건너뜀
-            items.add(ChallengeListResponse.Item.of(ch, m.getStatus().name()));
+            if (ch == null) continue;   // 삭제/정합성 깨진 멤버십은 건너뜀
+            items.add(ChallengeListResponse.Item.of(ch, m.getRole().name()));
         }
         return new ChallengeListResponse(items);
     }
@@ -80,8 +85,8 @@ public class ChallengeService {
     // ===== 3.2 생성 =====
     @Transactional
     public ChallengeResponse create(UUID userId, CreateChallengeRequest req) {
+        // 이름(제목/설명) 모더레이션은 하지 않는다(생성 및 라이프사이클 §Non-Goals — LLM draft Step2가 대체).
         validateTitle(req.title());
-        nameBlocklist.validate(req.title());     // 명백 비속어는 동기 차단(§5.1, 선택)
         if (req.description() != null && req.description().length() > 200)
             throw new BusinessException(ErrorCode.DESCRIPTION_TOO_LONG);
 
@@ -94,6 +99,8 @@ public class ChallengeService {
         LocalDate startDate = validateStartDate(req.startDate());
         validatePenalty(req.penalty());
         validateReward(req.reward());
+        // 정원: GROUP은 필수(≥1), SOLO는 도메인에서 1로 고정.
+        validateMaxParticipants(participationType, req.maxParticipants());
         if (participationType == ParticipationType.GROUP)
             checkMinMannerNotAboveOwner(userId, req.minMannerTemperature());
 
@@ -106,7 +113,7 @@ public class ChallengeService {
 
         Challenge challenge = Challenge.create(
                 userId, req.title(), req.description(), req.imageUrl(),
-                category, participationType, req.minMannerTemperature(), repeatDays,
+                category, participationType, req.minMannerTemperature(), req.maxParticipants(), repeatDays,
                 durationDays, startDate,
                 routine.templateId(), routine.verification(), routine.params(),
                 req.penalty(), req.reward(),
@@ -144,19 +151,26 @@ public class ChallengeService {
             throw new BusinessException(ErrorCode.ROUTINE_PERMISSION_REQUIRED);
     }
 
-    /** 그룹 기준 매너 온도가 생성자 본인 온도보다 높으면 거부 (생성/수정 공용). */
+    /** 그룹 기준 매너 온도가 생성자 본인 온도보다 높으면 거부 (생성/수정 공용, §3). */
     private void checkMinMannerNotAboveOwner(UUID ownerId, BigDecimal minManner) {
         if (minManner == null) return;
         if (mannerTemp(ownerId).compareTo(minManner) < 0) {
-            throw new BusinessException(ErrorCode.INVALID_MIN_MANNER_TEMPERATURE);
+            throw new BusinessException(ErrorCode.MIN_TEMP_EXCEEDS_OWNER);
         }
     }
 
-    // ===== 3.3 상세 + 참여 자격 =====
+    /** 정원 검증(§3·§4): GROUP은 최대 참여 인원 필수(≥1). SOLO는 1 고정이라 입력 무시. */
+    private void validateMaxParticipants(ParticipationType participationType, Integer maxParticipants) {
+        if (participationType != ParticipationType.GROUP) return;
+        if (maxParticipants == null || maxParticipants < 1)
+            throw new BusinessException(ErrorCode.MAX_PARTICIPANTS_REQUIRED);
+    }
+
+    // ===== §3 상세 + 참여 자격 =====
     @Transactional(readOnly = true)
     public ChallengeDetailResponse getDetail(UUID userId, UUID challengeId) {
         Challenge c = loadActive(challengeId);
-        // 가시성 게이트(§5.1): 비-OWNER는 APPROVED만 조회 가능. 그 외는 존재 자체를 숨겨 404.
+        // 가시성 게이트(§3-3): 비-OWNER는 모더레이션 통과(NONE/APPROVED)만 조회. 그 외는 존재를 숨겨 404.
         if (!c.isVisibleTo(userId)) throw new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND);
 
         // 생성자 닉네임: 검수 전/거절이면 임시 닉네임(visibleNicknameTo) + 익명이면 추가 마스킹(§11.2).
@@ -169,22 +183,30 @@ public class ChallengeService {
         var stats = new ChallengeDetailResponse.Stats(
                 c.getParticipantCount(), avgManner, /* completionRate */ null);
 
-        // 참여 자격
+        // 참여 자격: 정원·기준온도·재참여·모더레이션·상태 종합.
+        ChallengeMember myMembership = memberRepository.findByChallengeIdAndUserId(challengeId, userId).orElse(null);
+        boolean isActiveMember = myMembership != null && myMembership.isActive();
+        boolean rejoinBlocked = myMembership != null && !myMembership.isActive();   // LEFT/REMOVED 이력
         BigDecimal myManner = mannerTemp(userId);
-        boolean alreadyMember = isActiveOrPending(challengeId, userId);
         boolean meetsMinManner = !c.isGroup() || c.getMinMannerTemperature() == null
                 || myManner.compareTo(c.getMinMannerTemperature()) >= 0;
-        boolean canJoin = !alreadyMember && meetsMinManner && !c.isOwner(userId);
+        long activeCount = memberRepository.countByChallengeIdAndStatus(challengeId, MemberStatus.ACTIVE);
+        boolean hasRoom = c.getMaxParticipants() == null || activeCount < c.getMaxParticipants();
+        boolean canJoin = !isActiveMember && !rejoinBlocked && !c.isOwner(userId)
+                && meetsMinManner && hasRoom
+                && c.getStatus() != ChallengeStatus.COMPLETED
+                && c.isModerationCleared();
 
         var eligibility = new ChallengeDetailResponse.Eligibility(
-                canJoin, myManner, c.getMinMannerTemperature());
+                canJoin, myManner, c.getMinMannerTemperature(), rejoinBlocked);
 
         // fixDeadline 은 OWNER에게만 의미(REJECTED 1시간 수정창). 타인에겐 항상 null.
         String fixDeadline = (c.isOwner(userId) && c.getFixDeadline() != null)
                 ? c.getFixDeadline().toString() : null;
 
-        // 요청자의 역할: 생성자면 OWNER, ACTIVE/PENDING 멤버십이면 MEMBER, 그 외 NONE.
-        String myRole = resolveMyRole(c, userId, alreadyMember);
+        // 요청자의 역할: OWNER / MANAGER / MEMBER / NONE.
+        String myRole = c.isOwner(userId) ? MemberRole.OWNER.name()
+                : (isActiveMember ? myMembership.getRole().name() : "NONE");
 
         return new ChallengeDetailResponse(
                 c.getId().toString(), c.getTitle(), c.getDescription(), c.getImageUrl(),
@@ -195,89 +217,140 @@ public class ChallengeService {
                 c.getStartDate().toString(), c.getEndDate().toString(),
                 c.getTemplateId(), c.getVerificationConfig(), c.getParams(),
                 c.getPenalty(), c.getReward(),
-                stats, eligibility, myRole);
+                c.getMaxParticipants(), stats, eligibility, myRole);
     }
 
-    // ===== 3.4 수정 (시작 전, OWNER만) =====
+    // ===== §4 수정 (OWNER만) =====
+    /**
+     * 챌린지 수정. UPCOMING + 멤버(본인 제외) 0명이면 전 항목, 그 외(멤버 존재 또는 진행 중)면 maxParticipants만.
+     * 인원 상한 외 필드가 포함됐는데 전 항목 수정 불가 상태면 CHALLENGE_NOT_EDITABLE.
+     */
     @Transactional
     public ChallengeResponse update(UUID userId, UUID challengeId, UpdateChallengeRequest req) {
-        Challenge c = loadActive(challengeId);
+        // 인원 상한 축소 하한(현재 인원) 판정을 위해 행 잠금으로 로드.
+        Challenge c = challengeRepository.findByIdForUpdate(challengeId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
         ensureOwner(c, userId);
-        ensureEditable(c, challengeId);
 
-        if (req.title() != null) {
-            validateTitle(req.title());
-            nameBlocklist.validate(req.title());     // 명백 비속어 동기 차단(§5.1)
+        long activeCount = memberRepository.countByChallengeIdAndStatus(challengeId, MemberStatus.ACTIVE);
+        // "전 항목 수정 가능" = 시작 전(UPCOMING) + 멤버(본인 제외) 0명.
+        boolean fullEditable = c.isUpcoming() && activeCount <= 1;
+
+        boolean touchesOtherFields = req.title() != null || req.description() != null || req.imageUrl() != null
+                || req.category() != null || req.repeatDays() != null || req.durationDays() != null
+                || req.startDate() != null || req.penalty() != null || req.reward() != null
+                || req.minMannerTemperature() != null || req.params() != null;
+        if (touchesOtherFields && !fullEditable)
+            throw new BusinessException(ErrorCode.CHALLENGE_NOT_EDITABLE);
+
+        // 최대 참여 인원: 유일하게 언제든(시작 전·진행 중) 수정 가능. 현재 인원 미만으로 축소 불가.
+        if (req.maxParticipants() != null && c.isGroup()) {
+            if (req.maxParticipants() < activeCount)
+                throw new BusinessException(ErrorCode.MAX_PARTICIPANTS_BELOW_CURRENT);
+            c.changeMaxParticipants(req.maxParticipants());
         }
-        if (req.description() != null && req.description().length() > 200)
-            throw new BusinessException(ErrorCode.DESCRIPTION_TOO_LONG);
 
-        // imageUrl 이 실제로 바뀌면 재검수(§5.1) — 바꾸기 "전" 값과 비교. 이름 변경은 검수 트리거가 아니다
-        // (이름은 blocklist 동기 차단 + 추천 draft 게이트로만 거른다).
-        boolean imageChanged = req.imageUrl() != null && !req.imageUrl().equals(c.getImageUrl());
+        if (touchesOtherFields) {
+            if (req.title() != null) validateTitle(req.title());   // 이름 모더레이션 없음(§Non-Goals)
+            if (req.description() != null && req.description().length() > 200)
+                throw new BusinessException(ErrorCode.DESCRIPTION_TOO_LONG);
 
-        c.changeTitle(req.title());
-        c.changeImageUrl(req.imageUrl());
-        c.changeDescription(req.description());
-        if (req.category() != null)   c.changeCategory(validateCategory(req.category()));
-        if (req.repeatDays() != null) c.changeRepeatDays(validateRepeatDays(req.repeatDays()));
-        if (req.params() != null)
-            c.changeParams(routineSelectionService.revalidateParams(c.getTemplateId(), req.params()));
-        c.changePenalty(req.penalty());
-        c.changeReward(req.reward());
-        if (c.isGroup())
-            checkMinMannerNotAboveOwner(c.getCreatorId(), req.minMannerTemperature());
-        c.changeMinMannerTemperature(req.minMannerTemperature());
+            // imageUrl 이 실제로 바뀌면 재검수(§3-3) — 바꾸기 "전" 값과 비교.
+            boolean imageChanged = req.imageUrl() != null && !req.imageUrl().equals(c.getImageUrl());
 
-        // 일정 변경 → endDate 재파생
-        Integer duration = (req.durationDays() != null) ? validateDuration(req.durationDays()) : null;
-        LocalDate start = (req.startDate() != null) ? validateStartDate(req.startDate()) : null;
-        c.changeSchedule(duration, start);
+            c.changeTitle(req.title());
+            c.changeImageUrl(req.imageUrl());
+            c.changeDescription(req.description());
+            if (req.category() != null)   c.changeCategory(validateCategory(req.category()));
+            if (req.repeatDays() != null) c.changeRepeatDays(validateRepeatDays(req.repeatDays()));
+            if (req.params() != null)
+                c.changeParams(routineSelectionService.revalidateParams(c.getTemplateId(), req.params()));
+            c.changePenalty(req.penalty());
+            c.changeReward(req.reward());
+            if (c.isGroup())
+                checkMinMannerNotAboveOwner(c.getCreatorId(), req.minMannerTemperature());
+            c.changeMinMannerTemperature(req.minMannerTemperature());
 
-        // 이미지가 바뀌었으면 PENDING_REVIEW 로 되돌리고 재검수(REJECTED 1h 수정 경로 포함).
-        if (imageChanged) {
-            c.resubmitModeration();
-            eventPublisher.publishEvent(new ChallengeModerationRequested(c.getId()));
+            Integer duration = (req.durationDays() != null) ? validateDuration(req.durationDays()) : null;
+            LocalDate start = (req.startDate() != null) ? validateStartDate(req.startDate()) : null;
+            c.changeSchedule(duration, start);
+
+            if (imageChanged) {
+                c.resubmitModeration();   // PENDING_REVIEW 로 되돌리고 재검수(REJECTED 1h 수정 경로 포함)
+                eventPublisher.publishEvent(new ChallengeModerationRequested(c.getId()));
+            }
         }
 
         return ChallengeResponse.from(c);
     }
 
-    // ===== 3.5 삭제 (소프트, OWNER만) — §5.8 판정 순서 고정 =====
+    // ===== §8 삭제 (하드 삭제 + 감사 로깅, OWNER만) — 판정 순서 고정 =====
+    /**
+     * 챌린지 삭제. 참여자(OWNER 제외) 0명일 때만. 7일 잠금·차등차감 폐기.
+     * 판정 순서: ① OWNER → ② 참여자 ≥1명(CHALLENGE_HAS_MEMBERS) → ③ COMPLETED(CHALLENGE_COMPLETED)
+     *            → ④ 시작 전이면 즉시 삭제(무패널티) / 진행 중이면 챌린지 내 success 이력 판정 후 삭제 + 패널티 트리거.
+     * 챌린지 행 락 → 참여자 수 재확인 → 하드 삭제(신규 가입 경합 차단).
+     */
     @Transactional
     public DeleteChallengeResponse delete(UUID userId, UUID challengeId) {
-        Challenge c = loadActive(challengeId);
-        // ① OWNER 확인
+        Challenge c = challengeRepository.findByIdForUpdate(challengeId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
+        // ① OWNER
         ensureOwner(c, userId);
-        // ② 나 외 ACTIVE 멤버가 있으면 불가(PENDING 신청자는 제외 — ACTIVE만 카운트).
+        // ② 나 외 ACTIVE 멤버가 있으면 불가(이탈 경로: 임명→위임→탈퇴).
         long activeCount = memberRepository.countByChallengeIdAndStatus(challengeId, MemberStatus.ACTIVE);
-        if (activeCount > 1)   // 생성자 본인(ACTIVE) 1명 제외하고 더 있으면
+        if (activeCount > 1)
             throw new BusinessException(ErrorCode.CHALLENGE_HAS_MEMBERS);
-        // ③ 잠금: 생성 후 7일 이내 또는 계획 기간 7일 미만
-        Instant now = Instant.now();
-        Instant unlock = c.getCreatedAt().plus(DELETE_UNLOCK_DAYS, java.time.temporal.ChronoUnit.DAYS);
-        if (now.isBefore(unlock) || c.getDurationDays() < DELETE_UNLOCK_DAYS)
-            throw new BusinessException(ErrorCode.DELETE_LOCKED);
-        // ④ 차감 계산 후 소프트 삭제. 실제 매너 가감은 평판 스펙 소관 — 여기선 트리거 + 값 반환만.
-        BigDecimal mannerPenalty = computeMannerPenalty(c, now, unlock);
-        c.softDelete();
-        return new DeleteChallengeResponse(mannerPenalty);
+        // ③ 종료된 챌린지는 기록 보존 — 삭제 불가.
+        if (c.getStatus() == ChallengeStatus.COMPLETED)
+            throw new BusinessException(ErrorCode.CHALLENGE_COMPLETED);
+        // ④ 진행 중이면 챌린지 내 success 이력으로 탈퇴 패널티 트리거(시작 전은 무패널티).
+        boolean penaltyApplied = c.getStatus() == ChallengeStatus.ACTIVE
+                && verificationDailyRepository.existsByChallengeIdAndStatus(challengeId, VerificationStatus.SUCCESS);
+
+        // 하드 삭제 + 감사 로깅(§8-4).
+        log.warn("[AUDIT] 챌린지 하드 삭제 challengeId={} ownerId={} status={} penaltyApplied={}",
+                challengeId, userId, c.getStatus(), penaltyApplied);
+        hardDelete(challengeId);
+        return new DeleteChallengeResponse(penaltyApplied);
     }
 
     /**
-     * §5.8 차감량: mannerPenalty = round(basePenalty × max(0,(endDate−now)/(endDate−unlock)), 1).
-     *  - basePenalty = 챌린지 패널티 설정의 mannerDeduction.
-     *  - 진행할수록(now가 endDate에 가까울수록) 차감이 작아지고, 계획 종료 시 0.
-     *  - 하루 경계는 KST(§4.4). endDate(로컬 날짜)는 그 날 끝(다음날 자정)으로 환산해 비교.
+     * 챌린지와 자식 행을 FK 안전 순서로 물리 삭제한다(§8-4 하드 삭제).
+     * 자식(인증·감시자·위임·멤버)부터 지우고 마지막에 챌린지 행을 지운다.
+     * 삭제는 참여자 0명(본인만)일 때만 호출되므로 대상 데이터량은 작다.
      */
-    private BigDecimal computeMannerPenalty(Challenge c, Instant now, Instant unlock) {
-        BigDecimal base = (c.getPenalty() != null && c.getPenalty().mannerDeduction() != null)
-                ? c.getPenalty().mannerDeduction() : BigDecimal.ZERO;
-        Instant end = c.getEndDate().plusDays(1).atStartOfDay(KST).toInstant();
-        double span = (double) (end.getEpochSecond() - unlock.getEpochSecond());
-        double remain = (double) (end.getEpochSecond() - now.getEpochSecond());
-        double ratio = (span <= 0) ? 0.0 : Math.max(0.0, Math.min(1.0, remain / span));
-        return base.multiply(BigDecimal.valueOf(ratio)).setScale(1, RoundingMode.HALF_UP);
+    private void hardDelete(UUID challengeId) {
+        // 대기 중인 영속 변경을 먼저 DB에 반영(네이티브 삭제가 최신 상태를 지우도록).
+        entityManager.flush();
+        exec("DELETE FROM VerificationMethodResult WHERE verificationDailyId IN " +
+                "(SELECT id FROM VerificationDaily WHERE challengeId = :cid)", challengeId);
+        exec("DELETE FROM VerificationDaily WHERE challengeId = :cid", challengeId);
+        exec("DELETE FROM RoutineOutcome WHERE challengeId = :cid", challengeId);
+        exec("DELETE FROM WatcherNotification WHERE challengeId = :cid", challengeId);
+        exec("DELETE FROM WatcherOtp WHERE invitationId IN " +
+                "(SELECT id FROM WatcherInvitation WHERE challengeId = :cid)", challengeId);
+        exec("DELETE FROM Watcher WHERE challengeId = :cid", challengeId);
+        exec("DELETE FROM WatcherInvitation WHERE challengeId = :cid", challengeId);
+        exec("DELETE FROM ChallengeDelegation WHERE challengeId = :cid", challengeId);
+        exec("DELETE FROM ChallengeMember WHERE challengeId = :cid", challengeId);
+        exec("DELETE FROM Challenge WHERE id = :cid", challengeId);
+        // 네이티브 삭제는 1차 캐시를 갱신하지 않으므로, 삭제된 엔티티가 캐시에서 되살아나지 않도록 detach.
+        entityManager.clear();
+    }
+
+    /** binary(16) UUID 바인딩 네이티브 삭제. */
+    private void exec(String sql, UUID challengeId) {
+        entityManager.createNativeQuery(sql)
+                .setParameter("cid", uuidToBytes(challengeId))
+                .executeUpdate();
+    }
+
+    private static byte[] uuidToBytes(UUID u) {
+        ByteBuffer bb = ByteBuffer.allocate(16);
+        bb.putLong(u.getMostSignificantBits());
+        bb.putLong(u.getLeastSignificantBits());
+        return bb.array();
     }
 
     // ====================== 내부 헬퍼 ======================
@@ -289,36 +362,6 @@ public class ChallengeService {
 
     private void ensureOwner(Challenge c, UUID userId) {
         if (!c.isOwner(userId)) throw new BusinessException(ErrorCode.NOT_CHALLENGE_OWNER);
-    }
-
-    /**
-     * 수정/삭제 가능 여부.
-     *  - 시작된(ACTIVE 이후) 챌린지는 불가.
-     *  - 그룹은 생성자 외 다른 멤버(ACTIVE/PENDING)가 있으면 불가 (스펙 3.4/3.5).
-     *    솔로는 본인뿐이라 자유.
-     *  ※ 솔로 "n일 후에만 수정 가능 / 한 번 수정하면 n일 잠금" 규칙(스펙 3.4 메모)은
-     *    인증·운영 스펙과 함께 별도 구현 예정 (TODO).
-     */
-    private void ensureEditable(Challenge c, UUID challengeId) {
-        if (!c.isEditable()) throw new BusinessException(ErrorCode.CHALLENGE_NOT_EDITABLE);
-        if (c.isGroup()) {
-            long others = memberRepository.countByChallengeIdAndStatus(challengeId, MemberStatus.ACTIVE)
-                    + memberRepository.countByChallengeIdAndStatus(challengeId, MemberStatus.PENDING);
-            // 생성자 본인(ACTIVE) 1명만 있으면 others == 1 → 허용. 그 이상이면 불가.
-            if (others > 1) throw new BusinessException(ErrorCode.CHALLENGE_NOT_EDITABLE);
-        }
-    }
-
-    /** 상세 응답의 myRole: 생성자면 OWNER, ACTIVE/PENDING 멤버십이면 MEMBER, 그 외 NONE. */
-    private String resolveMyRole(Challenge c, UUID userId, boolean alreadyMember) {
-        if (c.isOwner(userId)) return MemberRole.OWNER.name();
-        return alreadyMember ? MemberRole.MEMBER.name() : "NONE";
-    }
-
-    private boolean isActiveOrPending(UUID challengeId, UUID userId) {
-        return memberRepository.findByChallengeIdAndUserId(challengeId, userId)
-                .map(m -> m.isActive() || m.isPending())
-                .orElse(false);
     }
 
     /** ACTIVE 멤버들의 매너 온도 평균(소수 첫째 자리). 멤버 없으면 null. */

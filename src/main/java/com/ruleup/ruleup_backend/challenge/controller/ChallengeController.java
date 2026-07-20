@@ -15,6 +15,7 @@ import org.springframework.web.multipart.MultipartFile;
 import com.ruleup.ruleup_backend.common.image.UploadRateLimiter;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeRecommendationService;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeImageService;
+import com.ruleup.ruleup_backend.challenge.recommendation.RecommendationRateLimiter;
 
 import java.util.UUID;
 
@@ -29,15 +30,18 @@ public class ChallengeController {
     private final ChallengeService challengeService;
     private final ChallengeImageService challengeImageService;
     private final UploadRateLimiter uploadRateLimiter;
+    private final RecommendationRateLimiter recommendationRateLimiter;
 
-    @Operation(summary = "챌린지 추천", description = "제목/설명을 루틴 템플릿과 매칭해 인증·목표값을 추천하고, "
-            + "참여방식·일정·패널티·보상 기본값까지 얹어 전체 챌린지 초안을 돌려준다(저장 X). 권한은 보지 않는다.")
+    @Operation(summary = "챌린지 추천(LLM)", description = "Step0 rate limit(1분 10회, 초과 시 429). Step1·2 차단 시 fallback:true. "
+            + "제목/설명을 루틴 템플릿과 매칭해 전체 챌린지 초안을 돌려준다(저장 X). maxMannerTemperature=생성자 온도 상한.")
     @PostMapping("/recommendation")
-    public ApiResponse<ChallengeRecommendationResponse> recommend(@RequestBody RoutineRecommendationRequest request) {
-        return ApiResponse.ok(challengeRecommendationService.recommend(request));
+    public ApiResponse<ChallengeRecommendationResponse> recommend(@AuthenticationPrincipal String userId,
+                                                                  @RequestBody RoutineRecommendationRequest request) {
+        recommendationRateLimiter.check(userId);   // Step0: 사용자당 1분 10회
+        return ApiResponse.ok(challengeRecommendationService.recommend(UUID.fromString(userId), request));
     }
 
-    @Operation(summary = "챌린지 생성", description = "추천을 수정·확정한 최종값으로 생성. RECRUITING으로 저장하고 생성자를 OWNER로 등록.")
+    @Operation(summary = "챌린지 생성", description = "추천을 수정·확정한 최종값으로 생성. UPCOMING으로 저장하고 생성자를 OWNER로 등록.")
     @PostMapping
     public ApiResponse<ChallengeResponse> create(@AuthenticationPrincipal String userId,
                                                  @RequestBody CreateChallengeRequest request) {
@@ -56,12 +60,10 @@ public class ChallengeController {
     }
 
     @Operation(summary = "내 챌린지 목록", description = "내가 참여 중인 챌린지 목록(멤버십 기준, 페이지네이션 없음). "
-            + "scope=ACTIVE(기본, 실제 참여 중)/ALL(승인 대기 PENDING 포함). 소프트 삭제 제외.")
+            + "승인제 폐기로 항상 확정 멤버십만. 항목마다 myRole 포함.")
     @GetMapping
-    public ApiResponse<ChallengeListResponse> myChallenges(
-            @AuthenticationPrincipal String userId,
-            @RequestParam(defaultValue = "ACTIVE") String scope) {
-        return ApiResponse.ok(challengeService.myChallenges(UUID.fromString(userId), scope));
+    public ApiResponse<ChallengeListResponse> myChallenges(@AuthenticationPrincipal String userId) {
+        return ApiResponse.ok(challengeService.myChallenges(UUID.fromString(userId)));
     }
 
     @Operation(summary = "챌린지 상세 + 참여 자격")
@@ -71,7 +73,7 @@ public class ChallengeController {
         return ApiResponse.ok(challengeService.getDetail(UUID.fromString(userId), UUID.fromString(challengeId)));
     }
 
-    @Operation(summary = "챌린지 수정", description = "시작 전(RECRUITING), 생성자만. 변경 필드만 보냄. 일정 변경 시 endDate 재파생.")
+    @Operation(summary = "챌린지 수정", description = "OWNER만. UPCOMING+멤버0명=전항목/그외=maxParticipants만. 변경 필드만 보냄.")
     @PatchMapping("/{challengeId}")
     public ApiResponse<ChallengeResponse> update(@AuthenticationPrincipal String userId,
                                                  @PathVariable String challengeId,
@@ -80,8 +82,8 @@ public class ChallengeController {
     }
 
     @Operation(summary = "챌린지 삭제",
-            description = "생성자만, 소프트 삭제. §5.8 판정 순서: OWNER → 나 외 ACTIVE 멤버(CHALLENGE_HAS_MEMBERS) "
-                    + "→ 잠금(생성 7일 이내·기간 7일 미만 DELETE_LOCKED) → 차감 계산 후 삭제. mannerPenalty 반환.")
+            description = "OWNER만, 하드 삭제+감사 로깅. 참여자 0명일 때만. 판정: OWNER→참여자≥1(CHALLENGE_HAS_MEMBERS)"
+                    + "→COMPLETED(CHALLENGE_COMPLETED)→시작전 무패널티/진행중 success 이력 시 패널티. penaltyApplied 반환.")
     @DeleteMapping("/{challengeId}")
     public ApiResponse<DeleteChallengeResponse> delete(@AuthenticationPrincipal String userId,
                                                        @PathVariable String challengeId) {
@@ -90,8 +92,9 @@ public class ChallengeController {
 
     @Operation(summary = "추천 선택 → 초안(LLM 우회)", description = "추천 버튼에서 고른 templateId로 챌린지 초안을 바로 구성. LLM 안 거침.")
     @PostMapping("/recommendation/by-template")
-    public ApiResponse<ChallengeRecommendationResponse> recommendByTemplate(@RequestBody TemplateRecommendationRequest request) {
+    public ApiResponse<ChallengeRecommendationResponse> recommendByTemplate(@AuthenticationPrincipal String userId,
+                                                                            @RequestBody TemplateRecommendationRequest request) {
         return ApiResponse.ok(challengeRecommendationService.recommendByTemplate(
-                request.templateId(), request.title(), request.description()));
+                UUID.fromString(userId), request.templateId(), request.title(), request.description()));
     }
 }

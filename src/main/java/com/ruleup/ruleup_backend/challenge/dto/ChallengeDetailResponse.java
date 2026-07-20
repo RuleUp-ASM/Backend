@@ -29,9 +29,10 @@ public record ChallengeDetailResponse(
         Map<String, Object> params,
         PenaltyConfig penalty,
         RewardConfig reward,
+        Integer maxParticipants,
         Stats stats,
         Eligibility eligibility,
-        String myRole   // 요청자의 역할: OWNER / MEMBER / NONE
+        String myRole   // 요청자의 역할: OWNER / MANAGER / MEMBER / NONE
 ) {
     public record Owner(String nickname) {}
 
@@ -41,9 +42,11 @@ public record ChallengeDetailResponse(
             BigDecimal completionRate
     ) {}
 
+    /** canJoin은 정원·기준온도·재참여·모더레이션·상태를 종합한 참여 가능 여부. */
     public record Eligibility(
             boolean canJoin,
             BigDecimal myMannerTemperature,
-            BigDecimal minMannerTemperature
+            BigDecimal minMannerTemperature,
+            boolean rejoinBlocked
     ) {}
 }

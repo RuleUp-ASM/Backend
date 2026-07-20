@@ -4,7 +4,9 @@ import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeModerationStatus;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus;
 import com.ruleup.ruleup_backend.challenge.domain.ParticipationType;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -23,6 +25,14 @@ public interface ChallengeRepository extends JpaRepository<Challenge, UUID> {
     Optional<Challenge> findByIdAndDeletedAtIsNull(UUID id);
 
     /**
+     * 삭제되지 않은 챌린지 1건을 비관적 쓰기 잠금으로 로드(가입 정원 경합·삭제 0명 판정 직렬화, §5·§8).
+     * 잠금 하에서 참여자 수를 세고 삽입/삭제해 "마지막 1자리 동시 가입"·"0명 판정 vs 신규 가입"을 차단한다.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT c FROM Challenge c WHERE c.id = :id AND c.deletedAt IS NULL")
+    Optional<Challenge> findByIdForUpdate(@Param("id") UUID id);
+
+    /**
      * 모더레이션 마감 배치(§5.1/§8): REJECTED 상태로 1시간 수정창(fixDeadline)이 지난 챌린지를
      * FOR UPDATE SKIP LOCKED 로 선점. 다중 인스턴스에서도 잠긴 행은 건너뛰어 중복 처리 불가
      * (ShedLock 없이 DB 멱등 — 기존 확정 배치와 동일 패턴).
@@ -34,16 +44,16 @@ public interface ChallengeRepository extends JpaRepository<Challenge, UUID> {
     List<Challenge> findRejectedFixWindowExpiredForUpdate(@Param("now") Instant now, @Param("limit") int limit);
 
     /**
-     * 활성화 배치(§5.7): 시작일(startDate)이 도달한 RECRUITING·APPROVED 챌린지를
-     * FOR UPDATE SKIP LOCKED 로 선점. 모더레이션 미승인(PENDING_REVIEW/REJECTED) 챌린지는
+     * 활성화 배치(§2): 시작일(startDate)이 도달한 UPCOMING·모더레이션 통과(NONE/APPROVED) 챌린지를
+     * FOR UPDATE SKIP LOCKED 로 선점. 모더레이션 미통과(PENDING_REVIEW/REJECTED) 챌린지는
      * 가입·노출이 막혀 있으므로 활성화 대상에서 제외한다.
      * 모더레이션 마감 배치와 동일한 DB 멱등 패턴(다중 인스턴스에서도 중복 전환 불가).
      */
     @Query(value = "SELECT * FROM Challenge " +
-            "WHERE status = 'RECRUITING' AND moderationStatus = 'APPROVED' AND startDate <= :today " +
+            "WHERE status = 'UPCOMING' AND moderationStatus IN ('NONE','APPROVED') AND startDate <= :today " +
             "AND deletedAt IS NULL " +
             "ORDER BY startDate LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
-    List<Challenge> findRecruitingDueForActivationForUpdate(@Param("today") LocalDate today, @Param("limit") int limit);
+    List<Challenge> findUpcomingDueForActivationForUpdate(@Param("today") LocalDate today, @Param("limit") int limit);
 
     /**
      * 모더레이션 재검 배치(§5.1/§8): AI 검수가 결론을 못 낸 채(=UNAVAILABLE 또는 리스너 실패로)
@@ -89,7 +99,7 @@ public interface ChallengeRepository extends JpaRepository<Challenge, UUID> {
      * 인기 배치·failCount 배치가 순회 대상으로 쓴다.
      */
     @Query("SELECT c FROM Challenge c WHERE c.deletedAt IS NULL " +
-            "AND c.moderationStatus = com.ruleup.ruleup_backend.challenge.domain.ChallengeModerationStatus.APPROVED " +
+            "AND c.moderationStatus IN (com.ruleup.ruleup_backend.challenge.domain.ChallengeModerationStatus.NONE, com.ruleup.ruleup_backend.challenge.domain.ChallengeModerationStatus.APPROVED) " +
             "AND c.endDate >= :today")
     List<Challenge> findExploreCandidates(@Param("today") LocalDate today);
 
@@ -99,7 +109,7 @@ public interface ChallengeRepository extends JpaRepository<Challenge, UUID> {
      * 필터 파라미터가 null 이면 그 조건은 건너뛴다(전체). applyManner=true 면 "내가 들어갈 수 있는 것"만.
      */
     @Query("SELECT c FROM Challenge c WHERE c.deletedAt IS NULL " +
-            "AND c.moderationStatus = com.ruleup.ruleup_backend.challenge.domain.ChallengeModerationStatus.APPROVED " +
+            "AND c.moderationStatus IN (com.ruleup.ruleup_backend.challenge.domain.ChallengeModerationStatus.NONE, com.ruleup.ruleup_backend.challenge.domain.ChallengeModerationStatus.APPROVED) " +
             "AND c.status <> com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus.COMPLETED " +
             "AND c.endDate >= :today " +
             "AND (:category IS NULL OR c.category = :category) " +
@@ -120,7 +130,7 @@ public interface ChallengeRepository extends JpaRepository<Challenge, UUID> {
 
     /** 카테고리별 진행 중(종료 전) 챌린지 수(§2.2): 삭제 X · APPROVED · endDate ≥ today. */
     @Query("SELECT c.category, COUNT(c) FROM Challenge c WHERE c.deletedAt IS NULL " +
-            "AND c.moderationStatus = com.ruleup.ruleup_backend.challenge.domain.ChallengeModerationStatus.APPROVED " +
+            "AND c.moderationStatus IN (com.ruleup.ruleup_backend.challenge.domain.ChallengeModerationStatus.NONE, com.ruleup.ruleup_backend.challenge.domain.ChallengeModerationStatus.APPROVED) " +
             "AND c.endDate >= :today GROUP BY c.category")
     List<Object[]> countActiveByCategory(@Param("today") LocalDate today);
 

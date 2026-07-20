@@ -18,8 +18,10 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ApiResponse<Void>> handleBusiness(BusinessException e) {
         ErrorCode code = e.getErrorCode();
-        return ResponseEntity.status(code.getStatus())
-                .body(ApiResponse.fail(ErrorResponse.of(code)));
+        ErrorResponse body = (e.getDetail() != null)
+                ? ErrorResponse.of(code, e.getDetail())
+                : ErrorResponse.of(code);
+        return ResponseEntity.status(code.getStatus()).body(ApiResponse.fail(body));
     }
 
     // 본문 JSON이 깨졌거나 형식이 안 맞을 때 → 400

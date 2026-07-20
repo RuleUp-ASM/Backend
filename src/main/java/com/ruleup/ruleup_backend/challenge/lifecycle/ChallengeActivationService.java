@@ -14,10 +14,10 @@ import java.time.ZoneId;
 import java.util.List;
 
 /**
- * 챌린지 활성화 배치 (CLAUDE.md §5.7 — 시작일 도달 시 RECRUITING→ACTIVE).
- *  - startDate(KST)가 도달한 APPROVED·RECRUITING 챌린지를 ACTIVE 로 전환한다.
+ * 챌린지 활성화 배치 (생성 및 라이프사이클 §2 — 시작일 도달 시 UPCOMING→ACTIVE).
+ *  - startDate(KST)가 도달한 모더레이션 통과(NONE/APPROVED)·UPCOMING 챌린지를 ACTIVE 로 전환한다.
  *  - ACTIVE 가 되어야 인증 sync(§3.1)가 그 챌린지를 평가 대상으로 삼는다(VerificationSyncService §11.3).
- *  - 모더레이션 미승인(PENDING_REVIEW/REJECTED) 챌린지는 가입·노출이 막혀 있어 활성화 대상이 아니다.
+ *  - 모더레이션 미통과(PENDING_REVIEW/REJECTED) 챌린지는 가입·노출이 막혀 있어 활성화 대상이 아니다.
  *
  * 동시성: FOR UPDATE SKIP LOCKED 선점이라 다중 인스턴스에서도 중복 전환 없음
  *         (ChallengeModerationCloseService 와 동일한 ShedLock 없는 DB 멱등 패턴).
@@ -33,12 +33,12 @@ public class ChallengeActivationService {
 
     private final ChallengeRepository challengeRepository;
 
-    /** 1분마다: 시작일이 도달한 모집중·승인 챌린지를 ACTIVE 로 전환한다. */
+    /** 1분마다: 시작일이 도달한 시작 전(UPCOMING)·모더레이션 통과 챌린지를 ACTIVE 로 전환한다. */
     @Scheduled(fixedDelay = 60_000)
     @Transactional
     public void activateDueChallenges() {
         LocalDate today = LocalDate.now(KST);
-        List<Challenge> due = challengeRepository.findRecruitingDueForActivationForUpdate(today, CLAIM_LIMIT);
+        List<Challenge> due = challengeRepository.findUpcomingDueForActivationForUpdate(today, CLAIM_LIMIT);
         for (Challenge c : due) {
             c.activate();
         }

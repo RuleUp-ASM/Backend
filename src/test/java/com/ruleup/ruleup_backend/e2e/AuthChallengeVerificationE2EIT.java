@@ -76,7 +76,7 @@ class AuthChallengeVerificationE2EIT {
         assertThat((Boolean) read(login, "$.data.isNewUser")).isFalse();
         String ownerToken = read(login, "$.data.accessToken");
 
-        // ── 4) 챌린지 생성(MANUAL, 이미지 없음) → RECRUITING / APPROVED(이미지 없어 즉시 공개) ──
+        // ── 4) 챌린지 생성(MANUAL, 이미지 없음) → UPCOMING / NONE(이미지 없어 즉시 모집) ──
         String today = LocalDate.now(KST).toString();
         MvcResult created = postJsonAuth("/api/v1/challenges", ownerToken, """
                 {"title":"아침 7시 기상","description":null,"imageUrl":null,"category":"EXERCISE",
@@ -86,11 +86,11 @@ class AuthChallengeVerificationE2EIT {
                  "penalty":{"mannerDeduction":1},"reward":{"mannerGain":1},"anonymity":"REAL"}"""
                 .formatted(today));
         String challengeId = read(created, "$.data.challengeId");
-        assertThat((String) read(created, "$.data.status")).isEqualTo("RECRUITING");
-        // 이미지가 없어 검수 대상이 없으므로 생성 즉시 APPROVED(공개). (이미지 있을 때의 비공개 게이트는 ChallengeModerationGateTest)
-        assertThat((String) read(created, "$.data.moderationStatus")).isEqualTo("APPROVED");
+        assertThat((String) read(created, "$.data.status")).isEqualTo("UPCOMING");
+        // 이미지가 없어 검수 대상이 없으므로 생성 즉시 NONE(모집 가능). (이미지 있을 때의 비공개 게이트는 ChallengeModerationGateTest)
+        assertThat((String) read(created, "$.data.moderationStatus")).isEqualTo("NONE");
 
-        // ── 5) 조회: APPROVED라 OWNER·타인 모두 200 ─────────────────────────
+        // ── 5) 조회: 모더레이션 통과(NONE)라 OWNER·타인 모두 200 ─────────────────────────
         mvc.perform(get("/api/v1/challenges/" + challengeId).header("Authorization", "Bearer " + ownerToken))
                 .andExpect(status().isOk());
         String otherToken = signupAndLogin("e2e-other", "구경꾼E2E");

@@ -285,7 +285,7 @@ class ChallengeExploreIT {
                                LocalDate startDate, int durationDays, int participantCount) {
         Challenge c = Challenge.create(
                 owner, "탐색 챌린지", null, null,
-                category, type, minManner, List.of("MON"),
+                category, type, minManner, null, List.of("MON"),
                 durationDays, startDate,
                 null, vc, new LinkedHashMap<>(),
                 new PenaltyConfig(BigDecimal.ONE, null, false), new RewardConfig(BigDecimal.ONE),
