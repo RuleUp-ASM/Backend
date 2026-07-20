@@ -26,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -73,7 +74,7 @@ class VerificationReadV3IT {
         Challenge c = groupChallenge(owner.getId());
         User u = newUser();
         ChallengeMember m = memberRepository.saveAndFlush(ChallengeMember.join(c.getId(), u.getId(), MemberStatus.ACTIVE));
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));   // detail()의 KST 오늘과 일치시켜 TZ 무관하게
         VerificationDaily d = VerificationDaily.open(m.getId(), c.getId(), u.getId(), today);
         d.recordProvisionalFailure("GPS_PRESENCE", "INSUFFICIENT_DWELL", Instant.now().plus(2, ChronoUnit.DAYS));
         dailyRepo.saveAndFlush(d);
