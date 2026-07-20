@@ -35,7 +35,7 @@ import java.util.UUID;
 public class VerificationManualService {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
-    private static final int FALLBACK_WEEKLY_LIMIT = 1;       // 주 1회(롤링 7일, §9.2)
+    private static final int FALLBACK_MONTHLY_LIMIT = 3;       // 월 3회/챌린지(§10.2)
 
     private final ChallengeQueryService challengeQuery;
     private final VerificationDailyRepository dailyRepo;
@@ -76,13 +76,23 @@ public class VerificationManualService {
         if (daily.getStatus() == VerificationStatus.SUCCESS) {
             throw new BusinessException(ErrorCode.ALREADY_VERIFIED);
         }
+        // 이미 확정(FAILED lock)된 일자는 제출 기한 경과(솔로: 창닫힘+lag / 그룹: 이의 제기 창 마감, §10.2).
+        if (daily.getStatus() == VerificationStatus.FAILED) {
+            throw new BusinessException(ErrorCode.VERIFICATION_WINDOW_CLOSED);
+        }
 
         Instant now = Instant.now();
         boolean fallback = req.fallback();
 
-        // 예비 폴백: 주1회 한도 — 초과면 그냥 실패(버튼 비활성 우회 방지, §9.2).
-        if (fallback && !member.tryUseFallback(today, FALLBACK_WEEKLY_LIMIT)) {
-            throw new BusinessException(ErrorCode.FALLBACK_LIMIT_EXCEEDED);
+        if (fallback) {
+            // 폴백 제출은 사진 포함 글 혹은 글 — content 필수(§10.2).
+            if (req.content() == null || req.content().isBlank()) {
+                throw new BusinessException(ErrorCode.CONTENT_REQUIRED);
+            }
+            // 월 3회/챌린지 한도 — 초과면 제출 거부(실패 확정 아님, 자동 판정 경로 유지, §10.2).
+            if (!member.tryUseFallback(today, FALLBACK_MONTHLY_LIMIT)) {
+                throw new BusinessException(ErrorCode.FALLBACK_LIMIT_EXCEEDED);
+            }
         }
 
         VerificationMethodResult mr = methodResultRepo
@@ -92,21 +102,38 @@ public class VerificationManualService {
         }
         Map<String, Object> evidence = new HashMap<>();
         if (isPhoto) evidence.put("imageUrl", req.imageUrl()); else evidence.put("selfCheck", true);
-        if (fallback) evidence.put("fallback", true);
-        // 폴백은 방장 승인 전이라 잠정. 방식 결과도 PENDING으로 두고, 승인 시 SUCCESS로 확정.
-        mr.evaluate(fallback ? VerificationStatus.PENDING : VerificationStatus.SUCCESS, evidence, now);
-        methodResultRepo.save(mr);
-
         if (fallback) {
-            // 방장 승인 모델(§9.2): PENDING_APPROVAL 로 적재, 진행률은 승인 전이라 현재값 유지.
+            evidence.put("fallback", true);
+            evidence.put("content", req.content());                 // 처리 대기함(pending-reviews)에서 증빙 표시
+            if (req.imageUrl() != null) evidence.put("imageUrl", req.imageUrl());
+        }
+
+        if (fallback && ch.isGroup()) {
+            // 그룹 폴백: 방장/공동 관리자 승인 대기(§10.2). 방식 결과도 PENDING, 진행률 유지.
+            mr.evaluate(VerificationStatus.PENDING, evidence, now);
+            methodResultRepo.save(mr);
             daily.recordFallbackPending(method);
-            progressService.recount(member);   // PENDING은 성공 미집계 → 진행률 유지
+            progressService.recount(member);
             return new ManualVerificationResponse(
                     daily.getId().toString(), targetDate.toString(), "PENDING_APPROVAL",
                     method, "PENDING", null, null, member.getProgressRate());
         }
 
+        if (fallback) {
+            // 솔로 폴백: 승인 주체가 본인뿐 → 제출 즉시 SUCCESS(verifiedVia=MANUAL_FALLBACK, §10.2).
+            mr.evaluate(VerificationStatus.SUCCESS, evidence, now);
+            methodResultRepo.save(mr);
+            daily.approveFallback(now);
+            if (targetDate.equals(today)) progressService.recountAndSetToday(member, VerificationStatus.SUCCESS);
+            else progressService.recount(member);
+            return new ManualVerificationResponse(
+                    daily.getId().toString(), targetDate.toString(), "SUCCESS",
+                    method, null, "MANUAL_FALLBACK", null, member.getProgressRate());
+        }
+
         // 정규 수동 = 즉시 확정 SUCCESS.
+        mr.evaluate(VerificationStatus.SUCCESS, evidence, now);
+        methodResultRepo.save(mr);
         daily.recordManual(method, now);
         if (targetDate.equals(today)) progressService.updateAfterSync(member, VerificationStatus.SUCCESS, now);
         else progressService.recount(member);

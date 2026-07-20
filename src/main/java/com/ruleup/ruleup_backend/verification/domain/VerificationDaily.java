@@ -152,12 +152,15 @@ public class VerificationDaily extends AssignedIdEntity {
         this.fallbackApprovalStatus = FallbackApprovalStatus.APPROVED;
     }
 
-    /** 방장 거절 → FAILED 확정(failureReason=FALLBACK_REJECTED). */
-    public void rejectFallback(Instant verifiedAt) {
-        this.status = VerificationStatus.FAILED;
-        this.failureReason = "FALLBACK_REJECTED";
+    /**
+     * 폴백 제출 기각(§10.2 v3): 해당 제출만 기각하고 일자 판정은 기존(자동) 경로로 복귀(PENDING).
+     * 그날이 실패로 확정되는 것이 아니다 — 자동 신호가 오면 SUCCESS, 끝내 미충족이면 §8.7 잠정 실패 경로.
+     */
+    public void rejectFallbackSubmission() {
+        this.status = VerificationStatus.PENDING;
         this.verifiedVia = null;
-        this.verifiedAt = verifiedAt;
+        this.verifiedAt = null;
+        this.failureReason = null;
         this.fallbackApprovalStatus = FallbackApprovalStatus.REJECTED;
     }
 

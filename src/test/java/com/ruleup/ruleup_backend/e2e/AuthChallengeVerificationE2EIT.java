@@ -108,20 +108,14 @@ class AuthChallengeVerificationE2EIT {
         mvc.perform(get("/api/v1/verifications/progress").header("Authorization", "Bearer " + ownerToken))
                 .andExpect(status().isOk());
 
-        // ── 7) 예비 폴백: 제출 → PENDING_APPROVAL → 방장 승인 → SUCCESS ──────
+        // ── 7) 예비 폴백(솔로): 글 포함 제출 → 즉시 SUCCESS(MANUAL_FALLBACK) ──────
+        // 솔로는 승인 주체가 본인뿐이라 제출 즉시 확정(§10.2). 그룹 폴백 승인 플로우는 별도 IT에서 검증.
         String tomorrow = LocalDate.now(KST).plusDays(1).toString();
         MvcResult fallback = postJsonAuth("/api/v1/challenges/" + challengeId + "/verifications", ownerToken, """
-                {"method":"SELF_CHECK","targetDate":"%s","asFallback":true}""".formatted(tomorrow));
-        assertThat((String) read(fallback, "$.data.status")).isEqualTo("PENDING_APPROVAL");
-        assertThat((String) read(fallback, "$.data.approvalStatus")).isEqualTo("PENDING");
-        String verificationId = read(fallback, "$.data.verificationId");
-
-        MvcResult approved = postJsonAuth(
-                "/api/v1/challenges/" + challengeId + "/verifications/" + verificationId + "/approval",
-                ownerToken, """
-                {"decision":"APPROVE","reason":null}""");
-        assertThat((String) read(approved, "$.data.status")).isEqualTo("SUCCESS");
-        assertThat((String) read(approved, "$.data.verifiedVia")).isEqualTo("MANUAL_FALLBACK");
+                {"method":"SELF_CHECK","targetDate":"%s","content":"기기 오류로 수동 제출합니다","asFallback":true}"""
+                .formatted(tomorrow));
+        assertThat((String) read(fallback, "$.data.status")).isEqualTo("SUCCESS");
+        assertThat((String) read(fallback, "$.data.verifiedVia")).isEqualTo("MANUAL_FALLBACK");
     }
 
     // ===== 헬퍼 =====
