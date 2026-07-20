@@ -162,10 +162,10 @@ public class VerificationSyncService {
             daily.recordResult(VerificationStatus.NOT_REQUIRED, null, null, null);
             return VerificationStatus.NOT_REQUIRED;
         }
-        return evaluateAndApply(member, config, daily, signals, gaps, today, now);
+        return evaluateAndApply(member, challenge, config, daily, signals, gaps, today, now);
     }
 
-    private VerificationStatus evaluateAndApply(ChallengeMember member, VerificationConfig config,
+    private VerificationStatus evaluateAndApply(ChallengeMember member, Challenge challenge, VerificationConfig config,
                                                 VerificationDaily daily, List<SyncSignal> signals,
                                                 List<SyncRequest.Gap> gaps, LocalDate today, Instant now) {
         VerificationMethod method = config.primaryMethod();
@@ -209,20 +209,27 @@ public class VerificationSyncService {
                 ? windowCloses.plus(maxLagHours(config), ChronoUnit.HOURS) : null;
         daily.applyWindow(windowCloses, finalizeAfter);
 
-        String contributing = (outcome.status() == VerificationStatus.SUCCESS) ? method.name() : null;
-        Instant verifiedAt = (outcome.status() == VerificationStatus.SUCCESS
-                || outcome.status() == VerificationStatus.FAILED) ? now : null;
-        daily.recordResult(outcome.status(), contributing, outcome.failureReason(), verifiedAt);
-
-        if (config.isFrequency() && outcome.status() == VerificationStatus.SUCCESS) {
-            member.incrementPeriodCompleted();   // 빈도형: 주기 완료 +1 (미잠금 상태에서 첫 SUCCESS 전이 1회)
-        }
-        // 제약형 위반 등으로 이 날이 FAILED 로 잠기면 감시자 통지 적재(§9). 다음 sync는 line 126에서 스킵되어 중복 없음.
         if (outcome.status() == VerificationStatus.FAILED) {
-            eventPublisher.publishEvent(new RoutineFailureConfirmed(
-                    member.getChallengeId(), member.getUserId(), today, now));
+            // 제약형 위반 등 sync 시점 실패(§8.7). 그룹은 잠정 실패(3일 이의 제기 창), 솔로는 즉시 확정.
+            if (challenge != null && challenge.isGroup()) {
+                daily.recordProvisionalFailure(method.name(), outcome.failureReason(),
+                        now.plus(VerificationDaily.OBJECTION_WINDOW_DAYS, ChronoUnit.DAYS));   // 온도 미반영, 이벤트 없음(확정 아님)
+            } else {
+                daily.recordResult(VerificationStatus.FAILED, null, outcome.failureReason(), now);
+                // 솔로 즉시 확정 → 감시자 통지 적재(§9). 다음 sync는 line 126에서 스킵되어 중복 없음.
+                eventPublisher.publishEvent(new RoutineFailureConfirmed(
+                        member.getChallengeId(), member.getUserId(), today, now));
+            }
+        } else {
+            String contributing = (outcome.status() == VerificationStatus.SUCCESS) ? method.name() : null;
+            Instant verifiedAt = (outcome.status() == VerificationStatus.SUCCESS) ? now : null;
+            daily.recordResult(outcome.status(), contributing, outcome.failureReason(), verifiedAt);
+            if (config.isFrequency() && outcome.status() == VerificationStatus.SUCCESS) {
+                member.incrementPeriodCompleted();   // 빈도형: 주기 완료 +1 (미잠금 상태에서 첫 SUCCESS 전이 1회)
+            }
         }
-        return outcome.status();
+        // 캐시(todayStatus)에는 실제 저장 상태를 반영(그룹 잠정 실패는 FAILED_PROVISIONAL).
+        return daily.getStatus();
     }
 
     private enum Disposition { NOT_TARGET, NOT_REQUIRED, EVALUATE }

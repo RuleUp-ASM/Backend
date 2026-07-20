@@ -11,6 +11,7 @@ import com.ruleup.ruleup_backend.verification.domain.*;
 import com.ruleup.ruleup_backend.verification.dto.ChallengeProgress;
 import com.ruleup.ruleup_backend.verification.dto.VerificationDetailResponse;
 import com.ruleup.ruleup_backend.verification.dto.VerificationDetailResponse.*;
+import com.ruleup.ruleup_backend.verification.repository.ObjectionRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationMethodResultRepository;
 import lombok.RequiredArgsConstructor;
@@ -35,6 +36,7 @@ public class VerificationReadService {
     private final ChallengeQueryService challengeQuery;
     private final VerificationDailyRepository dailyRepo;
     private final VerificationMethodResultRepository methodResultRepo;
+    private final ObjectionRepository objectionRepo;
     private final VerificationConfigFactory configFactory;
 
     // ===== §3.2 진행률 일괄 =====
@@ -116,14 +118,28 @@ public class VerificationReadService {
                              VerificationDaily daily, List<VerificationMethodResult> results) {
         boolean isTarget = isTodayTarget(config, ch, m, today);
         if (daily == null) {
-            return new Today(isTarget, isTarget ? "PENDING" : "NOT_TARGET", null, null, null, null, null, null);
+            return new Today(isTarget, isTarget ? "PENDING" : "NOT_TARGET", null, null, null, null, null, null, null);
         }
         var evidence = results.isEmpty() ? null : results.get(0).getEvidence();
         return new Today(isTarget, daily.getStatus().name(),
                 str(daily.getWindowClosesAt()), str(daily.getVerifiedAt()),
                 daily.getVerifiedVia() != null ? daily.getVerifiedVia().name() : null,
                 str(daily.getDisputeClosesAt()),
-                daily.getFailureReason(), evidence);
+                daily.getFailureReason(), evidence,
+                buildObjection(ch, m, daily));
+    }
+
+    /** 잠정 실패(그룹)일 때만 이의 제기 객체를 구성. 솔로는 잠정 단계가 없어 null. */
+    private VerificationDetailResponse.Objection buildObjection(Challenge ch, ChallengeMember m, VerificationDaily daily) {
+        if (!ch.isGroup() || !daily.isProvisionalFailure()) return null;
+        var existing = objectionRepo.findByChallengeMemberIdAndTargetDate(m.getId(), daily.getTargetDate())
+                .orElse(null);
+        boolean windowOpen = daily.getDisputeClosesAt() != null
+                && java.time.Instant.now().isBefore(daily.getDisputeClosesAt());
+        boolean available = windowOpen && existing == null;   // 창 열림 + 미제출이면 제기 가능
+        return new VerificationDetailResponse.Objection(
+                available, str(daily.getDisputeClosesAt()),
+                existing != null ? existing.getId().toString() : null);
     }
 
     private boolean isTodayTarget(VerificationConfig config, Challenge ch, ChallengeMember m, LocalDate today) {

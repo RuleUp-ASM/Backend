@@ -114,12 +114,22 @@ public enum ErrorCode {
     NOT_CHALLENGE_MEMBER(HttpStatus.FORBIDDEN, "챌린지 참여자만 접근할 수 있습니다."),
     ALREADY_VERIFIED(HttpStatus.CONFLICT, "이미 인증된 날짜입니다."),
 
-    // ===== 예비 폴백 방장 승인 (§9.2 / API: .../verifications/{id}/approval) =====
+    // ===== 폴백 승인 / 이의 제기 처리 (§8.7 / §10.2 — OWNER/MANAGER) =====
     VERIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "인증 제출을 찾을 수 없습니다."),
     ALREADY_DECIDED(HttpStatus.CONFLICT, "이미 승인/거절된 제출입니다."),
     NOT_PENDING_APPROVAL(HttpStatus.CONFLICT, "승인 대상(예비 폴백)이 아닙니다."),
     INVALID_TARGET_DATE(HttpStatus.BAD_REQUEST, "유효하지 않은 대상 날짜입니다."),
     IMAGE_REQUIRED(HttpStatus.BAD_REQUEST, "사진 인증은 이미지가 필요합니다."),
+    CONTENT_REQUIRED(HttpStatus.BAD_REQUEST, "글 내용을 입력해주세요."),
+    NOT_CHALLENGE_ADMIN(HttpStatus.FORBIDDEN, "방장 또는 공동 관리자만 처리할 수 있습니다."),
+    INVALID_DECISION(HttpStatus.BAD_REQUEST, "유효하지 않은 처리 동작입니다. (APPROVE / REJECT)"),
+    VERIFICATION_WINDOW_CLOSED(HttpStatus.CONFLICT, "제출 기한이 지났습니다."),
+    // 이의 제기(§8.7)
+    OBJECTION_NOT_FOUND(HttpStatus.NOT_FOUND, "이의 제기를 찾을 수 없습니다."),
+    OBJECTION_WINDOW_CLOSED(HttpStatus.CONFLICT, "이의 제기 창(3일)이 지났습니다."),
+    NOT_OBJECTIONABLE(HttpStatus.CONFLICT, "이의 제기할 수 없는 상태입니다(잠정 실패가 아니거나 솔로 챌린지)."),
+    ALREADY_OBJECTED(HttpStatus.CONFLICT, "이미 이의 제기한 날짜입니다."),
+    UNSUPPORTED_OBJECTION_TYPE(HttpStatus.BAD_REQUEST, "지원하지 않는 이의 제기 유형입니다. (FAILURE만 지원)"),
 
     // ===== 인증 v2 — 예비 폴백 / 셋업 / 내 위치 / 장소 검색 (§9·§11) =====
     FALLBACK_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "예비 수동 인증은 주 1회만 사용할 수 있습니다."),

@@ -26,14 +26,18 @@ public record VerificationDetailResponse(
 
     public record Today(
             boolean isTarget,
-            String status,
+            String status,             // SUCCESS / PENDING / FAILED_PROVISIONAL / FAILED / NOT_TARGET / NOT_REQUIRED
             String windowClosesAt,
             String verifiedAt,
-            String verifiedVia,        // AUTO / MANUAL / MANUAL_FALLBACK (§11.3)
-            String disputeClosesAt,    // 예비 폴백 이의 윈도우 종료(잠정성공 중)
+            String verifiedVia,        // AUTO / MANUAL / MANUAL_FALLBACK / OBJECTION
+            String disputeClosesAt,    // 이의 제기 창 마감(잠정 실패 중)
             String failureReason,
-            Map<String, Object> evidence
+            Map<String, Object> evidence,
+            Objection objection        // FAILED_PROVISIONAL 일 때만. 솔로는 항상 null
     ) {}
+
+    /** 이의 제기 가능 여부·마감·기제출 ID(§8.7). status=FAILED_PROVISIONAL 일 때만 채워진다. */
+    public record Objection(boolean available, String deadline, String objectionId) {}
 
     public record MethodEval(
             String method,

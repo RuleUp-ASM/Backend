@@ -293,15 +293,16 @@ public class ChallengeMember extends AssignedIdEntity {
     }
 
     /**
-     * 예비 폴백 한도 소진 시도(주1회·롤링 7일, §9.2). 윈도우가 만료됐으면 리셋 후 1회 허용.
+     * 예비 폴백 한도 소진 시도(월 N회·달력 월, §10.2). 달이 바뀌면 리셋 후 허용.
      * @return true=사용 허용(카운터 반영됨) / false=한도 초과
      */
-    public boolean tryUseFallback(LocalDate today, int weeklyLimit) {
-        if (fallbackUsedPeriodStart == null || !today.isBefore(fallbackUsedPeriodStart.plusDays(7))) {
-            this.fallbackUsedPeriodStart = today;     // 새 7일 윈도우 개시
+    public boolean tryUseFallback(LocalDate today, int monthlyLimit) {
+        LocalDate monthStart = today.withDayOfMonth(1);
+        if (fallbackUsedPeriodStart == null || !fallbackUsedPeriodStart.equals(monthStart)) {
+            this.fallbackUsedPeriodStart = monthStart;   // 새 달 윈도우 개시
             this.fallbackUsedCount = 0;
         }
-        if (fallbackUsedCount >= weeklyLimit) return false;
+        if (fallbackUsedCount >= monthlyLimit) return false;
         this.fallbackUsedCount++;
         return true;
     }
