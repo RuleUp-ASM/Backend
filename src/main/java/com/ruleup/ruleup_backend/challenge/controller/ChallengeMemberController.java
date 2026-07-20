@@ -1,6 +1,7 @@
 package com.ruleup.ruleup_backend.challenge.controller;
 
 import com.ruleup.ruleup_backend.challenge.dto.JoinResponse;
+import com.ruleup.ruleup_backend.challenge.dto.LeaveResponse;
 import com.ruleup.ruleup_backend.challenge.dto.MemberListResponse;
 import com.ruleup.ruleup_backend.challenge.dto.RoleChangeRequest;
 import com.ruleup.ruleup_backend.challenge.dto.RoleChangeResponse;
@@ -43,6 +44,14 @@ public class ChallengeMemberController {
                                                        @PathVariable String challengeId) {
         return ApiResponse.ok(memberService.listMembers(
                 UUID.fromString(userId), UUID.fromString(challengeId)));
+    }
+
+    @Operation(summary = "챌린지 탈퇴",
+            description = "본인 탈퇴. 본인 success 이력 있으면 패널티 트리거. OWNER 불가(참여자 있으면 위임, 없으면 삭제). 탈퇴 후 재참여 영구 불가.")
+    @DeleteMapping("/me")
+    public ApiResponse<LeaveResponse> leave(@AuthenticationPrincipal String userId,
+                                            @PathVariable String challengeId) {
+        return ApiResponse.ok(memberService.leave(UUID.fromString(userId), UUID.fromString(challengeId)));
     }
 
     @Operation(summary = "공동 관리자 임명/해제",

@@ -2,6 +2,7 @@ package com.ruleup.ruleup_backend.challenge.service;
 
 import com.ruleup.ruleup_backend.challenge.domain.*;
 import com.ruleup.ruleup_backend.challenge.dto.JoinResponse;
+import com.ruleup.ruleup_backend.challenge.dto.LeaveResponse;
 import com.ruleup.ruleup_backend.challenge.dto.MemberListResponse;
 import com.ruleup.ruleup_backend.challenge.dto.RoleChangeResponse;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
@@ -9,7 +10,9 @@ import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.verification.SetupStatus;
+import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
 import com.ruleup.ruleup_backend.reputation.domain.ReputationScore;
+import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
 import com.ruleup.ruleup_backend.reputation.ReputationScoreRepository;
 import com.ruleup.ruleup_backend.user.domain.User;
 import com.ruleup.ruleup_backend.user.UserRepository;
@@ -38,6 +41,7 @@ public class ChallengeMemberService {
     private final ChallengeMemberRepository memberRepository;
     private final UserRepository userRepository;
     private final ReputationScoreRepository reputationScoreRepository;
+    private final VerificationDailyRepository verificationDailyRepository;
 
     // ===== §5 가입 =====
     /**
@@ -86,6 +90,41 @@ public class ChallengeMemberService {
         }
         challengeRepository.incrementParticipantCount(challengeId);
         return joinResponse(c, MemberStatus.ACTIVE, joined.getSetupStatus());
+    }
+
+    // ===== §6 탈퇴 =====
+    /**
+     * 챌린지 탈퇴(본인). 패널티는 본인 success 이력 유무로 판정(있으면 트리거, 실제 가감은 매너 온도 스펙 소관).
+     * 탈퇴 후 해당 챌린지 재참여 영구 불가(uq_member — LEFT 행 유지).
+     *  - 종료된 챌린지: CHALLENGE_COMPLETED
+     *  - OWNER: 탈퇴 불가. 참여자(본인 제외)가 있으면 DELEGATE_FIRST, 없으면 DELETE_INSTEAD 사유로 안내.
+     */
+    @Transactional
+    public LeaveResponse leave(UUID userId, UUID challengeId) {
+        Challenge c = challengeRepository.findByIdForUpdate(challengeId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
+
+        if (c.getStatus() == ChallengeStatus.COMPLETED)
+            throw new BusinessException(ErrorCode.CHALLENGE_COMPLETED);
+
+        ChallengeMember me = memberRepository.findByChallengeIdAndUserId(challengeId, userId)
+                .filter(ChallengeMember::isActive)
+                .orElseThrow(() -> new BusinessException(ErrorCode.MEMBER_NOT_FOUND));
+
+        // 방장은 탈퇴 불가 — 참여자(본인 제외)가 있으면 위임 후, 없으면 삭제로 안내.
+        if (me.isOwner()) {
+            long others = memberRepository.countByChallengeIdAndStatus(challengeId, MemberStatus.ACTIVE) - 1;
+            String reason = (others >= 1) ? "DELEGATE_FIRST" : "DELETE_INSTEAD";
+            throw new BusinessException(ErrorCode.OWNER_CANNOT_LEAVE, reason);
+        }
+
+        // 본인 success 이력 유무로 패널티 트리거 판정(이미 반영된 미인증 패널티는 그대로 유지).
+        boolean penaltyApplied = verificationDailyRepository
+                .countByChallengeMemberIdAndStatus(me.getId(), VerificationStatus.SUCCESS) > 0;
+
+        me.leave();   // ACTIVE → LEFT (dirty checking). 행은 남겨 재참여 금지.
+        challengeRepository.decrementParticipantCount(challengeId);
+        return new LeaveResponse(penaltyApplied);
     }
 
     /** 가입 응답 조립: 멤버 상태 + 셋업 상태 + 인증 스냅샷(필요 권한·방식). */

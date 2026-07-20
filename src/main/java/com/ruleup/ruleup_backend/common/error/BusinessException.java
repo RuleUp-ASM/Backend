@@ -11,9 +11,16 @@ import lombok.Getter;
 public class BusinessException extends RuntimeException {
 
     private final ErrorCode errorCode;
+    /** 선택: 클라이언트 분기용 사유(예: OWNER_CANNOT_LEAVE → DELEGATE_FIRST/DELETE_INSTEAD). 없으면 null. */
+    private final String detail;
 
     public BusinessException(ErrorCode errorCode) {
+        this(errorCode, null);
+    }
+
+    public BusinessException(ErrorCode errorCode, String detail) {
         super(errorCode.getMessage());
         this.errorCode = errorCode;
+        this.detail = detail;
     }
 }
