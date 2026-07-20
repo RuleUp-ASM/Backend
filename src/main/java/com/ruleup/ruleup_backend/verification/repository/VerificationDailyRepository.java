@@ -29,6 +29,10 @@ public interface VerificationDailyRepository extends JpaRepository<VerificationD
     /** 상세 화면 최근 로그(§3.3 dailyLogs). */
     List<VerificationDaily> findByChallengeMemberIdOrderByTargetDateDesc(UUID challengeMemberId);
 
+    /** 처리 대기함(pending-reviews): 챌린지의 승인 대기 폴백 제출. */
+    List<VerificationDaily> findByChallengeIdAndFallbackApprovalStatus(
+            UUID challengeId, com.ruleup.ruleup_backend.verification.domain.FallbackApprovalStatus status);
+
     /** 확정 배치: 유예까지 끝나 이제 잠가도 되는 PENDING 행(§2.14). */
     List<VerificationDaily> findByStatusAndFinalizeAfterLessThanEqual(VerificationStatus status, Instant now);
 

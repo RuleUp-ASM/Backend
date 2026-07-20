@@ -11,6 +11,7 @@ import com.ruleup.ruleup_backend.verification.dto.ObjectionDecisionRequest;
 import com.ruleup.ruleup_backend.verification.dto.ObjectionDecisionResponse;
 import com.ruleup.ruleup_backend.verification.dto.ObjectionResponse;
 import com.ruleup.ruleup_backend.verification.dto.ObjectionSubmitRequest;
+import com.ruleup.ruleup_backend.verification.dto.PendingReviewsResponse;
 import com.ruleup.ruleup_backend.verification.dto.ScreenAppsResponse;
 import com.ruleup.ruleup_backend.verification.dto.ScreenAppsUpdateRequest;
 import com.ruleup.ruleup_backend.verification.dto.ScreenAppsUpdateResponse;
@@ -19,6 +20,7 @@ import com.ruleup.ruleup_backend.verification.dto.SetupRequirementResponse;
 import com.ruleup.ruleup_backend.verification.dto.SetupResponse;
 import com.ruleup.ruleup_backend.verification.dto.VerificationDetailResponse;
 import com.ruleup.ruleup_backend.verification.service.ObjectionService;
+import com.ruleup.ruleup_backend.verification.service.PendingReviewsService;
 import com.ruleup.ruleup_backend.verification.service.VerificationApprovalService;
 import com.ruleup.ruleup_backend.verification.service.VerificationManualService;
 import com.ruleup.ruleup_backend.verification.service.VerificationReadService;
@@ -45,6 +47,7 @@ public class VerificationChallengeController {
     private final VerificationApprovalService approvalService;
     private final VerificationSetupService setupService;
     private final ObjectionService objectionService;
+    private final PendingReviewsService pendingReviewsService;
 
     @Operation(summary = "챌린지 인증 여부 판단(§3.3)",
             description = "검증 결과/실패 화면용. 진행 요약·오늘 상태·실패 사유·방식별 마지막 평가·최근 로그. 참여 멤버만.")
@@ -95,6 +98,14 @@ public class VerificationChallengeController {
                                                                   @RequestBody ObjectionDecisionRequest request) {
         return ApiResponse.ok(objectionService.decide(
                 UUID.fromString(userId), challengeId, objectionId, request));
+    }
+
+    @Operation(summary = "처리 대기함 조회(pending-reviews)",
+            description = "방장/공동 관리자용. 폴백 수동 인증(PENDING_APPROVAL)과 이의 제기(PENDING)를 통합 목록으로. kind별 처리 API 분기.")
+    @GetMapping("/{challengeId}/pending-reviews")
+    public ApiResponse<PendingReviewsResponse> pendingReviews(@AuthenticationPrincipal String userId,
+                                                              @PathVariable UUID challengeId) {
+        return ApiResponse.ok(pendingReviewsService.list(UUID.fromString(userId), challengeId));
     }
 
     @Operation(summary = "최초 진입 셋업 요구사항 조회(§11.4)",
