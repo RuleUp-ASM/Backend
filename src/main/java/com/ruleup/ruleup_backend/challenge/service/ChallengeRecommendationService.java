@@ -9,6 +9,8 @@ import com.ruleup.ruleup_backend.challenge.dto.ChallengeRecommendationResponse;
 import com.ruleup.ruleup_backend.challenge.recommendation.ChallengeDraftClient;
 import com.ruleup.ruleup_backend.challenge.recommendation.ChallengeDraftSuggestion;
 import com.ruleup.ruleup_backend.challenge.recommendation.ChallengeSettings;
+import com.ruleup.ruleup_backend.reputation.ReputationScoreRepository;
+import com.ruleup.ruleup_backend.reputation.domain.ReputationScore;
 import com.ruleup.ruleup_backend.routine.dto.RoutineRecommendationRequest;
 import com.ruleup.ruleup_backend.routine.dto.RoutineRecommendationResponse;
 import com.ruleup.ruleup_backend.routine.service.RoutineRecommendationService;
@@ -18,6 +20,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * 챌린지 추천 = "전체 초안 만들기".
@@ -35,6 +38,7 @@ public class ChallengeRecommendationService {
 
     private final RoutineRecommendationService routineRecommendationService;
     private final ChallengeDraftClient draftClient;
+    private final ReputationScoreRepository reputationScoreRepository;
 
     // ===== 폴백 기본값 (LLM 실패/이상값일 때) =====
     private static final ParticipationType DEFAULT_PARTICIPATION = ParticipationType.SOLO;
@@ -42,16 +46,22 @@ public class ChallengeRecommendationService {
             List.of("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN");   // 매일
     private static final int DEFAULT_DURATION_DAYS = 14;
     private static final int START_OFFSET_DAYS = 1;                     // 내일 시작(서버 고정)
+    private static final int DEFAULT_MAX_PARTICIPANTS = 10;             // 그룹 선택 시 초안 정원(수정 가능)
     private static final BigDecimal DEFAULT_MANNER_DEDUCTION = new BigDecimal("1.0");
     private static final BigDecimal DEFAULT_MANNER_GAIN = new BigDecimal("1.0");
 
-    public ChallengeRecommendationResponse recommend(RoutineRecommendationRequest req) {
+    public ChallengeRecommendationResponse recommend(UUID userId, RoutineRecommendationRequest req) {
         // 입력 검증을 LLM 호출보다 먼저(잘못된 요청에 토큰/지연 낭비 안 하도록)
         routineRecommendationService.validate(req);
 
-        // 루틴 매칭 + 챌린지 설정 — LLM 한 번만 호출(실패 시 empty → 전부 폴백)
+        // 루틴 매칭 + 챌린지 설정 — LLM 한 번만 호출.
+        //  - blocked(Step1·2 차단) → fallback:true (클라 최초 화면 복귀)
+        //  - empty(LLM 장애)      → 기본 템플릿으로 초안 제공
         ChallengeDraftSuggestion draft = draftClient.suggest(
                 req.title(), req.description(), routineRecommendationService.candidates());
+        if (draft.blocked()) {
+            return ChallengeRecommendationResponse.blocked();
+        }
 
         // 매칭분은 RoutineRecommendationService 가 카탈로그/스키마로 검증해 응답을 만든다(LLM 재호출 없음)
         RoutineRecommendationResponse routine =
@@ -67,6 +77,7 @@ public class ChallengeRecommendationService {
         LocalDate end = start.plusDays((long) DEFAULT_DURATION_DAYS - 1);
 
         return new ChallengeRecommendationResponse(
+                false,
                 routine.matched(),
                 routine.templateId(),
                 routine.title(),
@@ -78,6 +89,8 @@ public class ChallengeRecommendationService {
                 routine.rationale(),
                 participation,
                 null,                       // minMannerTemperature: 그룹 선택 시 클라에서 설정
+                ownerTemp(userId),          // maxMannerTemperature: 기준 온도 상한(= 생성자 현재 온도)
+                DEFAULT_MAX_PARTICIPANTS,
                 repeatDays,
                 DEFAULT_DURATION_DAYS,
                 start.toString(),
@@ -85,6 +98,12 @@ public class ChallengeRecommendationService {
                 new PenaltyConfig(DEFAULT_MANNER_DEDUCTION, new PenaltyConfig.SnsShare(false, null), false),
                 new RewardConfig(DEFAULT_MANNER_GAIN),
                 Anonymity.REAL.name());        // 초안 기본은 실명(§11.2 — 응답 누락 금지)
+    }
+
+    private BigDecimal ownerTemp(UUID userId) {
+        return reputationScoreRepository.findById(userId)
+                .map(ReputationScore::getMannerTemperature)
+                .orElse(ReputationScore.INITIAL_TEMPERATURE);
     }
 
     // ===== LLM 값 검증·폴백 (신뢰 경계) =====
@@ -105,14 +124,15 @@ public class ChallengeRecommendationService {
     }
 
     /** 추천 선택 경로(Path A): templateId로 챌린지 초안 구성. LLM(루틴매칭·설정제안) 둘 다 우회 — 설정은 정적 기본값. */
-    public ChallengeRecommendationResponse recommendByTemplate(Long templateId, String title, String description) {
+    public ChallengeRecommendationResponse recommendByTemplate(UUID userId, Long templateId, String title, String description) {
         RoutineRecommendationResponse routine = routineRecommendationService.recommendByTemplate(templateId, title);
         LocalDate start = LocalDate.now().plusDays(START_OFFSET_DAYS);
         LocalDate end = start.plusDays((long) DEFAULT_DURATION_DAYS - 1);
         return new ChallengeRecommendationResponse(
-                routine.matched(), routine.templateId(), routine.title(), description, routine.category(),
+                false, routine.matched(), routine.templateId(), routine.title(), description, routine.category(),
                 routine.recommendedMethod(), routine.options(), routine.params(), routine.rationale(),
-                DEFAULT_PARTICIPATION.name(), null, DEFAULT_REPEAT_DAYS, DEFAULT_DURATION_DAYS,
+                DEFAULT_PARTICIPATION.name(), null, ownerTemp(userId), DEFAULT_MAX_PARTICIPANTS,
+                DEFAULT_REPEAT_DAYS, DEFAULT_DURATION_DAYS,
                 start.toString(), end.toString(),
                 new PenaltyConfig(DEFAULT_MANNER_DEDUCTION, new PenaltyConfig.SnsShare(false, null), false),
                 new RewardConfig(DEFAULT_MANNER_GAIN),

@@ -46,32 +46,33 @@ public class GeminiChallengeDraftClient implements ChallengeDraftClient {
 
     @Override
     public ChallengeDraftSuggestion suggest(String title, String description, List<RoutineCandidate> candidates) {
-        // [0] 잘못된 입력 빠른 감지 — 명백한 쓰레기 입력은 LLM 호출 전에 걸러 토큰·지연을 아낀다.
+        // [Step1] 입력 적합성 사전검사 — 명백히 부적합한 입력은 LLM 호출 전에 차단(fallback:true).
         if (isObviouslyInvalid(title)) {
-            log.debug("챌린지 초안 제안: 로컬 사전검사에서 무효 입력 감지 → LLM 우회, 폴백");
-            return ChallengeDraftSuggestion.empty();
+            log.debug("챌린지 초안 제안: 로컬 사전검사에서 무효 입력 감지 → Step1 차단(fallback)");
+            return ChallengeDraftSuggestion.block();
         }
 
         String content = llm.generateText(buildPrompt(title, description, candidates));
         if (content == null) {
-            log.debug("챌린지 초안 제안: LLM 응답 없음 → 폴백 (후보 {}개)", candidates.size());
+            log.debug("챌린지 초안 제안: LLM 응답 없음 → 기본 템플릿 폴백 (후보 {}개)", candidates.size());
             return ChallengeDraftSuggestion.empty();
         }
         Draft d = llm.parseJson(content, Draft.class);
         if (d == null) {
-            log.debug("챌린지 초안 제안: JSON 파싱 실패 → 폴백");
+            log.debug("챌린지 초안 제안: JSON 파싱 실패 → 기본 템플릿 폴백");
             return ChallengeDraftSuggestion.empty();
         }
-        // [1-단계 결과] LLM 이 스스로 "습관 챌린지로 부적합"이라 판단(usable=false)하면 초안을 만들지 않고 폴백.
+        // [Step1·2] LLM 이 부적합/유해 입력으로 판정(usable=false)하면 초안을 만들지 않고 차단(fallback:true).
         if (Boolean.FALSE.equals(d.usable())) {
-            log.debug("챌린지 초안 제안: LLM 이 부적합 입력으로 판정(reason={}) → 폴백", d.rejectReason());
-            return ChallengeDraftSuggestion.empty();
+            log.debug("챌린지 초안 제안: LLM 이 부적합 입력으로 판정(reason={}) → Step1·2 차단(fallback)", d.rejectReason());
+            return ChallengeDraftSuggestion.block();
         }
         log.debug("챌린지 초안 제안: templateId={} participationType={}",
                 d.templateId(), d.participationType());
         return new ChallengeDraftSuggestion(
                 new RoutineMatch(d.templateId(), toParamsMap(d.params())),
-                new ChallengeSettings(d.participationType(), d.repeatDays()));
+                new ChallengeSettings(d.participationType(), d.repeatDays()),
+                false);
     }
 
     /** LLM 이 key/value 배열로 준 목표값을 서버가 쓰는 Map 으로 변환(값은 문자열 그대로, 검증은 ParamSpec). */

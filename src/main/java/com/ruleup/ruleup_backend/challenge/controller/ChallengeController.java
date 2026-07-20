@@ -15,6 +15,7 @@ import org.springframework.web.multipart.MultipartFile;
 import com.ruleup.ruleup_backend.common.image.UploadRateLimiter;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeRecommendationService;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeImageService;
+import com.ruleup.ruleup_backend.challenge.recommendation.RecommendationRateLimiter;
 
 import java.util.UUID;
 
@@ -29,12 +30,15 @@ public class ChallengeController {
     private final ChallengeService challengeService;
     private final ChallengeImageService challengeImageService;
     private final UploadRateLimiter uploadRateLimiter;
+    private final RecommendationRateLimiter recommendationRateLimiter;
 
-    @Operation(summary = "챌린지 추천", description = "제목/설명을 루틴 템플릿과 매칭해 인증·목표값을 추천하고, "
-            + "참여방식·일정·패널티·보상 기본값까지 얹어 전체 챌린지 초안을 돌려준다(저장 X). 권한은 보지 않는다.")
+    @Operation(summary = "챌린지 추천(LLM)", description = "Step0 rate limit(1분 10회, 초과 시 429). Step1·2 차단 시 fallback:true. "
+            + "제목/설명을 루틴 템플릿과 매칭해 전체 챌린지 초안을 돌려준다(저장 X). maxMannerTemperature=생성자 온도 상한.")
     @PostMapping("/recommendation")
-    public ApiResponse<ChallengeRecommendationResponse> recommend(@RequestBody RoutineRecommendationRequest request) {
-        return ApiResponse.ok(challengeRecommendationService.recommend(request));
+    public ApiResponse<ChallengeRecommendationResponse> recommend(@AuthenticationPrincipal String userId,
+                                                                  @RequestBody RoutineRecommendationRequest request) {
+        recommendationRateLimiter.check(userId);   // Step0: 사용자당 1분 10회
+        return ApiResponse.ok(challengeRecommendationService.recommend(UUID.fromString(userId), request));
     }
 
     @Operation(summary = "챌린지 생성", description = "추천을 수정·확정한 최종값으로 생성. UPCOMING으로 저장하고 생성자를 OWNER로 등록.")
@@ -88,8 +92,9 @@ public class ChallengeController {
 
     @Operation(summary = "추천 선택 → 초안(LLM 우회)", description = "추천 버튼에서 고른 templateId로 챌린지 초안을 바로 구성. LLM 안 거침.")
     @PostMapping("/recommendation/by-template")
-    public ApiResponse<ChallengeRecommendationResponse> recommendByTemplate(@RequestBody TemplateRecommendationRequest request) {
+    public ApiResponse<ChallengeRecommendationResponse> recommendByTemplate(@AuthenticationPrincipal String userId,
+                                                                            @RequestBody TemplateRecommendationRequest request) {
         return ApiResponse.ok(challengeRecommendationService.recommendByTemplate(
-                request.templateId(), request.title(), request.description()));
+                UUID.fromString(userId), request.templateId(), request.title(), request.description()));
     }
 }

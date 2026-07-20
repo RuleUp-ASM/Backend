@@ -12,11 +12,20 @@ import com.ruleup.ruleup_backend.routine.match.RoutineMatch;
  */
 public record ChallengeDraftSuggestion(
         RoutineMatch match,
-        ChallengeSettings settings
+        ChallengeSettings settings,
+        boolean blocked
 ) {
-    /** LLM 실패/무응답 시. 매칭은 none, 설정은 empty → 서버가 전부 폴백. */
+    /** LLM 실패/무응답 시. 매칭은 none, 설정은 empty → 서버가 전부 폴백(기본 템플릿으로 초안 제공). */
     public static ChallengeDraftSuggestion empty() {
-        return new ChallengeDraftSuggestion(RoutineMatch.none(), ChallengeSettings.empty());
+        return new ChallengeDraftSuggestion(RoutineMatch.none(), ChallengeSettings.empty(), false);
+    }
+
+    /**
+     * Step1(입력 적합성)·Step2(콘텐츠 검수) 차단. 초안을 만들지 않고 클라를 최초 생성 화면으로 되돌린다(fallback:true).
+     * empty()(=LLM 장애 시 기본 템플릿 제공)와 구분된다.
+     */
+    public static ChallengeDraftSuggestion block() {
+        return new ChallengeDraftSuggestion(RoutineMatch.none(), ChallengeSettings.empty(), true);
     }
 
     public RoutineMatch matchOrNone() {

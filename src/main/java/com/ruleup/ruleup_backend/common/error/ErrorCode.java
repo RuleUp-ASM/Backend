@@ -93,6 +93,7 @@ public enum ErrorCode {
     INVALID_DELEGATION_ACTION(HttpStatus.BAD_REQUEST, "유효하지 않은 위임 동작입니다. (ACCEPT / REJECT / CANCEL)"),
 
     // ===== 루틴 - 추천/생성 (제목→템플릿 매칭→인증방식 선택) =====
+    RECOMMENDATION_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "추천 요청이 너무 잦습니다. 잠시 후 다시 시도해주세요."),
     ROUTINE_TITLE_REQUIRED(HttpStatus.BAD_REQUEST, "루틴 제목을 입력해주세요."),
     ROUTINE_TITLE_TOO_LONG(HttpStatus.BAD_REQUEST, "루틴 제목은 100자를 초과할 수 없습니다."),
     ROUTINE_DESCRIPTION_TOO_LONG(HttpStatus.BAD_REQUEST, "루틴 설명은 255자를 초과할 수 없습니다."),
