@@ -32,8 +32,9 @@ public class Challenge extends AssignedIdEntity {
     @Column(name = "id", nullable = false, updatable = false)
     private UUID id;
 
+    // 방장(OWNER) 식별자. 위임(§7-2)으로 바뀔 수 있어 updatable(자동 언박싱 아님).
     @JdbcTypeCode(SqlTypes.BINARY)
-    @Column(name = "creatorId", nullable = false, updatable = false)
+    @Column(name = "creatorId", nullable = false)
     private UUID creatorId;
 
     @Column(name = "title", nullable = false, length = 30)
@@ -269,6 +270,9 @@ public class Challenge extends AssignedIdEntity {
             this.endDate = deriveEndDate(this.startDate, this.durationDays);
         }
     }
+
+    /** 방장 위임 성립(§7-2): creatorId(=OWNER 식별자)를 새 방장으로 교체. 멤버 role swap은 호출부가 함께 수행. */
+    public void transferOwnership(UUID newOwnerUserId) { this.creatorId = newOwnerUserId; }
 
     public void increaseParticipantCount() { this.participantCount++; }
     public void decreaseParticipantCount() { if (this.participantCount > 0) this.participantCount--; }
