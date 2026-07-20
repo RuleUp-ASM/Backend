@@ -29,6 +29,9 @@ import java.util.UUID;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class VerificationDaily extends AssignedIdEntity {
 
+    /** 이의 제기 창 길이(잠정 실패 전환 시점부터, §8.7). */
+    public static final int OBJECTION_WINDOW_DAYS = 3;
+
     @Id
     @JdbcTypeCode(SqlTypes.BINARY)
     @Column(name = "id", nullable = false, updatable = false)

@@ -44,6 +44,15 @@ public interface VerificationDailyRepository extends JpaRepository<VerificationD
     List<VerificationDaily> findDuePendingForUpdate(@Param("now") Instant now, @Param("limit") int limit);
 
     /**
+     * 잠정 실패 확정 배치(§8.7): 이의 제기 창(disputeClosesAt)이 지난 FAILED_PROVISIONAL 행을 선점.
+     * 처리(pending) 중인 이의 제기가 있으면 배치가 건너뛰어 확정을 보류한다(호출부에서 재확인).
+     */
+    @Query(value = "SELECT * FROM VerificationDaily " +
+            "WHERE status = 'FAILED_PROVISIONAL' AND disputeClosesAt IS NOT NULL AND disputeClosesAt <= :now " +
+            "ORDER BY disputeClosesAt LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
+    List<VerificationDaily> findProvisionalDueForLockForUpdate(@Param("now") Instant now, @Param("limit") int limit);
+
+    /**
      * 추천 아웃컴 수집(RoutineOutcomeCollector): 확정 시각이 워터마크 이후인 종결(SUCCESS/FAILED) 행.
      * verifiedAt 오름차순 → 페이지 상한(Pageable)으로 한 배치 처리량을 제한한다.
      */
