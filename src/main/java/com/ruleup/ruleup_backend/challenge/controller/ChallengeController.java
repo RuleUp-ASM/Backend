@@ -37,7 +37,7 @@ public class ChallengeController {
         return ApiResponse.ok(challengeRecommendationService.recommend(request));
     }
 
-    @Operation(summary = "챌린지 생성", description = "추천을 수정·확정한 최종값으로 생성. RECRUITING으로 저장하고 생성자를 OWNER로 등록.")
+    @Operation(summary = "챌린지 생성", description = "추천을 수정·확정한 최종값으로 생성. UPCOMING으로 저장하고 생성자를 OWNER로 등록.")
     @PostMapping
     public ApiResponse<ChallengeResponse> create(@AuthenticationPrincipal String userId,
                                                  @RequestBody CreateChallengeRequest request) {
@@ -56,12 +56,10 @@ public class ChallengeController {
     }
 
     @Operation(summary = "내 챌린지 목록", description = "내가 참여 중인 챌린지 목록(멤버십 기준, 페이지네이션 없음). "
-            + "scope=ACTIVE(기본, 실제 참여 중)/ALL(승인 대기 PENDING 포함). 소프트 삭제 제외.")
+            + "승인제 폐기로 항상 확정 멤버십만. 항목마다 myRole 포함.")
     @GetMapping
-    public ApiResponse<ChallengeListResponse> myChallenges(
-            @AuthenticationPrincipal String userId,
-            @RequestParam(defaultValue = "ACTIVE") String scope) {
-        return ApiResponse.ok(challengeService.myChallenges(UUID.fromString(userId), scope));
+    public ApiResponse<ChallengeListResponse> myChallenges(@AuthenticationPrincipal String userId) {
+        return ApiResponse.ok(challengeService.myChallenges(UUID.fromString(userId)));
     }
 
     @Operation(summary = "챌린지 상세 + 참여 자격")
@@ -71,7 +69,7 @@ public class ChallengeController {
         return ApiResponse.ok(challengeService.getDetail(UUID.fromString(userId), UUID.fromString(challengeId)));
     }
 
-    @Operation(summary = "챌린지 수정", description = "시작 전(RECRUITING), 생성자만. 변경 필드만 보냄. 일정 변경 시 endDate 재파생.")
+    @Operation(summary = "챌린지 수정", description = "OWNER만. UPCOMING+멤버0명=전항목/그외=maxParticipants만. 변경 필드만 보냄.")
     @PatchMapping("/{challengeId}")
     public ApiResponse<ChallengeResponse> update(@AuthenticationPrincipal String userId,
                                                  @PathVariable String challengeId,
@@ -80,8 +78,8 @@ public class ChallengeController {
     }
 
     @Operation(summary = "챌린지 삭제",
-            description = "생성자만, 소프트 삭제. §5.8 판정 순서: OWNER → 나 외 ACTIVE 멤버(CHALLENGE_HAS_MEMBERS) "
-                    + "→ 잠금(생성 7일 이내·기간 7일 미만 DELETE_LOCKED) → 차감 계산 후 삭제. mannerPenalty 반환.")
+            description = "OWNER만, 하드 삭제+감사 로깅. 참여자 0명일 때만. 판정: OWNER→참여자≥1(CHALLENGE_HAS_MEMBERS)"
+                    + "→COMPLETED(CHALLENGE_COMPLETED)→시작전 무패널티/진행중 success 이력 시 패널티. penaltyApplied 반환.")
     @DeleteMapping("/{challengeId}")
     public ApiResponse<DeleteChallengeResponse> delete(@AuthenticationPrincipal String userId,
                                                        @PathVariable String challengeId) {

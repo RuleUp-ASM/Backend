@@ -159,8 +159,8 @@ public class Challenge extends AssignedIdEntity {
         c.category = category;
         c.participationType = participationType;
         c.minMannerTemperature = (participationType == ParticipationType.GROUP) ? minMannerTemperature : null;
-        // SOLO는 정원 1 고정, GROUP은 방장이 지정한 값(생성 서비스에서 필수 검증).
-        c.maxParticipants = (participationType == ParticipationType.SOLO) ? 1 : maxParticipants;
+        // SOLO는 정원 1 고정, GROUP은 방장이 지정한 값(생성 서비스에서 필수 검증). Integer 유지(자동 언박싱 NPE 방지).
+        c.maxParticipants = (participationType == ParticipationType.SOLO) ? Integer.valueOf(1) : maxParticipants;
         c.repeatDays = (repeatDays != null) ? new ArrayList<>(repeatDays) : new ArrayList<>();
         c.durationDays = durationDays;
         c.startDate = startDate;

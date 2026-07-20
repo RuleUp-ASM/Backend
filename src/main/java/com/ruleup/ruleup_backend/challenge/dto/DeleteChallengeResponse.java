@@ -1,10 +1,8 @@
 package com.ruleup.ruleup_backend.challenge.dto;
 
-import java.math.BigDecimal;
-
 /**
- * 3.5 삭제 응답 (§5.8).
- *  - mannerPenalty : 이번 삭제로 발생하는 평판 차감량(0이면 무차감). 실제 적용은 평판/패널티 스펙 소관.
- * (공통 봉투 data 안에 담긴다: { "success": true, "data": { "mannerPenalty": 0.5 } })
+ * 삭제 응답 (§8). penaltyApplied = 진행 중 삭제에서 챌린지 내 success 이력이 있어 탈퇴 패널티가 트리거됐는지.
+ * 시작 전 삭제 또는 success 이력 없음 = false. 실제 온도 가감은 매너 온도 스펙 소관.
+ * (공통 봉투 data 안에 담긴다: { "success": true, "data": { "penaltyApplied": false } })
  */
-public record DeleteChallengeResponse(BigDecimal mannerPenalty) {}
+public record DeleteChallengeResponse(boolean penaltyApplied) {}
