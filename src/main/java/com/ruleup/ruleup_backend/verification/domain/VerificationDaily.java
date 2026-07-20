@@ -74,7 +74,7 @@ public class VerificationDaily extends AssignedIdEntity {
     private VerifiedVia verifiedVia;     // AUTO / MANUAL / MANUAL_FALLBACK (없으면 미확정)
 
     @Column(name = "disputeClosesAt")
-    private Instant disputeClosesAt;     // (레거시) 예비 폴백 이의 윈도우 — 방장 승인 모델로 전환되며 미사용
+    private Instant disputeClosesAt;     // 이의 제기 창 마감(잠정 실패 전환 +3일, §8.7). 이 시각 후 미제기면 배치가 FAILED lock.
 
     @Enumerated(EnumType.STRING)
     @Column(name = "fallbackApprovalStatus", length = 20)
@@ -164,4 +164,43 @@ public class VerificationDaily extends AssignedIdEntity {
     }
 
     public boolean isPending() { return status == VerificationStatus.PENDING; }
+
+    // ===== v3: 실패 2단계(잠정 실패 → 이의 제기 창 → 확정) §8.7 =====
+
+    /**
+     * 잠정 실패(그룹) 전환. status=FAILED_PROVISIONAL, 이의 제기 창 마감(objectionClosesAt) 설정.
+     * 온도는 반영하지 않는다(확정 아님). verifiedAt/verifiedVia는 확정 시점까지 미설정.
+     */
+    public void recordProvisionalFailure(String method, String failureReason, Instant objectionClosesAt) {
+        this.status = VerificationStatus.FAILED_PROVISIONAL;
+        this.method = method;
+        this.failureReason = failureReason;
+        this.verifiedVia = null;
+        this.verifiedAt = null;
+        this.disputeClosesAt = objectionClosesAt;
+    }
+
+    /** 잠정 실패 → FAILED 확정(창 종료·미제기/기각). 온도 반영 트리거는 이 시점. failureReason 유지. */
+    public void lockFailed(Instant verifiedAt) {
+        this.status = VerificationStatus.FAILED;
+        this.verifiedAt = verifiedAt;
+    }
+
+    /** 이의 제기 승인 → SUCCESS 확정(verifiedVia=OBJECTION). 잠정 실패는 온도 미반영이라 복원 불필요. */
+    public void approveObjection(Instant verifiedAt) {
+        this.status = VerificationStatus.SUCCESS;
+        this.failureReason = null;
+        this.verifiedVia = VerifiedVia.OBJECTION;
+        this.verifiedAt = verifiedAt;
+    }
+
+    /** 이의 제기 기각 → FAILED 확정(lock, failureReason=OBJECTION_REJECTED). 재제기 불가. */
+    public void rejectObjection(Instant verifiedAt) {
+        this.status = VerificationStatus.FAILED;
+        this.failureReason = "OBJECTION_REJECTED";
+        this.verifiedVia = null;
+        this.verifiedAt = verifiedAt;
+    }
+
+    public boolean isProvisionalFailure() { return status == VerificationStatus.FAILED_PROVISIONAL; }
 }

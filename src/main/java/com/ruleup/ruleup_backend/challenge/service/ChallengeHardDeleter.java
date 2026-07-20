@@ -26,6 +26,7 @@ public class ChallengeHardDeleter {
         exec("DELETE FROM VerificationMethodResult WHERE verificationDailyId IN " +
                 "(SELECT id FROM VerificationDaily WHERE challengeId = :cid)", challengeId);
         exec("DELETE FROM VerificationDaily WHERE challengeId = :cid", challengeId);
+        exec("DELETE FROM Objection WHERE challengeId = :cid", challengeId);
         exec("DELETE FROM RoutineOutcome WHERE challengeId = :cid", challengeId);
         exec("DELETE FROM WatcherNotification WHERE challengeId = :cid", challengeId);
         exec("DELETE FROM WatcherOtp WHERE invitationId IN " +
