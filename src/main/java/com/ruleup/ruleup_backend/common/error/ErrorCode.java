@@ -71,11 +71,26 @@ public enum ErrorCode {
     DELETE_LOCKED(HttpStatus.CONFLICT, "생성 후 7일 이내이거나 계획 기간이 7일 미만이면 삭제할 수 없습니다."),
     CHALLENGE_NAME_REJECTED(HttpStatus.UNPROCESSABLE_ENTITY, "사용할 수 없는 챌린지 이름입니다."),
 
-    // ===== 챌린지 - 참여/멤버 (3.6 / 3.7 / 3.8) =====
+    // ===== 챌린지 - 참여/탈퇴/멤버 (§5·§6·§7) =====
     MANNER_TEMPERATURE_BELOW_MINIMUM(HttpStatus.FORBIDDEN, "참여 기준 매너 온도를 충족하지 못했습니다."),
     ALREADY_JOINED(HttpStatus.CONFLICT, "이미 참여한 챌린지입니다."),
+    REJOIN_FORBIDDEN(HttpStatus.CONFLICT, "탈퇴한 챌린지에는 다시 참여할 수 없습니다."),
+    CHALLENGE_FULL(HttpStatus.CONFLICT, "정원이 가득 찼습니다."),
+    CHALLENGE_COMPLETED(HttpStatus.CONFLICT, "종료된 챌린지입니다."),
     MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "멤버를 찾을 수 없습니다."),
-    INVALID_MEMBER_ACTION(HttpStatus.BAD_REQUEST, "유효하지 않은 처리 동작입니다. (APPROVE / REJECT)"),
+    OWNER_CANNOT_LEAVE(HttpStatus.FORBIDDEN, "방장은 탈퇴할 수 없습니다. 참여자가 있으면 위임 후, 없으면 삭제로 진행하세요."),
+    // 역할 임명/해제(§7-1)
+    CANNOT_CHANGE_OWNER_ROLE(HttpStatus.BAD_REQUEST, "OWNER 역할은 이 API로 변경할 수 없습니다. 위임을 사용하세요."),
+    ALREADY_IN_ROLE(HttpStatus.CONFLICT, "이미 해당 역할입니다."),
+    INVALID_MEMBER_ACTION(HttpStatus.BAD_REQUEST, "유효하지 않은 처리 동작입니다."),
+    // 방장 위임(§7-2)
+    TARGET_NOT_MANAGER(HttpStatus.BAD_REQUEST, "위임 대상은 공동 관리자여야 합니다."),
+    DELEGATION_ALREADY_PENDING(HttpStatus.CONFLICT, "이미 진행 중인 위임 요청이 있습니다."),
+    DELEGATION_NOT_FOUND(HttpStatus.NOT_FOUND, "위임 요청을 찾을 수 없습니다."),
+    DELEGATION_EXPIRED(HttpStatus.GONE, "만료된 위임 요청입니다."),
+    DELEGATION_ALREADY_RESOLVED(HttpStatus.CONFLICT, "이미 처리된 위임 요청입니다."),
+    NOT_DELEGATION_TARGET(HttpStatus.FORBIDDEN, "위임 대상자만 수행할 수 있습니다."),
+    INVALID_DELEGATION_ACTION(HttpStatus.BAD_REQUEST, "유효하지 않은 위임 동작입니다. (ACCEPT / REJECT / CANCEL)"),
 
     // ===== 루틴 - 추천/생성 (제목→템플릿 매칭→인증방식 선택) =====
     ROUTINE_TITLE_REQUIRED(HttpStatus.BAD_REQUEST, "루틴 제목을 입력해주세요."),

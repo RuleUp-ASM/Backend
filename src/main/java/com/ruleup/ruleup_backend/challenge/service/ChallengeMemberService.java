@@ -2,15 +2,12 @@ package com.ruleup.ruleup_backend.challenge.service;
 
 import com.ruleup.ruleup_backend.challenge.domain.*;
 import com.ruleup.ruleup_backend.challenge.dto.JoinResponse;
-import com.ruleup.ruleup_backend.challenge.dto.MemberActionResponse;
 import com.ruleup.ruleup_backend.challenge.dto.MemberListResponse;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.verification.SetupStatus;
-import com.ruleup.ruleup_backend.notification.NotificationService;
-import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.reputation.domain.ReputationScore;
 import com.ruleup.ruleup_backend.reputation.ReputationScoreRepository;
 import com.ruleup.ruleup_backend.user.domain.User;
@@ -28,10 +25,9 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * 챌린지 멤버십 (스펙 3.6 ~ 3.8): 참여 신청 / 승인·거절 / 멤버 목록.
- *  - 참여(3.6): 그룹+기준이면 매너 검증 후 PENDING, 솔로/기준미설정이면 즉시 ACTIVE.
- *  - 승인(3.7): OWNER만. PENDING → ACTIVE(+count) / REMOVED.
- *  - 목록(3.8): 기본 ACTIVE. PENDING·ALL은 OWNER만 조회.
+ * 챌린지 멤버십 (생성 및 라이프사이클 스펙 §5·§6·§7): 가입 / 탈퇴 / 역할 변경 / 멤버 목록.
+ *  - 가입(§5): 승인 절차 없이 검증 통과 시 즉시 ACTIVE. 판정 순서 종료→재참여금지→정원(락)→기준온도→모더레이션.
+ *  - 목록(§7): 현재 멤버(ACTIVE)만. 익명 챌린지는 닉네임 마스킹.
  */
 @Service
 @RequiredArgsConstructor
@@ -41,51 +37,54 @@ public class ChallengeMemberService {
     private final ChallengeMemberRepository memberRepository;
     private final UserRepository userRepository;
     private final ReputationScoreRepository reputationScoreRepository;
-    private final NotificationService notificationService;
 
-    // ===== 3.6 참여 신청 =====
+    // ===== §5 가입 =====
+    /**
+     * 챌린지 가입. 승인 절차 없이 검증 통과 시 즉시 ACTIVE.
+     * 판정 순서(스펙 §5): ① 종료 → ② 재참여 이력(uq_member) → ③ 정원(행 잠금으로 동시 가입 경합 차단)
+     *                    → ④ 기준 온도 → ⑤ 이미지 모더레이션 통과 여부.
+     */
     @Transactional
     public JoinResponse join(UUID userId, UUID challengeId) {
-        Challenge c = loadActive(challengeId);
-        // 모더레이션 게이트(§5.1): APPROVED 가 아니면 가입 차단.
-        if (!c.isModerationCleared()) throw new BusinessException(ErrorCode.CHALLENGE_UNDER_REVIEW);
+        // 정원 경합을 직렬화하기 위해 챌린지 행을 잠근 채로 판정한다("마지막 1자리 동시 가입" 차단).
+        Challenge c = challengeRepository.findByIdForUpdate(challengeId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
 
-        // 한 챌린지 1회 멤버십(uq_member). 기존 행이 ACTIVE/PENDING이면 중복, LEFT/REMOVED면 재참여 허용.
+        // ① 종료된 챌린지는 가입 개념 없음
+        if (c.getStatus() == ChallengeStatus.COMPLETED)
+            throw new BusinessException(ErrorCode.CHALLENGE_COMPLETED);
+
+        // ② 재참여 금지(uq_member): 멤버십 행이 있으면 ACTIVE=이미 참여, 그 외(LEFT/REMOVED)=재참여 영구 불가
         ChallengeMember existing = memberRepository.findByChallengeIdAndUserId(challengeId, userId).orElse(null);
-        if (existing != null && (existing.isActive() || existing.isPending()))
-            throw new BusinessException(ErrorCode.ALREADY_JOINED);
-
-        MemberStatus initial = decideInitialStatus(c, userId);
-
         if (existing != null) {
-            // 재참여: LEFT/REMOVED → initial 로 CAS. 동시 재참여는 행 잠금으로 직렬화되어 1건만 성사.
-            int updated = memberRepository.compareAndSetStatus(
-                    existing.getId(), List.of(MemberStatus.LEFT, MemberStatus.REMOVED), initial);
-            if (updated == 0) throw new BusinessException(ErrorCode.ALREADY_JOINED);
-            if (initial == MemberStatus.ACTIVE) challengeRepository.incrementParticipantCount(challengeId);
-            notifyOwnerOnPendingJoin(c, initial);
-            // 재참여는 기존 행의 setupStatus를 그대로 둔다(이전에 셋업했으면 READY 유지).
-            return joinResponse(c, initial, existing.getSetupStatus());
+            if (existing.isActive()) throw new BusinessException(ErrorCode.ALREADY_JOINED);
+            throw new BusinessException(ErrorCode.REJOIN_FORBIDDEN);
         }
 
-        // 최초 참여: uq_member 로 동시 INSERT는 1건만 성공, 나머지는 중복으로 변환.
-        ChallengeMember joined = ChallengeMember.join(challengeId, userId, initial);
+        // ③ 정원(잠금 하에서 현재 ACTIVE 수 확인)
+        Integer cap = c.getMaxParticipants();
+        long activeCount = memberRepository.countByChallengeIdAndStatus(challengeId, MemberStatus.ACTIVE);
+        if (cap != null && activeCount >= cap)
+            throw new BusinessException(ErrorCode.CHALLENGE_FULL);
+
+        // ④ 기준 온도(GROUP + 기준 설정 시)
+        if (c.isGroup() && c.getMinMannerTemperature() != null
+                && mannerTemp(userId).compareTo(c.getMinMannerTemperature()) < 0)
+            throw new BusinessException(ErrorCode.MANNER_TEMPERATURE_BELOW_MINIMUM);
+
+        // ⑤ 이미지 모더레이션 미통과(PENDING_REVIEW/REJECTED)면 모집 차단
+        if (!c.isModerationCleared())
+            throw new BusinessException(ErrorCode.CHALLENGE_UNDER_REVIEW);
+
+        // 즉시 ACTIVE 등록. uq_member 로 동시 INSERT는 1건만 성공, 나머지는 중복으로 변환.
+        ChallengeMember joined = ChallengeMember.join(challengeId, userId, MemberStatus.ACTIVE);
         try {
             memberRepository.saveAndFlush(joined);
         } catch (DataIntegrityViolationException dup) {
             throw new BusinessException(ErrorCode.ALREADY_JOINED);
         }
-        if (initial == MemberStatus.ACTIVE) challengeRepository.incrementParticipantCount(challengeId);
-        notifyOwnerOnPendingJoin(c, initial);
-        return joinResponse(c, initial, joined.getSetupStatus());
-    }
-
-    /** 그룹 승인제 가입(PENDING)일 때만 방장에게 새 신청 알림. ACTIVE 즉시가입은 알림 없음. */
-    private void notifyOwnerOnPendingJoin(Challenge c, MemberStatus initial) {
-        if (initial != MemberStatus.PENDING) return;
-        notificationService.notify(c.getCreatorId(), NotificationType.CHALLENGE_JOIN_REQUESTED,
-                "새 참여 신청이 있어요",
-                "[" + c.getTitle() + "] 챌린지에 새 참여 신청이 도착했어요. 멤버 목록에서 승인/거절할 수 있어요.");
+        challengeRepository.incrementParticipantCount(challengeId);
+        return joinResponse(c, MemberStatus.ACTIVE, joined.getSetupStatus());
     }
 
     /** 가입 응답 조립: 멤버 상태 + 셋업 상태 + 인증 스냅샷(필요 권한·방식). */
@@ -96,78 +95,16 @@ public class ChallengeMemberService {
                 c.getVerificationConfig());
     }
 
-    /** 그룹+기준 설정 → 매너 검증 후 PENDING. 솔로 또는 기준 미설정 → ACTIVE. */
-    private MemberStatus decideInitialStatus(Challenge c, UUID userId) {
-        if (c.isGroup() && c.getMinMannerTemperature() != null) {
-            BigDecimal myManner = mannerTemp(userId);
-            if (myManner.compareTo(c.getMinMannerTemperature()) < 0)
-                throw new BusinessException(ErrorCode.MANNER_TEMPERATURE_BELOW_MINIMUM);
-            return MemberStatus.PENDING;     // 기준은 통과했지만 운영자 승인 대기
-        }
-        return MemberStatus.ACTIVE;
-    }
-
-    // ===== 3.7 승인/거절 (OWNER) =====
-    @Transactional
-    public MemberActionResponse handleApplication(UUID ownerId, UUID challengeId, UUID targetUserId, String action) {
-        Challenge c = loadActive(challengeId);
-        ensureOwner(c, ownerId);
-
-        ChallengeMember member = memberRepository.findByChallengeIdAndUserId(challengeId, targetUserId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.MEMBER_NOT_FOUND));
-
-        if (action == null) throw new BusinessException(ErrorCode.INVALID_MEMBER_ACTION);
-        return switch (action) {
-            // 둘 다 PENDING 신청에 대한 처리. CAS로 동시 처리 시 1회만 성사(참여자 수 중복 증가 방지).
-            case "APPROVE" -> transitionFromPending(c, targetUserId, member, MemberStatus.ACTIVE, true,
-                    NotificationType.CHALLENGE_MEMBER_APPROVED, "참여가 승인되었어요",
-                    " 챌린지 참여가 승인되었어요. 이제 인증을 시작할 수 있어요.");
-            case "REJECT"  -> transitionFromPending(c, targetUserId, member, MemberStatus.REMOVED, false,
-                    NotificationType.CHALLENGE_MEMBER_REJECTED, "참여가 거절되었어요",
-                    " 챌린지 참여 신청이 거절되었어요.");
-            default -> throw new BusinessException(ErrorCode.INVALID_MEMBER_ACTION);
-        };
-    }
-
-    /**
-     * PENDING → to 로 원자적 전이. 성사(1행)면 (옵션) 참여자 수 증가 + 신청자 알림 후 to 반환.
-     * 이미 처리됐으면(0행) 현재 상태를 재조회해 멱등 응답(중복 알림 없음).
-     */
-    private MemberActionResponse transitionFromPending(Challenge c, UUID targetUserId,
-                                                       ChallengeMember member, MemberStatus to, boolean bumpCount,
-                                                       NotificationType notifyType, String title, String tail) {
-        int updated = memberRepository.compareAndSetStatus(
-                member.getId(), List.of(MemberStatus.PENDING), to);
-        if (updated == 1) {
-            if (bumpCount) challengeRepository.incrementParticipantCount(c.getId());
-            notificationService.notify(targetUserId, notifyType, title, "[" + c.getTitle() + "]" + tail);
-            return new MemberActionResponse(to.name());
-        }
-        MemberStatus current = memberRepository.findByChallengeIdAndUserId(c.getId(), targetUserId)
-                .map(ChallengeMember::getStatus).orElse(member.getStatus());
-        return new MemberActionResponse(current.name());
-    }
-
-    // ===== 3.8 멤버 목록 =====
+    // ===== §7 멤버 목록 =====
     @Transactional(readOnly = true)
-    public MemberListResponse listMembers(UUID viewerId, UUID challengeId, String statusFilter) {
+    public MemberListResponse listMembers(UUID viewerId, UUID challengeId) {
         Challenge c = loadActive(challengeId);
-        // 가시성 게이트(§5.1): 비-OWNER는 APPROVED 챌린지만 접근, 그 외는 존재 자체를 숨겨 404.
+        // 가시성 게이트(§3-3): 비-OWNER는 모더레이션 통과(NONE/APPROVED)만 접근, 그 외는 존재 자체를 숨겨 404.
         if (!c.isVisibleTo(viewerId)) throw new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND);
 
-        String filter = (statusFilter == null || statusFilter.isBlank())
-                ? "ACTIVE" : statusFilter.toUpperCase();
-
-        // PENDING·ALL은 OWNER만 (일반 참여자에게 신청자 노출 X)
-        if (("PENDING".equals(filter) || "ALL".equals(filter)) && !c.isOwner(viewerId))
-            throw new BusinessException(ErrorCode.NOT_CHALLENGE_OWNER);
-
-        List<ChallengeMember> members = switch (filter) {
-            case "ALL"     -> memberRepository.findByChallengeIdOrderByJoinedAtAsc(challengeId);
-            case "PENDING" -> memberRepository.findByChallengeIdAndStatusOrderByJoinedAtAsc(challengeId, MemberStatus.PENDING);
-            case "ACTIVE"  -> memberRepository.findByChallengeIdAndStatusOrderByJoinedAtAsc(challengeId, MemberStatus.ACTIVE);
-            default        -> throw new BusinessException(ErrorCode.INVALID_REQUEST);
-        };
+        // 승인제 폐기 — 현재 멤버(ACTIVE)만 반환. 탈퇴/제거(LEFT/REMOVED)는 목록에서 제외.
+        List<ChallengeMember> members =
+                memberRepository.findByChallengeIdAndStatusOrderByJoinedAtAsc(challengeId, MemberStatus.ACTIVE);
 
         // 사용자/매너 정보 일괄 조회 (N+1 방지)
         List<UUID> userIds = members.stream().map(ChallengeMember::getUserId).toList();
@@ -178,8 +115,7 @@ public class ChallengeMemberService {
 
         List<MemberListResponse.Member> dto = members.stream().map(m -> {
             User u = userMap.get(m.getUserId());
-            // 검수 전/거절이면 타인에게는 임시 닉네임·사진 숨김(본인이 볼 땐 본인 값).
-            // 추가로 익명 챌린지(§11.2)면 닉네임 마스킹 + 프로필 사진 숨김.
+            // 익명 챌린지(§11.2)면 닉네임 마스킹 + 프로필 사진 숨김. 그 외엔 본인 가시성 규칙 적용.
             String visibleNick = (u != null) ? u.visibleNicknameTo(viewerId) : null;
             String nickname = c.getAnonymity().maskNickname(visibleNick);
             String profile = (u != null && !c.getAnonymity().isAnonymous())
@@ -187,11 +123,12 @@ public class ChallengeMemberService {
             BigDecimal manner = mannerMap.getOrDefault(m.getUserId(), ReputationScore.INITIAL_TEMPERATURE);
             return new MemberListResponse.Member(
                     m.getUserId().toString(), nickname, profile,
-                    m.getRole().name(), m.getStatus().name(), manner,
+                    m.getRole().name(), manner,
                     m.getJoinedAt() != null ? m.getJoinedAt().toString() : null);
         }).toList();
 
-        return new MemberListResponse(challengeId.toString(), c.getParticipantCount(), dto);
+        return new MemberListResponse(challengeId.toString(), c.getParticipantCount(),
+                c.getMaxParticipants(), dto);
     }
 
     // ===== 헬퍼 =====
