@@ -77,7 +77,7 @@ public class AuthService {
         // 로그인마다: 기기 정보 갱신 + 국가 코드(서버가 요청에서 해석) 최신화.
         // user는 트랜잭션 밖에서 조회된 detached 엔티티 → save(merge)로 반영(변경 없으면 UPDATE 생략).
         applyDeviceInfo(user, req.deviceInfo());
-        user.updateCountryCode(countryResolver.resolve());
+        user.updateCountryCode(countryResolver.resolve(deviceCountry(req.deviceInfo())));
         userRepository.save(user);
         TokenService.TokenPair pair = tokenService.issueTokenPair(user);   // 내부에서 @Transactional
         BigDecimal temp = reputationScoreRepository.findById(user.getId())
@@ -151,7 +151,7 @@ public class AuthService {
         User user = User.create(provider, oauthSubject, email,
                 req.nickname(), req.profileImageUrl(), new ArrayList<>(categories));
         applyDeviceInfo(user, req.deviceInfo());              // 가입 시 기기 정보 최초 저장
-        user.updateCountryCode(countryResolver.resolve());   // 국가 코드는 서버가 요청에서 해석
+        user.updateCountryCode(countryResolver.resolve(deviceCountry(req.deviceInfo())));   // 지오 헤더 → 기기 지역 → Accept-Language
         userRepository.save(user);
         reputationScoreRepository.save(ReputationScore.createDefault(user));
         saveAgreements(user, ag);
@@ -177,6 +177,11 @@ public class AuthService {
         user.updateDeviceInfo(device.toPlatform(), device.versionCode(), device.versionName(),
                 device.osVersion(), device.sdkInt(), device.deviceModel(),
                 device.manufacturer(), device.lowRam());
+    }
+
+    /** deviceInfo 의 기기 지역(국가 코드 폴백 소스). null 안전. */
+    private String deviceCountry(DeviceInfoRequest device) {
+        return (device != null) ? device.country() : null;
     }
 
     private void saveAgreements(User user, SignupRequest.Agreements ag) {

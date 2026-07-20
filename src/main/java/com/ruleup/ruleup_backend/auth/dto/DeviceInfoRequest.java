@@ -22,7 +22,8 @@ public record DeviceInfoRequest(
         String manufacturer,
         Boolean lowRam,
         String versionName,
-        Integer versionCode) {
+        Integer versionCode,
+        String country) {   // 기기 지역(ISO alpha-2 또는 "ko-KR" 허용, 선택). CDN 지오 헤더가 없을 때 국가 코드 소스로 사용.
 
     /** 문자열 platform 을 enum 으로(대소문자 무시, 알 수 없거나 비면 null). */
     public Platform toPlatform() {
