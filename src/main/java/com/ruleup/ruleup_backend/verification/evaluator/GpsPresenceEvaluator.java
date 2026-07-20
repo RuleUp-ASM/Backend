@@ -35,7 +35,7 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
         if (cfg == null) return EvaluationOutcome.pending(null, null);
 
         Instant windowClose = TimeWindows.startOfDay(ctx.targetDate().plusDays(1), ctx.zone());
-        List<GeofenceTransition> trans = collectTransitions(ctx.signals());
+        List<GeofenceTransition> trans = collectTransitions(ctx.signals(), ctx.memberId());
         trans.sort(Comparator.comparing(t -> nz(safe(t.at()))));
 
         // ===== AVOID(제약형): 창 내 ENTER 1건이라도 → 즉시 FAILED =====
@@ -102,12 +102,22 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
                 : EvaluationOutcome.pending(ev, windowClose);
     }
 
-    private List<GeofenceTransition> collectTransitions(List<SyncSignal> signals) {
+    /**
+     * 이 멤버(=memberId)의 지오펜스 전환만 수집한다.
+     * geofenceId=challengeMemberId 계약(§6.2)상 sync에 여러 챌린지 전환이 섞여 오므로, 여기서 memberId로
+     * 필터하지 않으면 다른 챌린지 지오펜스의 ENTER/DWELL이 이 챌린지를 인증(또는 AVOID 위반)시킨다(교차 인증 버그).
+     * memberId가 없으면(레거시/단일 멤버 컨텍스트) 필터하지 않는다.
+     */
+    private List<GeofenceTransition> collectTransitions(List<SyncSignal> signals, String memberId) {
         List<GeofenceTransition> out = new ArrayList<>();
         if (signals == null) return out;
         for (SyncSignal s : signals) {
-            if (("GEOFENCE".equals(s.type()) || "GEOFENCE_TRANSITION".equals(s.type()))
-                    && s.transitions() != null) out.addAll(s.transitions());
+            if (!("GEOFENCE".equals(s.type()) || "GEOFENCE_TRANSITION".equals(s.type())) || s.transitions() == null) {
+                continue;
+            }
+            for (GeofenceTransition t : s.transitions()) {
+                if (memberId == null || memberId.equals(t.geofenceId())) out.add(t);
+            }
         }
         return out;
     }

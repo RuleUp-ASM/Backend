@@ -39,18 +39,27 @@ class GpsPresenceEvaluatorTest {
 
     private DayContext ctx(GpsConfig gps, List<SyncSignal> signals,
                            Map<String, Object> prior, List<GeoAnchor> anchors) {
+        return ctx(gps, signals, prior, anchors, "member-1");
+    }
+
+    private DayContext ctx(GpsConfig gps, List<SyncSignal> signals,
+                           Map<String, Object> prior, List<GeoAnchor> anchors, String memberId) {
         VerificationConfig config = new VerificationConfig(
                 ScheduleType.FIXED_DAYS, null, MethodCombine.AND,
                 List.of(VerificationMethod.GPS_PRESENCE), gps, null, null, null, null, List.of());
         return new DayContext(DAY, KST, Instant.parse("2026-07-14T05:00:00Z"),
-                config, signals, prior, anchors, List.of());
+                config, signals, prior, anchors, List.of(), memberId);
     }
 
     // SyncSignal 13필드: type, observedAt, transitions, points, isMock, readings,
     //                    sessionStart, sessionEnd, detectedActivity, date, usageEvents, screenEvents, segments
     private static SyncSignal geofence(String transition, String atIso) {
+        return geofence("member-1", transition, atIso);
+    }
+
+    private static SyncSignal geofence(String geofenceId, String transition, String atIso) {
         return new SyncSignal("GEOFENCE", atIso,
-                List.of(new GeofenceTransition("member-1", transition, atIso, false)),
+                List.of(new GeofenceTransition(geofenceId, transition, atIso, false)),
                 null, null, null, null, null, null, null, null, null, null);
     }
 
@@ -58,6 +67,25 @@ class GpsPresenceEvaluatorTest {
         return new SyncSignal("LOCATION", atIso, null,
                 List.of(new GeoPoint(lat, lng, 10.0, atIso, false)),
                 false, null, null, null, null, null, null, null, null);
+    }
+
+    // ===== 교차 인증 차단: 다른 멤버(지오펜스)의 전환은 이 멤버 인증에 쓰이지 않는다 =====
+    @Test
+    void transitionsFromAnotherMemberDoNotVerifyThisChallenge() {
+        // member-2 의 지오펜스에서 40분 체류(ENTER/EXIT). 같은 sync 페이로드가 member-1 평가에도 그대로 흘러온다.
+        var otherEnter = geofence("member-2", "ENTER", "2026-07-14T01:00:00Z");
+        var otherExit  = geofence("member-2", "EXIT",  "2026-07-14T01:40:00Z");
+
+        // member-1 관점 평가: 자기 전환이 없으므로 인증되면 안 된다(PENDING).
+        EvaluationOutcome out = evaluator.evaluate(
+                ctx(visitConfig(30), List.of(otherEnter, otherExit), null, List.of(), "member-1"));
+        assertThat(out.status()).isEqualTo(com.ruleup.ruleup_backend.common.verification.VerificationStatus.PENDING);
+        assertThat(((Number) out.evidence().get("dwellSeconds")).longValue()).isZero();
+
+        // 대조군: 같은 전환을 member-2 관점으로 평가하면 정상 인증된다.
+        EvaluationOutcome mine = evaluator.evaluate(
+                ctx(visitConfig(30), List.of(otherEnter, otherExit), null, List.of(), "member-2"));
+        assertThat(mine.status()).isEqualTo(com.ruleup.ruleup_backend.common.verification.VerificationStatus.SUCCESS);
     }
 
     // ===== ② 트랜지션 멱등: 재전송된 ENTER/EXIT 가 이중 누적되지 않는다 =====

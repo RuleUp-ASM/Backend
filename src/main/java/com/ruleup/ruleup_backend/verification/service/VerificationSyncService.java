@@ -183,7 +183,7 @@ public class VerificationSyncService {
                 .map(com.ruleup.ruleup_backend.common.verification.ScreenApp::packageName)
                 .toList();
         DayContext ctx = new DayContext(today, KST, now, config, signals, prior,
-                member.getAnchors(), memberScreenApps);
+                member.getAnchors(), memberScreenApps, member.getId().toString());
         EvaluationOutcome outcome = evaluator.evaluate(ctx);
 
         // ③ 권한 공백(gaps) 반영: 신호 없이 PENDING이고 해당 신호타입에 비회복 권한 공백이 있으면
