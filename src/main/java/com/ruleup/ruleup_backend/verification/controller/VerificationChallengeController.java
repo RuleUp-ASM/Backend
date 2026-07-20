@@ -7,6 +7,10 @@ import com.ruleup.ruleup_backend.verification.dto.ManualVerificationRequest;
 import com.ruleup.ruleup_backend.verification.dto.ManualVerificationResponse;
 import com.ruleup.ruleup_backend.verification.dto.MemberLocationRequest;
 import com.ruleup.ruleup_backend.verification.dto.MemberLocationResponse;
+import com.ruleup.ruleup_backend.verification.dto.ObjectionDecisionRequest;
+import com.ruleup.ruleup_backend.verification.dto.ObjectionDecisionResponse;
+import com.ruleup.ruleup_backend.verification.dto.ObjectionResponse;
+import com.ruleup.ruleup_backend.verification.dto.ObjectionSubmitRequest;
 import com.ruleup.ruleup_backend.verification.dto.ScreenAppsResponse;
 import com.ruleup.ruleup_backend.verification.dto.ScreenAppsUpdateRequest;
 import com.ruleup.ruleup_backend.verification.dto.ScreenAppsUpdateResponse;
@@ -14,6 +18,7 @@ import com.ruleup.ruleup_backend.verification.dto.SetupRequest;
 import com.ruleup.ruleup_backend.verification.dto.SetupRequirementResponse;
 import com.ruleup.ruleup_backend.verification.dto.SetupResponse;
 import com.ruleup.ruleup_backend.verification.dto.VerificationDetailResponse;
+import com.ruleup.ruleup_backend.verification.service.ObjectionService;
 import com.ruleup.ruleup_backend.verification.service.VerificationApprovalService;
 import com.ruleup.ruleup_backend.verification.service.VerificationManualService;
 import com.ruleup.ruleup_backend.verification.service.VerificationReadService;
@@ -39,6 +44,7 @@ public class VerificationChallengeController {
     private final VerificationManualService manualService;
     private final VerificationApprovalService approvalService;
     private final VerificationSetupService setupService;
+    private final ObjectionService objectionService;
 
     @Operation(summary = "챌린지 인증 여부 판단(§3.3)",
             description = "검증 결과/실패 화면용. 진행 요약·오늘 상태·실패 사유·방식별 마지막 평가·최근 로그. 참여 멤버만.")
@@ -69,6 +75,26 @@ public class VerificationChallengeController {
                                                          @RequestBody FallbackApprovalRequest request) {
         return ApiResponse.ok(approvalService.decide(
                 UUID.fromString(userId), challengeId, verificationId, request));
+    }
+
+    @Operation(summary = "이의 제기 제출(§8.7)",
+            description = "잠정 실패(FAILED_PROVISIONAL) 일자에 대해 3일 창 안에 본인이 제출(일자당 1회). 사진 포함 글 또는 글. 솔로는 대상 아님.")
+    @PostMapping("/{challengeId}/objections")
+    public ApiResponse<ObjectionResponse> submitObjection(@AuthenticationPrincipal String userId,
+                                                          @PathVariable UUID challengeId,
+                                                          @RequestBody ObjectionSubmitRequest request) {
+        return ApiResponse.ok(objectionService.submit(UUID.fromString(userId), challengeId, request));
+    }
+
+    @Operation(summary = "이의 제기 처리(§8.7)",
+            description = "방장/공동 관리자. APPROVE→SUCCESS(verifiedVia=OBJECTION), REJECT→FAILED(OBJECTION_REJECTED, 온도 반영).")
+    @PostMapping("/{challengeId}/objections/{objectionId}/decision")
+    public ApiResponse<ObjectionDecisionResponse> decideObjection(@AuthenticationPrincipal String userId,
+                                                                  @PathVariable UUID challengeId,
+                                                                  @PathVariable UUID objectionId,
+                                                                  @RequestBody ObjectionDecisionRequest request) {
+        return ApiResponse.ok(objectionService.decide(
+                UUID.fromString(userId), challengeId, objectionId, request));
     }
 
     @Operation(summary = "최초 진입 셋업 요구사항 조회(§11.4)",
