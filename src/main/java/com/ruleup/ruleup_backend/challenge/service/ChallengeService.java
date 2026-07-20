@@ -16,8 +16,6 @@ import com.ruleup.ruleup_backend.user.domain.InterestCategory;
 import com.ruleup.ruleup_backend.user.domain.User;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,7 +25,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.nio.ByteBuffer;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -54,10 +51,8 @@ public class ChallengeService {
     private final ReputationScoreRepository reputationScoreRepository;
     private final RoutineSelectionService routineSelectionService;
     private final VerificationDailyRepository verificationDailyRepository;
+    private final ChallengeHardDeleter hardDeleter;
     private final ApplicationEventPublisher eventPublisher;
-
-    @PersistenceContext
-    private EntityManager entityManager;
 
     /** 하루 경계 계산의 사용자 로컬 = MVP는 KST 고정. */
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
@@ -308,49 +303,11 @@ public class ChallengeService {
         boolean penaltyApplied = c.getStatus() == ChallengeStatus.ACTIVE
                 && verificationDailyRepository.existsByChallengeIdAndStatus(challengeId, VerificationStatus.SUCCESS);
 
-        // 하드 삭제 + 감사 로깅(§8-4).
-        log.warn("[AUDIT] 챌린지 하드 삭제 challengeId={} ownerId={} status={} penaltyApplied={}",
-                challengeId, userId, c.getStatus(), penaltyApplied);
-        hardDelete(challengeId);
+        // 하드 삭제 + 감사 로깅(§8-4). 대표 이미지(S3)는 DB와 무관하게 남으므로 imageUrl 을 함께 남긴다.
+        log.warn("[AUDIT] 챌린지 하드 삭제 challengeId={} ownerId={} status={} penaltyApplied={} imageUrl={}",
+                challengeId, userId, c.getStatus(), penaltyApplied, c.getImageUrl());
+        hardDeleter.hardDelete(challengeId);
         return new DeleteChallengeResponse(penaltyApplied);
-    }
-
-    /**
-     * 챌린지와 자식 행을 FK 안전 순서로 물리 삭제한다(§8-4 하드 삭제).
-     * 자식(인증·감시자·위임·멤버)부터 지우고 마지막에 챌린지 행을 지운다.
-     * 삭제는 참여자 0명(본인만)일 때만 호출되므로 대상 데이터량은 작다.
-     */
-    private void hardDelete(UUID challengeId) {
-        // 대기 중인 영속 변경을 먼저 DB에 반영(네이티브 삭제가 최신 상태를 지우도록).
-        entityManager.flush();
-        exec("DELETE FROM VerificationMethodResult WHERE verificationDailyId IN " +
-                "(SELECT id FROM VerificationDaily WHERE challengeId = :cid)", challengeId);
-        exec("DELETE FROM VerificationDaily WHERE challengeId = :cid", challengeId);
-        exec("DELETE FROM RoutineOutcome WHERE challengeId = :cid", challengeId);
-        exec("DELETE FROM WatcherNotification WHERE challengeId = :cid", challengeId);
-        exec("DELETE FROM WatcherOtp WHERE invitationId IN " +
-                "(SELECT id FROM WatcherInvitation WHERE challengeId = :cid)", challengeId);
-        exec("DELETE FROM Watcher WHERE challengeId = :cid", challengeId);
-        exec("DELETE FROM WatcherInvitation WHERE challengeId = :cid", challengeId);
-        exec("DELETE FROM ChallengeDelegation WHERE challengeId = :cid", challengeId);
-        exec("DELETE FROM ChallengeMember WHERE challengeId = :cid", challengeId);
-        exec("DELETE FROM Challenge WHERE id = :cid", challengeId);
-        // 네이티브 삭제는 1차 캐시를 갱신하지 않으므로, 삭제된 엔티티가 캐시에서 되살아나지 않도록 detach.
-        entityManager.clear();
-    }
-
-    /** binary(16) UUID 바인딩 네이티브 삭제. */
-    private void exec(String sql, UUID challengeId) {
-        entityManager.createNativeQuery(sql)
-                .setParameter("cid", uuidToBytes(challengeId))
-                .executeUpdate();
-    }
-
-    private static byte[] uuidToBytes(UUID u) {
-        ByteBuffer bb = ByteBuffer.allocate(16);
-        bb.putLong(u.getMostSignificantBits());
-        bb.putLong(u.getLeastSignificantBits());
-        return bb.array();
     }
 
     // ====================== 내부 헬퍼 ======================
