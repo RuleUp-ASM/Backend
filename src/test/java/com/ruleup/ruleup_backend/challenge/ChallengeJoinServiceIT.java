@@ -118,4 +118,67 @@ class ChallengeJoinServiceIT {
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode").isEqualTo(ErrorCode.CHALLENGE_COMPLETED);
     }
+
+    // ===== §7-1 역할 임명/해제 =====
+
+    @Test
+    @DisplayName("OWNER는 멤버를 MANAGER로 임명하고 다시 해제할 수 있다")
+    void ownerPromotesAndDemotes() {
+        User owner = newUser();
+        Challenge c = newGroupChallenge(owner.getId(), 5);
+        User member = newUser();
+        memberService.join(member.getId(), c.getId());
+
+        assertThat(memberService.changeRole(owner.getId(), c.getId(), member.getId(), "PROMOTE").role())
+                .isEqualTo("MANAGER");
+        assertThat(memberRepository.findByChallengeIdAndUserId(c.getId(), member.getId())
+                .orElseThrow().getRole()).isEqualTo(MemberRole.MANAGER);
+
+        assertThat(memberService.changeRole(owner.getId(), c.getId(), member.getId(), "DEMOTE").role())
+                .isEqualTo("MEMBER");
+    }
+
+    @Test
+    @DisplayName("MANAGER 본인은 스스로 DEMOTE(내려놓기)할 수 있으나, 남을 임명할 수는 없다")
+    void managerSelfDemoteButCannotPromoteOthers() {
+        User owner = newUser();
+        Challenge c = newGroupChallenge(owner.getId(), 5);
+        User mgr = newUser();
+        memberService.join(mgr.getId(), c.getId());
+        memberService.changeRole(owner.getId(), c.getId(), mgr.getId(), "PROMOTE");   // MANAGER 로
+
+        // 본인 내려놓기 허용
+        assertThat(memberService.changeRole(mgr.getId(), c.getId(), mgr.getId(), "DEMOTE").role())
+                .isEqualTo("MEMBER");
+
+        // 비-OWNER가 남을 임명 시도 → 권한 없음
+        User other = newUser();
+        memberService.join(other.getId(), c.getId());
+        assertThatThrownBy(() -> memberService.changeRole(mgr.getId(), c.getId(), other.getId(), "PROMOTE"))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.NOT_CHALLENGE_OWNER);
+    }
+
+    @Test
+    @DisplayName("OWNER 대상 역할 변경은 CANNOT_CHANGE_OWNER_ROLE")
+    void cannotChangeOwnerRole() {
+        User owner = newUser();
+        Challenge c = newGroupChallenge(owner.getId(), 5);
+        assertThatThrownBy(() -> memberService.changeRole(owner.getId(), c.getId(), owner.getId(), "DEMOTE"))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.CANNOT_CHANGE_OWNER_ROLE);
+    }
+
+    @Test
+    @DisplayName("이미 해당 역할이면 ALREADY_IN_ROLE")
+    void alreadyInRole() {
+        User owner = newUser();
+        Challenge c = newGroupChallenge(owner.getId(), 5);
+        User member = newUser();
+        memberService.join(member.getId(), c.getId());
+
+        assertThatThrownBy(() -> memberService.changeRole(owner.getId(), c.getId(), member.getId(), "DEMOTE"))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.ALREADY_IN_ROLE);
+    }
 }

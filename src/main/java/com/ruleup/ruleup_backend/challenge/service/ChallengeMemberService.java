@@ -3,6 +3,7 @@ package com.ruleup.ruleup_backend.challenge.service;
 import com.ruleup.ruleup_backend.challenge.domain.*;
 import com.ruleup.ruleup_backend.challenge.dto.JoinResponse;
 import com.ruleup.ruleup_backend.challenge.dto.MemberListResponse;
+import com.ruleup.ruleup_backend.challenge.dto.RoleChangeResponse;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
@@ -129,6 +130,39 @@ public class ChallengeMemberService {
 
         return new MemberListResponse(challengeId.toString(), c.getParticipantCount(),
                 c.getMaxParticipants(), dto);
+    }
+
+    // ===== §7-1 공동 관리자 임명/해제 =====
+    /**
+     * 역할 변경(PROMOTE: MEMBER→MANAGER / DEMOTE: MANAGER→MEMBER).
+     *  - 임명·해제는 OWNER만. 단 MANAGER 본인의 DEMOTE(내려놓기)는 허용.
+     *  - OWNER 역할은 이 API로 변경 불가(위임 API 사용).
+     */
+    @Transactional
+    public RoleChangeResponse changeRole(UUID actorId, UUID challengeId, UUID targetUserId, String action) {
+        Challenge c = loadActive(challengeId);
+        ChallengeMember target = memberRepository.findByChallengeIdAndUserId(challengeId, targetUserId)
+                .filter(ChallengeMember::isActive)
+                .orElseThrow(() -> new BusinessException(ErrorCode.MEMBER_NOT_FOUND));
+
+        // OWNER 는 이 API로 못 바꾼다(위임 API 전용).
+        if (target.isOwner()) throw new BusinessException(ErrorCode.CANNOT_CHANGE_OWNER_ROLE);
+
+        MemberRole desired = switch (action == null ? "" : action) {
+            case "PROMOTE" -> MemberRole.MANAGER;
+            case "DEMOTE"  -> MemberRole.MEMBER;
+            default -> throw new BusinessException(ErrorCode.INVALID_MEMBER_ACTION);
+        };
+
+        // 권한: OWNER는 임명·해제 모두 / 그 외엔 "본인 DEMOTE(내려놓기)"만.
+        boolean selfDemote = "DEMOTE".equals(action) && actorId.equals(targetUserId);
+        if (!c.isOwner(actorId) && !selfDemote)
+            throw new BusinessException(ErrorCode.NOT_CHALLENGE_OWNER);
+
+        if (target.getRole() == desired) throw new BusinessException(ErrorCode.ALREADY_IN_ROLE);
+
+        target.changeRole(desired);   // 영속 상태 → dirty checking 으로 flush
+        return new RoleChangeResponse(targetUserId.toString(), desired.name());
     }
 
     // ===== 헬퍼 =====

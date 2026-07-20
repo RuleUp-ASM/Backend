@@ -2,6 +2,8 @@ package com.ruleup.ruleup_backend.challenge.controller;
 
 import com.ruleup.ruleup_backend.challenge.dto.JoinResponse;
 import com.ruleup.ruleup_backend.challenge.dto.MemberListResponse;
+import com.ruleup.ruleup_backend.challenge.dto.RoleChangeRequest;
+import com.ruleup.ruleup_backend.challenge.dto.RoleChangeResponse;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeMemberService;
 import com.ruleup.ruleup_backend.common.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -41,5 +43,17 @@ public class ChallengeMemberController {
                                                        @PathVariable String challengeId) {
         return ApiResponse.ok(memberService.listMembers(
                 UUID.fromString(userId), UUID.fromString(challengeId)));
+    }
+
+    @Operation(summary = "공동 관리자 임명/해제",
+            description = "PROMOTE(MEMBER→MANAGER)/DEMOTE(MANAGER→MEMBER). OWNER만, 단 MANAGER 본인의 DEMOTE는 허용. OWNER 역할은 위임 API로만 변경.")
+    @PatchMapping("/{targetUserId}/role")
+    public ApiResponse<RoleChangeResponse> changeRole(@AuthenticationPrincipal String userId,
+                                                      @PathVariable String challengeId,
+                                                      @PathVariable String targetUserId,
+                                                      @RequestBody RoleChangeRequest request) {
+        return ApiResponse.ok(memberService.changeRole(
+                UUID.fromString(userId), UUID.fromString(challengeId),
+                UUID.fromString(targetUserId), request.action()));
     }
 }
