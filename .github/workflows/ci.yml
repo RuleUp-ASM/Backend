@@ -66,7 +66,9 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
 
-      - name: Build & Test
+      # build → check → (test + jacocoTestCoverageVerification).
+      # 전체 명령어 커버리지가 45% 미만이면 이 스텝이 실패해 CI가 막힌다(build.gradle 커버리지 게이트).
+      - name: Build & Test (coverage-gated)
         run: ./gradlew build
 
       # 테스트가 깨져도(실패해도) 결과를 PR에 표시한다.
@@ -89,11 +91,13 @@ jobs:
             build/test-results/test
           retention-days: 7
 
-      # 커버리지를 PR에 코멘트로 표시. 임계치(min-coverage)를 안 걸어서 막지 않고 보기만 한다.
+      # 커버리지를 PR에 코멘트로 표시(임계치도 함께 표기). 하드 게이트는 build.gradle(위 Build & Test)이 담당하고,
+      # 이 스텝은 게이트가 실패해도(always) 커버리지 현황을 PR에 남긴다.
       - name: Add coverage to PR
         uses: madrapps/jacoco-report@v1.8.0
-        if: github.event_name == 'pull_request'
+        if: always() && github.event_name == 'pull_request'
         with:
           paths: ${{ github.workspace }}/build/reports/jacoco/test/jacocoTestReport.xml
           token: ${{ secrets.GITHUB_TOKEN }}
           title: 'Test Coverage'
+          min-coverage-overall: 45

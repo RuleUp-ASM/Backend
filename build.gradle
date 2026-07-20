@@ -112,6 +112,26 @@ tasks.named('jacocoTestReport') {
 	}
 }
 
+// 커버리지 게이트: 전체 명령어(instruction) 커버리지가 최소치 미만이면 빌드를 실패시켜 CI를 막는다.
+// 현재 ~48.5% → 45%로 바닥을 깔아 "지금은 통과, 앞으로의 하락만 차단". 올리려면 minimum 값만 상향.
+jacocoTestCoverageVerification {
+	dependsOn tasks.named('test')
+	violationRules {
+		rule {
+			limit {
+				counter = 'INSTRUCTION'
+				value = 'COVEREDRATIO'
+				minimum = 0.45
+			}
+		}
+	}
+}
+
+// build(=check) 시 커버리지 검증까지 강제 → PR·push 모두에서 커버리지 하락을 CI(./gradlew build)가 막는다.
+tasks.named('check') {
+	dependsOn tasks.named('jacocoTestCoverageVerification')
+}
+
 // 실행 가능한 bootJar만 만든다 (plain jar 비활성) → 배포 시 jar 하나만 생김
 tasks.named('jar') {
 	enabled = false

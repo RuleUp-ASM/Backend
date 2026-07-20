@@ -31,9 +31,9 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * REJECTED 1시간 수정창 마감 배치(§5.1 상태머신 끝단 / §8.2) 통합 검증 — 실제 MySQL(Testcontainers).
+ * REJECTED 1시간 수정창 마감 배치(§3-3 상태머신 끝단 / §8-4) 통합 검증 — 실제 MySQL(Testcontainers).
  *  - native FOR UPDATE SKIP LOCKED 폴링 쿼리가 올바른 행만 잡는지(컬럼/문법) 실 DB로 확인.
- *  - 수정창 경과 → 영구 닫힘(소프트 삭제) + 생성자 알림.
+ *  - 수정창 경과 → 하드 삭제 + 생성자 알림.
  *  - 수정창 이내 → 그대로 유지.
  */
 @Import(TestcontainersConfiguration.class)
@@ -62,7 +62,7 @@ class ChallengeModerationCloseServiceIT {
     }
 
     @Test
-    @DisplayName("수정창 경과한 REJECTED는 영구 닫힘(소프트 삭제) + 생성자 알림")
+    @DisplayName("수정창 경과한 REJECTED는 하드 삭제 + 생성자 알림")
     void closesRejectedWhenFixWindowExpired() {
         User owner = newOwner();
         Challenge c = sampleChallenge(owner.getId());
@@ -72,7 +72,7 @@ class ChallengeModerationCloseServiceIT {
 
         closeService.closeExpiredRejected();
 
-        assertThat(challengeRepository.findByIdAndDeletedAtIsNull(c.getId())).isEmpty();
+        assertThat(challengeRepository.findById(c.getId())).isEmpty();   // 하드 삭제 — 행 자체가 사라짐
         assertThat(notificationRepository.findByUserIdOrderByCreatedAtDesc(owner.getId()))
                 .anyMatch(n -> n.getType() == NotificationType.CHALLENGE_CLOSED);
     }

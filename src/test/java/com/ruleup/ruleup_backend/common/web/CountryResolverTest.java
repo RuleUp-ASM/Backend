@@ -59,7 +59,34 @@ class CountryResolverTest {
     }
 
     @Test
-    void 요청스레드_밖이면_null() {
+    void 요청스레드_밖이면_클라이언트값만_사용() {
         assertThat(resolver.resolve()).isNull();
+        assertThat(resolver.resolve("KR")).isEqualTo("KR");   // 배치 등 요청 밖에서도 클라 값은 인정
+    }
+
+    @Test
+    void 지오헤더_없으면_클라이언트_기기지역_사용() {
+        MockHttpServletRequest req = new MockHttpServletRequest();   // 지오 헤더/AcceptLanguage 없음
+        bind(req);
+        assertThat(resolver.resolve("kr")).isEqualTo("KR");         // 소문자 정규화
+        assertThat(resolver.resolve("ko-KR")).isEqualTo("KR");     // 로케일 형태 → 지역 추출
+    }
+
+    @Test
+    void 지오헤더가_클라이언트값보다_우선() {
+        MockHttpServletRequest req = new MockHttpServletRequest();
+        req.addHeader("CloudFront-Viewer-Country", "US");
+        bind(req);
+        assertThat(resolver.resolve("KR")).isEqualTo("US");   // 실제 접속 국가(CDN) 우선
+    }
+
+    @Test
+    void 언어만_있는_AcceptLanguage는_지역없어_클라이언트값으로_폴백() {
+        MockHttpServletRequest req = new MockHttpServletRequest();
+        req.addHeader("Accept-Language", "ko");           // 지역 없는 언어만
+        req.addPreferredLocale(Locale.KOREAN);            // country == ""
+        bind(req);
+        assertThat(resolver.resolve()).isNull();          // 언어만으론 국가 확정 불가
+        assertThat(resolver.resolve("KR")).isEqualTo("KR");
     }
 }
