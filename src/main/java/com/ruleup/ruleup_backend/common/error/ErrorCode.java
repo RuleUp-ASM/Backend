@@ -103,6 +103,11 @@ public enum ErrorCode {
     ROUTINE_PERMISSION_REQUIRED(HttpStatus.BAD_REQUEST, "자동 인증에 필요한 권한이 모두 허용되지 않았습니다."),
     INVALID_ROUTINE_PARAM(HttpStatus.BAD_REQUEST, "목표값이 올바르지 않습니다."),
 
+    // ===== 마이프로필 (마이 홈·캘린더·통계·평판·초대) =====
+    INVALID_CALENDAR_MONTH(HttpStatus.BAD_REQUEST, "월 형식이 올바르지 않습니다. (YYYY-MM)"),
+    INVALID_CALENDAR_DATE(HttpStatus.BAD_REQUEST, "날짜 형식이 올바르지 않습니다. (YYYY-MM-DD)"),
+    INVALID_STATS_PERIOD(HttpStatus.BAD_REQUEST, "통계 기간이 올바르지 않습니다. (WEEKLY / MONTHLY / YEARLY)"),
+
     // ===== 알림 =====
     NOTIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "알림을 찾을 수 없습니다."),
 

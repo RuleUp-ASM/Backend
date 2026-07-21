@@ -12,7 +12,8 @@ public record SignupRequest(
         List<String> interestCategories,
         String profileImageUrl,
         ClientProperties clientProperties,
-        DeviceInfoRequest deviceInfo) {
+        DeviceInfoRequest deviceInfo,
+        String inviteCode) {   // 친구 초대 코드(선택). 유효하면 초대 기록 연동(마이프로필 §6.4).
 
     public record ClientProperties(Agreements agreements) {}
 

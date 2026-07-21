@@ -56,6 +56,13 @@ public class ReputationScore {
     @Column(name = "lastCalculatedDate")
     private LocalDate lastCalculatedDate;                    // 배치 멱등 가드
 
+    // ===== 역대 최고온도(마이프로필 히스토리) =====
+    @Column(name = "peakTemperature")
+    private BigDecimal peakTemperature;                      // 역대 최고 온도(없으면 null)
+
+    @Column(name = "peakAchievedAt")
+    private LocalDate peakAchievedAt;                        // 최고 온도 달성일
+
     public static ReputationScore createDefault(User user) {
         ReputationScore r = new ReputationScore();
         r.user = user;                          // userId는 @MapsId가 user.id에서 도출
@@ -78,5 +85,15 @@ public class ReputationScore {
         this.lastQualifyingDate = lastQualifyingDate;
         this.mannerTemperature = temperature;
         this.lastCalculatedDate = calculatedDate;
+    }
+
+    /** 온도가 역대 최고를 경신하면 peak 갱신. 반환값=경신 여부(마일스톤 훅용). */
+    public boolean updatePeakIfHigher(BigDecimal temperature, LocalDate date) {
+        if (peakTemperature == null || temperature.compareTo(peakTemperature) > 0) {
+            this.peakTemperature = temperature;
+            this.peakAchievedAt = date;
+            return true;
+        }
+        return false;
     }
 }

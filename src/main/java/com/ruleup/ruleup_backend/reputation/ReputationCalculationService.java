@@ -7,6 +7,7 @@ import com.ruleup.ruleup_backend.challenge.domain.MemberStatus;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.reputation.domain.ReputationScore;
+import com.ruleup.ruleup_backend.reputation.domain.ReputationSnapshot;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,6 +42,8 @@ public class ReputationCalculationService {
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     private final ReputationScoreRepository scoreRepository;
+    private final ReputationSnapshotRepository snapshotRepository;
+    private final MilestoneService milestoneService;
     private final ChallengeMemberRepository memberRepository;
     private final ChallengeRepository challengeRepository;
     private final TemperatureFormula formula;
@@ -104,10 +107,27 @@ public class ReputationCalculationService {
             }
         }
 
+        BigDecimal prevTemp = score.getMannerTemperature();
         BigDecimal temperature = formula.temperature(v + b);   // ③ T = f(V+B)
         score.applyCalculation(v, b, qDays, lastQual, temperature, today);
+        score.updatePeakIfHigher(temperature, today);          // 역대 최고온도 경신
         scoreRepository.save(score);
+
+        // 일별 온도 스냅샷 멱등 적재(온도 상세 recentChanges + 통계 mannerDelta 원천).
+        if (!snapshotRepository.existsByUserIdAndSnapshotDate(userId, today)) {
+            BigDecimal delta = temperature.subtract(prevTemp).setScale(2, java.math.RoundingMode.HALF_UP);
+            snapshotRepository.save(ReputationSnapshot.of(userId, today, temperature, delta, snapshotLabel(sd)));
+        }
+        // 마일스톤(티어 통과·첫 완주·스트릭) 멱등 적재.
+        milestoneService.detectDaily(userId, prevTemp, temperature, today);
         return true;
+    }
+
+    /** 스냅샷 규칙 라벨(s_d 부호 기반): 자격 유지 / 페이스 하락 / 유지. */
+    private String snapshotLabel(double sd) {
+        if (sd >= props.getQualifyingThreshold()) return "자격일 유지";
+        if (sd < 0) return "페이스 하락";
+        return "페이스 유지";
     }
 
     /**
