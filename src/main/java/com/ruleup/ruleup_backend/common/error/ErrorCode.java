@@ -108,6 +108,11 @@ public enum ErrorCode {
     INVALID_CALENDAR_DATE(HttpStatus.BAD_REQUEST, "날짜 형식이 올바르지 않습니다. (YYYY-MM-DD)"),
     INVALID_STATS_PERIOD(HttpStatus.BAD_REQUEST, "통계 기간이 올바르지 않습니다. (WEEKLY / MONTHLY / YEARLY)"),
 
+    // ===== 방 내부(공지·랭킹·방 홈) =====
+    NOT_A_MEMBER(HttpStatus.FORBIDDEN, "챌린지 멤버만 접근할 수 있습니다."),
+    INVALID_NOTICE_PAYLOAD(HttpStatus.BAD_REQUEST, "공지 제목/본문이 올바르지 않습니다."),
+    NOTICE_NOT_FOUND(HttpStatus.NOT_FOUND, "공지를 찾을 수 없습니다."),
+
     // ===== 알림 =====
     NOTIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "알림을 찾을 수 없습니다."),
 

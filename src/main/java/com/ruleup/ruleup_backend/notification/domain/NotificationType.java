@@ -24,6 +24,8 @@ public enum NotificationType {
     FALLBACK_REJECTED,
     /** 감시 대상이 루틴을 실패함 → 감시자(유저)에게 인앱 통지 */
     WATCHER_ROUTINE_FAILED,
+    /** 방장이 공지를 등록(또는 재확인 필요 수정)함 → ACTIVE 멤버(작성자 제외)에게 인앱 통지 */
+    NOTICE_CREATED,
     /** 기타 시스템 알림 */
     SYSTEM
 }
