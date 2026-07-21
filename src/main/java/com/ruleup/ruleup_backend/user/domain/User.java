@@ -53,13 +53,6 @@ public class User extends AssignedIdEntity {
     @Column(name = "nicknameStatus", nullable = false)
     private ModerationStatus nicknameStatus = ModerationStatus.PENDING;
 
-    /**
-     * 검수 통과 전(또는 거절)에 다른 사용자에게 대신 보여줄 임시 닉네임 (예: user_ab12cd).
-     * 본인에게는 항상 본인이 정한 nickname이 보인다.
-     */
-    @Column(name = "tempNickname", nullable = false, length = 20)
-    private String tempNickname;
-
     @Column(name = "profileImageUrl")
     private String profileImageUrl;
 
@@ -146,7 +139,6 @@ public class User extends AssignedIdEntity {
         u.oauthSubject = oauthSubject;
         u.email = email;
         u.nickname = nickname;
-        u.tempNickname = generateTempNickname(u.id);
         u.profileImageUrl = profileImageUrl;
         u.interestCategories = (interestCategories != null) ? interestCategories : new ArrayList<>();
         u.nicknameStatus = ModerationStatus.PENDING;
@@ -191,9 +183,15 @@ public class User extends AssignedIdEntity {
         this.deviceInfoUpdatedAt = Instant.now();
     }
 
-    /** UUID에서 안정적으로 파생한 임시 닉네임(예: user_ab12cd). 사람이 봐도 사람마다 다르다. */
-    private static String generateTempNickname(UUID id) {
-        return "user_" + id.toString().replace("-", "").substring(0, 6);
+    /**
+     * 검수 통과 전(또는 거절)에 다른 사용자에게 대신 보여줄 임시 닉네임 (예: user_ab12cd).
+     * 본인에게는 항상 본인이 정한 nickname이 보인다.
+     * <p>PK(UUID v7)에서 결정적으로 파생하므로 저장할 필요가 없다(DB 매핑 없는 파생 메서드).
+     * v7은 앞 구간이 타임스탬프라 같은 시간대 가입자끼리 겹치므로, 랜덤 비트 구간인 <b>뒤 6자리</b>를 쓴다.
+     */
+    public String tempNickname() {
+        String hex = id.toString().replace("-", "");
+        return "user_" + hex.substring(hex.length() - 6);
     }
 
     public void changeNickname(String newNickname) {
@@ -215,7 +213,7 @@ public class User extends AssignedIdEntity {
 
     public String visibleNicknameTo(UUID viewerId) {
         if (viewerId != null && viewerId.equals(this.id)) return nickname;
-        return (nicknameStatus == ModerationStatus.APPROVED) ? nickname : tempNickname;
+        return (nicknameStatus == ModerationStatus.APPROVED) ? nickname : tempNickname();
     }
 
     public String visibleProfileImageTo(UUID viewerId) {
