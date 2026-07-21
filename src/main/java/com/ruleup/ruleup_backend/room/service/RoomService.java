@@ -75,14 +75,14 @@ public class RoomService {
                 c.getTitle(), avgCompletion(actives), avgManner(actives),
                 remainingDays(c), actives.size());
 
-        Notice pinned = noticeRepo.findByChallengeIdAndPinnedTrueAndDeletedAtIsNull(challengeId).orElse(null);
+        Notice pinned = noticeRepo.findByChallengeIdAndPinnedTrue(challengeId).orElse(null);
         RoomDtos.RoomResponse.PinnedNotice pinnedDto = (pinned == null) ? null
                 : new RoomDtos.RoomResponse.PinnedNotice(
                         pinned.getId().toString(), pinned.getTitle(), pinned.isPinned(),
                         pinned.getCreatedAt().toString(),
                         noticeReadRepo.existsByNoticeIdAndUserId(pinned.getId(), userId));
 
-        long total = noticeRepo.countByChallengeIdAndDeletedAtIsNull(challengeId);
+        long total = noticeRepo.countByChallengeId(challengeId);
         long read = noticeReadRepo.countByChallengeIdAndUserId(challengeId, userId);
         int unread = (int) Math.max(0, total - read);
 

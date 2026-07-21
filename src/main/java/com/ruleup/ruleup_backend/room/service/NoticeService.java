@@ -11,6 +11,8 @@ import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.room.RoomAuthority;
 import com.ruleup.ruleup_backend.room.domain.Notice;
 import com.ruleup.ruleup_backend.room.domain.NoticeRead;
+import com.ruleup.ruleup_backend.room.domain.RoomActivityLog;
+import com.ruleup.ruleup_backend.room.domain.RoomLogAction;
 import com.ruleup.ruleup_backend.room.dto.NoticeDtos;
 import com.ruleup.ruleup_backend.room.repository.NoticeReadRepository;
 import com.ruleup.ruleup_backend.room.repository.NoticeRepository;
@@ -24,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -47,12 +50,13 @@ public class NoticeService {
     private final ChallengeMemberRepository memberRepository;
     private final UserRepository userRepository;
     private final NotificationService notificationService;
+    private final RoomActivityLogger activityLogger;
 
     // ===== 목록 =====
     @Transactional(readOnly = true)
     public NoticeDtos.ListResponse list(UUID userId, UUID challengeId) {
         roomAuthority.requireMember(challengeId, userId);
-        List<Notice> notices = noticeRepo.findByChallengeIdAndDeletedAtIsNullOrderByPinnedDescCreatedAtDesc(
+        List<Notice> notices = noticeRepo.findByChallengeIdOrderByPinnedDescCreatedAtDesc(
                 challengeId, PageRequest.of(0, RECENT_LIMIT));
         Set<UUID> read = noticeReadRepo.findByUserIdAndNoticeIdIn(userId,
                         notices.stream().map(Notice::getId).toList()).stream()
@@ -76,6 +80,8 @@ public class NoticeService {
         Notice notice = noticeRepo.saveAndFlush(
                 Notice.create(challengeId, userId, req.title(), req.content(), req.pinnedOrFalse()));
 
+        activityLogger.log(challengeId, userId, RoomActivityLog.ENTITY_NOTICE, notice.getId(),
+                RoomLogAction.CREATE, Map.of("title", notice.getTitle(), "pinned", notice.isPinned()));
         fanOut(challengeId, userId, notice.getTitle());
         return new NoticeDtos.CreateResponse(
                 notice.getId().toString(), notice.isPinned(), notice.getCreatedAt().toString());
@@ -119,16 +125,24 @@ public class NoticeService {
             fanOut(challengeId, userId, n.getTitle());   // 재발송
         }
         noticeRepo.saveAndFlush(n);
+        activityLogger.log(challengeId, userId, RoomActivityLog.ENTITY_NOTICE, noticeId,
+                RoomLogAction.UPDATE, Map.of("title", n.getTitle(), "readReset", readReset));
         return new NoticeDtos.EditResponse(n.getId().toString(), n.getUpdatedAt().toString(), readReset);
     }
 
-    // ===== 삭제(방장, 소프트) =====
+    // ===== 삭제(방장, 물리 삭제 + 로그 보존) =====
     @Transactional
     public void delete(UUID userId, UUID challengeId, UUID noticeId) {
         roomAuthority.requireOwner(challengeId, userId);
         Notice n = loadNotice(noticeId, challengeId);
-        n.softDelete();
-        noticeReadRepo.deleteByNoticeId(noticeId);   // 읽음 정리
+
+        // 물리 삭제 전 원본 스냅샷을 로그로 보존(삭제 후에도 내용 확인 가능).
+        Map<String, ?> snapshot = Map.of(
+                "title", n.getTitle(), "content", n.getContent(), "pinned", n.isPinned());
+        noticeReadRepo.deleteByNoticeId(noticeId);   // FK: 읽음 먼저 정리
+        noticeRepo.deleteById(noticeId);             // 물리 삭제
+        activityLogger.log(challengeId, userId, RoomActivityLog.ENTITY_NOTICE, noticeId,
+                RoomLogAction.DELETE, snapshot);
     }
 
     // ===== 고정(방장, 단일 pin) =====
@@ -144,13 +158,15 @@ public class NoticeService {
         } else {
             n.unpin();
         }
+        activityLogger.log(challengeId, userId, RoomActivityLog.ENTITY_NOTICE, noticeId,
+                RoomLogAction.UPDATE, Map.of("pinned", n.isPinned()));
         return new NoticeDtos.PinResponse(n.getId().toString(), n.isPinned(), unpinnedId);
     }
 
     // ===== 헬퍼 =====
     /** 현재 고정 공지를 해제(except 제외). 해제된 공지 id 반환(없으면 null). */
     private String unpinExisting(UUID challengeId, UUID exceptId) {
-        Notice pinned = noticeRepo.findByChallengeIdAndPinnedTrueAndDeletedAtIsNull(challengeId).orElse(null);
+        Notice pinned = noticeRepo.findByChallengeIdAndPinnedTrue(challengeId).orElse(null);
         if (pinned == null || pinned.getId().equals(exceptId)) return null;
         pinned.unpin();
         return pinned.getId().toString();
@@ -166,7 +182,7 @@ public class NoticeService {
     }
 
     private Notice loadNotice(UUID noticeId, UUID challengeId) {
-        return noticeRepo.findByIdAndChallengeIdAndDeletedAtIsNull(noticeId, challengeId)
+        return noticeRepo.findByIdAndChallengeId(noticeId, challengeId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOTICE_NOT_FOUND));
     }
 
