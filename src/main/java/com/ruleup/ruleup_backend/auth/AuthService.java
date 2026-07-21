@@ -51,6 +51,7 @@ public class AuthService {
     private final AppProperties props;
     private final ApplicationEventPublisher eventPublisher;
     private final CountryResolver countryResolver;
+    private final com.ruleup.ruleup_backend.reputation.MilestoneService milestoneService;
 
     // ===== OAuth 로그인 =====
     // ⚠️ 일부러 @Transactional 을 붙이지 않는다.
@@ -154,6 +155,7 @@ public class AuthService {
         user.updateCountryCode(countryResolver.resolve(deviceCountry(req.deviceInfo())));   // 지오 헤더 → 기기 지역 → Accept-Language
         userRepository.save(user);
         reputationScoreRepository.save(ReputationScore.createDefault(user));
+        milestoneService.recordSignup(user.getId(), java.time.LocalDate.now(java.time.ZoneId.of("Asia/Seoul")));
         saveAgreements(user, ag);
 
         // 가입은 여기서 그대로 완료(닉네임/사진 상태는 PENDING).

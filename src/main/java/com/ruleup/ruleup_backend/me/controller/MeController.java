@@ -4,10 +4,12 @@ import com.ruleup.ruleup_backend.common.response.ApiResponse;
 import com.ruleup.ruleup_backend.me.dto.CalendarDayResponse;
 import com.ruleup.ruleup_backend.me.dto.CalendarMonthResponse;
 import com.ruleup.ruleup_backend.me.dto.MeHomeResponse;
+import com.ruleup.ruleup_backend.me.dto.MeReputationHistoryResponse;
 import com.ruleup.ruleup_backend.me.dto.MeReputationResponse;
 import com.ruleup.ruleup_backend.me.dto.MeStatsResponse;
 import com.ruleup.ruleup_backend.me.service.MeCalendarService;
 import com.ruleup.ruleup_backend.me.service.MeHomeService;
+import com.ruleup.ruleup_backend.me.service.MeReputationHistoryService;
 import com.ruleup.ruleup_backend.me.service.MeReputationService;
 import com.ruleup.ruleup_backend.me.service.MeStatsService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -35,6 +37,7 @@ public class MeController {
     private final MeCalendarService calendarService;
     private final MeStatsService statsService;
     private final MeReputationService reputationService;
+    private final MeReputationHistoryService reputationHistoryService;
 
     @Operation(summary = "마이 홈 일괄 조회", description = "닉네임·검수상태·프로필이미지·매너온도 + 카운트(완주·진행·그룹).")
     @GetMapping("/home")
@@ -68,5 +71,11 @@ public class MeController {
     @GetMapping("/reputation")
     public ApiResponse<MeReputationResponse> reputation(@AuthenticationPrincipal String userId) {
         return ApiResponse.ok(reputationService.reputation(UUID.fromString(userId)));
+    }
+
+    @Operation(summary = "평판 히스토리", description = "역대 최고 온도(달성일) + 마일스톤 피드(시간 역순, 상한 50).")
+    @GetMapping("/reputation/history")
+    public ApiResponse<MeReputationHistoryResponse> reputationHistory(@AuthenticationPrincipal String userId) {
+        return ApiResponse.ok(reputationHistoryService.history(UUID.fromString(userId)));
     }
 }

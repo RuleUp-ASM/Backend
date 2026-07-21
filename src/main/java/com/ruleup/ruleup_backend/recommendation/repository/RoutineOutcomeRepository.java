@@ -23,4 +23,7 @@ public interface RoutineOutcomeRepository extends JpaRepository<RoutineOutcome, 
 
     /** 일자 상세: 유저의 특정 날짜 확정 아웃컴. */
     java.util.List<RoutineOutcome> findByUserIdAndTargetDate(UUID userId, java.time.LocalDate targetDate);
+
+    /** 마일스톤(STREAK): 유저의 전체 확정 아웃컴. */
+    java.util.List<RoutineOutcome> findByUserId(UUID userId);
 }

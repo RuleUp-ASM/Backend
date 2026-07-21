@@ -43,6 +43,7 @@ public class ReputationCalculationService {
 
     private final ReputationScoreRepository scoreRepository;
     private final ReputationSnapshotRepository snapshotRepository;
+    private final MilestoneService milestoneService;
     private final ChallengeMemberRepository memberRepository;
     private final ChallengeRepository challengeRepository;
     private final TemperatureFormula formula;
@@ -117,6 +118,8 @@ public class ReputationCalculationService {
             BigDecimal delta = temperature.subtract(prevTemp).setScale(2, java.math.RoundingMode.HALF_UP);
             snapshotRepository.save(ReputationSnapshot.of(userId, today, temperature, delta, snapshotLabel(sd)));
         }
+        // 마일스톤(티어 통과·첫 완주·스트릭) 멱등 적재.
+        milestoneService.detectDaily(userId, prevTemp, temperature, today);
         return true;
     }
 
