@@ -16,7 +16,7 @@ import java.util.UUID;
 
 /**
  * 챌린지 공지 (Notice 테이블, 방 내부기능 §7.1). 방장이 작성, 게시형(채팅 아님).
- * 단일 pin(챌린지당 고정 1개), 소프트 삭제(deletedAt).
+ * 단일 pin(챌린지당 고정 1개). 삭제는 물리 삭제이며 이력은 RoomActivityLog로 보존한다.
  */
 @Entity
 @Table(name = "Notice")
@@ -46,9 +46,6 @@ public class Notice extends AssignedIdEntity {
     @Column(name = "pinned", nullable = false)
     private boolean pinned;
 
-    @Column(name = "deletedAt")
-    private Instant deletedAt;
-
     @Generated(event = EventType.INSERT)
     @Column(name = "createdAt", nullable = false, updatable = false)
     private Instant createdAt;
@@ -75,6 +72,4 @@ public class Notice extends AssignedIdEntity {
 
     public void pin()   { this.pinned = true; }
     public void unpin() { this.pinned = false; }
-    public void softDelete() { this.deletedAt = Instant.now(); }
-    public boolean isDeleted() { return deletedAt != null; }
 }

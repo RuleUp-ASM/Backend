@@ -8,7 +8,11 @@ import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.notification.NotificationRepository;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
+import com.ruleup.ruleup_backend.room.domain.RoomActivityLog;
+import com.ruleup.ruleup_backend.room.domain.RoomLogAction;
 import com.ruleup.ruleup_backend.room.dto.NoticeDtos;
+import com.ruleup.ruleup_backend.room.repository.NoticeRepository;
+import com.ruleup.ruleup_backend.room.repository.RoomActivityLogRepository;
 import com.ruleup.ruleup_backend.room.service.NoticeService;
 import com.ruleup.ruleup_backend.routine.domain.VerificationConfig;
 import com.ruleup.ruleup_backend.user.UserRepository;
@@ -40,6 +44,8 @@ class NoticeServiceIT {
     @Autowired ChallengeMemberRepository memberRepository;
     @Autowired UserRepository userRepository;
     @Autowired NotificationRepository notificationRepository;
+    @Autowired NoticeRepository noticeRepository;
+    @Autowired RoomActivityLogRepository roomActivityLogRepository;
 
     private User newUser() {
         String u = UUID.randomUUID().toString().substring(0, 8);
@@ -137,13 +143,29 @@ class NoticeServiceIT {
     }
 
     @Test
-    @DisplayName("삭제(소프트) → 목록에서 제외")
-    void softDelete() {
+    @DisplayName("삭제(물리) → 행 제거 + 목록 제외, DELETE 로그에 원본 스냅샷 보존")
+    void hardDeleteWithLog() {
         User owner = newUser();
         Challenge c = groupChallenge(owner.getId());
-        var created = noticeService.create(owner.getId(), c.getId(), create("제목", "본문", false));
-        noticeService.delete(owner.getId(), c.getId(), UUID.fromString(created.noticeId()));
+        var created = noticeService.create(owner.getId(), c.getId(), create("공지제목", "삭제될 본문", false));
+        UUID noticeId = UUID.fromString(created.noticeId());
+
+        noticeService.delete(owner.getId(), c.getId(), noticeId);
+
+        // 물리 삭제: 행 자체가 사라지고 목록에서도 제외
+        assertThat(noticeRepository.findByIdAndChallengeId(noticeId, c.getId())).isEmpty();
         assertThat(noticeService.list(owner.getId(), c.getId()).notices()).isEmpty();
+
+        // 활동 로그: CREATE + DELETE 남고, DELETE payload에 원본 스냅샷 보존
+        List<RoomActivityLog> logs = roomActivityLogRepository.findByChallengeIdOrderByCreatedAtDesc(c.getId());
+        assertThat(logs).extracting(RoomActivityLog::getAction)
+                .containsExactlyInAnyOrder(RoomLogAction.CREATE, RoomLogAction.DELETE);
+        RoomActivityLog del = logs.stream()
+                .filter(l -> l.getAction() == RoomLogAction.DELETE).findFirst().orElseThrow();
+        assertThat(del.getEntityType()).isEqualTo(RoomActivityLog.ENTITY_NOTICE);
+        assertThat(del.getEntityId()).isEqualTo(noticeId);
+        assertThat(del.getActorId()).isEqualTo(owner.getId());
+        assertThat(del.getPayload()).contains("공지제목", "삭제될 본문");
     }
 
     @Test
