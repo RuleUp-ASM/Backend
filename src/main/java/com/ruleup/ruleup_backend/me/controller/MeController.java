@@ -3,7 +3,9 @@ package com.ruleup.ruleup_backend.me.controller;
 import com.ruleup.ruleup_backend.common.response.ApiResponse;
 import com.ruleup.ruleup_backend.me.dto.CalendarDayResponse;
 import com.ruleup.ruleup_backend.me.dto.CalendarMonthResponse;
+import com.ruleup.ruleup_backend.invitation.InvitationService;
 import com.ruleup.ruleup_backend.me.dto.MeHomeResponse;
+import com.ruleup.ruleup_backend.me.dto.MeInvitationResponse;
 import com.ruleup.ruleup_backend.me.dto.MeReputationHistoryResponse;
 import com.ruleup.ruleup_backend.me.dto.MeReputationResponse;
 import com.ruleup.ruleup_backend.me.dto.MeStatsResponse;
@@ -38,6 +40,7 @@ public class MeController {
     private final MeStatsService statsService;
     private final MeReputationService reputationService;
     private final MeReputationHistoryService reputationHistoryService;
+    private final InvitationService invitationService;
 
     @Operation(summary = "마이 홈 일괄 조회", description = "닉네임·검수상태·프로필이미지·매너온도 + 카운트(완주·진행·그룹).")
     @GetMapping("/home")
@@ -77,5 +80,11 @@ public class MeController {
     @GetMapping("/reputation/history")
     public ApiResponse<MeReputationHistoryResponse> reputationHistory(@AuthenticationPrincipal String userId) {
         return ApiResponse.ok(reputationHistoryService.history(UUID.fromString(userId)));
+    }
+
+    @Operation(summary = "친구 초대", description = "내 초대 코드/딥링크(유저당 1개, 멱등 생성) + 초대 현황(피초대 가입).")
+    @GetMapping("/invitation")
+    public ApiResponse<MeInvitationResponse> invitation(@AuthenticationPrincipal String userId) {
+        return ApiResponse.ok(invitationService.myInvitation(UUID.fromString(userId)));
     }
 }
