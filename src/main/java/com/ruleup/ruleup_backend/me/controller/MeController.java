@@ -4,9 +4,11 @@ import com.ruleup.ruleup_backend.common.response.ApiResponse;
 import com.ruleup.ruleup_backend.me.dto.CalendarDayResponse;
 import com.ruleup.ruleup_backend.me.dto.CalendarMonthResponse;
 import com.ruleup.ruleup_backend.me.dto.MeHomeResponse;
+import com.ruleup.ruleup_backend.me.dto.MeReputationResponse;
 import com.ruleup.ruleup_backend.me.dto.MeStatsResponse;
 import com.ruleup.ruleup_backend.me.service.MeCalendarService;
 import com.ruleup.ruleup_backend.me.service.MeHomeService;
+import com.ruleup.ruleup_backend.me.service.MeReputationService;
 import com.ruleup.ruleup_backend.me.service.MeStatsService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -32,6 +34,7 @@ public class MeController {
     private final MeHomeService homeService;
     private final MeCalendarService calendarService;
     private final MeStatsService statsService;
+    private final MeReputationService reputationService;
 
     @Operation(summary = "마이 홈 일괄 조회", description = "닉네임·검수상태·프로필이미지·매너온도 + 카운트(완주·진행·그룹).")
     @GetMapping("/home")
@@ -59,5 +62,11 @@ public class MeController {
                                               @RequestParam(required = false, defaultValue = "MONTHLY") String period,
                                               @RequestParam(required = false) String anchor) {
         return ApiResponse.ok(statsService.stats(UUID.fromString(userId), period, anchor));
+    }
+
+    @Operation(summary = "매너 온도 상세", description = "현재 온도 + 밴드 라벨 + 다음 목표 진행 바 + 최근 변동 10건.")
+    @GetMapping("/reputation")
+    public ApiResponse<MeReputationResponse> reputation(@AuthenticationPrincipal String userId) {
+        return ApiResponse.ok(reputationService.reputation(UUID.fromString(userId)));
     }
 }
