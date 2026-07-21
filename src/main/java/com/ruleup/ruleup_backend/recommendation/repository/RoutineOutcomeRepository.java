@@ -17,4 +17,10 @@ public interface RoutineOutcomeRepository extends JpaRepository<RoutineOutcome, 
 
     /** upsert 키 조회(멤버×날짜 1행). */
     Optional<RoutineOutcome> findByChallengeIdAndUserIdAndTargetDate(UUID challengeId, UUID userId, java.time.LocalDate targetDate);
+
+    /** 캘린더/통계: 유저의 날짜 범위 확정 아웃컴(SUCCESS/FAILED). */
+    java.util.List<RoutineOutcome> findByUserIdAndTargetDateBetween(UUID userId, java.time.LocalDate from, java.time.LocalDate to);
+
+    /** 일자 상세: 유저의 특정 날짜 확정 아웃컴. */
+    java.util.List<RoutineOutcome> findByUserIdAndTargetDate(UUID userId, java.time.LocalDate targetDate);
 }
