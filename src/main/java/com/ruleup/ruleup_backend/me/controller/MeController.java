@@ -4,8 +4,10 @@ import com.ruleup.ruleup_backend.common.response.ApiResponse;
 import com.ruleup.ruleup_backend.me.dto.CalendarDayResponse;
 import com.ruleup.ruleup_backend.me.dto.CalendarMonthResponse;
 import com.ruleup.ruleup_backend.me.dto.MeHomeResponse;
+import com.ruleup.ruleup_backend.me.dto.MeStatsResponse;
 import com.ruleup.ruleup_backend.me.service.MeCalendarService;
 import com.ruleup.ruleup_backend.me.service.MeHomeService;
+import com.ruleup.ruleup_backend.me.service.MeStatsService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -29,6 +31,7 @@ public class MeController {
 
     private final MeHomeService homeService;
     private final MeCalendarService calendarService;
+    private final MeStatsService statsService;
 
     @Operation(summary = "마이 홈 일괄 조회", description = "닉네임·검수상태·프로필이미지·매너온도 + 카운트(완주·진행·그룹).")
     @GetMapping("/home")
@@ -48,5 +51,13 @@ public class MeController {
     public ApiResponse<CalendarDayResponse> calendarDay(@AuthenticationPrincipal String userId,
                                                         @PathVariable String date) {
         return ApiResponse.ok(calendarService.day(UUID.fromString(userId), date));
+    }
+
+    @Operation(summary = "기간 통계", description = "WEEKLY/MONTHLY/YEARLY. 총 완주·평균 완주율·온도 변화·평균 연속일·완주율 시리즈·인사이트.")
+    @GetMapping("/stats")
+    public ApiResponse<MeStatsResponse> stats(@AuthenticationPrincipal String userId,
+                                              @RequestParam(required = false, defaultValue = "MONTHLY") String period,
+                                              @RequestParam(required = false) String anchor) {
+        return ApiResponse.ok(statsService.stats(UUID.fromString(userId), period, anchor));
     }
 }
