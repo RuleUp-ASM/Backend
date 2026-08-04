@@ -253,18 +253,31 @@ public class User extends AssignedIdEntity {
         this.approvedNickname = approvedNickname;
     }
 
+    /**
+     * 닉네임 변경 신청. approvedNickname(직전 승인본)은 <b>승인 시점까지 유지</b>한다 —
+     * 타인 화면에 계속 노출되고, 심사가 거부되면 돌아갈 자리이기도 하다(회원 정책 §3·§4.1).
+     *
+     * <p>변경 주기(월 1회) 기준 시각은 "승인"이 아니라 <b>이 신청 시점</b>이다.
+     * 승인 시각으로 세면 가입 직후 최초 승인만으로 잠겨 첫 변경조차 막힌다.
+     * 모더레이션 거부에 따른 재수정은 횟수에서 제외하므로(정책 §3) 시각을 갱신하지 않는다.
+     */
     public void changeNickname(String newNickname) {
+        boolean fixingRejection = (this.nicknameStatus == NicknameStatus.REJECTED);
         this.nickname = newNickname;
         this.nicknameStatus = NicknameStatus.PENDING;
         this.moderationCheckedAt = null;
-        // approvedNickname(직전 승인본)은 승인 시점까지 유지 — 타인 화면 계속 노출
+        if (!fixingRejection) this.nicknameChangedAt = Instant.now();
     }
 
     // ===== 검수 결과 반영 =====
+    /**
+     * 승인 — 신청값을 타인 노출용으로 확정한다. 이 시점에 직전 승인 닉네임의 점유가 풀린다
+     * (사칭 방지를 위해 심사 중에는 붙잡고 있다가, 새 닉네임이 통과하면 해제 — 2026-08-04 확정).
+     * 변경 주기 기준 시각은 신청 시점에 이미 기록했으므로 여기서 건드리지 않는다.
+     */
     public void approveNickname() {
         this.approvedNickname = this.nickname;
         this.nicknameStatus = NicknameStatus.APPROVED;
-        this.nicknameChangedAt = Instant.now();
     }
 
     public void rejectNickname()       { this.nicknameStatus = NicknameStatus.REJECTED; }

@@ -55,6 +55,10 @@ CREATE TABLE `users` (
   `deleted_at`                  DATETIME(3) NULL,
   `created_at`                  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `updated_at`                  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  -- 신청/승인 닉네임은 각각 별도 UNIQUE 인덱스다. 따라서 "A가 신청한 값 = B가 승인받은 값"
+  -- 같은 교차 중복은 DB 하나로 원자적으로 막지 못한다(DB 정리 §7.3에 명시된 MVP 수용 한계).
+  -- 애플리케이션이 신청 전·승인 직전 두 번 검사하고, 승인 UPDATE 충돌은 CONFLICT 로 처리한다.
+  -- 닉네임 입력 시점부터 완전한 선점이 필요해지면 그때 nickname_claims 테이블을 도입한다.
   -- PENDING 신청 닉네임만 UNIQUE 대상 (REJECTED/CONFLICT/WITHDRAWN 은 점유 해제)
   `active_requested_nickname`   VARCHAR(12) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin
                                 GENERATED ALWAYS AS (

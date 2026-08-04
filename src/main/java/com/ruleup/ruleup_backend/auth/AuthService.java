@@ -57,6 +57,8 @@ public class AuthService {
     static final int MAX_SIGNUP_ATTEMPTS = 3;
     /** 재시도 대상 제약 — 임시 승인 닉네임 UNIQUE. 신청 닉네임 충돌(409)은 재시도 대상이 아니다. */
     private static final String APPROVED_NICKNAME_CONSTRAINT = "uq_users_active_approved_nickname";
+    /** 동시 가입 경합 — 이 제약이 터졌다면 다른 요청이 먼저 같은 소셜 계정을 만든 것이다. */
+    private static final String OAUTH_IDENTITY_CONSTRAINT = "uq_users_oauth_identity";
     /** 만 14세 미만 가입 불가 — 법적 요구사항(가드레일: 통과 0건). */
     private static final int MIN_AGE_YEARS = 14;
 
@@ -154,6 +156,12 @@ public class AuthService {
                 final int current = attempt;
                 return transactionTemplate.execute(status -> register(req, tokenConsumed, current));
             } catch (DataIntegrityViolationException e) {
+                // 동시 가입 경합 — 사전 조회 후 다른 요청이 먼저 가입했다.
+                // 계약: "후발 요청은 기존 유저 로그인으로 수렴"(테크 스펙 4-3).
+                if (isConstraintViolation(e, OAUTH_IDENTITY_CONSTRAINT)) {
+                    log.info("동시 가입 경합 감지 — 기존 계정 로그인으로 수렴합니다.");
+                    return convergeToExistingLogin(req.signupToken());
+                }
                 // 신청 닉네임 충돌 등 사용자에게 알려야 할 위반은 그대로 올려보낸다(409).
                 if (!isApprovedNicknameConflict(e)) throw e;
                 if (attempt >= MAX_SIGNUP_ATTEMPTS) {
@@ -182,14 +190,7 @@ public class AuthService {
 
         // (provider, subject) 중복 가입 차단 — 경합 시 후발 요청은 기존 유저 로그인으로 수렴(테크 스펙 4-3)
         User existing = userRepository.findByOauthProviderAndOauthSubject(provider, oauthSubject).orElse(null);
-        if (existing != null) {
-            if (existing.isBanned()) throw new BusinessException(ErrorCode.ACCOUNT_BANNED);
-            TokenService.TokenPair pair = tokenService.issueTokenPair(existing);
-            UserScoreSummary summary = scoreSummaryRepository.findById(existing.getId()).orElse(null);
-            return new SignupResponse(false, pair.accessToken(), pair.refreshToken(), "Bearer",
-                    pair.expiresIn(), FlushIntervalPolicy.forUser(existing),
-                    UserResponse.from(existing, summary));
-        }
+        if (existing != null) return loginResponseFor(existing);
 
         // 닉네임 형식 → 중복(신청 PENDING·승인 닉네임 모두 점유로 본다)
         if (!NicknamePolicy.isValid(req.nickname()))
@@ -197,10 +198,13 @@ public class AuthService {
         if (userRepository.isNicknameTaken(req.nickname(), null))
             throw new BusinessException(ErrorCode.NICKNAME_DUPLICATED);
 
-        // 관심 카테고리: 코드 유효성(12종) → 개수(0~6, 건너뛰기 허용)
-        List<String> categories = (req.interestCategories() != null) ? req.interestCategories() : List.of();
-        if (!InterestCategory.allValid(categories))
+        // 관심 카테고리: 코드 유효성(12종) → 중복 제거 → 개수(0~6, 건너뛰기 허용).
+        // 중복은 user_interests PK(user_id, category) 위반이라 그대로 두면 500 이 된다. 클라 버그로
+        // 가입을 막지 않도록 서버가 정규화한다(온보딩 완주율 우선) — 고유값 기준으로 상한을 센다.
+        List<String> requested = (req.interestCategories() != null) ? req.interestCategories() : List.of();
+        if (!InterestCategory.allValid(requested))
             throw new BusinessException(ErrorCode.CATEGORY_INVALID);
+        List<String> categories = requested.stream().distinct().toList();
         if (!InterestCategory.isCountValid(categories))
             throw new BusinessException(ErrorCode.INTEREST_LIMIT_EXCEEDED);
 
@@ -260,9 +264,35 @@ public class AuthService {
 
     /** 임시 승인 닉네임 UNIQUE 위반인지 — 이 경우에만 새 후보로 가입을 재시도한다. */
     private boolean isApprovedNicknameConflict(DataIntegrityViolationException e) {
+        return isConstraintViolation(e, APPROVED_NICKNAME_CONSTRAINT);
+    }
+
+    private boolean isConstraintViolation(DataIntegrityViolationException e, String constraint) {
         Throwable root = e.getMostSpecificCause();
         String message = (root != null) ? root.getMessage() : null;
-        return message != null && message.contains(APPROVED_NICKNAME_CONSTRAINT);
+        return message != null && message.contains(constraint);
+    }
+
+    /**
+     * 이미 만들어진 같은 소셜 계정으로 로그인 응답을 만든다(동시 가입 수렴).
+     * 가입 트랜잭션은 롤백된 뒤이므로 여기서 다시 조회한다.
+     */
+    private SignupResponse convergeToExistingLogin(String signupToken) {
+        Claims claims = parseSignupToken(signupToken);
+        OAuthProvider provider = OAuthProvider.valueOf((String) claims.get("provider"));
+        User existing = userRepository.findByOauthProviderAndOauthSubject(provider, claims.getSubject())
+                .orElseThrow(() -> new BusinessException(ErrorCode.LOGIN_FAILED));
+        return loginResponseFor(existing);
+    }
+
+    /** 기존 계정에 토큰을 발급해 가입 응답 형태(isNewUser=false)로 감싼다. */
+    private SignupResponse loginResponseFor(User existing) {
+        if (existing.isBanned()) throw new BusinessException(ErrorCode.ACCOUNT_BANNED);
+        TokenService.TokenPair pair = tokenService.issueTokenPair(existing);
+        UserScoreSummary summary = scoreSummaryRepository.findById(existing.getId()).orElse(null);
+        return new SignupResponse(false, pair.accessToken(), pair.refreshToken(), "Bearer",
+                pair.expiresIn(), FlushIntervalPolicy.forUser(existing),
+                UserResponse.from(existing, summary));
     }
 
     /** 생일 파싱·검증. 누락/형식/미래 = BIRTHDATE_INVALID, 만 14세 미만 = BIRTHDATE_UNDERAGE. */

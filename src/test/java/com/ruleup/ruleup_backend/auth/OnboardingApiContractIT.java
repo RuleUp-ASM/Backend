@@ -345,11 +345,18 @@ class OnboardingApiContractIT extends AuthApiSupport {
             assertThat(res.getResponse().getStatus()).isEqualTo(200);
             assertThat((Integer) read(res, "$.data.maxSelectable")).isEqualTo(6);
 
-            // 계약을 통째로 고정한다 — 개수만 보면 코드가 바뀌어도 통과한다(2026-08-03 확정 12종)
+            // 계약을 통째로 고정한다 — 개수만 보면 코드가 바뀌어도 통과한다(2026-08-03 확정 12종).
+            // 관심 분야 정책 §1: 노출은 "고정 순서"이고 온보딩·챌린지가 같은 목록을 써야 한다 → 순서까지 고정.
             List<String> codes = read(res, "$.data.categories[*].code");
-            assertThat(codes).containsExactlyInAnyOrder(
+            assertThat(codes).containsExactly(
                     "EXERCISE", "WAKE_SLEEP", "DIET_HEALTH", "STUDY", "READING", "MIND",
                     "FINANCE", "HOBBY", "HOUSEKEEPING", "CAREER_PRODUCTIVITY", "DETOX", "ETC");
+
+            // 표시 라벨도 정책 §2 표와 1:1 이어야 한다(화면 문구가 정책과 갈라지지 않게)
+            List<String> labels = read(res, "$.data.categories[*].label");
+            assertThat(labels).containsExactly(
+                    "운동", "기상·수면", "식습관·건강", "학습", "독서", "마음",
+                    "재테크", "취미", "정리·살림", "커리어·생산성", "절제·디톡스", "기타");
         }
     }
 

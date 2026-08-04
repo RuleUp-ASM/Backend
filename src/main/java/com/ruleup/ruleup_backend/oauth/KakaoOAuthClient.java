@@ -61,7 +61,7 @@ public class KakaoOAuthClient implements OAuthClient {
         form.add("grant_type", "authorization_code");
         form.add("client_id", config.clientId());        // 카카오 REST API 키
         form.add("client_secret", config.clientSecret());
-        form.add("redirect_uri", redirectUri);
+        form.add("redirect_uri", resolveRedirectUri(redirectUri));
         form.add("code", code);
         if (codeVerifier != null && !codeVerifier.isBlank()) form.add("code_verifier", codeVerifier);
 
@@ -72,6 +72,16 @@ public class KakaoOAuthClient implements OAuthClient {
         if (res == null || res.accessToken() == null)
             throw new BusinessException(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
         return res;
+    }
+
+    /**
+     * 계약상 redirectUri 는 null 일 수 있다(카카오톡 간편 로그인 등 SDK 내부 처리).
+     * 그런데 카카오 토큰 엔드포인트는 인가 요청에 쓴 값과의 일치를 요구하므로 빈 값을 보내면
+     * KOE006 으로 실패한다 → 누락 시 서버 설정값(등록된 redirect_uri)으로 채운다.
+     */
+    private String resolveRedirectUri(String fromClient) {
+        if (fromClient != null && !fromClient.isBlank()) return fromClient;
+        return config.redirectUri();
     }
 
     private OAuthUserInfo requestUser(KakaoTokenResponse token) {
