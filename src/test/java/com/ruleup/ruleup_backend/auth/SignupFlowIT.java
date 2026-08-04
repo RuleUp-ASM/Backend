@@ -277,7 +277,7 @@ class SignupFlowIT {
         }
 
         @Test
-        @DisplayName("성별 건너뛰기 시 클라가 보내는 NON_BINARY 가 그대로 저장된다")
+        @DisplayName("성별 건너뛰기 시 클라가 보내는 NON_BINARY 가 그대로 저장된다 (4종 전수는 OnboardingApiContractIT)")
         void signup_non_binary_gender_stored() throws Exception {
             String tag = uniq();
             Map<String, Object> body = preparedSignup(tag, "논바이유저" + SEQ.get());

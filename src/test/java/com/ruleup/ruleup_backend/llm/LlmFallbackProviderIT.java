@@ -15,7 +15,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * GeminiClient·BedrockNovaClient 는 조건부 빈에서 빠진다(FallbackLlmClient 가 내부에서 직접 생성해 위임).
  */
 @Import(TestcontainersConfiguration.class)
-@SpringBootTest(properties = "app.llm.provider=fallback")
+// app.llm.fake=false: 배선 검증이 목적이라 테스트용 fake LlmClient(@Primary)를 끈다.
+@SpringBootTest(properties = {"app.llm.provider=fallback", "app.llm.fake=false"})
 class LlmFallbackProviderIT {
 
     @Autowired LlmClient llmClient;

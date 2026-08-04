@@ -25,9 +25,16 @@ import java.util.UUID;
  * - 닉네임 2컬럼 모델: nickname(신청값, 본인 화면) / approvedNickname(타인에게 항상 노출).
  *   최초 가입 직후 approvedNickname 은 UUID 기반 임시 8자리.
  * - PK는 UUID v7 → BINARY(16).
+ *
+ * <p><b>{@code @DynamicUpdate} 인 이유</b>: 이 행은 서로 다른 트랜잭션이 각자 다른 컬럼을 고친다 —
+ * 비동기 검수(닉네임/사진 상태), 로그인(기기·접속 시각), 탈퇴·잠금(status·deleted_at).
+ * 전체 컬럼 UPDATE(기본 동작)면 늦게 커밋되는 쪽이 자기가 읽은 낡은 스냅샷으로 남의 변경을
+ * 덮어쓴다(lost update). 실제로 커밋 직후 시작되는 검수가 탈퇴/잠금을 ACTIVE로 되돌렸다.
+ * 변경 컬럼만 UPDATE하면 서로 다른 컬럼을 고치는 한 충돌하지 않는다.
  */
 @Entity
 @Table(name = "users")
+@org.hibernate.annotations.DynamicUpdate   // 아래 주석 참조 — 비동기 검수의 lost update 방지
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class User extends AssignedIdEntity {

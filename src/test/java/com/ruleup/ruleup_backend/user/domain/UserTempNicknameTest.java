@@ -4,9 +4,14 @@ import com.ruleup.ruleup_backend.common.UuidGenerator;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * deriveTempNickname()은 PK(UUID v7)에서 결정적으로 파생하는 임시 승인 닉네임(가입 직후 approved_nickname 초기값).
@@ -66,6 +71,49 @@ class UserTempNicknameTest {
         User u1 = userWithId(UuidGenerator.generate());
         User u2 = userWithId(UuidGenerator.generate());
         assertThat(u1.deriveTempNickname()).isNotEqualTo(u2.deriveTempNickname());
+    }
+
+    // ===== 충돌 재시도 (DB 정리 문서 §6) =====
+
+    /** 처음 생성한 임시 닉네임이 비어 있으면 그대로 쓴다(불필요한 재생성 금지). */
+    @Test
+    void allocator_keepsFirstCandidate_whenAvailable() {
+        User u = User.create(OAuthProvider.KAKAO, "sub", null, "성은이", null, null);
+        String first = u.getApprovedNickname();
+
+        TempNicknameAllocator.assign(u, taken -> false);   // 아무것도 점유되지 않은 상태
+
+        assertThat(u.getApprovedNickname()).isEqualTo(first);
+    }
+
+    /** 이미 점유된 값이면 다른 8자리로 재시도해서 사용 가능한 값을 얻는다. */
+    @Test
+    void allocator_retriesUntilFreeCandidate() {
+        User u = User.create(OAuthProvider.KAKAO, "sub", null, "성은이", null, null);
+        String first = u.getApprovedNickname();
+        Set<String> occupied = new HashSet<>();
+        occupied.add(first);                               // 첫 후보는 이미 다른 사람이 쓰는 중
+
+        List<String> tried = new ArrayList<>();
+        TempNicknameAllocator.assign(u, candidate -> {
+            tried.add(candidate);
+            return occupied.contains(candidate);
+        });
+
+        assertThat(u.getApprovedNickname())
+                .isNotEqualTo(first)                       // 충돌한 값은 버린다
+                .hasSize(8)
+                .containsPattern("^[0-9a-f]{8}$");
+        assertThat(tried).hasSizeGreaterThanOrEqualTo(2);  // 최소 한 번은 재시도했다
+    }
+
+    /** 연속 충돌이 상한을 넘으면 조용히 중복 저장하지 않고 실패시킨다(UNIQUE 위반 방지). */
+    @Test
+    void allocator_failsFast_whenEveryCandidateTaken() {
+        User u = User.create(OAuthProvider.KAKAO, "sub", null, "성은이", null, null);
+
+        assertThatThrownBy(() -> TempNicknameAllocator.assign(u, candidate -> true))
+                .isInstanceOf(IllegalStateException.class);
     }
 
     /** 가입 직후 approved_nickname 은 임시 닉네임으로 초기화되고, 승인 시 신청값으로 교체된다. */

@@ -23,6 +23,7 @@ public class SecurityConfig {
 
     private final JwtProvider jwtProvider;
     private final JwtAuthenticationEntryPoint entryPoint;
+    private final com.ruleup.ruleup_backend.user.UserRepository userRepository;
 
     // 로그인 없이 접근 가능한 공개 경로
     private static final String[] PUBLIC = {
@@ -48,6 +49,9 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         JwtAuthenticationFilter jwtFilter = new JwtAuthenticationFilter(jwtProvider);
+        // 잠금 계정 열람 전용 강제(§7.2) — 인증이 세팅된 뒤 쓰기 요청만 검사한다.
+        // (@Component 로 두면 Boot 가 서블릿 필터로도 자동 등록해 이중 실행되므로 여기서 직접 만든다)
+        LockedAccountFilter lockedFilter = new LockedAccountFilter(userRepository);
 
         http
                 .csrf(AbstractHttpConfigurer::disable)
@@ -69,7 +73,8 @@ public class SecurityConfig {
                         .anyRequest().authenticated()
                 )
                 .exceptionHandling(ex -> ex.authenticationEntryPoint(entryPoint))
-                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterAfter(lockedFilter, JwtAuthenticationFilter.class);
 
         return http.build();
     }

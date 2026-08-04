@@ -15,7 +15,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * GeminiClient 빈은 생성되지 않는다(코드는 그대로, 조건부 빈으로 교체). 기본(fallback)은 나머지 전체 테스트가 커버.
  */
 @Import(TestcontainersConfiguration.class)
-@SpringBootTest(properties = "app.llm.provider=bedrock")
+// app.llm.fake=false: 배선 검증이 목적이라 테스트용 fake LlmClient(@Primary)를 끈다.
+@SpringBootTest(properties = {"app.llm.provider=bedrock", "app.llm.fake=false"})
 class LlmProviderSwitchIT {
 
     @Autowired LlmClient llmClient;

@@ -78,6 +78,7 @@ public class AuthService {
     public OAuthLoginResponse oauthLogin(OAuthProvider provider, OAuthLoginRequest req) {
         // deviceId·deviceInfo는 로그인·가입 양쪽 필수(계약). 외부 호출 전에 빠르게 거부.
         requireValidDevice(req.deviceId(), req.deviceInfo());
+        requireValidOAuthRequest(provider, req);
 
         OAuthClient client = resolver.resolve(provider);
 
@@ -187,6 +188,8 @@ public class AuthService {
 
         User user = User.create(provider, oauthSubject, email, req.nickname(), null,
                 new ArrayList<>(categories));
+        // 임시 승인 닉네임(UUID 뒤 8자)이 이미 점유돼 있으면 다른 값으로 재시도 (DB 정리 §6)
+        TempNicknameAllocator.assign(user, candidate -> userRepository.isNicknameTaken(candidate, user.getId()));
         user.registerDemographics(birthDate, gender);
         applyDeviceInfo(user, req.deviceInfo());              // 가입 시 기기 정보 최초 저장
         user.attachInstallation(req.installationId(), req.deviceId());
@@ -229,17 +232,36 @@ public class AuthService {
         return birthDate;
     }
 
-    /** 성별 파싱 — 계약 허용값은 MALE/FEMALE/NON_BINARY. 누락/허용 외 = GENDER_REQUIRED. */
+    /**
+     * 성별 파싱 — 저장 필수 필드. 허용값 4종(MALE/FEMALE/NON_BINARY/PREFER_NOT_TO_SAY)을 모두 받는다.
+     * "미응답" 표현은 API 계약(NON_BINARY)과 DB 정리 문서(PREFER_NOT_TO_SAY)가 아직 상충 중이라
+     * 합의 전까지 둘 다 수용한다. 누락/허용 외 값은 GENDER_REQUIRED.
+     */
     private Gender parseGender(String raw) {
         if (raw == null || raw.isBlank())
             throw new BusinessException(ErrorCode.GENDER_REQUIRED);
         try {
-            Gender g = Gender.valueOf(raw.trim().toUpperCase());
-            if (g == Gender.PREFER_NOT_TO_SAY)   // DB에는 존재하지만 API 계약 밖(합의 전 보류값)
-                throw new BusinessException(ErrorCode.GENDER_REQUIRED);
-            return g;
+            return Gender.valueOf(raw.trim().toUpperCase());
         } catch (IllegalArgumentException e) {
             throw new BusinessException(ErrorCode.GENDER_REQUIRED);
+        }
+    }
+
+    /**
+     * OAuth 요청 자체의 형식 검증 (IdP 호출 전 조기 거부 — 테크 스펙 4-4).
+     *  · code·codeVerifier(PKCE) 누락 → 400 LOGIN_FAILED (검증 자체가 불가)
+     *  · 구글은 redirectUri 검증 필수 — 등록값과 다르면 400 INVALID_REDIRECT_URI.
+     *    카카오는 카카오톡 간편 로그인 경로에서 SDK가 내부 처리해 null 이 올 수 있어 검증하지 않는다.
+     */
+    private void requireValidOAuthRequest(OAuthProvider provider, OAuthLoginRequest req) {
+        if (req.code() == null || req.code().isBlank()
+                || req.codeVerifier() == null || req.codeVerifier().isBlank())
+            throw new BusinessException(ErrorCode.LOGIN_FAILED);
+
+        if (provider == OAuthProvider.GOOGLE) {
+            String registered = props.oauth().google().redirectUri();
+            if (registered != null && !registered.isBlank() && !registered.equals(req.redirectUri()))
+                throw new BusinessException(ErrorCode.INVALID_REDIRECT_URI);
         }
     }
 

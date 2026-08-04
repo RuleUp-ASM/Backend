@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.ruleup.ruleup_backend.llm.LlmClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Profile;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -18,6 +19,7 @@ import java.util.Locale;
  * 어떤 실패든 {@link ModerationResult#UNAVAILABLE}로 폴백 → 검수 보류(가입은 이미 끝났으므로 안전).
  */
 @Component
+@Profile("!test")   // 테스트는 FakeModerationConfig 의 결정적 fake 를 쓴다(외부 LLM 호출 차단)
 public class GeminiModerationClient implements ContentModerationClient {
 
     private static final Logger log = LoggerFactory.getLogger(GeminiModerationClient.class);
