@@ -83,16 +83,18 @@ public class KakaoOAuthClient implements OAuthClient {
             throw new BusinessException(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
 
         String email = (res.kakaoAccount() != null) ? res.kakaoAccount().email() : null;
+        String nickname = (res.kakaoAccount() != null && res.kakaoAccount().profile() != null)
+                ? res.kakaoAccount().profile().nickname() : null;
         String img = (res.kakaoAccount() != null && res.kakaoAccount().profile() != null)
                 ? res.kakaoAccount().profile().profileImageUrl() : null;
-        return new OAuthUserInfo(String.valueOf(res.id()), email, img);
+        return new OAuthUserInfo(String.valueOf(res.id()), email, nickname, img);
     }
 
     // 카카오 응답에서 필요한 필드만 (SNAKE_CASE 설정으로 access_token→accessToken 자동 매핑)
     record KakaoTokenResponse(@JsonProperty("access_token") String accessToken) {}
     record KakaoUserResponse(Long id, @JsonProperty("kakao_account") KakaoAccount kakaoAccount) {
         record KakaoAccount(String email, Profile profile) {
-            record Profile(@JsonProperty("profile_image_url") String profileImageUrl) {}
+            record Profile(String nickname, @JsonProperty("profile_image_url") String profileImageUrl) {}
         }
     }
 }

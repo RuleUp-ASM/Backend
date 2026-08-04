@@ -2,7 +2,11 @@ package com.ruleup.ruleup_backend.profile;
 
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
+import com.ruleup.ruleup_backend.moderation.ModerationRequestRepository;
 import com.ruleup.ruleup_backend.moderation.UserModerationRequested;
+import com.ruleup.ruleup_backend.moderation.domain.ModerationRequest;
+import com.ruleup.ruleup_backend.moderation.domain.ModerationRequestStatus;
+import com.ruleup.ruleup_backend.moderation.domain.ModerationTarget;
 import com.ruleup.ruleup_backend.profile.dto.ProfileImageResponse;
 import com.ruleup.ruleup_backend.profile.dto.ProfileResponse;
 import com.ruleup.ruleup_backend.profile.dto.UpdateProfileRequest;
@@ -30,6 +34,7 @@ public class ProfileService {
 
     private final UserRepository userRepository;
     private final ReputationScoreRepository reputationScoreRepository;
+    private final ModerationRequestRepository moderationRequestRepository;
     private final ImageStorageService imageStorage;
     private final ApplicationEventPublisher eventPublisher;
 
@@ -54,6 +59,7 @@ public class ProfileService {
             if (userRepository.isNicknameTaken(req.nickname(), userId))
                 throw new BusinessException(ErrorCode.NICKNAME_DUPLICATED);
             user.changeNickname(req.nickname());   // 상태를 PENDING으로 되돌림 → 재검수 필요
+            submitModerationRequest(userId, ModerationTarget.NICKNAME, req.nickname());
             needsModeration = true;
         }
 
@@ -69,6 +75,7 @@ public class ProfileService {
         // 프로필 이미지 URL (직접 지정 시)
         if (req.profileImageUrl() != null && !req.profileImageUrl().equals(user.getProfileImageUrl())) {
             user.changeProfileImage(req.profileImageUrl());   // 상태 PENDING → 재검수
+            submitModerationRequest(userId, ModerationTarget.PROFILE_IMAGE, req.profileImageUrl());
             needsModeration = true;
         }
 
@@ -85,8 +92,21 @@ public class ProfileService {
         String url = ServletUriComponentsBuilder.fromCurrentContextPath()
                 .path("/files/").path(filename).toUriString();
         user.changeProfileImage(url);   // 상태 PENDING → 커밋 후 재검수
+        submitModerationRequest(userId, ModerationTarget.PROFILE_IMAGE, url);
         eventPublisher.publishEvent(new UserModerationRequested(userId));
         return new ProfileImageResponse(url);
+    }
+
+    /**
+     * 심사 요청 제출 — 사용자·target당 PENDING 은 하나만(UNIQUE)이므로,
+     * 아직 결정되지 않은 기존 요청은 새 제출로 대체(삭제 후 재등록)한다.
+     */
+    private void submitModerationRequest(UUID userId, ModerationTarget target, String content) {
+        moderationRequestRepository
+                .findByUserIdAndTargetAndStatus(userId, target, ModerationRequestStatus.PENDING)
+                .ifPresent(moderationRequestRepository::delete);
+        moderationRequestRepository.flush();   // UNIQUE(user_id, pending_target) 해제 후 INSERT
+        moderationRequestRepository.save(ModerationRequest.request(userId, target, content));
     }
 
     @Transactional

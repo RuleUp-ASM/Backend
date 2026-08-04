@@ -15,6 +15,11 @@ public enum ErrorCode {
     // ===== 로그인 (4.1 / 4.2) =====
     LOGIN_FAILED(HttpStatus.BAD_REQUEST, "소셜 로그인에 실패했습니다."),
     LOGIN_PROVIDER_UNAVAILABLE(HttpStatus.BAD_GATEWAY, "소셜 로그인 제공자에 연결할 수 없습니다."),
+    INVALID_REDIRECT_URI(HttpStatus.BAD_REQUEST, "redirectUri가 올바르지 않습니다."),
+    ACCOUNT_BANNED(HttpStatus.FORBIDDEN, "영구 정지된 계정입니다."),
+    ACCOUNT_LOCKED(HttpStatus.FORBIDDEN, "잠금 상태의 계정은 이 기능을 사용할 수 없습니다."),
+    INSTALLATION_ALREADY_REGISTERED(HttpStatus.FORBIDDEN,
+            "이 기기(설치)에 이미 사용 중인 계정이 있습니다. 기존 계정으로 로그인해주세요."),
 
     // ===== 가입 세션 토큰 (signupToken) (4.3) =====
     // 계약: 만료/위조 모두 400 INVALID_SIGNUP_TOKEN 로 단일화.
@@ -23,13 +28,19 @@ public enum ErrorCode {
     // ===== 기기 정보 (deviceInfo) (4.1 / 4.3) =====
     INVALID_DEVICE_INFO(HttpStatus.BAD_REQUEST, "기기 정보(deviceInfo)가 누락되었거나 형식이 올바르지 않습니다."),
 
-    // ===== 닉네임 / 카테고리 / 약관 (4.3 / 4.6 / 4.9) =====
+    // ===== 닉네임 / 카테고리 / 약관 / 온보딩 (4.3 / 4.6 / 4.9) =====
     NICKNAME_FORMAT_INVALID(HttpStatus.BAD_REQUEST, "닉네임 형식이 올바르지 않습니다."),
     NICKNAME_DUPLICATED(HttpStatus.CONFLICT, "이미 사용 중인 닉네임입니다."),
+    NICKNAME_RECENTLY_RELEASED(HttpStatus.CONFLICT, "최근 해제된 닉네임은 1주일간 사용할 수 없습니다."),
     NICKNAME_CHANGE_LOCKED(HttpStatus.FORBIDDEN, "닉네임은 30일에 한 번만 변경할 수 있습니다."),
     CATEGORY_INVALID(HttpStatus.BAD_REQUEST, "유효하지 않은 관심 카테고리입니다."),
-    CATEGORY_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "관심 카테고리는 1~6개까지 선택할 수 있습니다."),
-    AGREEMENT_REQUIRED(HttpStatus.BAD_REQUEST, "필수 약관에 동의해야 합니다."),
+    CATEGORY_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "관심 카테고리는 최대 6개까지 선택할 수 있습니다."),
+    INTEREST_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "관심 카테고리는 0~6개까지 선택할 수 있습니다."),
+    REQUIRED_AGREEMENT_MISSING(HttpStatus.BAD_REQUEST, "필수 약관(이용약관·개인정보·위치기반)에 모두 동의해야 합니다."),
+    BIRTHDATE_INVALID(HttpStatus.BAD_REQUEST, "생년월일 형식이 올바르지 않습니다. (YYYY-MM-DD)"),
+    BIRTHDATE_UNDERAGE(HttpStatus.BAD_REQUEST, "만 14세 미만은 가입할 수 없습니다."),
+    GENDER_REQUIRED(HttpStatus.BAD_REQUEST, "성별 값이 누락되었거나 올바르지 않습니다. (MALE/FEMALE/NON_BINARY)"),
+    CONFIRM_PHRASE_MISMATCH(HttpStatus.BAD_REQUEST, "탈퇴 확인 문구가 일치하지 않습니다."),
 
     // ===== 앱 토큰 (4.4 refresh / 보호 API) =====
     SESSION_EXPIRED(HttpStatus.UNAUTHORIZED, "세션이 만료되었습니다. 다시 로그인해주세요."),
