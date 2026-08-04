@@ -9,6 +9,14 @@ app:
   recommendation:
     # 짧은 테스트 동안 추천 재계산 배치가 끼어들지 않도록 첫 실행을 멀리 민다.
     rebuild-initial-delay-ms: 3600000
+  # 인트로 버전 게이트: 플랫폼별 최소 버전을 다르게 둬서 "platform 에 따라 판정이 갈리는지"를 검증한다.
+  client:
+    android:
+      min-version-code: 100
+      min-app-version: 1.0.0
+    ios:
+      min-version-code: 200
+      min-app-version: 2.0.0
   oauth:
     kakao:
       client-id: dummy

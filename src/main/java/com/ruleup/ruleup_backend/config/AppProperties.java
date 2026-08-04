@@ -49,11 +49,38 @@ public record AppProperties(Jwt jwt, Oauth oauth, Llm llm, Client client) {
         ) {}
     }
 
-    /** 앱 버전 게이트(GET /intro). 강제/권장 업데이트 안내값. */
+    /**
+     * 앱 버전 게이트(GET /intro). 업데이트 정책은 예외 없이 강제라 "권장 버전"은 두지 않는다.
+     * 플랫폼별로 버전 체계·최소 버전이 달라 android/ios 를 분리한다(계약: platform 헤더 필수).
+     */
     public record Client(
-            int minVersionCode,         // 이 코드 미만이면 강제 업데이트(400)
-            String minAppVersion,       // 화면 표시용 최소 버전명 (예: "1.0.0")
-            String recommendAppVersion, // 화면 표시용 권장 버전명 (예: "1.2.0")
-            String devTestMsg           // 개발/점검용 안내 메시지 (없으면 빈 문자열)
-    ) {}
+            Version android,
+            Version ios,
+            String devTestMsg,          // 개발/점검용 안내 메시지 (없으면 빈 문자열)
+            TermsVersions termsVersions
+    ) {
+
+        public record Version(
+                int minVersionCode,     // 이 코드 미만이면 강제 업데이트
+                String minAppVersion    // 화면 표시용 최소 버전명 (예: "1.0.0")
+        ) {}
+
+        /**
+         * 현행 약관 버전 — 인트로 응답으로 내려 클라 하드코딩을 막고, 가입 시 동의 버전 기록의
+         * 서버 기준값으로도 쓴다(클라가 version 을 안 보내면 이 값으로 저장).
+         */
+        public record TermsVersions(
+                String termsOfService,
+                String privacyPolicy,
+                String locationService,
+                String marketing,
+                String event,
+                String nightPush
+        ) {}
+
+        /** 플랫폼별 버전 정책. 알 수 없는 값이면 안드로이드 기준을 쓴다(컨트롤러가 먼저 400으로 막는다). */
+        public Version versionOf(com.ruleup.ruleup_backend.user.domain.Platform platform) {
+            return (platform == com.ruleup.ruleup_backend.user.domain.Platform.IOS) ? ios : android;
+        }
+    }
 }

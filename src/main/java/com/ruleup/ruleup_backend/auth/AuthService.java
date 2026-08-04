@@ -29,9 +29,13 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
@@ -46,8 +50,13 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class AuthService {
 
-    private static final String DEFAULT_AGREEMENT_VERSION = "1.0";   // 클라가 version 미전송 시 폴백
+    private static final Logger log = LoggerFactory.getLogger(AuthService.class);
+
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    /** 임시 승인 닉네임 INSERT 충돌 시 가입 트랜잭션 재시도 상한 (DB 정리 §6). */
+    private static final int MAX_SIGNUP_ATTEMPTS = 3;
+    /** 재시도 대상 제약 — 임시 승인 닉네임 UNIQUE. 신청 닉네임 충돌(409)은 재시도 대상이 아니다. */
+    private static final String APPROVED_NICKNAME_CONSTRAINT = "uq_users_active_approved_nickname";
     /** 만 14세 미만 가입 불가 — 법적 요구사항(가드레일: 통과 0건). */
     private static final int MIN_AGE_YEARS = 14;
 
@@ -61,6 +70,8 @@ public class AuthService {
     private final TokenService tokenService;
     private final JwtProvider jwtProvider;
     private final SignupTokenStore signupTokenStore;
+    private final TempNicknameAllocator tempNicknameAllocator;
+    private final TransactionTemplate transactionTemplate;
     private final LoginSessionService loginSessionService;
     private final SocialTokenService socialTokenService;
     private final AppProperties props;
@@ -128,17 +139,37 @@ public class AuthService {
     // ===== 가입 =====
     // 여러 테이블(users, user_information, user_interests, user_agreements,
     // moderation_requests, user_score_summaries, refresh_tokens)을 함께 쓰므로
-    // 하나라도 실패하면 전부 롤백되어야 한다 → @Transactional 필수.
+    // 하나라도 실패하면 전부 롤백되어야 한다 → 트랜잭션 필수.
     // (외부 호출 없음: signupToken 파싱은 우리 서버 안에서 끝남)
-    @Transactional
+    //
+    // @Transactional 대신 TransactionTemplate 을 쓰는 이유: 임시 승인 닉네임이 INSERT 시점에
+    // UNIQUE 충돌하면(사전 검사와 INSERT 사이의 경합) 같은 트랜잭션에서 복구할 수 없어
+    // — 제약 위반이 나면 영속성 컨텍스트가 깨진다 — 트랜잭션을 새로 열어 재시도해야 한다.
     public SignupResponse signup(SignupRequest req) {
+        // 토큰 소모는 요청당 한 번만. 재시도로 두 번 소모되면 스스로 INVALID_SIGNUP_TOKEN 이 된다.
+        boolean[] tokenConsumed = {false};
+
+        for (int attempt = 1; ; attempt++) {
+            try {
+                final int current = attempt;
+                return transactionTemplate.execute(status -> register(req, tokenConsumed, current));
+            } catch (DataIntegrityViolationException e) {
+                if (attempt >= MAX_SIGNUP_ATTEMPTS || !isApprovedNicknameConflict(e)) throw e;
+                log.warn("임시 승인 닉네임 INSERT 충돌 — 가입 재시도 {}/{}", attempt, MAX_SIGNUP_ATTEMPTS);
+            }
+        }
+    }
+
+    /** 가입 본체(트랜잭션 안). 임시 닉네임 충돌로 재시도될 수 있으므로 부수효과는 전부 트랜잭션 안에 둔다. */
+    private SignupResponse register(SignupRequest req, boolean[] tokenConsumed, int attempt) {
         Claims claims = parseSignupToken(req.signupToken());
         OAuthProvider provider = OAuthProvider.valueOf((String) claims.get("provider"));
         String oauthSubject = claims.getSubject();
         String email = (String) claims.get("email");
 
-        // signupToken 1회용 — 이미 소모된 jti의 재제출은 즉시 거부(계약: 처음부터 다시)
-        if (signupTokenStore.isUsed(claims.getId()))
+        // signupToken 1회용 — 이미 소모된 jti의 재제출은 즉시 거부(계약: 처음부터 다시).
+        // 단, 이 요청이 방금 소모한 경우(닉네임 충돌 재시도)는 같은 요청의 연장이므로 통과시킨다.
+        if (!tokenConsumed[0] && signupTokenStore.isUsed(claims.getId()))
             throw new BusinessException(ErrorCode.INVALID_SIGNUP_TOKEN);
 
         // (provider, subject) 중복 가입 차단 — 경합 시 후발 요청은 기존 유저 로그인으로 수렴(테크 스펙 4-3)
@@ -182,14 +213,19 @@ public class AuthService {
         if (userRepository.existsActiveByInstallationId(req.installationId()))
             throw new BusinessException(ErrorCode.INSTALLATION_ALREADY_REGISTERED);
 
-        // signupToken 1회용 — 검증을 모두 통과한 시점에 jti를 소모한다
-        if (!signupTokenStore.consume(claims.getId()))
-            throw new BusinessException(ErrorCode.INVALID_SIGNUP_TOKEN);
+        // signupToken 1회용 — 검증을 모두 통과한 시점에 jti를 소모한다.
+        // 재시도(2회차 이상)는 이미 이 요청이 소모한 것이므로 다시 소모하지 않는다.
+        if (!tokenConsumed[0]) {
+            if (!signupTokenStore.consume(claims.getId()))
+                throw new BusinessException(ErrorCode.INVALID_SIGNUP_TOKEN);
+            tokenConsumed[0] = true;
+        }
 
         User user = User.create(provider, oauthSubject, email, req.nickname(), null,
                 new ArrayList<>(categories));
-        // 임시 승인 닉네임(UUID 뒤 8자)이 이미 점유돼 있으면 다른 값으로 재시도 (DB 정리 §6)
-        TempNicknameAllocator.assign(user, candidate -> userRepository.isNicknameTaken(candidate, user.getId()));
+        // 임시 승인 닉네임(8자)이 이미 점유돼 있으면 다른 값으로 재시도 (DB 정리 §6)
+        tempNicknameAllocator.assign(user, candidate -> userRepository.isNicknameTaken(candidate, user.getId()));
+        if (attempt > 1) tempNicknameAllocator.reassign(user);   // 직전 시도가 INSERT 충돌 → 새 후보로
         user.registerDemographics(birthDate, gender);
         applyDeviceInfo(user, req.deviceInfo());              // 가입 시 기기 정보 최초 저장
         user.attachInstallation(req.installationId(), req.deviceId());
@@ -212,6 +248,13 @@ public class AuthService {
         TokenService.TokenPair pair = tokenService.issueTokenPair(user);
         int flushIntervalSec = FlushIntervalPolicy.forUser(user);   // deviceInfo 확정 저장 시점 → 주기 부트스트랩
         return SignupResponse.from(pair, user, summary, flushIntervalSec);
+    }
+
+    /** 임시 승인 닉네임 UNIQUE 위반인지 — 이 경우에만 새 후보로 가입을 재시도한다. */
+    private boolean isApprovedNicknameConflict(DataIntegrityViolationException e) {
+        Throwable root = e.getMostSpecificCause();
+        String message = (root != null) ? root.getMessage() : null;
+        return message != null && message.contains(APPROVED_NICKNAME_CONSTRAINT);
     }
 
     /** 생일 파싱·검증. 누락/형식/미래 = BIRTHDATE_INVALID, 만 14세 미만 = BIRTHDATE_UNDERAGE. */
@@ -299,8 +342,21 @@ public class AuthService {
     private void saveAgreement(User user, AgreementType type, SignupRequest.AgreementItem item) {
         boolean agreed = item != null && item.isAgreed();
         String version = (item != null && item.version() != null && !item.version().isBlank())
-                ? item.version() : DEFAULT_AGREEMENT_VERSION;
+                ? item.version() : currentVersionOf(type);   // 미전송 시 서버가 아는 현행 버전으로
         userAgreementRepository.save(UserAgreement.of(user, type, agreed, version));
+    }
+
+    /** 인트로가 내려주는 현행 약관 버전과 같은 값 — 클라가 version 을 생략해도 기록이 어긋나지 않게. */
+    private String currentVersionOf(AgreementType type) {
+        AppProperties.Client.TermsVersions v = props.client().termsVersions();
+        return switch (type) {
+            case TOS -> v.termsOfService();
+            case PRIVACY -> v.privacyPolicy();
+            case LOCATION -> v.locationService();
+            case MARKETING -> v.marketing();
+            case EVENT -> v.event();
+            case NIGHT_PUSH -> v.nightPush();
+        };
     }
 
     // ===== 토큰 재발급 (회전) =====

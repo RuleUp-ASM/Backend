@@ -174,10 +174,18 @@ class OnboardingApiContractIT extends AuthApiSupport {
     @Nested
     class 인트로 {
 
+        /** 테스트 설정: ANDROID 최소 100 / IOS 최소 200 (application-test.yaml). */
+        private MvcResult intro(String platform, Integer versionCode) throws Exception {
+            var req = get("/api/v1/intro");
+            if (platform != null) req = req.header("platform", platform);
+            if (versionCode != null) req = req.header("appVersionCode", versionCode);
+            return mvc.perform(req).andReturn();
+        }
+
         @Test
         @DisplayName("최신 버전이면 forceUpdate=false 로 항상 200을 준다")
         void intro_returns_200_envelope() throws Exception {
-            MvcResult res = mvc.perform(get("/api/v1/intro").header("appVersionCode", 9999)).andReturn();
+            MvcResult res = intro("ANDROID", 9999);
             assertThat(res.getResponse().getStatus()).isEqualTo(200);
             assertThat((Boolean) read(res, "$.success")).isTrue();
             assertThat((Boolean) read(res, "$.data.forceUpdate")).isFalse();
@@ -186,22 +194,76 @@ class OnboardingApiContractIT extends AuthApiSupport {
         @Test
         @DisplayName("최소 지원 버전 미만이면 forceUpdate=true (에러가 아니라 200 + 플래그)")
         void intro_force_update_flag() throws Exception {
-            MvcResult res = mvc.perform(get("/api/v1/intro").header("appVersionCode", 0)).andReturn();
+            MvcResult res = intro("ANDROID", 0);
             assertThat(res.getResponse().getStatus()).isEqualTo(200);
             assertThat((Boolean) read(res, "$.data.forceUpdate")).isTrue();
         }
 
         @Test
+        @DisplayName("같은 버전코드라도 플랫폼에 따라 강제 업데이트 판정이 갈린다 (platform 이 필수인 이유)")
+        void intro_judges_per_platform() throws Exception {
+            // 테스트 설정: ANDROID 최소 100 / IOS 최소 200 → 150 은 안드로만 통과
+            MvcResult android = intro("ANDROID", 150);
+            assertThat((Boolean) read(android, "$.data.forceUpdate")).isFalse();
+            assertThat((String) read(android, "$.data.minAppVersion")).isEqualTo("1.0.0");
+
+            MvcResult ios = intro("IOS", 150);
+            assertThat((Boolean) read(ios, "$.data.forceUpdate")).isTrue();
+            assertThat((String) read(ios, "$.data.minAppVersion")).isEqualTo("2.0.0");
+        }
+
+        @Test
+        @DisplayName("현행 약관 버전 6종(termsVersions)을 내려준다 — 클라 하드코딩 방지")
+        void intro_returns_terms_versions() throws Exception {
+            MvcResult res = intro("ANDROID", 9999);
+            for (String key : List.of("termsOfService", "privacyPolicy", "locationService",
+                    "marketing", "event", "nightPush")) {
+                assertThat((String) read(res, "$.data.termsVersions." + key))
+                        .as("termsVersions.%s", key).isNotBlank();
+            }
+        }
+
+        @Test
+        @DisplayName("가입 시 version 을 생략하면 인트로가 알려준 현행 버전으로 기록된다")
+        void signup_falls_back_to_current_terms_version() throws Exception {
+            String currentTos = read(intro("ANDROID", 9999), "$.data.termsVersions.termsOfService");
+
+            String tag = uniq("tv");
+            Map<String, Object> body = preparedSignup(tag, "약관버전" + seq());
+            Map<String, Object> ag = allAgreements();
+            ag.put("termsOfService", Map.of("agreed", true));   // version 미전송
+            body.put("agreements", ag);
+            assertThat(postJson("/api/v1/auth/signup", body).getResponse().getStatus()).isEqualTo(200);
+
+            String at = read(postJson("/api/v1/auth/oauth/kakao",
+                    loginBody(tag, "inst-" + tag, "dev-" + tag)), "$.data.accessToken");
+            MvcResult me = mvc.perform(get("/api/v1/users/me")
+                    .header("Authorization", "Bearer " + at)).andReturn();
+            assertThat((String) read(me, "$.data.agreements.termsOfService.version")).isEqualTo(currentTos);
+        }
+
+        @Test
         @DisplayName("appVersionCode 헤더 누락은 400 INVALID_REQUEST")
-        void intro_missing_header_rejected() throws Exception {
-            expectError(mvc.perform(get("/api/v1/intro")).andReturn(), 400, "INVALID_REQUEST");
+        void intro_missing_version_header_rejected() throws Exception {
+            expectError(intro("ANDROID", null), 400, "INVALID_REQUEST");
+        }
+
+        @Test
+        @DisplayName("platform 헤더 누락은 400 INVALID_REQUEST — 플랫폼별 판정이 불가하다")
+        void intro_missing_platform_header_rejected() throws Exception {
+            expectError(intro(null, 9999), 400, "INVALID_REQUEST");
+        }
+
+        @Test
+        @DisplayName("허용 외 platform 값은 400 INVALID_REQUEST")
+        void intro_unknown_platform_rejected() throws Exception {
+            expectError(intro("WINDOWS_PHONE", 9999), 400, "INVALID_REQUEST");
         }
 
         @Test
         @DisplayName("인트로는 로그인 없이 호출할 수 있다 (스플래시 단계)")
         void intro_is_public() throws Exception {
-            assertThat(mvc.perform(get("/api/v1/intro").header("appVersionCode", 100))
-                    .andReturn().getResponse().getStatus()).isEqualTo(200);
+            assertThat(intro("ANDROID", 9999).getResponse().getStatus()).isEqualTo(200);
         }
     }
 
@@ -283,8 +345,11 @@ class OnboardingApiContractIT extends AuthApiSupport {
             assertThat(res.getResponse().getStatus()).isEqualTo(200);
             assertThat((Integer) read(res, "$.data.maxSelectable")).isEqualTo(6);
 
+            // 계약을 통째로 고정한다 — 개수만 보면 코드가 바뀌어도 통과한다(2026-08-03 확정 12종)
             List<String> codes = read(res, "$.data.categories[*].code");
-            assertThat(codes).hasSize(12).contains("EXERCISE", "WAKE_SLEEP", "DIET_HEALTH", "ETC");
+            assertThat(codes).containsExactlyInAnyOrder(
+                    "EXERCISE", "WAKE_SLEEP", "DIET_HEALTH", "STUDY", "READING", "MIND",
+                    "FINANCE", "HOBBY", "HOUSEKEEPING", "CAREER_PRODUCTIVITY", "DETOX", "ETC");
         }
     }
 

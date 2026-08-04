@@ -127,10 +127,22 @@ app:
 
   # 앱 버전 게이트 (GET /intro). 배포 환경마다 env로 바꿔 끼운다.
   client:
-    min-version-code: ${MIN_APP_VERSION_CODE:1}   # 이 코드 미만이면 강제 업데이트(400)
-    min-app-version: ${MIN_APP_VERSION:1.0.0}      # 화면 표시용 최소 버전명
-    recommend-app-version: ${RECOMMEND_APP_VERSION:1.0.0}  # 화면 표시용 권장 버전명
+    # 강제 업데이트 판정은 플랫폼별로 한다(스토어 심사 주기·버전 체계가 달라 최소 버전이 갈린다).
+    android:
+      min-version-code: ${MIN_APP_VERSION_CODE_ANDROID:1}   # 이 코드 미만이면 강제 업데이트
+      min-app-version: ${MIN_APP_VERSION_ANDROID:1.0.0}     # 화면 표시용 최소 버전명
+    ios:
+      min-version-code: ${MIN_APP_VERSION_CODE_IOS:1}
+      min-app-version: ${MIN_APP_VERSION_IOS:1.0.0}
     dev-test-msg: ${DEV_TEST_MSG:}                 # 점검/안내 메시지 (없으면 빈값 → null)
+    # 현행 약관 버전. 인트로 응답 + 가입 동의 이력의 서버 기준값(클라 하드코딩 방지).
+    terms-versions:
+      terms-of-service: ${TERMS_VERSION_TOS:1.0}
+      privacy-policy: ${TERMS_VERSION_PRIVACY:1.0}
+      location-service: ${TERMS_VERSION_LOCATION:1.0}
+      marketing: ${TERMS_VERSION_MARKETING:1.0}
+      event: ${TERMS_VERSION_EVENT:1.0}
+      night-push: ${TERMS_VERSION_NIGHT_PUSH:1.0}
 
   # 리버스 프록시(EC2 + Cloudflare 터널) 뒤에서 Swagger Try-it-out이 정확한 주소로 가도록.
   # 로컬은 비워두고, EC2에서만 systemd 환경변수로 채운다: SWAGGER_SERVER_URL=https://<도메인>

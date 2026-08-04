@@ -41,6 +41,7 @@ public class LoginSessionService {
     private final NotificationService notificationService;
     private final CountryResolver countryResolver;
     private final TokenService tokenService;
+    private final com.ruleup.ruleup_backend.user.domain.TempNicknameAllocator tempNicknameAllocator;
 
     @Transactional
     public OAuthLoginResponse loginExisting(UUID userId, OAuthProvider provider,
@@ -60,7 +61,8 @@ public class LoginSessionService {
                     || (user.isNicknamePending()
                         && userRepository.isNicknameTaken(user.getNickname(), user.getId()));
             if (nicknameTaken) {
-                user.regenerateTempApprovedNickname();
+                tempNicknameAllocator.assign(user,
+                        candidate -> userRepository.isNicknameTaken(candidate, user.getId()));
                 user.markNicknameConflict();   // 클라는 닉네임 재설정 화면에서 진행을 막는다(계약)
             }
             user.restore(req.installationId(), req.deviceId());

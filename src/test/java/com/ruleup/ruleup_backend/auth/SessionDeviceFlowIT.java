@@ -246,8 +246,25 @@ class SessionDeviceFlowIT {
         }
 
         @Test
-        @DisplayName("잠금 중에도 로그아웃과 탈퇴는 허용된다 (§7.5)")
-        void locked_can_logout_and_withdraw() throws Exception {
+        @DisplayName("잠금 중에도 로그아웃은 허용된다 — 세션을 못 끊으면 로그인 상태에 갇힌다")
+        void locked_can_logout() throws Exception {
+            String tag = uniq();
+            signup(tag);
+            User user = findUser(tag);
+            user.lock();
+            userRepository.save(user);
+
+            MvcResult login = postJson("/api/v1/auth/oauth/kakao", loginBody(tag, "inst-" + tag, "dev-" + tag));
+            String at = read(login, "$.data.accessToken");
+            String rt = read(login, "$.data.refreshToken");
+
+            assertThat(logout(at, rt).getResponse().getStatus()).isEqualTo(200);
+            expectError(refresh(rt), 401, "SESSION_EXPIRED");   // 실제로 세션이 끊겼다
+        }
+
+        @Test
+        @DisplayName("잠금 중에도 탈퇴는 허용된다 (§7.5)")
+        void locked_can_withdraw() throws Exception {
             String tag = uniq();
             String at = lockAndRelogin(tag);
 
@@ -258,6 +275,7 @@ class SessionDeviceFlowIT {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(om.writeValueAsString(withdrawBody))).andReturn();
             assertThat(withdrawn.getResponse().getStatus()).isEqualTo(200);
+            assertThat(findUser(tag).isWithdrawn()).isTrue();
         }
 
         /** 가입 → 잠금 → 재로그인해서 잠금 상태의 accessToken 을 얻는다. */

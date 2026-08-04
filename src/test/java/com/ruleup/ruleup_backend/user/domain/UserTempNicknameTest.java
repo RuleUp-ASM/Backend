@@ -73,47 +73,70 @@ class UserTempNicknameTest {
         assertThat(u1.deriveTempNickname()).isNotEqualTo(u2.deriveTempNickname());
     }
 
-    // ===== 충돌 재시도 (DB 정리 문서 §6) =====
+    // ===== 사전 검사 단계의 충돌 재시도 (DB 정리 문서 §6) =====
+    // INSERT 시점 충돌(경합)까지 포함한 검증은 TempNicknameCollisionIT 가 실제 DB로 수행한다.
 
-    /** 처음 생성한 임시 닉네임이 비어 있으면 그대로 쓴다(불필요한 재생성 금지). */
+    private static final TempNicknameGenerator REAL_GENERATOR = new RandomTempNicknameGenerator();
+
+    /** 생성기가 준 첫 후보가 비어 있으면 그대로 쓴다(불필요한 재발급 금지). */
     @Test
     void allocator_keepsFirstCandidate_whenAvailable() {
         User u = User.create(OAuthProvider.KAKAO, "sub", null, "성은이", null, null);
-        String first = u.getApprovedNickname();
+        List<String> issued = new ArrayList<>();
+        TempNicknameAllocator allocator = new TempNicknameAllocator(() -> {
+            String candidate = REAL_GENERATOR.next();
+            issued.add(candidate);
+            return candidate;
+        });
 
-        TempNicknameAllocator.assign(u, taken -> false);   // 아무것도 점유되지 않은 상태
+        allocator.assign(u, taken -> false);   // 아무것도 점유되지 않은 상태
 
-        assertThat(u.getApprovedNickname()).isEqualTo(first);
+        assertThat(issued).hasSize(1);
+        assertThat(u.getApprovedNickname()).isEqualTo(issued.getFirst());
     }
 
     /** 이미 점유된 값이면 다른 8자리로 재시도해서 사용 가능한 값을 얻는다. */
     @Test
     void allocator_retriesUntilFreeCandidate() {
         User u = User.create(OAuthProvider.KAKAO, "sub", null, "성은이", null, null);
-        String first = u.getApprovedNickname();
-        Set<String> occupied = new HashSet<>();
-        occupied.add(first);                               // 첫 후보는 이미 다른 사람이 쓰는 중
+        Set<String> occupied = new HashSet<>(Set.of("aaaaaaaa"));   // 첫 후보는 이미 다른 사람이 쓰는 중
 
-        List<String> tried = new ArrayList<>();
-        TempNicknameAllocator.assign(u, candidate -> {
-            tried.add(candidate);
-            return occupied.contains(candidate);
+        List<String> issued = new ArrayList<>();
+        TempNicknameAllocator allocator = new TempNicknameAllocator(() -> {
+            String candidate = issued.isEmpty() ? "aaaaaaaa" : REAL_GENERATOR.next();
+            issued.add(candidate);
+            return candidate;
         });
 
+        allocator.assign(u, occupied::contains);
+
         assertThat(u.getApprovedNickname())
-                .isNotEqualTo(first)                       // 충돌한 값은 버린다
+                .isNotEqualTo("aaaaaaaa")                  // 충돌한 값은 버린다
                 .hasSize(8)
                 .containsPattern("^[0-9a-f]{8}$");
-        assertThat(tried).hasSizeGreaterThanOrEqualTo(2);  // 최소 한 번은 재시도했다
+        assertThat(issued).hasSizeGreaterThanOrEqualTo(2); // 최소 한 번은 재발급했다
     }
 
     /** 연속 충돌이 상한을 넘으면 조용히 중복 저장하지 않고 실패시킨다(UNIQUE 위반 방지). */
     @Test
     void allocator_failsFast_whenEveryCandidateTaken() {
         User u = User.create(OAuthProvider.KAKAO, "sub", null, "성은이", null, null);
+        TempNicknameAllocator allocator = new TempNicknameAllocator(REAL_GENERATOR);
 
-        assertThatThrownBy(() -> TempNicknameAllocator.assign(u, candidate -> true))
+        assertThatThrownBy(() -> allocator.assign(u, candidate -> true))
                 .isInstanceOf(IllegalStateException.class);
+    }
+
+    /** 생성기 후보는 8자리 hex 이고 매번 달라야 한다(임시 닉네임끼리의 충돌 확률을 낮춘다). */
+    @Test
+    void generator_producesDistinct8HexCandidates() {
+        Set<String> candidates = new HashSet<>();
+        for (int i = 0; i < 50; i++) {
+            String candidate = REAL_GENERATOR.next();
+            assertThat(candidate).hasSize(8).containsPattern("^[0-9a-f]{8}$");
+            candidates.add(candidate);
+        }
+        assertThat(candidates).hasSize(50);
     }
 
     /** 가입 직후 approved_nickname 은 임시 닉네임으로 초기화되고, 승인 시 신청값으로 교체된다. */

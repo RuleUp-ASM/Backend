@@ -244,10 +244,13 @@ public class User extends AssignedIdEntity {
         return hex.substring(hex.length() - 8);
     }
 
-    /** 임시 닉네임 UNIQUE 충돌 시 재생성용 — 랜덤 UUID 뒤 8자리로 교체. */
-    public void regenerateTempApprovedNickname() {
-        String hex = UUID.randomUUID().toString().replace("-", "");
-        this.approvedNickname = hex.substring(hex.length() - 8);
+    /**
+     * 타인에게 노출될 승인 닉네임을 직접 지정한다.
+     * 가입 시 사용 가능한 임시 닉네임 할당, INSERT 충돌 후 재시도, 복원 시 선점 충돌 처리에 쓴다
+     * ({@code TempNicknameAllocator} 경유). 값의 생성 규칙은 {@code TempNicknameGenerator} 소관.
+     */
+    public void assignApprovedNickname(String approvedNickname) {
+        this.approvedNickname = approvedNickname;
     }
 
     public void changeNickname(String newNickname) {
