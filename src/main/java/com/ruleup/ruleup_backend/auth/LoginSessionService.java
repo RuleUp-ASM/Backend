@@ -51,6 +51,22 @@ public class LoginSessionService {
         // 영구 정지 계정은 로그인 자체를 차단한다. (재가입 경로도 없음 — subject 가 살아있는 한 이 분기로 온다)
         if (user.isBanned()) throw new BusinessException(ErrorCode.ACCOUNT_BANNED);
 
+        // ===== 탈퇴 복원 — 1년 내 동일 소셜 계정 재로그인 시 전부 복원 (DB 정리 §12.2) =====
+        // (1년 경과분은 파기 배치가 subject 를 익명화하면 자연히 신규 분기로 빠진다 — 후속 이슈)
+        boolean restored = false;
+        if (user.isWithdrawn()) {
+            // 기존 승인 닉네임(또는 심사 중이던 신청 닉네임)을 타인이 선점했으면 CONFLICT + 임시 닉네임
+            boolean nicknameTaken = userRepository.isNicknameTaken(user.getApprovedNickname(), user.getId())
+                    || (user.isNicknamePending()
+                        && userRepository.isNicknameTaken(user.getNickname(), user.getId()));
+            if (nicknameTaken) {
+                user.regenerateTempApprovedNickname();
+                user.markNicknameConflict();   // 클라는 닉네임 재설정 화면에서 진행을 막는다(계약)
+            }
+            user.restore(req.installationId(), req.deviceId());
+            restored = true;
+        }
+
         // ===== 단일 활성 기기 — 다른 기기 로그인이면 기존 세션 전부 종료 =====
         boolean deviceChanged = user.getDeviceId() != null && req.deviceId() != null
                 && !req.deviceId().equals(user.getDeviceId());
@@ -84,7 +100,7 @@ public class LoginSessionService {
         TokenService.TokenPair pair = tokenService.issueTokenPair(user);
         UserScoreSummary summary = scoreSummaryRepository.findById(user.getId()).orElse(null);
         int flushIntervalSec = FlushIntervalPolicy.forUser(user);
-        return OAuthLoginResponse.existing(pair, user, summary, flushIntervalSec, false);
+        return OAuthLoginResponse.existing(pair, user, summary, flushIntervalSec, restored);
     }
 
     private void applyDeviceInfo(User user, DeviceInfoRequest device) {
