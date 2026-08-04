@@ -127,16 +127,19 @@ class UserTempNicknameTest {
                 .isInstanceOf(IllegalStateException.class);
     }
 
-    /** 생성기 후보는 8자리 hex 이고 매번 달라야 한다(임시 닉네임끼리의 충돌 확률을 낮춘다). */
+    /**
+     * 생성기 후보는 항상 8자리 hex 여야 한다({@code approved_nickname VARCHAR(12)} 제약).
+     *
+     * <p>"매번 다른 값"은 <b>단언하지 않는다.</b> 8 hex 는 유한 공간이라 중복이 원리적으로 가능하고,
+     * 그걸 실패 조건으로 두면 확률은 낮아도 언젠가 터지는 flaky 테스트가 된다. 애초에 유일성은
+     * 생성기의 보장 사항이 아니라 할당기(사전 검사)·DB UNIQUE·재시도가 함께 책임진다
+     * — 그 경로는 {@code TempNicknameCollisionIT} 가 실제 DB로 검증한다.
+     */
     @Test
-    void generator_producesDistinct8HexCandidates() {
-        Set<String> candidates = new HashSet<>();
+    void generator_producesWellFormed8HexCandidates() {
         for (int i = 0; i < 50; i++) {
-            String candidate = REAL_GENERATOR.next();
-            assertThat(candidate).hasSize(8).containsPattern("^[0-9a-f]{8}$");
-            candidates.add(candidate);
+            assertThat(REAL_GENERATOR.next()).hasSize(8).containsPattern("^[0-9a-f]{8}$");
         }
-        assertThat(candidates).hasSize(50);
     }
 
     /** 가입 직후 approved_nickname 은 임시 닉네임으로 초기화되고, 승인 시 신청값으로 교체된다. */

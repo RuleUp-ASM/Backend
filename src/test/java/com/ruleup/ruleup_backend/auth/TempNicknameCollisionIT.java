@@ -1,6 +1,7 @@
 package com.ruleup.ruleup_backend.auth;
 
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
+import com.ruleup.ruleup_backend.auth.domain.SocialToken;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import com.ruleup.ruleup_backend.user.domain.OAuthProvider;
 import com.ruleup.ruleup_backend.user.domain.RandomTempNicknameGenerator;
@@ -28,6 +29,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 
@@ -49,6 +51,7 @@ class TempNicknameCollisionIT extends AuthApiSupport {
     @Autowired WebApplicationContext wac;
     @MockitoSpyBean RandomTempNicknameGenerator tempNicknameGenerator;
     @MockitoSpyBean UserRepository userRepository;
+    @Autowired SocialTokenRepository socialTokenRepository;
 
     private MockMvc mvc;
 
@@ -115,7 +118,8 @@ class TempNicknameCollisionIT extends AuthApiSupport {
         //  "8자리 hex"로 고정하지 않고, 점유된 값이 아니라는 것만 확인한다)
         User created = findUser(tag);
         assertThat(created.getApprovedNickname()).isNotEqualTo(occupied);
-        verify(tempNicknameGenerator, atLeast(2)).next();   // 최소 한 번은 재발급했다
+        verify(tempNicknameGenerator, atLeast(2)).next();          // 최소 한 번은 재발급했다
+        verify(userRepository, times(2)).save(any(User.class));    // INSERT 는 정확히 두 번 시도됐다
     }
 
     @Test
@@ -143,6 +147,12 @@ class TempNicknameCollisionIT extends AuthApiSupport {
         assertThat(created.getBirthDate()).isNotNull();                       // user_information 도 함께
         assertThat(created.getInterestCategories()).isNotEmpty();             // user_interests 도 함께
         assertThat((Integer) read(res, "$.data.user.score")).isEqualTo(10);   // 점수 요약도 정상
+
+        // social_tokens 도 저장돼야 한다. 보류분(in-memory)은 트랜잭션과 함께 롤백되지 않으므로,
+        // 1회차에서 미리 지워버리면 재시도가 토큰을 못 찾아 unlink 근거가 조용히 사라진다.
+        assertThat(socialTokenRepository.findById(new SocialToken.Key(userId, OAuthProvider.KAKAO)))
+                .as("재시도로 성공한 가입도 IdP 토큰을 보존해야 한다")
+                .isPresent();
     }
 
     @Test
@@ -158,9 +168,13 @@ class TempNicknameCollisionIT extends AuthApiSupport {
         String tag = uniq("rt3");
         MvcResult res = postJson("/api/v1/auth/signup", preparedSignup(tag, "포기유저" + seq()));
 
-        assertThat(res.getResponse().getStatus()).isNotEqualTo(200);   // 성공으로 위장하지 않는다
+        // 상한만큼 "실제로" 트랜잭션을 다시 열었는지 — 생성기 호출 수는 사전 검사 루프와 섞이므로
+        // INSERT 시도(=save) 횟수로 센다.
+        verify(userRepository, times(AuthService.MAX_SIGNUP_ATTEMPTS)).save(any(User.class));
+
+        // 사용자 입력 문제가 아니므로 닉네임 중복(409)으로 위장하지 않는다
+        assertThat(res.getResponse().getStatus()).isEqualTo(500);
         assertThat((Boolean) read(res, "$.success")).isFalse();
-        // 상한(3회)만큼 실제로 재시도한 뒤 포기했는지 — 시도마다 후보를 새로 받는다
-        verify(tempNicknameGenerator, atLeast(3)).next();
+        assertThat((String) read(res, "$.error.code")).isEqualTo("INTERNAL_SERVER_ERROR");
     }
 }

@@ -53,8 +53,8 @@ public class AuthService {
     private static final Logger log = LoggerFactory.getLogger(AuthService.class);
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
-    /** 임시 승인 닉네임 INSERT 충돌 시 가입 트랜잭션 재시도 상한 (DB 정리 §6). */
-    private static final int MAX_SIGNUP_ATTEMPTS = 3;
+    /** 임시 승인 닉네임 INSERT 충돌 시 가입 트랜잭션 재시도 상한 (DB 정리 §6). 같은 패키지 테스트가 참조. */
+    static final int MAX_SIGNUP_ATTEMPTS = 3;
     /** 재시도 대상 제약 — 임시 승인 닉네임 UNIQUE. 신청 닉네임 충돌(409)은 재시도 대상이 아니다. */
     private static final String APPROVED_NICKNAME_CONSTRAINT = "uq_users_active_approved_nickname";
     /** 만 14세 미만 가입 불가 — 법적 요구사항(가드레일: 통과 0건). */
@@ -154,7 +154,15 @@ public class AuthService {
                 final int current = attempt;
                 return transactionTemplate.execute(status -> register(req, tokenConsumed, current));
             } catch (DataIntegrityViolationException e) {
-                if (attempt >= MAX_SIGNUP_ATTEMPTS || !isApprovedNicknameConflict(e)) throw e;
+                // 신청 닉네임 충돌 등 사용자에게 알려야 할 위반은 그대로 올려보낸다(409).
+                if (!isApprovedNicknameConflict(e)) throw e;
+                if (attempt >= MAX_SIGNUP_ATTEMPTS) {
+                    // 사용자 입력 문제가 아니라 서버가 빈 임시 닉네임을 못 찾은 것 →
+                    // "닉네임 중복(409)"으로 위장하면 원인을 오해하게 된다.
+                    log.error("임시 승인 닉네임 충돌이 {}회 연속 발생해 가입을 포기했습니다.",
+                            MAX_SIGNUP_ATTEMPTS, e);
+                    throw new BusinessException(ErrorCode.INTERNAL_SERVER_ERROR);
+                }
                 log.warn("임시 승인 닉네임 INSERT 충돌 — 가입 재시도 {}/{}", attempt, MAX_SIGNUP_ATTEMPTS);
             }
         }
