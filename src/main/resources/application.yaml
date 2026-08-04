@@ -10,9 +10,9 @@ spring:
 
   datasource:
     # 접속 주소는 env(DB_URL)로 주입한다. 미설정 시 로컬 기본값(localhost)으로 폴백.
-    #  · 운영(RDS): DB_URL=jdbc:mysql://<rds-endpoint>:3306/ruleup?serverTimezone=UTC&characterEncoding=UTF-8&rewriteBatchedStatements=true&sslMode=REQUIRED
-    #  · 로컬: env 미설정이면 아래 기본값 사용.
-    url: ${DB_URL:jdbc:mysql://localhost:3306/ruleup?serverTimezone=UTC&characterEncoding=UTF-8&rewriteBatchedStatements=true}
+    #  · 운영(RDS): DB_URL=jdbc:mysql://<rds-endpoint>:3306/RuleUp7?serverTimezone=UTC&characterEncoding=UTF-8&rewriteBatchedStatements=true&sslMode=REQUIRED
+    #  · 로컬: env 미설정이면 아래 기본값 사용. RuleUp7 리베이스라인 DB — 없으면 자동 생성.
+    url: ${DB_URL:jdbc:mysql://localhost:3306/RuleUp7?serverTimezone=UTC&characterEncoding=UTF-8&rewriteBatchedStatements=true&createDatabaseIfNotExist=true}
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
     hikari:

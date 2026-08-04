@@ -9,8 +9,9 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * tempNickname()은 PK(UUID v7)에서 결정적으로 파생하는 임시 표시명(저장 안 함).
- * 핵심: v7의 앞 구간은 타임스탬프라 같은 시간대 가입자끼리 겹치므로 <b>뒤 6자리</b>(랜덤 구간)를 써야 한다.
+ * deriveTempNickname()은 PK(UUID v7)에서 결정적으로 파생하는 임시 승인 닉네임(가입 직후 approved_nickname 초기값).
+ * 핵심: v7의 앞 구간은 타임스탬프라 같은 시간대 가입자끼리 겹치므로 <b>뒤 8자리</b>(랜덤 구간)를 써야 한다.
+ * (approved_nickname VARCHAR(12) 제약상 prefix 없이 8자만 사용 — DB 정리 문서 §6)
  */
 class UserTempNicknameTest {
 
@@ -28,22 +29,22 @@ class UserTempNicknameTest {
     }
 
     @Test
-    void format_isUserPlusLast6Hex() {
+    void format_isLast8Hex() {
         UUID id = UUID.fromString("0190abcd-1234-7abc-8def-0000001a2b3c");
-        assertThat(userWithId(id).tempNickname()).isEqualTo("user_1a2b3c");   // 하이픈 제거 후 뒤 6자리
+        assertThat(userWithId(id).deriveTempNickname()).isEqualTo("001a2b3c");   // 하이픈 제거 후 뒤 8자리
     }
 
     @Test
     void deterministic_sameIdSameValue() {
         UUID id = UuidGenerator.generate();
         User u = userWithId(id);
-        assertThat(u.tempNickname()).isEqualTo(u.tempNickname());              // 항상 동일
-        assertThat(userWithId(id).tempNickname()).isEqualTo(u.tempNickname()); // 같은 id → 같은 값
+        assertThat(u.deriveTempNickname()).isEqualTo(u.deriveTempNickname());              // 항상 동일
+        assertThat(userWithId(id).deriveTempNickname()).isEqualTo(u.deriveTempNickname()); // 같은 id → 같은 값
     }
 
     /**
      * 타임스탬프 구간이 동일한(가입 시각이 가까운) 서로 다른 v7 UUID 두 개는
-     * 서로 다른 tempNickname을 가져야 한다. (구버그: 앞 6자리를 쓰면 둘이 충돌했다.)
+     * 서로 다른 임시 닉네임을 가져야 한다. (구버그: 앞자리를 쓰면 둘이 충돌했다.)
      */
     @Test
     void closeTimestamps_produceDifferentTempNicknames() {
@@ -53,17 +54,30 @@ class UserTempNicknameTest {
 
         String hexA = a.toString().replace("-", "");
         String hexB = b.toString().replace("-", "");
-        assertThat(hexA.substring(0, 6)).isEqualTo(hexB.substring(0, 6));      // 앞 6자리는 같음(구버그가 충돌하던 지점)
+        assertThat(hexA.substring(0, 8)).isEqualTo(hexB.substring(0, 8));      // 앞 8자리는 같음(구버그가 충돌하던 지점)
 
-        assertThat(userWithId(a).tempNickname())
-                .isNotEqualTo(userWithId(b).tempNickname());                   // 새 로직(뒤 6자리)은 구분됨
+        assertThat(userWithId(a).deriveTempNickname())
+                .isNotEqualTo(userWithId(b).deriveTempNickname());             // 새 로직(뒤 8자리)은 구분됨
     }
 
-    /** 실제 v7 생성기로도 연속 생성 시(같은 시간대) 서로 다른 tempNickname이 나오는지 확인. */
+    /** 실제 v7 생성기로도 연속 생성 시(같은 시간대) 서로 다른 임시 닉네임이 나오는지 확인. */
     @Test
     void consecutiveV7Ids_areDistinct() {
         User u1 = userWithId(UuidGenerator.generate());
         User u2 = userWithId(UuidGenerator.generate());
-        assertThat(u1.tempNickname()).isNotEqualTo(u2.tempNickname());
+        assertThat(u1.deriveTempNickname()).isNotEqualTo(u2.deriveTempNickname());
+    }
+
+    /** 가입 직후 approved_nickname 은 임시 닉네임으로 초기화되고, 승인 시 신청값으로 교체된다. */
+    @Test
+    void approvedNickname_initializedWithTempAndReplacedOnApproval() {
+        User u = User.create(OAuthProvider.KAKAO, "sub", null, "성은이", null, null);
+        assertThat(u.getApprovedNickname()).isEqualTo(u.deriveTempNickname());
+        assertThat(u.visibleNicknameTo(null)).isEqualTo(u.deriveTempNickname());   // 타인 화면
+        assertThat(u.visibleNicknameTo(u.getId())).isEqualTo("성은이");             // 본인 화면
+
+        u.approveNickname();
+        assertThat(u.getApprovedNickname()).isEqualTo("성은이");
+        assertThat(u.visibleNicknameTo(null)).isEqualTo("성은이");
     }
 }

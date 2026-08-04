@@ -127,10 +127,10 @@ public class AuthService {
         String oauthSubject = claims.getSubject();
         String email = (String) claims.get("email");
 
-        // 닉네임 형식 → 중복
+        // 닉네임 형식 → 중복(신청 PENDING·승인 닉네임 모두 점유로 본다)
         if (!NicknamePolicy.isValid(req.nickname()))
             throw new BusinessException(ErrorCode.NICKNAME_FORMAT_INVALID);
-        if (userRepository.existsByNickname(req.nickname()))
+        if (userRepository.isNicknameTaken(req.nickname(), null))
             throw new BusinessException(ErrorCode.NICKNAME_DUPLICATED);
 
         // 관심 카테고리: 개수(1~6) → 코드 유효성
@@ -189,11 +189,12 @@ public class AuthService {
     }
 
     private void saveAgreements(User user, SignupRequest.Agreements ag) {
-        userAgreementRepository.save(UserAgreement.agree(user, AgreementType.TERMS, DEFAULT_AGREEMENT_VERSION));
-        userAgreementRepository.save(UserAgreement.agree(user, AgreementType.PRIVACY, DEFAULT_AGREEMENT_VERSION));
-        if (Boolean.TRUE.equals(ag.marketing())) {
-            userAgreementRepository.save(UserAgreement.agree(user, AgreementType.MARKETING, DEFAULT_AGREEMENT_VERSION));
-        }
+        // 약관 6종 계약 전환 전 임시 매핑: terms→TOS, privacy→PRIVACY, marketing→MARKETING.
+        // append-only 이력이므로 미동의(false)도 행으로 남긴다.
+        userAgreementRepository.save(UserAgreement.of(user, AgreementType.TOS, true, DEFAULT_AGREEMENT_VERSION));
+        userAgreementRepository.save(UserAgreement.of(user, AgreementType.PRIVACY, true, DEFAULT_AGREEMENT_VERSION));
+        userAgreementRepository.save(UserAgreement.of(user, AgreementType.MARKETING,
+                Boolean.TRUE.equals(ag.marketing()), DEFAULT_AGREEMENT_VERSION));
     }
 
     // ===== 토큰 재발급 (회전) =====
@@ -225,7 +226,7 @@ public class AuthService {
     public NicknameAvailabilityResponse checkNickname(String nickname) {
         if (!NicknamePolicy.isValid(nickname))
             return NicknameAvailabilityResponse.formatFail();        // valid:false, reason:FORMAT
-        if (userRepository.existsByNickname(nickname))
+        if (userRepository.isNicknameTaken(nickname, null))
             return NicknameAvailabilityResponse.duplicated();        // valid:true, available:false, reason:DUPLICATED
         return NicknameAvailabilityResponse.ok();                    // valid:true, available:true
     }

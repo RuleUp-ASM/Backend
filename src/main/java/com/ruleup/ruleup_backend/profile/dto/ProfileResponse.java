@@ -26,7 +26,7 @@ public record ProfileResponse(
                 ? changedAt.plus(NicknamePolicy.CHANGE_INTERVAL).toString() : null;
         return new ProfileResponse(
                 user.getId().toString(), user.getNickname(), user.getEmail(), user.getProfileImageUrl(),
-                user.getNicknameStatus().name(), user.getProfileImageStatus().name(), user.tempNickname(),
+                user.getNicknameStatus().name(), user.getProfileImageStatus().name(), user.getApprovedNickname(),
                 (changedAt != null ? changedAt.toString() : null),
                 changeableAfter,
                 temp, user.getInterestCategories(),
