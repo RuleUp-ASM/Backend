@@ -74,7 +74,7 @@ class SignupFlowIT {
     private static final AtomicInteger SEQ = new AtomicInteger();
 
     @Autowired WebApplicationContext wac;
-    @Autowired ObjectMapper om;
+    private final ObjectMapper om = new ObjectMapper();   // 직렬화 전용(빈 아님 — Boot4는 Jackson3 빈)
     @Autowired AppProperties props;
     @Autowired UserRepository userRepository;
     @Autowired UserAgreementRepository agreementRepository;

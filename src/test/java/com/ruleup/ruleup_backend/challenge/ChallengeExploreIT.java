@@ -220,7 +220,7 @@ class ChallengeExploreIT {
     // ===== 카테고리 그리드 =====
 
     @Test
-    @DisplayName("카테고리 그리드는 진행 중 수를 집계하고 15종 전체를 categoryId 순으로 낸다")
+    @DisplayName("카테고리 그리드는 진행 중 수를 집계하고 12종 전체를 categoryId 순으로 낸다")
     void categoryGrid() {
         UUID owner = newUser().getId();
         save(challenge(owner, "EXERCISE", ParticipationType.GROUP, null, manual(), today(), 14, 1));
@@ -231,7 +231,7 @@ class ChallengeExploreIT {
 
         CategoryGridResponse grid = categoryService.getCategories();
 
-        assertThat(grid.items()).hasSize(15);
+        assertThat(grid.items()).hasSize(12);   // 관심 카테고리 12종(2026-08-03 확정)
         CategoryGridResponse.Item exercise = grid.items().stream()
                 .filter(i -> i.name().equals("운동")).findFirst().orElseThrow();
         assertThat(exercise.categoryId()).isEqualTo(1L);

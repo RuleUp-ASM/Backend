@@ -56,22 +56,30 @@ class AuthChallengeVerificationE2EIT {
     void full_happy_path() throws Exception {
         // ── 1) 소셜 로그인(신규) → signupToken ──────────────────────────────
         MvcResult oauthNew = postJson("/api/v1/auth/oauth/kakao", """
-                {"code":"e2e-owner","codeVerifier":"v","redirectUri":"ruleup://login/callback","deviceInfo":%s}"""
+                {"code":"e2e-owner","codeVerifier":"v","redirectUri":"ruleup://login/callback",
+                 "installationId":"inst-e2e-owner","deviceId":"dev-e2e-owner","deviceInfo":%s}"""
                 .formatted(DEVICE_INFO));
         assertThat((Boolean) read(oauthNew, "$.data.isNewUser")).isTrue();
         String signupToken = read(oauthNew, "$.data.signupToken");
 
         // ── 2) 가입 완료 → accessToken (+ nicknameStatus=PENDING 계약 확인) ──
         MvcResult signup = postJson("/api/v1/auth/signup", """
-                {"signupToken":"%s","nickname":"도전왕E2E","interestCategories":["EXERCISE"],
-                 "clientProperties":{"agreements":{"terms":true,"privacy":true,"marketing":false}},
-                 "deviceInfo":%s}""".formatted(signupToken, DEVICE_INFO));
+                {"signupToken":"%s","installationId":"inst-e2e-owner","nickname":"도전왕E2E",
+                 "interestCategories":["EXERCISE"],"birthDate":"2000-05-27","gender":"MALE",
+                 "agreements":{"termsOfService":{"agreed":true,"version":"1.0"},
+                               "privacyPolicy":{"agreed":true,"version":"1.0"},
+                               "locationService":{"agreed":true,"version":"1.0"},
+                               "marketing":{"agreed":false,"version":"1.0"},
+                               "event":{"agreed":false,"version":"1.0"},
+                               "nightPush":{"agreed":false,"version":"1.0"}},
+                 "deviceId":"dev-e2e-owner","deviceInfo":%s}""".formatted(signupToken, DEVICE_INFO));
         assertThat((Boolean) read(signup, "$.data.isNewUser")).isTrue();
         assertThat((String) read(signup, "$.data.user.nicknameStatus")).isEqualTo("PENDING");
 
         // ── 3) 로그인(기존, 같은 code) → isNewUser=false + accessToken ───────
         MvcResult login = postJson("/api/v1/auth/oauth/kakao", """
-                {"code":"e2e-owner","codeVerifier":"v","redirectUri":"ruleup://login/callback","deviceInfo":%s}"""
+                {"code":"e2e-owner","codeVerifier":"v","redirectUri":"ruleup://login/callback",
+                 "installationId":"inst-e2e-owner","deviceId":"dev-e2e-owner","deviceInfo":%s}"""
                 .formatted(DEVICE_INFO));
         assertThat((Boolean) read(login, "$.data.isNewUser")).isFalse();
         String ownerToken = read(login, "$.data.accessToken");
@@ -123,13 +131,21 @@ class AuthChallengeVerificationE2EIT {
     /** 가입 후 로그인까지 해서 accessToken을 돌려준다(부수 사용자 생성용). */
     private String signupAndLogin(String code, String nickname) throws Exception {
         String loginBody = """
-                {"code":"%s","codeVerifier":"v","redirectUri":"ruleup://login/callback","deviceInfo":%s}"""
-                .formatted(code, DEVICE_INFO);
+                {"code":"%s","codeVerifier":"v","redirectUri":"ruleup://login/callback",
+                 "installationId":"inst-%s","deviceId":"dev-%s","deviceInfo":%s}"""
+                .formatted(code, code, code, DEVICE_INFO);
         String signupToken = read(postJson("/api/v1/auth/oauth/kakao", loginBody), "$.data.signupToken");
         postJson("/api/v1/auth/signup", """
-                {"signupToken":"%s","nickname":"%s","interestCategories":["EXERCISE"],
-                 "clientProperties":{"agreements":{"terms":true,"privacy":true,"marketing":false}},
-                 "deviceInfo":%s}""".formatted(signupToken, nickname, DEVICE_INFO));
+                {"signupToken":"%s","installationId":"inst-%s","nickname":"%s",
+                 "interestCategories":["EXERCISE"],"birthDate":"2000-05-27","gender":"MALE",
+                 "agreements":{"termsOfService":{"agreed":true,"version":"1.0"},
+                               "privacyPolicy":{"agreed":true,"version":"1.0"},
+                               "locationService":{"agreed":true,"version":"1.0"},
+                               "marketing":{"agreed":false,"version":"1.0"},
+                               "event":{"agreed":false,"version":"1.0"},
+                               "nightPush":{"agreed":false,"version":"1.0"}},
+                 "deviceId":"dev-%s","deviceInfo":%s}"""
+                .formatted(signupToken, code, nickname, code, DEVICE_INFO));
         return read(postJson("/api/v1/auth/oauth/kakao", loginBody), "$.data.accessToken");
     }
 

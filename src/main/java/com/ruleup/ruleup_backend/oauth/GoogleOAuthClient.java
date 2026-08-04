@@ -47,7 +47,7 @@ public class GoogleOAuthClient implements OAuthClient {
             // 200이지만 바디가 비었거나 역직렬화 실패 시 body()가 null → NPE 누수 방지
             if (u == null || u.sub() == null)
                 throw new BusinessException(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
-            return new OAuthUserInfo(u.sub(), u.email(), u.picture());
+            return new OAuthUserInfo(u.sub(), u.email(), u.name(), u.picture());
         } catch (RestClientResponseException e) {
             log.warn("Google OAuth failed: status={}, body={}", e.getStatusCode(), e.getResponseBodyAsString());
             throw new BusinessException(e.getStatusCode().is4xxClientError()
@@ -79,5 +79,5 @@ public class GoogleOAuthClient implements OAuthClient {
     }
 
     record GoogleTokenResponse(@JsonProperty("access_token") String accessToken) {}
-    record GoogleUserResponse(String sub, String email, String picture) {}
+    record GoogleUserResponse(String sub, String email, String name, String picture) {}
 }

@@ -26,6 +26,6 @@ public class MockOAuthClient implements OAuthClient {
     @Override
     public OAuthUserInfo fetchUserInfo(String code, String codeVerifier, String redirectUri) {
         String subject = "mock-" + provider.name().toLowerCase() + "-" + code;
-        return new OAuthUserInfo(subject, code + "@mock.local", null);
+        return new OAuthUserInfo(subject, code + "@mock.local", "목유저", null);
     }
 }
