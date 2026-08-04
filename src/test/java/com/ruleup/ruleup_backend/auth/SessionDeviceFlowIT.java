@@ -1,0 +1,350 @@
+package com.ruleup.ruleup_backend.auth;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jayway.jsonpath.JsonPath;
+import com.ruleup.ruleup_backend.TestcontainersConfiguration;
+import com.ruleup.ruleup_backend.auth.domain.SocialToken;
+import com.ruleup.ruleup_backend.auth.SocialTokenRepository;
+import com.ruleup.ruleup_backend.notification.NotificationRepository;
+import com.ruleup.ruleup_backend.notification.domain.NotificationType;
+import com.ruleup.ruleup_backend.user.UserRepository;
+import com.ruleup.ruleup_backend.user.domain.OAuthProvider;
+import com.ruleup.ruleup_backend.user.domain.User;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.WebApplicationContext;
+
+import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+
+/**
+ * 로그인 분기·단일 활성 기기·RT 회전/재사용 감지 스펙 테스트 (테크 스펙 4-3, 회원 정책 §7·§8).
+ *
+ * 커버 범위
+ *  1) 계정 상태 분기: BANNED 로그인 403(재로그인=사실상 재가입 경로도 차단), LOCKED 는 열람 전용 로그인 허용
+ *  2) 단일 활성 기기: 다른 기기 로그인 시 기존 RT 전부 revoke + 기기정보 교체 + 세션 종료 알림
+ *  3) 설치 인계: 기존 회원이 타 계정 점유 설치에서 로그인하면 이전 계정 연결 해제(+세션 종료)
+ *  4) RT 회전: refresh 마다 새 페어 + 기존 즉시 revoke (같은 family 유지)
+ *  5) RT 재사용 감지: revoke 된 RT 재제출 → family 전체 revoke (탈취 대응) — 새 RT도 무효
+ *  6) 로그아웃: RT revoke + 멱등, 이후 refresh 401
+ *  7) social_tokens: 로그인 시 IdP 토큰 암호화 저장(unlink 근거)
+ */
+@SpringBootTest
+@Import(TestcontainersConfiguration.class)
+class SessionDeviceFlowIT {
+
+    private static final AtomicInteger SEQ = new AtomicInteger();
+
+    @Autowired WebApplicationContext wac;
+    private final ObjectMapper om = new ObjectMapper();
+    @Autowired UserRepository userRepository;
+    @Autowired NotificationRepository notificationRepository;
+    @Autowired SocialTokenRepository socialTokenRepository;
+
+    private MockMvc mvc;
+
+    @BeforeEach
+    void setUp() {
+        mvc = MockMvcBuilders.webAppContextSetup(wac).apply(springSecurity()).build();
+    }
+
+    // ==================================================================
+    // 헬퍼
+    // ==================================================================
+
+    private static String uniq() {
+        return "sd" + System.nanoTime() + "n" + SEQ.incrementAndGet();
+    }
+
+    private Map<String, Object> deviceInfo() {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("platform", "ANDROID");
+        m.put("osVersion", "14");
+        m.put("sdkInt", 34);
+        m.put("deviceModel", "SM-S921N");
+        m.put("manufacturer", "samsung");
+        m.put("lowRam", false);
+        m.put("versionName", "1.0.0");
+        m.put("versionCode", 100);
+        return m;
+    }
+
+    private Map<String, Object> loginBody(String code, String installationId, String deviceId) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("code", code);
+        m.put("codeVerifier", "verifier");
+        m.put("redirectUri", "kakao://oauth");
+        m.put("installationId", installationId);
+        m.put("deviceId", deviceId);
+        m.put("deviceInfo", deviceInfo());
+        return m;
+    }
+
+    private Map<String, Object> agreement(boolean agreed) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("agreed", agreed);
+        m.put("version", "1.0");
+        return m;
+    }
+
+    private MvcResult postJson(String url, Map<String, Object> body) throws Exception {
+        return mvc.perform(post(url).contentType(MediaType.APPLICATION_JSON)
+                .content(om.writeValueAsString(body))).andReturn();
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T> T read(MvcResult res, String path) throws Exception {
+        return (T) JsonPath.read(res.getResponse().getContentAsString(StandardCharsets.UTF_8), path);
+    }
+
+    /** 가입까지 완료하고 (userId 조회용 tag, refreshToken) 을 돌려준다. */
+    private MvcResult signup(String tag) throws Exception {
+        MvcResult login = postJson("/api/v1/auth/oauth/kakao", loginBody(tag, "inst-" + tag, "dev-" + tag));
+        assertThat(login.getResponse().getStatus()).isEqualTo(200);
+        String token = read(login, "$.data.signupToken");
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("signupToken", token);
+        body.put("installationId", "inst-" + tag);
+        body.put("nickname", "세션유저" + SEQ.get());
+        body.put("interestCategories", List.of("EXERCISE"));
+        body.put("birthDate", "2000-05-27");
+        body.put("gender", "MALE");
+        Map<String, Object> ag = new LinkedHashMap<>();
+        ag.put("termsOfService", agreement(true));
+        ag.put("privacyPolicy", agreement(true));
+        ag.put("locationService", agreement(true));
+        ag.put("marketing", agreement(false));
+        ag.put("event", agreement(false));
+        ag.put("nightPush", agreement(false));
+        body.put("agreements", ag);
+        body.put("deviceId", "dev-" + tag);
+        body.put("deviceInfo", deviceInfo());
+
+        MvcResult res = postJson("/api/v1/auth/signup", body);
+        assertThat(res.getResponse().getStatus()).isEqualTo(200);
+        return res;
+    }
+
+    private User findUser(String tag) {
+        return userRepository.findByOauthProviderAndOauthSubject(OAuthProvider.KAKAO, "mock-kakao-" + tag)
+                .orElseThrow();
+    }
+
+    private MvcResult refresh(String refreshToken) throws Exception {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("refreshToken", refreshToken);
+        return postJson("/api/v1/auth/refresh", m);
+    }
+
+    private MvcResult logout(String refreshToken) throws Exception {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("refreshToken", refreshToken);
+        return postJson("/api/v1/auth/logout", m);
+    }
+
+    private void expectError(MvcResult res, int status, String code) throws Exception {
+        assertThat(res.getResponse().getStatus()).as("HTTP status").isEqualTo(status);
+        assertThat((String) read(res, "$.error.code")).isEqualTo(code);
+    }
+
+    // ==================================================================
+    // 1) 계정 상태 분기
+    // ==================================================================
+
+    @Nested
+    class 계정_상태_분기 {
+
+        @Test
+        @DisplayName("영구 정지(BANNED) 계정은 로그인 자체가 403 ACCOUNT_BANNED — 재가입 경로도 없다")
+        void banned_login_rejected() throws Exception {
+            String tag = uniq();
+            signup(tag);
+            User user = findUser(tag);
+            user.ban();
+            userRepository.save(user);
+
+            // 로그인 차단 — (provider, subject)가 살아 있으므로 신규 가입 분기로도 못 빠진다
+            MvcResult res = postJson("/api/v1/auth/oauth/kakao", loginBody(tag, "inst-" + tag, "dev-" + tag));
+            expectError(res, 403, "ACCOUNT_BANNED");
+        }
+
+        @Test
+        @DisplayName("잠금(LOCKED) 계정은 열람 전용으로 로그인된다 — accountStatus=LOCKED + lockInfo")
+        void locked_login_allowed_readonly() throws Exception {
+            String tag = uniq();
+            signup(tag);
+            User user = findUser(tag);
+            user.lock();
+            userRepository.save(user);
+
+            MvcResult res = postJson("/api/v1/auth/oauth/kakao", loginBody(tag, "inst-" + tag, "dev-" + tag));
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+            assertThat((Boolean) read(res, "$.data.isNewUser")).isFalse();
+            assertThat((String) read(res, "$.data.user.accountStatus")).isEqualTo("LOCKED");
+            assertThat((Object) read(res, "$.data.user.lockInfo")).isNotNull();
+            assertThat((String) read(res, "$.data.accessToken")).isNotBlank();   // 열람 전용 홈 진입용
+        }
+    }
+
+    // ==================================================================
+    // 2) 단일 활성 기기
+    // ==================================================================
+
+    @Nested
+    class 단일_활성_기기 {
+
+        @Test
+        @DisplayName("다른 기기 로그인 시: 기존 RT 전부 revoke + 기기정보 교체 + 세션 종료 알림")
+        void new_device_login_revokes_old_sessions() throws Exception {
+            String tag = uniq();
+            MvcResult signup = signup(tag);
+            String oldRefresh = read(signup, "$.data.refreshToken");
+
+            // 다른 기기에서 로그인 (deviceId·installationId 모두 새 값 — 기기 교체 시나리오)
+            MvcResult relogin = postJson("/api/v1/auth/oauth/kakao",
+                    loginBody(tag, "inst-" + tag + "-b", "dev-" + tag + "-b"));
+            assertThat(relogin.getResponse().getStatus()).isEqualTo(200);
+
+            // 기존 기기의 RT 는 전부 무효 → 401 SESSION_EXPIRED
+            expectError(refresh(oldRefresh), 401, "SESSION_EXPIRED");
+
+            // 활성 기기 정보는 새 기기로 교체
+            User user = findUser(tag);
+            assertThat(user.getDeviceId()).isEqualTo("dev-" + tag + "-b");
+            assertThat(user.getInstallationId()).isEqualTo("inst-" + tag + "-b");
+
+            // 기존 기기에 "다른 기기에서 로그인됨" 알림 (인앱 — 다음 접속 시 확인)
+            boolean notified = notificationRepository.findByUserIdOrderByCreatedAtDesc(user.getId()).stream()
+                    .anyMatch(n -> n.getType() == NotificationType.SYSTEM);
+            assertThat(notified).isTrue();
+        }
+
+        @Test
+        @DisplayName("같은 기기 재로그인은 세션을 끊지 않는다")
+        void same_device_relogin_keeps_sessions() throws Exception {
+            String tag = uniq();
+            MvcResult signup = signup(tag);
+            String oldRefresh = read(signup, "$.data.refreshToken");
+
+            MvcResult relogin = postJson("/api/v1/auth/oauth/kakao", loginBody(tag, "inst-" + tag, "dev-" + tag));
+            assertThat(relogin.getResponse().getStatus()).isEqualTo(200);
+
+            // 같은 기기였으므로 기존 RT 는 여전히 유효 (회전 성공 = 200)
+            assertThat(refresh(oldRefresh).getResponse().getStatus()).isEqualTo(200);
+        }
+
+        @Test
+        @DisplayName("타 계정이 점유한 설치에서 기존 회원이 로그인하면 설치를 인계받고 이전 계정 세션은 종료된다")
+        void installation_takeover_between_accounts() throws Exception {
+            String tagA = uniq();
+            MvcResult signupA = signup(tagA);
+            String refreshA = read(signupA, "$.data.refreshToken");
+
+            String tagB = uniq();
+            signup(tagB);
+
+            // B가 A의 설치(inst-tagA)에서 로그인 — 기존 회원 로그인은 차단 대상이 아니라 인계 대상
+            MvcResult loginB = postJson("/api/v1/auth/oauth/kakao",
+                    loginBody(tagB, "inst-" + tagA, "dev-" + tagA));
+            assertThat(loginB.getResponse().getStatus()).isEqualTo(200);
+
+            // 설치는 B에게 인계, A의 연결은 해제 (uq_users_installation_id)
+            assertThat(findUser(tagB).getInstallationId()).isEqualTo("inst-" + tagA);
+            assertThat(findUser(tagA).getInstallationId()).isNull();
+
+            // A의 세션은 전부 종료
+            expectError(refresh(refreshA), 401, "SESSION_EXPIRED");
+        }
+    }
+
+    // ==================================================================
+    // 3) RT 회전 · 재사용 감지 · 로그아웃
+    // ==================================================================
+
+    @Nested
+    class 토큰_회전 {
+
+        @Test
+        @DisplayName("refresh 는 회전: 새 페어 발급 + 기존 RT 즉시 무효")
+        void refresh_rotates_and_revokes_old() throws Exception {
+            String tag = uniq();
+            String rt1 = read(signup(tag), "$.data.refreshToken");
+
+            MvcResult r = refresh(rt1);
+            assertThat(r.getResponse().getStatus()).isEqualTo(200);
+            String rt2 = read(r, "$.data.refreshToken");
+            assertThat(rt2).isNotEqualTo(rt1);
+
+            // 회전된 새 RT 는 정상 사용 가능
+            assertThat(refresh(rt2).getResponse().getStatus()).isEqualTo(200);
+        }
+
+        @Test
+        @DisplayName("revoke 된 RT 재제출(재사용 감지) 시 family 전체를 무효화한다 — 탈취 대응")
+        void reuse_detection_revokes_whole_family() throws Exception {
+            String tag = uniq();
+            String rt1 = read(signup(tag), "$.data.refreshToken");
+
+            String rt2 = read(refresh(rt1), "$.data.refreshToken");   // rt1 은 이 시점에 revoke
+
+            // 탈취범이 rt1 을 재사용 → 401 + family 전체 revoke
+            expectError(refresh(rt1), 401, "SESSION_EXPIRED");
+
+            // 정상 사용자가 갖고 있던 rt2 도 함께 무효 (재로그인 요구)
+            expectError(refresh(rt2), 401, "SESSION_EXPIRED");
+        }
+
+        @Test
+        @DisplayName("로그아웃하면 해당 RT 는 무효가 되고, 로그아웃은 멱등이다")
+        void logout_revokes_and_is_idempotent() throws Exception {
+            String tag = uniq();
+            String rt = read(signup(tag), "$.data.refreshToken");
+
+            assertThat(logout(rt).getResponse().getStatus()).isEqualTo(200);
+            assertThat(logout(rt).getResponse().getStatus()).isEqualTo(200);   // 멱등
+            expectError(refresh(rt), 401, "SESSION_EXPIRED");
+        }
+    }
+
+    // ==================================================================
+    // 4) social_tokens 저장
+    // ==================================================================
+
+    @Nested
+    class 소셜_토큰 {
+
+        @Test
+        @DisplayName("가입·로그인 시 IdP 토큰이 암호화되어 social_tokens 에 저장된다 (unlink 근거)")
+        void social_tokens_stored_encrypted() throws Exception {
+            String tag = uniq();
+            signup(tag);
+            User user = findUser(tag);
+
+            SocialToken stored = socialTokenRepository
+                    .findById(new SocialToken.Key(user.getId(), OAuthProvider.KAKAO))
+                    .orElseThrow();
+            assertThat(stored.getAccessTokenEnc()).isNotEmpty();
+            assertThat(stored.getEncryptionKeyVersion()).isPositive();
+            // 원문이 그대로 저장되면 안 된다 (Mock IdP 토큰: "mock-idp-at-" + code)
+            assertThat(new String(stored.getAccessTokenEnc(), StandardCharsets.UTF_8))
+                    .doesNotContain("mock-idp-at-");
+        }
+    }
+}
