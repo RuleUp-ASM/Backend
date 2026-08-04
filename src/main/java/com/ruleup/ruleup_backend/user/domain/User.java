@@ -25,9 +25,16 @@ import java.util.UUID;
  * - 닉네임 2컬럼 모델: nickname(신청값, 본인 화면) / approvedNickname(타인에게 항상 노출).
  *   최초 가입 직후 approvedNickname 은 UUID 기반 임시 8자리.
  * - PK는 UUID v7 → BINARY(16).
+ *
+ * <p><b>{@code @DynamicUpdate} 인 이유</b>: 이 행은 서로 다른 트랜잭션이 각자 다른 컬럼을 고친다 —
+ * 비동기 검수(닉네임/사진 상태), 로그인(기기·접속 시각), 탈퇴·잠금(status·deleted_at).
+ * 전체 컬럼 UPDATE(기본 동작)면 늦게 커밋되는 쪽이 자기가 읽은 낡은 스냅샷으로 남의 변경을
+ * 덮어쓴다(lost update). 실제로 커밋 직후 시작되는 검수가 탈퇴/잠금을 ACTIVE로 되돌렸다.
+ * 변경 컬럼만 UPDATE하면 서로 다른 컬럼을 고치는 한 충돌하지 않는다.
  */
 @Entity
 @Table(name = "users")
+@org.hibernate.annotations.DynamicUpdate   // 아래 주석 참조 — 비동기 검수의 lost update 방지
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class User extends AssignedIdEntity {
@@ -237,24 +244,40 @@ public class User extends AssignedIdEntity {
         return hex.substring(hex.length() - 8);
     }
 
-    /** 임시 닉네임 UNIQUE 충돌 시 재생성용 — 랜덤 UUID 뒤 8자리로 교체. */
-    public void regenerateTempApprovedNickname() {
-        String hex = UUID.randomUUID().toString().replace("-", "");
-        this.approvedNickname = hex.substring(hex.length() - 8);
+    /**
+     * 타인에게 노출될 승인 닉네임을 직접 지정한다.
+     * 가입 시 사용 가능한 임시 닉네임 할당, INSERT 충돌 후 재시도, 복원 시 선점 충돌 처리에 쓴다
+     * ({@code TempNicknameAllocator} 경유). 값의 생성 규칙은 {@code TempNicknameGenerator} 소관.
+     */
+    public void assignApprovedNickname(String approvedNickname) {
+        this.approvedNickname = approvedNickname;
     }
 
+    /**
+     * 닉네임 변경 신청. approvedNickname(직전 승인본)은 <b>승인 시점까지 유지</b>한다 —
+     * 타인 화면에 계속 노출되고, 심사가 거부되면 돌아갈 자리이기도 하다(회원 정책 §3·§4.1).
+     *
+     * <p>변경 주기(월 1회) 기준 시각은 "승인"이 아니라 <b>이 신청 시점</b>이다.
+     * 승인 시각으로 세면 가입 직후 최초 승인만으로 잠겨 첫 변경조차 막힌다.
+     * 모더레이션 거부에 따른 재수정은 횟수에서 제외하므로(정책 §3) 시각을 갱신하지 않는다.
+     */
     public void changeNickname(String newNickname) {
+        boolean fixingRejection = (this.nicknameStatus == NicknameStatus.REJECTED);
         this.nickname = newNickname;
         this.nicknameStatus = NicknameStatus.PENDING;
         this.moderationCheckedAt = null;
-        // approvedNickname(직전 승인본)은 승인 시점까지 유지 — 타인 화면 계속 노출
+        if (!fixingRejection) this.nicknameChangedAt = Instant.now();
     }
 
     // ===== 검수 결과 반영 =====
+    /**
+     * 승인 — 신청값을 타인 노출용으로 확정한다. 이 시점에 직전 승인 닉네임의 점유가 풀린다
+     * (사칭 방지를 위해 심사 중에는 붙잡고 있다가, 새 닉네임이 통과하면 해제 — 2026-08-04 확정).
+     * 변경 주기 기준 시각은 신청 시점에 이미 기록했으므로 여기서 건드리지 않는다.
+     */
     public void approveNickname() {
         this.approvedNickname = this.nickname;
         this.nicknameStatus = NicknameStatus.APPROVED;
-        this.nicknameChangedAt = Instant.now();
     }
 
     public void rejectNickname()       { this.nicknameStatus = NicknameStatus.REJECTED; }

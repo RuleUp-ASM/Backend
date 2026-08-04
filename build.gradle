@@ -112,16 +112,35 @@ tasks.named('jacocoTestReport') {
 	}
 }
 
-// 커버리지 게이트: 전체 명령어(instruction) 커버리지가 최소치 미만이면 빌드를 실패시켜 CI를 막는다.
-// 현재 ~48.5% → 45%로 바닥을 깔아 "지금은 통과, 앞으로의 하락만 차단". 올리려면 minimum 값만 상향.
+// 커버리지 게이트 대상: 지금 테스트가 남아 있는 "로그인·온보딩" 도메인만 센다.
+// 다른 도메인(챌린지·인증·감시자 등) 테스트를 새로 만들 때 이 목록을 지우고 전체로 되돌린다.
+// (전체를 분모로 두면 테스트 없는 도메인 때문에 게이트가 의미 없이 실패한다)
+def coverageScope = [
+		'com/ruleup/ruleup_backend/auth/**',
+		'com/ruleup/ruleup_backend/oauth/**',
+		'com/ruleup/ruleup_backend/user/**',
+		'com/ruleup/ruleup_backend/agreement/**',
+		'com/ruleup/ruleup_backend/moderation/**',
+		'com/ruleup/ruleup_backend/score/**',
+		'com/ruleup/ruleup_backend/intro/**',
+		'com/ruleup/ruleup_backend/onboarding/**',
+		'com/ruleup/ruleup_backend/security/**',
+]
+
+// 커버리지 게이트: 위 범위의 명령어(instruction) 커버리지가 최소치 미만이면 빌드를 실패시켜 CI를 막는다.
+// "지금은 통과, 앞으로의 하락만 차단"이 목적이라 측정값 바로 아래에 바닥을 깐다(현재 ~83.6%).
+// 올리려면 minimum 만 상향.
 jacocoTestCoverageVerification {
 	dependsOn tasks.named('test')
+	classDirectories.setFrom(
+			files(classDirectories.files.collect { fileTree(dir: it, includes: coverageScope) })
+	)
 	violationRules {
 		rule {
 			limit {
 				counter = 'INSTRUCTION'
 				value = 'COVEREDRATIO'
-				minimum = 0.45
+				minimum = 0.80
 			}
 		}
 	}

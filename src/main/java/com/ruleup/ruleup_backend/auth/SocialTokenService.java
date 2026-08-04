@@ -10,6 +10,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Duration;
 import java.util.UUID;
@@ -38,12 +40,31 @@ public class SocialTokenService {
         if (tokens != null && tokens.accessToken() != null) pending.put(signupJti, tokens);
     }
 
-    /** 가입 완료 시 보류분 저장 (가입 트랜잭션 내부에서 호출). */
+    /**
+     * 가입 완료 시 보류분 저장 (가입 트랜잭션 내부에서 호출).
+     *
+     * <p>보류분 제거는 <b>커밋 이후</b>에 한다. 보류 저장소는 in-memory 라 트랜잭션과 함께 롤백되지
+     * 않는데, 먼저 지워버리면 가입이 롤백·재시도될 때(임시 닉네임 INSERT 충돌) 두 번째 시도가
+     * 토큰을 찾지 못해 {@code social_tokens} 가 조용히 비게 된다 — unlink 근거가 사라진다.
+     */
     public void flushPending(String signupJti, UUID userId, OAuthProvider provider) {
         OAuthUserInfo.IdpTokens tokens = pending.getIfPresent(signupJti);
         if (tokens == null) return;
-        pending.invalidate(signupJti);
         upsert(userId, provider, tokens);
+        invalidateAfterCommit(signupJti);
+    }
+
+    private void invalidateAfterCommit(String signupJti) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            pending.invalidate(signupJti);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                pending.invalidate(signupJti);
+            }
+        });
     }
 
     /** 로그인마다 최신 IdP 토큰으로 갱신 저장. 트랜잭션이 있으면 참여, 없으면 새로 연다. */

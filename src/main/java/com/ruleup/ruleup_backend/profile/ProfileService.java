@@ -14,6 +14,7 @@ import com.ruleup.ruleup_backend.reputation.domain.ReputationScore;
 import com.ruleup.ruleup_backend.reputation.ReputationScoreRepository;
 import com.ruleup.ruleup_backend.user.domain.InterestCategory;
 import com.ruleup.ruleup_backend.user.domain.NicknamePolicy;
+import com.ruleup.ruleup_backend.user.domain.NicknameStatus;
 import com.ruleup.ruleup_backend.user.domain.User;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -51,8 +52,11 @@ public class ProfileService {
 
         // 닉네임: 값이 왔고 현재와 다를 때만 변경
         if (req.nickname() != null && !req.nickname().equals(user.getNickname())) {
+            // 변경 주기 제한(월 1회). 단, 모더레이션 거부에 따른 재수정은 횟수에서 제외한다(정책 §3).
             Instant changedAt = user.getNicknameChangedAt();
-            if (changedAt != null && Instant.now().isBefore(changedAt.plus(NicknamePolicy.CHANGE_INTERVAL)))
+            boolean fixingRejection = user.getNicknameStatus() == NicknameStatus.REJECTED;
+            if (!fixingRejection && changedAt != null
+                    && Instant.now().isBefore(changedAt.plus(NicknamePolicy.CHANGE_INTERVAL)))
                 throw new BusinessException(ErrorCode.NICKNAME_CHANGE_LOCKED);
             if (!NicknamePolicy.isValid(req.nickname()))
                 throw new BusinessException(ErrorCode.NICKNAME_FORMAT_INVALID);

@@ -18,7 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/categories")
 public class CategoryController {
 
-    @Operation(summary = "관심 카테고리 목록 조회", description = "가입/프로필 화면용 카테고리 15종")
+    @Operation(summary = "관심 카테고리 목록 조회", description = "가입/프로필 화면용 카테고리 12종")
     @GetMapping
     @Cacheable("categories")     // 매번 새로 만들 필요 없는 고정 목록 → 첫 호출 결과를 재사용
     public ApiResponse<CategoryListResponse> getCategories() {

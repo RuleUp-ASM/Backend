@@ -38,6 +38,8 @@ public class UserModerationService {
 
     @Transactional
     public void moderate(UUID userId) {
+        // 커밋 직후 비동기로 도는 사이 사용자가 탈퇴했을 수 있다 → 그러면 검수할 대상이 없다.
+        // (엔티티는 @DynamicUpdate 라 여기서 상태 컬럼을 되돌리지는 않는다)
         User user = userRepository.findByIdAndDeletedAtIsNull(userId).orElse(null);
         if (user == null) return;
 

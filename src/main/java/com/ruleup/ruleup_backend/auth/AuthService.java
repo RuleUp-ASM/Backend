@@ -29,9 +29,13 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
@@ -46,8 +50,15 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class AuthService {
 
-    private static final String DEFAULT_AGREEMENT_VERSION = "1.0";   // 클라가 version 미전송 시 폴백
+    private static final Logger log = LoggerFactory.getLogger(AuthService.class);
+
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    /** 임시 승인 닉네임 INSERT 충돌 시 가입 트랜잭션 재시도 상한 (DB 정리 §6). 같은 패키지 테스트가 참조. */
+    static final int MAX_SIGNUP_ATTEMPTS = 3;
+    /** 재시도 대상 제약 — 임시 승인 닉네임 UNIQUE. 신청 닉네임 충돌(409)은 재시도 대상이 아니다. */
+    private static final String APPROVED_NICKNAME_CONSTRAINT = "uq_users_active_approved_nickname";
+    /** 동시 가입 경합 — 이 제약이 터졌다면 다른 요청이 먼저 같은 소셜 계정을 만든 것이다. */
+    private static final String OAUTH_IDENTITY_CONSTRAINT = "uq_users_oauth_identity";
     /** 만 14세 미만 가입 불가 — 법적 요구사항(가드레일: 통과 0건). */
     private static final int MIN_AGE_YEARS = 14;
 
@@ -61,6 +72,8 @@ public class AuthService {
     private final TokenService tokenService;
     private final JwtProvider jwtProvider;
     private final SignupTokenStore signupTokenStore;
+    private final TempNicknameAllocator tempNicknameAllocator;
+    private final TransactionTemplate transactionTemplate;
     private final LoginSessionService loginSessionService;
     private final SocialTokenService socialTokenService;
     private final AppProperties props;
@@ -78,6 +91,7 @@ public class AuthService {
     public OAuthLoginResponse oauthLogin(OAuthProvider provider, OAuthLoginRequest req) {
         // deviceId·deviceInfo는 로그인·가입 양쪽 필수(계약). 외부 호출 전에 빠르게 거부.
         requireValidDevice(req.deviceId(), req.deviceInfo());
+        requireValidOAuthRequest(provider, req);
 
         OAuthClient client = resolver.resolve(provider);
 
@@ -127,29 +141,56 @@ public class AuthService {
     // ===== 가입 =====
     // 여러 테이블(users, user_information, user_interests, user_agreements,
     // moderation_requests, user_score_summaries, refresh_tokens)을 함께 쓰므로
-    // 하나라도 실패하면 전부 롤백되어야 한다 → @Transactional 필수.
+    // 하나라도 실패하면 전부 롤백되어야 한다 → 트랜잭션 필수.
     // (외부 호출 없음: signupToken 파싱은 우리 서버 안에서 끝남)
-    @Transactional
+    //
+    // @Transactional 대신 TransactionTemplate 을 쓰는 이유: 임시 승인 닉네임이 INSERT 시점에
+    // UNIQUE 충돌하면(사전 검사와 INSERT 사이의 경합) 같은 트랜잭션에서 복구할 수 없어
+    // — 제약 위반이 나면 영속성 컨텍스트가 깨진다 — 트랜잭션을 새로 열어 재시도해야 한다.
     public SignupResponse signup(SignupRequest req) {
+        // 토큰 소모는 요청당 한 번만. 재시도로 두 번 소모되면 스스로 INVALID_SIGNUP_TOKEN 이 된다.
+        boolean[] tokenConsumed = {false};
+
+        for (int attempt = 1; ; attempt++) {
+            try {
+                final int current = attempt;
+                return transactionTemplate.execute(status -> register(req, tokenConsumed, current));
+            } catch (DataIntegrityViolationException e) {
+                // 동시 가입 경합 — 사전 조회 후 다른 요청이 먼저 가입했다.
+                // 계약: "후발 요청은 기존 유저 로그인으로 수렴"(테크 스펙 4-3).
+                if (isConstraintViolation(e, OAUTH_IDENTITY_CONSTRAINT)) {
+                    log.info("동시 가입 경합 감지 — 기존 계정 로그인으로 수렴합니다.");
+                    return convergeToExistingLogin(req.signupToken());
+                }
+                // 신청 닉네임 충돌 등 사용자에게 알려야 할 위반은 그대로 올려보낸다(409).
+                if (!isApprovedNicknameConflict(e)) throw e;
+                if (attempt >= MAX_SIGNUP_ATTEMPTS) {
+                    // 사용자 입력 문제가 아니라 서버가 빈 임시 닉네임을 못 찾은 것 →
+                    // "닉네임 중복(409)"으로 위장하면 원인을 오해하게 된다.
+                    log.error("임시 승인 닉네임 충돌이 {}회 연속 발생해 가입을 포기했습니다.",
+                            MAX_SIGNUP_ATTEMPTS, e);
+                    throw new BusinessException(ErrorCode.INTERNAL_SERVER_ERROR);
+                }
+                log.warn("임시 승인 닉네임 INSERT 충돌 — 가입 재시도 {}/{}", attempt, MAX_SIGNUP_ATTEMPTS);
+            }
+        }
+    }
+
+    /** 가입 본체(트랜잭션 안). 임시 닉네임 충돌로 재시도될 수 있으므로 부수효과는 전부 트랜잭션 안에 둔다. */
+    private SignupResponse register(SignupRequest req, boolean[] tokenConsumed, int attempt) {
         Claims claims = parseSignupToken(req.signupToken());
         OAuthProvider provider = OAuthProvider.valueOf((String) claims.get("provider"));
         String oauthSubject = claims.getSubject();
         String email = (String) claims.get("email");
 
-        // signupToken 1회용 — 이미 소모된 jti의 재제출은 즉시 거부(계약: 처음부터 다시)
-        if (signupTokenStore.isUsed(claims.getId()))
+        // signupToken 1회용 — 이미 소모된 jti의 재제출은 즉시 거부(계약: 처음부터 다시).
+        // 단, 이 요청이 방금 소모한 경우(닉네임 충돌 재시도)는 같은 요청의 연장이므로 통과시킨다.
+        if (!tokenConsumed[0] && signupTokenStore.isUsed(claims.getId()))
             throw new BusinessException(ErrorCode.INVALID_SIGNUP_TOKEN);
 
         // (provider, subject) 중복 가입 차단 — 경합 시 후발 요청은 기존 유저 로그인으로 수렴(테크 스펙 4-3)
         User existing = userRepository.findByOauthProviderAndOauthSubject(provider, oauthSubject).orElse(null);
-        if (existing != null) {
-            if (existing.isBanned()) throw new BusinessException(ErrorCode.ACCOUNT_BANNED);
-            TokenService.TokenPair pair = tokenService.issueTokenPair(existing);
-            UserScoreSummary summary = scoreSummaryRepository.findById(existing.getId()).orElse(null);
-            return new SignupResponse(false, pair.accessToken(), pair.refreshToken(), "Bearer",
-                    pair.expiresIn(), FlushIntervalPolicy.forUser(existing),
-                    UserResponse.from(existing, summary));
-        }
+        if (existing != null) return loginResponseFor(existing);
 
         // 닉네임 형식 → 중복(신청 PENDING·승인 닉네임 모두 점유로 본다)
         if (!NicknamePolicy.isValid(req.nickname()))
@@ -157,10 +198,13 @@ public class AuthService {
         if (userRepository.isNicknameTaken(req.nickname(), null))
             throw new BusinessException(ErrorCode.NICKNAME_DUPLICATED);
 
-        // 관심 카테고리: 코드 유효성(12종) → 개수(0~6, 건너뛰기 허용)
-        List<String> categories = (req.interestCategories() != null) ? req.interestCategories() : List.of();
-        if (!InterestCategory.allValid(categories))
+        // 관심 카테고리: 코드 유효성(12종) → 중복 제거 → 개수(0~6, 건너뛰기 허용).
+        // 중복은 user_interests PK(user_id, category) 위반이라 그대로 두면 500 이 된다. 클라 버그로
+        // 가입을 막지 않도록 서버가 정규화한다(온보딩 완주율 우선) — 고유값 기준으로 상한을 센다.
+        List<String> requested = (req.interestCategories() != null) ? req.interestCategories() : List.of();
+        if (!InterestCategory.allValid(requested))
             throw new BusinessException(ErrorCode.CATEGORY_INVALID);
+        List<String> categories = requested.stream().distinct().toList();
         if (!InterestCategory.isCountValid(categories))
             throw new BusinessException(ErrorCode.INTEREST_LIMIT_EXCEEDED);
 
@@ -181,12 +225,19 @@ public class AuthService {
         if (userRepository.existsActiveByInstallationId(req.installationId()))
             throw new BusinessException(ErrorCode.INSTALLATION_ALREADY_REGISTERED);
 
-        // signupToken 1회용 — 검증을 모두 통과한 시점에 jti를 소모한다
-        if (!signupTokenStore.consume(claims.getId()))
-            throw new BusinessException(ErrorCode.INVALID_SIGNUP_TOKEN);
+        // signupToken 1회용 — 검증을 모두 통과한 시점에 jti를 소모한다.
+        // 재시도(2회차 이상)는 이미 이 요청이 소모한 것이므로 다시 소모하지 않는다.
+        if (!tokenConsumed[0]) {
+            if (!signupTokenStore.consume(claims.getId()))
+                throw new BusinessException(ErrorCode.INVALID_SIGNUP_TOKEN);
+            tokenConsumed[0] = true;
+        }
 
         User user = User.create(provider, oauthSubject, email, req.nickname(), null,
                 new ArrayList<>(categories));
+        // 임시 승인 닉네임(8자)이 이미 점유돼 있으면 다른 값으로 재시도 (DB 정리 §6)
+        tempNicknameAllocator.assign(user, candidate -> userRepository.isNicknameTaken(candidate, user.getId()));
+        if (attempt > 1) tempNicknameAllocator.reassign(user);   // 직전 시도가 INSERT 충돌 → 새 후보로
         user.registerDemographics(birthDate, gender);
         applyDeviceInfo(user, req.deviceInfo());              // 가입 시 기기 정보 최초 저장
         user.attachInstallation(req.installationId(), req.deviceId());
@@ -211,6 +262,39 @@ public class AuthService {
         return SignupResponse.from(pair, user, summary, flushIntervalSec);
     }
 
+    /** 임시 승인 닉네임 UNIQUE 위반인지 — 이 경우에만 새 후보로 가입을 재시도한다. */
+    private boolean isApprovedNicknameConflict(DataIntegrityViolationException e) {
+        return isConstraintViolation(e, APPROVED_NICKNAME_CONSTRAINT);
+    }
+
+    private boolean isConstraintViolation(DataIntegrityViolationException e, String constraint) {
+        Throwable root = e.getMostSpecificCause();
+        String message = (root != null) ? root.getMessage() : null;
+        return message != null && message.contains(constraint);
+    }
+
+    /**
+     * 이미 만들어진 같은 소셜 계정으로 로그인 응답을 만든다(동시 가입 수렴).
+     * 가입 트랜잭션은 롤백된 뒤이므로 여기서 다시 조회한다.
+     */
+    private SignupResponse convergeToExistingLogin(String signupToken) {
+        Claims claims = parseSignupToken(signupToken);
+        OAuthProvider provider = OAuthProvider.valueOf((String) claims.get("provider"));
+        User existing = userRepository.findByOauthProviderAndOauthSubject(provider, claims.getSubject())
+                .orElseThrow(() -> new BusinessException(ErrorCode.LOGIN_FAILED));
+        return loginResponseFor(existing);
+    }
+
+    /** 기존 계정에 토큰을 발급해 가입 응답 형태(isNewUser=false)로 감싼다. */
+    private SignupResponse loginResponseFor(User existing) {
+        if (existing.isBanned()) throw new BusinessException(ErrorCode.ACCOUNT_BANNED);
+        TokenService.TokenPair pair = tokenService.issueTokenPair(existing);
+        UserScoreSummary summary = scoreSummaryRepository.findById(existing.getId()).orElse(null);
+        return new SignupResponse(false, pair.accessToken(), pair.refreshToken(), "Bearer",
+                pair.expiresIn(), FlushIntervalPolicy.forUser(existing),
+                UserResponse.from(existing, summary));
+    }
+
     /** 생일 파싱·검증. 누락/형식/미래 = BIRTHDATE_INVALID, 만 14세 미만 = BIRTHDATE_UNDERAGE. */
     private LocalDate parseBirthDate(String raw) {
         if (raw == null || raw.isBlank())
@@ -229,17 +313,36 @@ public class AuthService {
         return birthDate;
     }
 
-    /** 성별 파싱 — 계약 허용값은 MALE/FEMALE/NON_BINARY. 누락/허용 외 = GENDER_REQUIRED. */
+    /**
+     * 성별 파싱 — 저장 필수 필드. 허용값 4종(MALE/FEMALE/NON_BINARY/PREFER_NOT_TO_SAY)을 모두 받는다.
+     * "미응답" 표현은 API 계약(NON_BINARY)과 DB 정리 문서(PREFER_NOT_TO_SAY)가 아직 상충 중이라
+     * 합의 전까지 둘 다 수용한다. 누락/허용 외 값은 GENDER_REQUIRED.
+     */
     private Gender parseGender(String raw) {
         if (raw == null || raw.isBlank())
             throw new BusinessException(ErrorCode.GENDER_REQUIRED);
         try {
-            Gender g = Gender.valueOf(raw.trim().toUpperCase());
-            if (g == Gender.PREFER_NOT_TO_SAY)   // DB에는 존재하지만 API 계약 밖(합의 전 보류값)
-                throw new BusinessException(ErrorCode.GENDER_REQUIRED);
-            return g;
+            return Gender.valueOf(raw.trim().toUpperCase());
         } catch (IllegalArgumentException e) {
             throw new BusinessException(ErrorCode.GENDER_REQUIRED);
+        }
+    }
+
+    /**
+     * OAuth 요청 자체의 형식 검증 (IdP 호출 전 조기 거부 — 테크 스펙 4-4).
+     *  · code·codeVerifier(PKCE) 누락 → 400 LOGIN_FAILED (검증 자체가 불가)
+     *  · 구글은 redirectUri 검증 필수 — 등록값과 다르면 400 INVALID_REDIRECT_URI.
+     *    카카오는 카카오톡 간편 로그인 경로에서 SDK가 내부 처리해 null 이 올 수 있어 검증하지 않는다.
+     */
+    private void requireValidOAuthRequest(OAuthProvider provider, OAuthLoginRequest req) {
+        if (req.code() == null || req.code().isBlank()
+                || req.codeVerifier() == null || req.codeVerifier().isBlank())
+            throw new BusinessException(ErrorCode.LOGIN_FAILED);
+
+        if (provider == OAuthProvider.GOOGLE) {
+            String registered = props.oauth().google().redirectUri();
+            if (registered != null && !registered.isBlank() && !registered.equals(req.redirectUri()))
+                throw new BusinessException(ErrorCode.INVALID_REDIRECT_URI);
         }
     }
 
@@ -277,8 +380,21 @@ public class AuthService {
     private void saveAgreement(User user, AgreementType type, SignupRequest.AgreementItem item) {
         boolean agreed = item != null && item.isAgreed();
         String version = (item != null && item.version() != null && !item.version().isBlank())
-                ? item.version() : DEFAULT_AGREEMENT_VERSION;
+                ? item.version() : currentVersionOf(type);   // 미전송 시 서버가 아는 현행 버전으로
         userAgreementRepository.save(UserAgreement.of(user, type, agreed, version));
+    }
+
+    /** 인트로가 내려주는 현행 약관 버전과 같은 값 — 클라가 version 을 생략해도 기록이 어긋나지 않게. */
+    private String currentVersionOf(AgreementType type) {
+        AppProperties.Client.TermsVersions v = props.client().termsVersions();
+        return switch (type) {
+            case TOS -> v.termsOfService();
+            case PRIVACY -> v.privacyPolicy();
+            case LOCATION -> v.locationService();
+            case MARKETING -> v.marketing();
+            case EVENT -> v.event();
+            case NIGHT_PUSH -> v.nightPush();
+        };
     }
 
     // ===== 토큰 재발급 (회전) =====

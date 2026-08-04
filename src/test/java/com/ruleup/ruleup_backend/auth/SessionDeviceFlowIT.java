@@ -31,6 +31,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 /**
@@ -203,6 +206,88 @@ class SessionDeviceFlowIT {
             assertThat((String) read(res, "$.data.user.accountStatus")).isEqualTo("LOCKED");
             assertThat((Object) read(res, "$.data.user.lockInfo")).isNotNull();
             assertThat((String) read(res, "$.data.accessToken")).isNotBlank();   // 열람 전용 홈 진입용
+        }
+
+        @Test
+        @DisplayName("잠금 계정도 조회는 된다 — 마이페이지·본인 기록 열람 허용(§7.2)")
+        void locked_can_read() throws Exception {
+            String tag = uniq();
+            String at = lockAndRelogin(tag);
+
+            assertThat(mvc.perform(get("/api/v1/users/me")
+                    .header("Authorization", "Bearer " + at)).andReturn()
+                    .getResponse().getStatus()).isEqualTo(200);
+            assertThat(mvc.perform(get("/api/v1/profile")
+                    .header("Authorization", "Bearer " + at)).andReturn()
+                    .getResponse().getStatus()).isEqualTo(200);
+        }
+
+        @Test
+        @DisplayName("잠금 계정의 쓰기(프로필 수정·챌린지 생성)는 403 ACCOUNT_LOCKED 로 막힌다")
+        void locked_writes_blocked() throws Exception {
+            String tag = uniq();
+            String at = lockAndRelogin(tag);
+
+            // 프로필 편집 — 정책상 명시적 차단 대상
+            Map<String, Object> profile = new LinkedHashMap<>();
+            profile.put("nickname", "잠금변경" + SEQ.get());
+            MvcResult patch = mvc.perform(patch("/api/v1/profile")
+                    .header("Authorization", "Bearer " + at)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(om.writeValueAsString(profile))).andReturn();
+            expectError(patch, 403, "ACCOUNT_LOCKED");
+
+            // 챌린지 생성 — 참여·생성 전면 차단
+            MvcResult create = mvc.perform(post("/api/v1/challenges")
+                    .header("Authorization", "Bearer " + at)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{}")).andReturn();
+            expectError(create, 403, "ACCOUNT_LOCKED");
+        }
+
+        @Test
+        @DisplayName("잠금 중에도 로그아웃은 허용된다 — 세션을 못 끊으면 로그인 상태에 갇힌다")
+        void locked_can_logout() throws Exception {
+            String tag = uniq();
+            signup(tag);
+            User user = findUser(tag);
+            user.lock();
+            userRepository.save(user);
+
+            MvcResult login = postJson("/api/v1/auth/oauth/kakao", loginBody(tag, "inst-" + tag, "dev-" + tag));
+            String at = read(login, "$.data.accessToken");
+            String rt = read(login, "$.data.refreshToken");
+
+            assertThat(logout(at, rt).getResponse().getStatus()).isEqualTo(200);
+            expectError(refresh(rt), 401, "SESSION_EXPIRED");   // 실제로 세션이 끊겼다
+        }
+
+        @Test
+        @DisplayName("잠금 중에도 탈퇴는 허용된다 (§7.5)")
+        void locked_can_withdraw() throws Exception {
+            String tag = uniq();
+            String at = lockAndRelogin(tag);
+
+            Map<String, Object> withdrawBody = new LinkedHashMap<>();
+            withdrawBody.put("confirmPhrase", "탈퇴할게요");
+            MvcResult withdrawn = mvc.perform(delete("/api/v1/users/me")
+                    .header("Authorization", "Bearer " + at)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(om.writeValueAsString(withdrawBody))).andReturn();
+            assertThat(withdrawn.getResponse().getStatus()).isEqualTo(200);
+            assertThat(findUser(tag).isWithdrawn()).isTrue();
+        }
+
+        /** 가입 → 잠금 → 재로그인해서 잠금 상태의 accessToken 을 얻는다. */
+        private String lockAndRelogin(String tag) throws Exception {
+            signup(tag);
+            User user = findUser(tag);
+            user.lock();
+            userRepository.save(user);
+
+            MvcResult res = postJson("/api/v1/auth/oauth/kakao", loginBody(tag, "inst-" + tag, "dev-" + tag));
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+            return read(res, "$.data.accessToken");
         }
     }
 
