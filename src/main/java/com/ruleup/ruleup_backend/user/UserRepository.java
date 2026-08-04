@@ -31,6 +31,9 @@ public interface UserRepository extends JpaRepository<User, UUID> {
             """)
     boolean isNicknameTaken(@Param("nickname") String nickname, @Param("excludeId") UUID excludeId);
 
+    /** 현재 이 설치를 점유 중인 사용자 — 기존 회원 로그인 시 설치 인계 처리용. */
+    Optional<User> findByInstallationId(String installationId);
+
     /** 동일 설치(installationId)에 연결된 활성(미탈퇴) 계정 존재 여부 — 다계정 가입 차단(회원 정책 §1). */
     @Query("""
             select count(u) > 0 from User u

@@ -26,6 +26,8 @@ public class MockOAuthClient implements OAuthClient {
     @Override
     public OAuthUserInfo fetchUserInfo(String code, String codeVerifier, String redirectUri) {
         String subject = "mock-" + provider.name().toLowerCase() + "-" + code;
-        return new OAuthUserInfo(subject, code + "@mock.local", "목유저", null);
+        return new OAuthUserInfo(subject, code + "@mock.local", "목유저", null,
+                new OAuthUserInfo.IdpTokens("mock-idp-at-" + code, "mock-idp-rt-" + code,
+                        java.time.Instant.now().plusSeconds(3600)));
     }
 }

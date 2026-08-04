@@ -43,8 +43,8 @@ public class KakaoOAuthClient implements OAuthClient {
     @Override
     public OAuthUserInfo fetchUserInfo(String code, String codeVerifier, String redirectUri) {
         try {
-            String accessToken = requestToken(code, codeVerifier, redirectUri);
-            return requestUser(accessToken);
+            KakaoTokenResponse token = requestToken(code, codeVerifier, redirectUri);
+            return requestUser(token);
         } catch (RestClientResponseException e) {
             // 카카오가 준 에러 바디(error, error_code: 예 KOE320)를 함께 남겨야 원인 파악 가능.
             // (status만으로는 redirect_uri 불일치 / PKCE / client_secret 중 무엇인지 알 수 없음)
@@ -56,7 +56,7 @@ public class KakaoOAuthClient implements OAuthClient {
         }
     }
 
-    private String requestToken(String code, String codeVerifier, String redirectUri) {
+    private KakaoTokenResponse requestToken(String code, String codeVerifier, String redirectUri) {
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("grant_type", "authorization_code");
         form.add("client_id", config.clientId());        // 카카오 REST API 키
@@ -71,12 +71,12 @@ public class KakaoOAuthClient implements OAuthClient {
                 .body(form).retrieve().body(KakaoTokenResponse.class);
         if (res == null || res.accessToken() == null)
             throw new BusinessException(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
-        return res.accessToken();
+        return res;
     }
 
-    private OAuthUserInfo requestUser(String accessToken) {
+    private OAuthUserInfo requestUser(KakaoTokenResponse token) {
         KakaoUserResponse res = restClient.get().uri(USER_URI)
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.accessToken())
                 .retrieve().body(KakaoUserResponse.class);
         // 200이지만 바디가 비었거나 역직렬화 실패 시 body()가 null → NPE 누수 방지
         if (res == null || res.id() == null)
@@ -87,11 +87,16 @@ public class KakaoOAuthClient implements OAuthClient {
                 ? res.kakaoAccount().profile().nickname() : null;
         String img = (res.kakaoAccount() != null && res.kakaoAccount().profile() != null)
                 ? res.kakaoAccount().profile().profileImageUrl() : null;
-        return new OAuthUserInfo(String.valueOf(res.id()), email, nickname, img);
+        java.time.Instant expiresAt = (token.expiresIn() != null)
+                ? java.time.Instant.now().plusSeconds(token.expiresIn()) : null;
+        return new OAuthUserInfo(String.valueOf(res.id()), email, nickname, img,
+                new OAuthUserInfo.IdpTokens(token.accessToken(), token.refreshToken(), expiresAt));
     }
 
     // 카카오 응답에서 필요한 필드만 (SNAKE_CASE 설정으로 access_token→accessToken 자동 매핑)
-    record KakaoTokenResponse(@JsonProperty("access_token") String accessToken) {}
+    record KakaoTokenResponse(@JsonProperty("access_token") String accessToken,
+                              @JsonProperty("refresh_token") String refreshToken,
+                              @JsonProperty("expires_in") Long expiresIn) {}
     record KakaoUserResponse(Long id, @JsonProperty("kakao_account") KakaoAccount kakaoAccount) {
         record KakaoAccount(String email, Profile profile) {
             record Profile(String nickname, @JsonProperty("profile_image_url") String profileImageUrl) {}
