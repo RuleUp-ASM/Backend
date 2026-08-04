@@ -18,14 +18,16 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * 서비스 사용자 (User 테이블).
- * OAuth(provider+subject)로 사용자를 식별하며, 닉네임은 unique.
+ * 서비스 사용자 (users 테이블 — DB 정리 문서 스키마).
+ * OAuth(provider+subject)로 식별. 개인정보(생일·성별·이메일)는 user_information(1:1)으로 분리.
  * - 생성은 반드시 정적 팩토리 create(...)를 통한다 (id 자동 채움).
- * - 탈퇴는 실제 삭제가 아니라 softDelete()로 deletedAt만 기록
- * - PK는 UUID v7 → BINARY(16) (시간순 정렬 + 인덱스 지역성)
+ * - 탈퇴는 소프트 탈퇴: status=WITHDRAWN + deleted_at 기록 (withdraw()).
+ * - 닉네임 2컬럼 모델: nickname(신청값, 본인 화면) / approvedNickname(타인에게 항상 노출).
+ *   최초 가입 직후 approvedNickname 은 UUID 기반 임시 8자리.
+ * - PK는 UUID v7 → BINARY(16).
  */
 @Entity
-@Table(name = "User")
+@Table(name = "users")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class User extends AssignedIdEntity {
@@ -35,99 +37,120 @@ public class User extends AssignedIdEntity {
     @Column(name = "id", nullable = false, updatable = false)
     private UUID id;
 
-    @Enumerated(EnumType.STRING)                 // MySQL ENUM 컬럼에 문자열로 매핑
-    @Column(name = "oauthProvider", nullable = false)
+    @Enumerated(EnumType.STRING)
+    @Column(name = "oauth_provider", nullable = false)
     private OAuthProvider oauthProvider;
 
-    @Column(name = "oauthSubject", nullable = false)
+    /** 탈퇴 1년 후 최종 파기 시 NULL로 익명화할 수 있어 nullable. 그 전까지는 항상 존재. */
+    @Column(name = "oauth_subject")
     private String oauthSubject;
 
-    @Column(name = "email")
-    private String email;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false)
+    private UserStatus status = UserStatus.ACTIVE;
 
+    /** 사용자가 신청한 닉네임(본인 화면 표시용). 변경 시 새 신청값으로 교체된다. */
     @Column(name = "nickname", nullable = false)
     private String nickname;
 
-    /** 닉네임 LLM 검수 상태 ("확인 전/후"). 가입은 항상 PENDING으로 통과 후 비동기 검수. */
-    @Enumerated(EnumType.STRING)
-    @Column(name = "nicknameStatus", nullable = false)
-    private ModerationStatus nicknameStatus = ModerationStatus.PENDING;
+    /** 다른 사용자에게 항상 노출되는 닉네임. 최초 가입 직후엔 UUID 기반 임시 8자리. */
+    @Column(name = "approved_nickname", nullable = false)
+    private String approvedNickname;
 
-    @Column(name = "profileImageUrl")
+    @Enumerated(EnumType.STRING)
+    @Column(name = "nickname_status", nullable = false)
+    private NicknameStatus nicknameStatus = NicknameStatus.PENDING;
+
+    /** 실제 승인 닉네임이 마지막으로 변경된 시각(거절 후 재신청만으로는 갱신 안 함). */
+    @Column(name = "nickname_changed_at")
+    private Instant nicknameChangedAt;
+
+    /** 사용자가 현재 제출한 이미지 (PENDING/REJECTED 상태일 수 있음). */
+    @Column(name = "profile_image_url")
     private String profileImageUrl;
 
-    /** 프로필 사진 LLM 검수 상태 ("확인 전/후"). 사진이 없으면 숨길 것도 없어 APPROVED. */
+    /** 다른 사용자에게 실제 노출되는 승인 이미지. NULL이면 기본 프로필. */
+    @Column(name = "approved_profile_image_url")
+    private String approvedProfileImageUrl;
+
     @Enumerated(EnumType.STRING)
-    @Column(name = "profileImageStatus", nullable = false)
-    private ModerationStatus profileImageStatus = ModerationStatus.PENDING;
+    @Column(name = "profile_image_status", nullable = false)
+    private ProfileImageStatus profileImageStatus = ProfileImageStatus.NONE;
 
     /** 마지막으로 LLM 검수를 실제 수행한 시각 (보류/재시도 판단용). */
-    @Column(name = "moderationCheckedAt")
+    @Column(name = "moderation_checked_at")
     private Instant moderationCheckedAt;
 
-    @JdbcTypeCode(SqlTypes.JSON)                 // MySQL JSON 컬럼에 List<String> 매핑
-    @Column(name = "interestCategories", nullable = false)
+    // ===== 단일 활성 기기 (멀티 디바이스 미지원 — 현재 설치·기기만 저장, 새 로그인 시 덮어씀) =====
+    /** 앱 설치 단위 UUID. UNIQUE — 하나의 설치가 여러 계정에 연결되는 것을 방지. */
+    @Column(name = "installation_id")
+    private String installationId;
+
+    /** 기기 식별자. 단일 활성 기기 판정 키. */
+    @Column(name = "device_id")
+    private String deviceId;
+
+    /** 사용자 개인정보(생일·성별·이메일) — user_information 1:1. 조회 편의를 위해 EAGER. */
+    @OneToOne(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
+    private UserInformation information;
+
+    /** 관심 카테고리 0~6개 (user_interests 테이블). 응답 조립이 잦아 EAGER. */
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "user_interests", joinColumns = @JoinColumn(name = "user_id"))
+    @Column(name = "category", nullable = false)
     private List<String> interestCategories = new ArrayList<>();
 
-    // ===== 추천 인구통계 (온보딩 수집, 미입력 시 NULL) =====
+    // ===== 추천 인구통계/기기 스펙 (문서 device_info JSON 대신 구조화 컬럼 유지) =====
     /** 국가 코드 ISO 3166-1 alpha-2 (예: "KR"). 추천 콜드스타트 base 세그먼트. */
-    @Column(name = "countryCode", length = 2)
+    @Column(name = "country_code", length = 2)
     private String countryCode;
 
-    /** 생년월일. 나이/연령대(age band)는 서비스에서 계산(저장 X). */
-    @Column(name = "birthDate")
-    private LocalDate birthDate;
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "gender")
-    private Gender gender;
-
-    // ===== 기기 정보 (가입 시 최초 수집, 로그인마다 갱신; 추천 PLATFORM 세그먼트로 사용) =====
     /** 클라 플랫폼(ANDROID/IOS). 추천 PLATFORM 세그먼트 축. NULL = 미입력. */
     @Enumerated(EnumType.STRING)
     @Column(name = "platform", length = 16)
     private Platform platform;
 
-    /** 앱 버전 코드(정수, 예: 안드로이드 versionCode). */
-    @Column(name = "appVersionCode")
+    @Column(name = "app_version_code")
     private Integer appVersionCode;
 
-    /** 앱 버전 네임(표시용, 예: "1.2.0"). */
-    @Column(name = "appVersionName", length = 32)
+    @Column(name = "app_version_name", length = 32)
     private String appVersionName;
 
-    /** OS 버전(표시용, 예: 안드로이드 "14"). */
-    @Column(name = "osVersion", length = 32)
+    @Column(name = "os_version", length = 32)
     private String osVersion;
 
     /** 안드로이드 SDK Int(예: 34). iOS는 null. */
-    @Column(name = "sdkInt")
+    @Column(name = "sdk_int")
     private Integer sdkInt;
 
-    /** 기기 모델(예: "SM-S921N"). */
-    @Column(name = "deviceModel", length = 64)
+    @Column(name = "device_model", length = 64)
     private String deviceModel;
 
-    /** 제조사(예: "samsung"). */
     @Column(name = "manufacturer", length = 64)
     private String manufacturer;
 
     /** 저사양(RAM) 기기 여부. */
-    @Column(name = "lowRam")
+    @Column(name = "low_ram")
     private Boolean lowRam;
 
     /** 기기 정보 마지막 갱신 시각(로그인마다 갱신). */
-    @Column(name = "deviceInfoUpdatedAt")
+    @Column(name = "device_info_updated_at")
     private Instant deviceInfoUpdatedAt;
 
-    @Column(name = "nicknameChangedAt")
-    private Instant nicknameChangedAt;
+    @Generated(event = EventType.INSERT)   // INSERT 시 DB default now()
+    @Column(name = "last_login_at")
+    private Instant lastLoginAt;
 
-    @Column(name = "deletedAt")
+    /** 휴면 판정 기준 — 인증된 API 호출/데이터 제출 시 갱신(하루 1회). */
+    @Generated(event = EventType.INSERT)
+    @Column(name = "last_active_at")
+    private Instant lastActiveAt;
+
+    @Column(name = "deleted_at")
     private Instant deletedAt;
 
-    @Generated(event = EventType.INSERT)   // INSERT 시 DB의 default now()로 채워지고, 그 값을 다시 읽어옴
-    @Column(name = "createdAt", nullable = false, updatable = false)
+    @Generated(event = EventType.INSERT)
+    @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
     public static User create(OAuthProvider provider, String oauthSubject, String email,
@@ -137,23 +160,30 @@ public class User extends AssignedIdEntity {
         u.id = UuidGenerator.generate();
         u.oauthProvider = provider;
         u.oauthSubject = oauthSubject;
-        u.email = email;
         u.nickname = nickname;
+        u.approvedNickname = u.deriveTempNickname();   // 승인 전 타인 노출용 임시 닉네임
+        u.nicknameStatus = NicknameStatus.PENDING;
         u.profileImageUrl = profileImageUrl;
-        u.interestCategories = (interestCategories != null) ? interestCategories : new ArrayList<>();
-        u.nicknameStatus = ModerationStatus.PENDING;
-        u.profileImageStatus = (profileImageUrl != null) ? ModerationStatus.PENDING : ModerationStatus.APPROVED;
+        u.approvedProfileImageUrl = null;              // 승인 전까지 기본 프로필
+        u.profileImageStatus = (profileImageUrl != null) ? ProfileImageStatus.PENDING : ProfileImageStatus.NONE;
+        u.interestCategories = (interestCategories != null) ? new ArrayList<>(interestCategories) : new ArrayList<>();
+        u.information = UserInformation.of(u, email);
         return u;
     }
 
+    // ===== 개인정보(user_information) 위임 접근자 =====
+    public String getEmail()       { return (information != null) ? information.getEmail() : null; }
+    public LocalDate getBirthDate(){ return (information != null) ? information.getBirthDate() : null; }
+    public Gender getGender()      { return (information != null) ? information.getGender() : null; }
+
     /**
-     * 추천용 인구통계 설정(가입 후 최초 접속 시 수집, 선택). 전달된 값만 덮어쓴다(미입력=null은 건너뜀).
-     * 추천은 채워진 세그먼트만 사용하므로 일부만 입력하거나 전부 건너뛰어도 동작한다.
-     * 국가 코드는 사용자 입력이 아니라 서버가 요청에서 해석하므로 {@link #updateCountryCode}로 따로 채운다.
+     * 추천용 인구통계 설정(온보딩 수집, 선택). 전달된 값만 덮어쓴다(미입력=null은 건너뜀).
+     * 생일은 "가입 후 수정 불가" 계약이므로 이미 값이 있으면 무시한다.
      */
     public void registerDemographics(LocalDate birthDate, Gender gender) {
-        if (birthDate != null) this.birthDate = birthDate;
-        if (gender != null) this.gender = gender;
+        if (information == null) information = UserInformation.of(this, null);
+        if (getBirthDate() == null) information.updateBirthDate(birthDate);
+        information.updateGender(gender);
     }
 
     /**
@@ -167,7 +197,6 @@ public class User extends AssignedIdEntity {
     /**
      * 기기 정보 갱신(가입 시 최초 수집, 로그인마다 갱신).
      * 전달된 값만 덮어쓴다(부분 전송 시 기존값 보존). 추천 PLATFORM 세그먼트에 platform 사용.
-     * 전체 디바이스 스펙(osVersion·sdkInt·deviceModel·manufacturer·lowRam)을 저장해 로그인 응답에 되돌려준다.
      */
     public void updateDeviceInfo(Platform platform, Integer appVersionCode, String appVersionName,
                                  String osVersion, Integer sdkInt, String deviceModel,
@@ -183,59 +212,113 @@ public class User extends AssignedIdEntity {
         this.deviceInfoUpdatedAt = Instant.now();
     }
 
+    /** 단일 활성 기기 등록/교체 — 새 기기 로그인 시 기존 값을 덮어쓴다(기존 RT revoke는 호출측). */
+    public void attachInstallation(String installationId, String deviceId) {
+        if (installationId != null) this.installationId = installationId;
+        if (deviceId != null) this.deviceId = deviceId;
+    }
+
+    public void touchLastLogin()  { this.lastLoginAt = Instant.now(); }
+    public void touchLastActive() { this.lastActiveAt = Instant.now(); }
+
     /**
-     * 검수 통과 전(또는 거절)에 다른 사용자에게 대신 보여줄 임시 닉네임 (예: user_ab12cd).
-     * 본인에게는 항상 본인이 정한 nickname이 보인다.
-     * <p>PK(UUID v7)에서 결정적으로 파생하므로 저장할 필요가 없다(DB 매핑 없는 파생 메서드).
-     * v7은 앞 구간이 타임스탬프라 같은 시간대 가입자끼리 겹치므로, 랜덤 비트 구간인 <b>뒤 6자리</b>를 쓴다.
+     * 승인 전(또는 거절) 타인에게 대신 보여줄 임시 닉네임(UUID 뒤 8자리 hex).
+     * PK(UUID v7)에서 파생 — v7 앞 구간은 타임스탬프라 겹치므로 랜덤 비트인 뒤 8자리를 쓴다.
+     * (approved_nickname VARCHAR(12) 제약상 prefix 없이 8자만 사용)
      */
-    public String tempNickname() {
+    public String deriveTempNickname() {
         String hex = id.toString().replace("-", "");
-        return "user_" + hex.substring(hex.length() - 6);
+        return hex.substring(hex.length() - 8);
+    }
+
+    /** 임시 닉네임 UNIQUE 충돌 시 재생성용 — 랜덤 UUID 뒤 8자리로 교체. */
+    public void regenerateTempApprovedNickname() {
+        String hex = UUID.randomUUID().toString().replace("-", "");
+        this.approvedNickname = hex.substring(hex.length() - 8);
     }
 
     public void changeNickname(String newNickname) {
         this.nickname = newNickname;
-        this.nicknameChangedAt = Instant.now();
-        this.nicknameStatus = ModerationStatus.PENDING;
+        this.nicknameStatus = NicknameStatus.PENDING;
         this.moderationCheckedAt = null;
+        // approvedNickname(직전 승인본)은 승인 시점까지 유지 — 타인 화면 계속 노출
     }
 
     // ===== 검수 결과 반영 =====
-    public void approveNickname()      { this.nicknameStatus = ModerationStatus.APPROVED; }
-    public void rejectNickname()       { this.nicknameStatus = ModerationStatus.REJECTED; }
-    public void approveProfileImage()  { this.profileImageStatus = ModerationStatus.APPROVED; }
-    public void rejectProfileImage()   { this.profileImageStatus = ModerationStatus.REJECTED; }
+    public void approveNickname() {
+        this.approvedNickname = this.nickname;
+        this.nicknameStatus = NicknameStatus.APPROVED;
+        this.nicknameChangedAt = Instant.now();
+    }
+
+    public void rejectNickname()       { this.nicknameStatus = NicknameStatus.REJECTED; }
+
+    /** 승인 직전 재검사에서 타인이 선점한 경우 (또는 탈퇴 복원 시 선점 충돌). */
+    public void markNicknameConflict() { this.nicknameStatus = NicknameStatus.CONFLICT; }
+
+    public void approveProfileImage() {
+        this.approvedProfileImageUrl = this.profileImageUrl;
+        this.profileImageStatus = ProfileImageStatus.APPROVED;
+    }
+
+    public void rejectProfileImage()   { this.profileImageStatus = ProfileImageStatus.REJECTED; }
     public void markModerationChecked(){ this.moderationCheckedAt = Instant.now(); }
 
-    public boolean isNicknamePending()     { return nicknameStatus == ModerationStatus.PENDING; }
-    public boolean isProfileImagePending() { return profileImageUrl != null && profileImageStatus == ModerationStatus.PENDING; }
+    public boolean isNicknamePending()     { return nicknameStatus == NicknameStatus.PENDING; }
+    public boolean isProfileImagePending() { return profileImageUrl != null && profileImageStatus == ProfileImageStatus.PENDING; }
 
+    /** 본인에게는 신청 닉네임, 타인에게는 항상 승인 닉네임(approved_nickname). */
     public String visibleNicknameTo(UUID viewerId) {
         if (viewerId != null && viewerId.equals(this.id)) return nickname;
-        return (nicknameStatus == ModerationStatus.APPROVED) ? nickname : tempNickname();
+        return approvedNickname;
     }
 
+    /** 본인에게는 제출 이미지, 타인에게는 승인 이미지(없으면 null=기본 프로필). */
     public String visibleProfileImageTo(UUID viewerId) {
         if (viewerId != null && viewerId.equals(this.id)) return profileImageUrl;
-        return (profileImageStatus == ModerationStatus.APPROVED) ? profileImageUrl : null;
+        return approvedProfileImageUrl;
     }
 
-    public void softDelete() {
+    /** 소프트 탈퇴 — status=WITHDRAWN + deleted_at. 기기 연결 해제(installation UNIQUE 반환). */
+    public void withdraw() {
+        this.status = UserStatus.WITHDRAWN;
         this.deletedAt = Instant.now();
+        this.installationId = null;
+        this.deviceId = null;
     }
+
+    /** 탈퇴 복원 — 1년 내 동일 소셜 계정 재로그인. 닉네임 충돌 처리는 호출측에서 별도 수행. */
+    public void restore(String installationId, String deviceId) {
+        this.status = UserStatus.ACTIVE;
+        this.deletedAt = null;
+        attachInstallation(installationId, deviceId);
+    }
+
+    public void lock()  { this.status = UserStatus.LOCKED; }
+    public void ban()   { this.status = UserStatus.BANNED; }
+
+    public boolean isWithdrawn() { return status == UserStatus.WITHDRAWN; }
+    public boolean isBanned()    { return status == UserStatus.BANNED; }
+    public boolean isLocked()    { return status == UserStatus.LOCKED; }
 
     public void changeInterestCategories(List<String> categories) {
-        this.interestCategories = (categories != null) ? new ArrayList<>(categories) : new ArrayList<>();
+        this.interestCategories.clear();
+        if (categories != null) this.interestCategories.addAll(categories);
     }
 
     public void changeProfileImage(String url) {
         this.profileImageUrl = url;
-        this.profileImageStatus = (url != null) ? ModerationStatus.PENDING : ModerationStatus.APPROVED;
+        if (url != null) {
+            this.profileImageStatus = ProfileImageStatus.PENDING;   // 승인 전까지 타인에겐 직전 승인본
+        } else {
+            this.approvedProfileImageUrl = null;
+            this.profileImageStatus = ProfileImageStatus.NONE;
+        }
     }
 
     public void removeProfileImage() {
         this.profileImageUrl = null;
-        this.profileImageStatus = ModerationStatus.APPROVED;
+        this.approvedProfileImageUrl = null;
+        this.profileImageStatus = ProfileImageStatus.NONE;
     }
 }

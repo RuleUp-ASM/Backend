@@ -6,5 +6,6 @@ import java.util.List;
 import java.util.UUID;
 
 public interface UserAgreementRepository extends JpaRepository<UserAgreement, UUID> {
-    List<UserAgreement> findByUser_Id(UUID userId);
+    /** append-only 이력 전체(최신순) — 현재 상태는 타입별 첫 행으로 계산한다. */
+    List<UserAgreement> findByUser_IdOrderByCreatedAtDescIdDesc(UUID userId);
 }

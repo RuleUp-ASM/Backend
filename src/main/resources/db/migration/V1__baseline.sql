@@ -1,23 +1,250 @@
 -- 경로: src/main/resources/db/migration/V1__baseline.sql
--- RuleUp 전체 스키마 baseline (단일 파일). 기존 V1~V21 의 CREATE/ALTER/INDEX 를 최종 형태로 통합했다.
---   · 처음 띄우는(fresh) DB 용. 증분 ALTER 없이 각 테이블을 최종 컬럼·인덱스로 한 번에 생성한다.
---   · 인덱스는 실제 소비 쿼리가 있는 것만 유지(미사용/중복 제거).
---   · RoutineTemplate/RoutineVerification 카탈로그 시드 포함(운영이 관리하는 읽기 전용 지식베이스).
---   · 테이블은 알파벳순(mysqldump)이라 FK 순서 무관하도록 FOREIGN_KEY_CHECKS 를 잠깐 끈다.
+-- RuleUp 전체 스키마 baseline — RuleUp7 데이터베이스용 리베이스라인.
+--   · 회원/인증 도메인은 "DB 정리" 문서 스키마(snake_case)로 전면 전환:
+--     users / user_information / user_interests / moderation_requests / refresh_tokens
+--     / user_agreements / social_tokens / user_score_summaries / score_transactions
+--   · 그 외 도메인 테이블은 기존 V1~V11 최종 형태를 유지하되 FK만 users(id)로 재지정.
+--   · RoutineTemplate/RoutineVerification 카탈로그 시드 포함.
+--   · 테이블 생성 순서 무관하도록 FOREIGN_KEY_CHECKS 를 잠깐 끈다.
 
 SET FOREIGN_KEY_CHECKS = 0;
 
--- ========================= 스키마 =========================
+-- ========== (A) 회원/인증 도메인 — DB 정리 문서 스키마 (MySQL 8.x / InnoDB) ==========
+-- UUID: 애플리케이션 UUIDv7 → BINARY(16). 시간: DATETIME(3) UTC.
+-- 문서 대비 의도적 편차:
+--   · device_info JSON 대신 구조화 컬럼(platform 등) 유지 — 추천/FlushIntervalPolicy가 타입 컬럼을 소비
+--   · country_code·moderation_checked_at 등 추천/모더레이션 운영 컬럼 유지
+--   · user_information.birth_date/gender 는 NULL 허용(레거시 온보딩 경로 호환) — 검증은 애플리케이션에서 강제
+--   · gender ENUM 은 NON_BINARY·PREFER_NOT_TO_SAY 둘 다 보유(정책 합의 전 안전값)
+--   · chk_users_active_device(활성계정 기기 필수)는 계약 전환기 동안 미적용 — 애플리케이션 검증
+
+CREATE TABLE `users` (
+  `id`                          BINARY(16) NOT NULL COMMENT '애플리케이션에서 생성한 UUIDv7',
+  `oauth_provider`              ENUM('KAKAO','GOOGLE','APPLE','NAVER') NOT NULL,
+  -- ACTIVE/LOCKED/BANNED 에서는 반드시 존재. 최종 파기 구현 시 WITHDRAWN 행은 NULL로 익명화 가능
+  `oauth_subject`               VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL,
+  `status`                      ENUM('ACTIVE','LOCKED','BANNED','WITHDRAWN') NOT NULL DEFAULT 'ACTIVE',
+  -- 현재 사용자가 신청한 닉네임 (변경 시 새 신청값)
+  `nickname`                    VARCHAR(12) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  -- 다른 사용자에게 항상 노출되는 닉네임 (최초 가입 직후엔 UUID 기반 임시 8자리)
+  `approved_nickname`           VARCHAR(12) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  `nickname_status`             ENUM('PENDING','APPROVED','REJECTED','CONFLICT') NOT NULL DEFAULT 'PENDING',
+  -- 실제 승인 닉네임이 변경된 시각 (거절 후 재신청만으로는 갱신 안 함)
+  `nickname_changed_at`         DATETIME(3) NULL,
+  -- 사용자가 현재 제출한 이미지 (PENDING/REJECTED 가능)
+  `profile_image_url`           VARCHAR(512) NULL,
+  -- 다른 사용자에게 실제 노출되는 승인 이미지 (NULL=기본 프로필)
+  `approved_profile_image_url`  VARCHAR(512) NULL,
+  `profile_image_status`        ENUM('NONE','PENDING','APPROVED','REJECTED') NOT NULL DEFAULT 'NONE',
+  `moderation_checked_at`       DATETIME(3) NULL,
+  -- 단일 활성 기기: 현재 설치·기기 정보만 저장, 새 기기 로그인 시 덮어씀
+  `installation_id`             VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  `device_id`                   VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  `country_code`                CHAR(2) NULL,
+  `platform`                    ENUM('ANDROID','IOS') NULL,
+  `app_version_code`            INT NULL,
+  `app_version_name`            VARCHAR(32) NULL,
+  `os_version`                  VARCHAR(32) NULL,
+  `sdk_int`                     INT NULL,
+  `device_model`                VARCHAR(64) NULL,
+  `manufacturer`                VARCHAR(64) NULL,
+  `low_ram`                     TINYINT(1) NULL,
+  `device_info_updated_at`      DATETIME(3) NULL,
+  `last_login_at`               DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `last_active_at`              DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '인증 API 호출 시 하루 한 번 갱신',
+  `deleted_at`                  DATETIME(3) NULL,
+  `created_at`                  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at`                  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  -- PENDING 신청 닉네임만 UNIQUE 대상 (REJECTED/CONFLICT/WITHDRAWN 은 점유 해제)
+  `active_requested_nickname`   VARCHAR(12) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin
+                                GENERATED ALWAYS AS (
+                                  CASE WHEN `status` <> 'WITHDRAWN' AND `nickname_status` = 'PENDING'
+                                       THEN `nickname` ELSE NULL END
+                                ) STORED,
+  -- 탈퇴하지 않은 사용자의 승인 닉네임만 UNIQUE 대상 (탈퇴 시 타인 재사용 허용)
+  `active_approved_nickname`    VARCHAR(12) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin
+                                GENERATED ALWAYS AS (
+                                  CASE WHEN `status` <> 'WITHDRAWN' THEN `approved_nickname` ELSE NULL END
+                                ) STORED,
+  PRIMARY KEY (`id`),
+  CONSTRAINT `chk_users_oauth_subject` CHECK (`oauth_subject` IS NOT NULL OR `status` = 'WITHDRAWN'),
+  CONSTRAINT `chk_users_withdrawal` CHECK (
+      (`status` = 'WITHDRAWN' AND `deleted_at` IS NOT NULL)
+      OR (`status` <> 'WITHDRAWN' AND `deleted_at` IS NULL)
+  )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='사용자 계정 코어';
+
+CREATE UNIQUE INDEX `uq_users_oauth_identity` ON `users` (`oauth_provider`, `oauth_subject`);
+CREATE UNIQUE INDEX `uq_users_active_requested_nickname` ON `users` (`active_requested_nickname`);
+CREATE UNIQUE INDEX `uq_users_active_approved_nickname` ON `users` (`active_approved_nickname`);
+CREATE UNIQUE INDEX `uq_users_installation_id` ON `users` (`installation_id`);
+CREATE INDEX `idx_users_device_id` ON `users` (`device_id`, `id`);
+
+CREATE TABLE `user_information` (
+  `user_id`     BINARY(16) NOT NULL,
+  `birth_date`  DATE NULL,
+  -- 성별 미응답 표현은 정책 합의 전 — NON_BINARY(API 계약)·PREFER_NOT_TO_SAY(DB 문서) 모두 보유
+  `gender`      ENUM('MALE','FEMALE','NON_BINARY','PREFER_NOT_TO_SAY') NULL,
+  `email`       VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL,
+  `created_at`  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at`  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`user_id`),
+  CONSTRAINT `fk_user_information_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='사용자 개인정보';
+
+CREATE TABLE `user_interests` (
+  `user_id`     BINARY(16) NOT NULL,
+  `category`    VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `created_at`  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`user_id`, `category`),
+  CONSTRAINT `fk_user_interests_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='사용자 관심 카테고리';
+
+CREATE INDEX `idx_user_interests_category` ON `user_interests` (`category`, `user_id`);
+
+CREATE TABLE `moderation_requests` (
+  `id`              BINARY(16) NOT NULL COMMENT 'UUIDv7',
+  `user_id`         BINARY(16) NOT NULL,
+  `target`          ENUM('NICKNAME','PROFILE_IMAGE') NOT NULL,
+  -- NICKNAME이면 신청 닉네임, PROFILE_IMAGE이면 이미지 object key/URL
+  `content`         VARCHAR(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  `status`          ENUM('PENDING','APPROVED','REJECTED') NOT NULL DEFAULT 'PENDING',
+  `reject_reason`   VARCHAR(255) NULL,
+  `requested_at`    DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `decided_at`      DATETIME(3) NULL,
+  -- 사용자별 target 하나에 PENDING 요청 하나만 허용 (완료되면 NULL → 이력 누적)
+  `pending_target`  VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin
+                    GENERATED ALWAYS AS (
+                      CASE WHEN `status` = 'PENDING' THEN `target` ELSE NULL END
+                    ) STORED,
+  PRIMARY KEY (`id`),
+  CONSTRAINT `fk_moderation_requests_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `chk_moderation_request_status` CHECK (
+      (`status` = 'PENDING' AND `decided_at` IS NULL AND `reject_reason` IS NULL)
+      OR (`status` = 'APPROVED' AND `decided_at` IS NOT NULL AND `reject_reason` IS NULL)
+      OR (`status` = 'REJECTED' AND `decided_at` IS NOT NULL AND `reject_reason` IS NOT NULL)
+  )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='닉네임 및 프로필 이미지 심사 이력';
+
+CREATE UNIQUE INDEX `uq_moderation_user_pending_target` ON `moderation_requests` (`user_id`, `pending_target`);
+CREATE INDEX `idx_moderation_requests_queue` ON `moderation_requests` (`status`, `target`, `requested_at`, `id`);
+CREATE INDEX `idx_moderation_requests_user_history` ON `moderation_requests` (`user_id`, `target`, `requested_at` DESC, `id` DESC);
+
+CREATE TABLE `refresh_tokens` (
+  `id`                 BINARY(16) NOT NULL COMMENT 'UUIDv7',
+  `user_id`            BINARY(16) NOT NULL,
+  -- 최초 발급부터 회전된 모든 RT가 같은 family_id를 공유
+  `family_id`          BINARY(16) NOT NULL,
+  -- 이전 RT의 ID (최초 발급 토큰은 NULL)
+  `parent_token_id`    BINARY(16) NULL,
+  -- 원문 미저장 — SHA-256 32바이트
+  `token_hash`         BINARY(32) NOT NULL,
+  `expires_at`         DATETIME(3) NOT NULL,
+  `revoked_at`         DATETIME(3) NULL,
+  -- 이미 사용/폐기된 토큰이 다시 제출된 시각 (재사용 감지)
+  `reuse_detected_at`  DATETIME(3) NULL,
+  `created_at`         DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  CONSTRAINT `fk_refresh_tokens_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_refresh_tokens_parent` FOREIGN KEY (`parent_token_id`) REFERENCES `refresh_tokens` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `chk_refresh_tokens_reuse` CHECK (`reuse_detected_at` IS NULL OR `revoked_at` IS NOT NULL)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Refresh Token 회전 및 폐기 정보';
+
+CREATE UNIQUE INDEX `uq_refresh_tokens_hash` ON `refresh_tokens` (`token_hash`);
+CREATE INDEX `idx_refresh_tokens_user_active` ON `refresh_tokens` (`user_id`, `revoked_at`, `expires_at`);
+CREATE INDEX `idx_refresh_tokens_family_active` ON `refresh_tokens` (`family_id`, `revoked_at`, `expires_at`);
+CREATE INDEX `idx_refresh_tokens_expiry` ON `refresh_tokens` (`expires_at`, `id`);
+
+CREATE TABLE `user_agreements` (
+  `id`              BINARY(16) NOT NULL COMMENT 'UUIDv7',
+  `user_id`         BINARY(16) NOT NULL,
+  `agreement_type`  ENUM('TOS','PRIVACY','LOCATION','MARKETING','EVENT','NIGHT_PUSH') NOT NULL,
+  -- append-only 이력: 1=동의, 0=철회. 현재 상태는 최신 행으로 조회
+  `agreed`          TINYINT(1) NOT NULL,
+  `version`         VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `created_at`      DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  CONSTRAINT `fk_user_agreements_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `chk_user_agreements_agreed` CHECK (`agreed` IN (0, 1))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='사용자 약관 동의 및 철회 이력';
+
+CREATE INDEX `idx_user_agreements_latest` ON `user_agreements` (`user_id`, `agreement_type`, `created_at` DESC, `id` DESC);
+
+CREATE TABLE `social_tokens` (
+  `user_id`                 BINARY(16) NOT NULL,
+  `provider`                ENUM('KAKAO','GOOGLE','APPLE','NAVER') NOT NULL,
+  -- nonce·auth tag 포함 애플리케이션 암호화 결과
+  `access_token_enc`        VARBINARY(2048) NOT NULL,
+  `refresh_token_enc`       VARBINARY(2048) NULL,
+  `encryption_key_version`  SMALLINT UNSIGNED NOT NULL,
+  `expires_at`              DATETIME(3) NULL,
+  `created_at`              DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at`              DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`user_id`, `provider`),
+  CONSTRAINT `fk_social_tokens_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='외부 소셜 제공자 토큰';
+
+CREATE INDEX `idx_social_tokens_expiry` ON `social_tokens` (`provider`, `expires_at`, `user_id`);
+
+CREATE TABLE `user_score_summaries` (
+  `user_id`           BINARY(16) NOT NULL,
+  `total_score`       BIGINT NOT NULL DEFAULT 0,
+  -- 점수만으로 계산한 실제 티어
+  `actual_tier`       VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'UNRANKED',
+  -- 강등 유예 등 정책 적용 후 표시 티어
+  `display_tier`      VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'UNRANKED',
+  `tier_grace_until`  DATETIME(3) NULL,
+  -- 점수 동시 업데이트 낙관적 락
+  `version`           BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  `created_at`        DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at`        DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`user_id`),
+  CONSTRAINT `fk_user_score_summaries_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='사용자 현재 점수 및 티어';
+
+CREATE INDEX `idx_user_score_summaries_ranking` ON `user_score_summaries` (`total_score` DESC, `user_id`);
+CREATE INDEX `idx_user_score_summaries_tier_ranking` ON `user_score_summaries` (`display_tier`, `total_score` DESC, `user_id`);
+
+CREATE TABLE `score_transactions` (
+  `id`                BINARY(16) NOT NULL COMMENT 'UUIDv7',
+  `user_id`           BINARY(16) NOT NULL,
+  -- 양수=증가, 음수=감소
+  `amount`            BIGINT NOT NULL,
+  -- 적용 이후 총점 (user_score_summaries 잠근 뒤 계산)
+  `balance_after`     BIGINT NOT NULL,
+  `transaction_type`  ENUM('CHALLENGE_SUCCESS','CHALLENGE_FAILURE','APPEAL_ADJUSTMENT','ADMIN_ADJUSTMENT','REVERSAL') NOT NULL,
+  `source_type`       ENUM('CHALLENGE_CYCLE','VERIFICATION','APPEAL','ADMIN') NOT NULL,
+  -- 다형적 참조라 FK 미적용 (challenge_cycle_id / verification_id / appeal_id 등)
+  `source_id`         BINARY(16) NULL,
+  `reversal_of_id`    BINARY(16) NULL,
+  -- 같은 이벤트 중복 반영 방지 (예: challenge-cycle:{cycleId}:user:{userId}:success)
+  `idempotency_key`   VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `description`       VARCHAR(255) NULL,
+  `created_at`        DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  CONSTRAINT `fk_score_transactions_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_score_transactions_reversal` FOREIGN KEY (`reversal_of_id`) REFERENCES `score_transactions` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `chk_score_transactions_amount` CHECK (`amount` <> 0),
+  CONSTRAINT `chk_score_transactions_self_reversal` CHECK (`reversal_of_id` IS NULL OR `reversal_of_id` <> `id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='사용자 점수 변경 원장';
+
+CREATE UNIQUE INDEX `uq_score_transactions_idempotency` ON `score_transactions` (`idempotency_key`);
+CREATE UNIQUE INDEX `uq_score_transactions_reversal` ON `score_transactions` (`reversal_of_id`);
+CREATE INDEX `idx_score_transactions_user_history` ON `score_transactions` (`user_id`, `created_at` DESC, `id` DESC);
+CREATE INDEX `idx_score_transactions_source` ON `score_transactions` (`source_type`, `source_id`, `user_id`, `created_at`);
+
+-- ========== (B) 기타 도메인 — 기존 최종 스키마 (FK만 users로 재지정) ==========
 
 CREATE TABLE `Challenge` (
   `id` binary(16) NOT NULL,
   `creatorId` binary(16) NOT NULL,
-  `title` varchar(30) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `description` varchar(200) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `imageUrl` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `category` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `participationType` enum('SOLO','GROUP') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `title` varchar(30) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `description` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `imageUrl` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `category` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `participationType` enum('SOLO','GROUP') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `minMannerTemperature` decimal(4,1) DEFAULT NULL,
+  `maxParticipants` int DEFAULT NULL,
   `repeatDays` json NOT NULL,
   `durationDays` int NOT NULL,
   `startDate` date NOT NULL,
@@ -27,16 +254,16 @@ CREATE TABLE `Challenge` (
   `params` json NOT NULL,
   `penaltyConfig` json NOT NULL,
   `rewardConfig` json NOT NULL,
-  `anonymity` enum('REAL','ANONYMOUS') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'REAL',
-  `status` enum('RECRUITING','ACTIVE','COMPLETED') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'RECRUITING',
-  `moderationStatus` enum('PENDING_REVIEW','APPROVED','REJECTED') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'PENDING_REVIEW',
+  `anonymity` enum('REAL','ANONYMOUS') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'REAL',
+  `status` enum('UPCOMING','ACTIVE','COMPLETED') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'UPCOMING',
+  `moderationStatus` enum('NONE','PENDING_REVIEW','APPROVED','REJECTED') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'NONE',
   `moderationDecidedAt` datetime(6) DEFAULT NULL,
   `fixDeadline` datetime(6) DEFAULT NULL,
   `aiAssisted` tinyint(1) NOT NULL DEFAULT '0',
   `participantCount` int NOT NULL DEFAULT '0',
   `trendingScore` double NOT NULL DEFAULT '0',
   `failCount` int NOT NULL DEFAULT '0',
-  `verificationType` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `verificationType` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   `updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
   `deletedAt` datetime(6) DEFAULT NULL,
@@ -44,32 +271,48 @@ CREATE TABLE `Challenge` (
   KEY `fkChallengeCreator` (`creatorId`),
   KEY `idx_challenge_explore` (`deletedAt`,`moderationStatus`,`status`,`endDate`),
   KEY `idx_challenge_template` (`templateId`),
-  CONSTRAINT `fkChallengeCreator` FOREIGN KEY (`creatorId`) REFERENCES `User` (`id`),
+  CONSTRAINT `fkChallengeCreator` FOREIGN KEY (`creatorId`) REFERENCES `users` (`id`),
   CONSTRAINT `ckChallengeDuration` CHECK ((`durationDays` >= 1)),
   CONSTRAINT `ckChallengeMinManner` CHECK (((`minMannerTemperature` is null) or (`minMannerTemperature` >= 0.0)))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `ChallengeDelegation` (
+  `id` binary(16) NOT NULL,
+  `challengeId` binary(16) NOT NULL,
+  `requesterId` binary(16) NOT NULL,
+  `targetUserId` binary(16) NOT NULL,
+  `status` enum('PENDING','ACCEPTED','REJECTED','CANCELED','EXPIRED') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'PENDING',
+  `expiresAt` datetime(6) NOT NULL,
+  `resolvedAt` datetime(6) DEFAULT NULL,
+  `createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  `updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`id`),
+  KEY `ixDelegationChallengeStatus` (`challengeId`,`status`),
+  KEY `ixDelegationTargetStatus` (`targetUserId`,`status`),
+  KEY `fkDelegationRequester` (`requesterId`),
+  CONSTRAINT `fkDelegationChallenge` FOREIGN KEY (`challengeId`) REFERENCES `Challenge` (`id`),
+  CONSTRAINT `fkDelegationRequester` FOREIGN KEY (`requesterId`) REFERENCES `users` (`id`),
+  CONSTRAINT `fkDelegationTarget` FOREIGN KEY (`targetUserId`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `ChallengeMember` (
   `id` binary(16) NOT NULL,
   `challengeId` binary(16) NOT NULL,
   `userId` binary(16) NOT NULL,
-  `role` enum('OWNER','MEMBER') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'MEMBER',
-  `status` enum('PENDING','ACTIVE','LEFT','REMOVED') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `role` enum('OWNER','MANAGER','MEMBER') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'MEMBER',
+  `status` enum('PENDING','ACTIVE','LEFT','REMOVED') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `joinedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-  `scheduleType` enum('FIXED_DAYS','FREQUENCY') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'FIXED_DAYS',
+  `scheduleType` enum('FIXED_DAYS','FREQUENCY') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'FIXED_DAYS',
   `targetDays` int NOT NULL DEFAULT '0',
   `successDays` int NOT NULL DEFAULT '0',
   `failDays` int NOT NULL DEFAULT '0',
   `progressRate` decimal(5,2) NOT NULL DEFAULT '0.00',
-  `todayStatus` enum('SUCCESS','PENDING','FAILED','NOT_TARGET','NOT_REQUIRED') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `todayStatus` enum('SUCCESS','PENDING','FAILED_PROVISIONAL','FAILED','NOT_TARGET','NOT_REQUIRED') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `lastSyncedAt` datetime(6) DEFAULT NULL,
-  `periodUnit` enum('WEEK','MONTH') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `periodUnit` enum('WEEK','MONTH') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `periodTarget` int DEFAULT NULL,
   `curPeriodStart` date DEFAULT NULL,
   `curPeriodEnd` date DEFAULT NULL,
   `curPeriodCompleted` int DEFAULT NULL,
-  `periodsTotal` int DEFAULT NULL,
-  `periodsMet` int DEFAULT NULL,
-  `setupStatus` enum('PENDING_SETUP','READY') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'PENDING_SETUP' COMMENT 'ìµœì´ˆ ì§„ìž… ì…‹ì—… ìƒíƒœ. READY ì „ê¹Œì§€ í‰ê°€ ìŠ¤í‚µ(Â§4)',
+  `setupStatus` enum('PENDING_SETUP','READY') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'PENDING_SETUP' COMMENT 'ìµœì´ˆ ì§„ìž… ì…‹ì—… ìƒíƒœ. READY ì „ê¹Œì§€ í‰ê°€ ìŠ¤í‚µ(Â§4)',
   `anchors` json DEFAULT NULL COMMENT 'ë©¤ë²„ GeoAnchor[] (PER_MEMBER). [{lat,lng,radiusM,label}] (Â§5)',
   `anchorUpdatedAt` datetime(6) DEFAULT NULL COMMENT 'ì•µì»¤ ë§ˆì§€ë§‰ ë³€ê²½ ì‹œê°(ìž¥ì†Œ ìˆ˜ì • ì¿¨ë‹¤ìš´ ê¸°ì¤€, Â§11.5)',
   `screenApps` json DEFAULT NULL,
@@ -84,38 +327,175 @@ CREATE TABLE `ChallengeMember` (
   UNIQUE KEY `uqMember` (`challengeId`,`userId`),
   KEY `ixMemberUserStatus` (`userId`,`status`),
   CONSTRAINT `fkMemberChallenge` FOREIGN KEY (`challengeId`) REFERENCES `Challenge` (`id`),
-  CONSTRAINT `fkMemberUser` FOREIGN KEY (`userId`) REFERENCES `User` (`id`)
+  CONSTRAINT `fkMemberUser` FOREIGN KEY (`userId`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `DeviceToken` (
+  `id` binary(16) NOT NULL,
+  `userId` binary(16) NOT NULL,
+  `token` varchar(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `platform` enum('ANDROID','IOS') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'ANDROID',
+  `lastSeenAt` datetime(6) NOT NULL,
+  `createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uqDeviceToken` (`token`),
+  KEY `ixDeviceTokenUser` (`userId`),
+  CONSTRAINT `fkDeviceTokenUser` FOREIGN KEY (`userId`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `InvitationSignup` (
+  `id` binary(16) NOT NULL,
+  `inviterUserId` binary(16) NOT NULL,
+  `inviteeUserId` binary(16) NOT NULL,
+  `occurredAt` datetime(6) NOT NULL,
+  `createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uqInvitationSignupInvitee` (`inviteeUserId`),
+  KEY `ixInvitationSignupInviter` (`inviterUserId`,`occurredAt`),
+  CONSTRAINT `fkInvitationSignupInvitee` FOREIGN KEY (`inviteeUserId`) REFERENCES `users` (`id`),
+  CONSTRAINT `fkInvitationSignupInviter` FOREIGN KEY (`inviterUserId`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `InviteCode` (
+  `id` binary(16) NOT NULL,
+  `userId` binary(16) NOT NULL,
+  `code` varchar(6) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uqInviteCodeUser` (`userId`),
+  UNIQUE KEY `uqInviteCodeCode` (`code`),
+  CONSTRAINT `fkInviteCodeUser` FOREIGN KEY (`userId`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `Milestone` (
+  `id` binary(16) NOT NULL,
+  `userId` binary(16) NOT NULL,
+  `type` enum('TIER_REACHED','STREAK','FIRST_COMPLETION','SIGNUP') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `dedupKey` varchar(60) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `label` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `achievedAt` date NOT NULL,
+  `createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uqMilestoneUserTypeKey` (`userId`,`type`,`dedupKey`),
+  KEY `ixMilestoneUserAchieved` (`userId`,`achievedAt`),
+  CONSTRAINT `fkMilestoneUser` FOREIGN KEY (`userId`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `Notice` (
+  `id` binary(16) NOT NULL,
+  `challengeId` binary(16) NOT NULL,
+  `authorId` binary(16) NOT NULL,
+  `title` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `content` varchar(2000) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `pinned` tinyint(1) NOT NULL DEFAULT '0',
+  `createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  `updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`id`),
+  KEY `fkNoticeAuthor` (`authorId`),
+  KEY `ixNoticeChallengePinned` (`challengeId`,`pinned`,`createdAt`),
+  CONSTRAINT `fkNoticeAuthor` FOREIGN KEY (`authorId`) REFERENCES `users` (`id`),
+  CONSTRAINT `fkNoticeChallenge` FOREIGN KEY (`challengeId`) REFERENCES `Challenge` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `NoticeRead` (
+  `id` binary(16) NOT NULL,
+  `noticeId` binary(16) NOT NULL,
+  `challengeId` binary(16) NOT NULL,
+  `userId` binary(16) NOT NULL,
+  `readAt` datetime(6) NOT NULL,
+  `createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uqNoticeReadNoticeUser` (`noticeId`,`userId`),
+  KEY `ixNoticeReadChallengeUser` (`challengeId`,`userId`),
+  KEY `fkNoticeReadUser` (`userId`),
+  CONSTRAINT `fkNoticeReadNotice` FOREIGN KEY (`noticeId`) REFERENCES `Notice` (`id`),
+  CONSTRAINT `fkNoticeReadUser` FOREIGN KEY (`userId`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `Notification` (
   `id` binary(16) NOT NULL,
   `userId` binary(16) NOT NULL,
-  `type` enum('NICKNAME_REJECTED','PROFILE_IMAGE_REJECTED','CHALLENGE_NAME_REJECTED','CHALLENGE_CLOSED','CHALLENGE_APPROVED','CHALLENGE_JOIN_REQUESTED','CHALLENGE_MEMBER_APPROVED','CHALLENGE_MEMBER_REJECTED','FALLBACK_APPROVED','FALLBACK_REJECTED','WATCHER_ROUTINE_FAILED','SYSTEM') COLLATE utf8mb4_unicode_ci NOT NULL,
-  `title` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `message` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `type` enum('NICKNAME_REJECTED','PROFILE_IMAGE_REJECTED','CHALLENGE_NAME_REJECTED','CHALLENGE_CLOSED','CHALLENGE_APPROVED','CHALLENGE_JOIN_REQUESTED','CHALLENGE_MEMBER_APPROVED','CHALLENGE_MEMBER_REJECTED','FALLBACK_APPROVED','FALLBACK_REJECTED','WATCHER_ROUTINE_FAILED','NOTICE_CREATED','SYSTEM') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `title` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `message` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `readAt` datetime(6) DEFAULT NULL,
   `createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   PRIMARY KEY (`id`),
   KEY `idxNotificationUserCreated` (`userId`,`createdAt`),
-  CONSTRAINT `fkNotificationUser` FOREIGN KEY (`userId`) REFERENCES `User` (`id`)
+  CONSTRAINT `fkNotificationUser` FOREIGN KEY (`userId`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-CREATE TABLE `RefreshToken` (
+CREATE TABLE `Objection` (
+  `id` binary(16) NOT NULL,
+  `challengeId` binary(16) NOT NULL,
+  `challengeMemberId` binary(16) NOT NULL,
+  `userId` binary(16) NOT NULL,
+  `targetDate` date NOT NULL,
+  `type` enum('FAILURE') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `content` varchar(1000) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `imageUrl` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `status` enum('PENDING','APPROVED','REJECTED') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'PENDING',
+  `deadline` datetime(6) NOT NULL,
+  `decidedBy` binary(16) DEFAULT NULL,
+  `decidedAt` datetime(6) DEFAULT NULL,
+  `decisionReason` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  `updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uqObjectionMemberDate` (`challengeMemberId`,`targetDate`),
+  KEY `ixObjectionChallengeStatus` (`challengeId`,`status`),
+  KEY `fkObjectionUser` (`userId`),
+  CONSTRAINT `fkObjectionChallenge` FOREIGN KEY (`challengeId`) REFERENCES `Challenge` (`id`),
+  CONSTRAINT `fkObjectionMember` FOREIGN KEY (`challengeMemberId`) REFERENCES `ChallengeMember` (`id`),
+  CONSTRAINT `fkObjectionUser` FOREIGN KEY (`userId`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `PushOutbox` (
   `id` binary(16) NOT NULL,
   `userId` binary(16) NOT NULL,
-  `tokenHash` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `expiresAt` datetime(6) NOT NULL,
-  `revokedAt` datetime(6) DEFAULT NULL,
+  `challengeId` binary(16) NOT NULL,
+  `targetDate` date NOT NULL,
+  `type` varchar(40) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `signalType` varchar(40) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `status` enum('PENDING','SENT','SKIPPED') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'PENDING',
+  `scheduledAt` datetime(6) NOT NULL,
+  `sentAt` datetime(6) DEFAULT NULL,
   `createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uqRefreshTokenHash` (`tokenHash`),
-  KEY `fkRefreshTokenUser` (`userId`),
-  CONSTRAINT `fkRefreshTokenUser` FOREIGN KEY (`userId`) REFERENCES `User` (`id`)
+  UNIQUE KEY `uqPushOutbox` (`userId`,`challengeId`,`targetDate`,`type`),
+  KEY `ixPushOutboxDue` (`status`,`scheduledAt`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `ReputationScore` (
   `userId` binary(16) NOT NULL,
-  `mannerTemperature` decimal(4,1) NOT NULL DEFAULT '36.5',
+  `mannerTemperature` decimal(5,2) NOT NULL DEFAULT '36.50',
+  `volumeIndex` decimal(7,4) NOT NULL DEFAULT '0.0000',
+  `tenureBonus` decimal(6,4) NOT NULL DEFAULT '0.0000',
+  `qualifyingDays` int NOT NULL DEFAULT '0',
+  `lastQualifyingDate` date DEFAULT NULL,
+  `lastCalculatedDate` date DEFAULT NULL,
+  `peakTemperature` decimal(5,2) DEFAULT NULL,
+  `peakAchievedAt` date DEFAULT NULL,
   PRIMARY KEY (`userId`),
-  CONSTRAINT `fkReputationUser` FOREIGN KEY (`userId`) REFERENCES `User` (`id`),
+  KEY `ixReputationCalcDate` (`lastCalculatedDate`),
+  CONSTRAINT `fkReputationUser` FOREIGN KEY (`userId`) REFERENCES `users` (`id`),
   CONSTRAINT `ckReputationMannerTemp` CHECK ((`mannerTemperature` >= 0.0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `ReputationSnapshot` (
+  `id` binary(16) NOT NULL,
+  `userId` binary(16) NOT NULL,
+  `snapshotDate` date NOT NULL,
+  `temperature` decimal(5,2) NOT NULL,
+  `delta` decimal(6,2) NOT NULL DEFAULT '0.00',
+  `label` varchar(40) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uqReputationSnapshotUserDate` (`userId`,`snapshotDate`),
+  KEY `ixReputationSnapshotUserDate` (`userId`,`snapshotDate`),
+  CONSTRAINT `fkReputationSnapshotUser` FOREIGN KEY (`userId`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `RoomActivityLog` (
+  `id` binary(16) NOT NULL,
+  `challengeId` binary(16) NOT NULL,
+  `actorId` binary(16) DEFAULT NULL,
+  `entityType` varchar(40) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `entityId` binary(16) DEFAULT NULL,
+  `action` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `payload` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+  `createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`id`),
+  KEY `ixRoomLogChallengeCreated` (`challengeId`,`createdAt`),
+  KEY `ixRoomLogEntity` (`entityType`,`entityId`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `RoutineOutcome` (
   `id` binary(16) NOT NULL,
@@ -123,11 +503,11 @@ CREATE TABLE `RoutineOutcome` (
   `challengeId` binary(16) NOT NULL,
   `challengeMemberId` binary(16) NOT NULL,
   `templateId` bigint unsigned DEFAULT NULL,
-  `category` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `category` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `targetDate` date NOT NULL,
-  `status` enum('PENDING','SUCCESS','FAILED','NOT_TARGET','NOT_REQUIRED') COLLATE utf8mb4_unicode_ci NOT NULL,
-  `verifiedVia` enum('AUTO','MANUAL','MANUAL_FALLBACK') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `failureReason` varchar(40) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `status` enum('PENDING','SUCCESS','FAILED','NOT_TARGET','NOT_REQUIRED') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `verifiedVia` enum('AUTO','MANUAL','MANUAL_FALLBACK') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `failureReason` varchar(40) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `confirmedAt` datetime(6) NOT NULL,
   `createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   `updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
@@ -137,30 +517,30 @@ CREATE TABLE `RoutineOutcome` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `RoutineTemplate` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `description` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `category` enum('EXERCISE','READING','MEDITATION','HEALTH','WAKEUP','WORK','STUDY','HOBBY','COOKING','FINANCE','ENVIRONMENT','RELATIONSHIP','MUSIC','WRITING','CODING') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `description` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `category` enum('EXERCISE','READING','MEDITATION','HEALTH','WAKEUP','WORK','STUDY','HOBBY','COOKING','FINANCE','ENVIRONMENT','RELATIONSHIP','MUSIC','WRITING','CODING') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `paramSchema` json DEFAULT NULL,
-  `rationale` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `rationale` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   `updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
   PRIMARY KEY (`id`),
   FULLTEXT KEY `ftxNameDesc` (`name`,`description`) /*!50100 WITH PARSER `ngram` */ 
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=106 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `RoutineVerification` (
   `templateId` bigint unsigned NOT NULL,
-  `autoVerificationType` enum('PHONE','HEALTH_CONNECT','EXTERNAL') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `autoSignalSource` enum('GEOFENCE','GPS','ACTIVITY','SLEEP','USAGE','APP_FEATURE','HC_RECORD','EXTERNAL_API') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `autoWearableReq` enum('NONE','OPTIONAL','REQUIRED') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `autoExternalService` varchar(40) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `autoVerificationType` enum('PHONE','HEALTH_CONNECT','EXTERNAL') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `autoSignalSource` enum('GEOFENCE','GPS','ACTIVITY','SLEEP','USAGE','APP_FEATURE','HC_RECORD','EXTERNAL_API') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `autoWearableReq` enum('NONE','OPTIONAL','REQUIRED') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `autoExternalService` varchar(40) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `autoRequiredPermissions` json DEFAULT NULL,
-  `manualSignalSource` enum('PHOTO','GROUP_CHECK','SELF_CHECK') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'PHOTO',
-  `verificationMethod` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `manualSignalSource` enum('PHOTO','GROUP_CHECK','SELF_CHECK') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'PHOTO',
+  `verificationMethod` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   PRIMARY KEY (`templateId`),
   CONSTRAINT `fkRoutineVerificationTemplate` FOREIGN KEY (`templateId`) REFERENCES `RoutineTemplate` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `SegmentTypeWeight` (
-  `segmentType` enum('GLOBAL','COUNTRY','GENDER','AGE_BAND','PLATFORM') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `segmentType` enum('GLOBAL','COUNTRY','GENDER','AGE_BAND','PLATFORM') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `weight` decimal(6,4) NOT NULL DEFAULT '1.0000',
   `sampleSize` bigint NOT NULL DEFAULT '0',
   `updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
@@ -189,8 +569,8 @@ CREATE TABLE `SystemMetricSnapshot` (
   KEY `ixSystemMetricCapturedAt` (`capturedAt`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `TemplateSegmentScore` (
-  `segmentType` enum('GLOBAL','COUNTRY','GENDER','AGE_BAND','PLATFORM') COLLATE utf8mb4_unicode_ci NOT NULL,
-  `segmentValue` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `segmentType` enum('GLOBAL','COUNTRY','GENDER','AGE_BAND','PLATFORM') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `segmentValue` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `templateId` bigint unsigned NOT NULL,
   `score` decimal(12,4) NOT NULL DEFAULT '0.0000',
   `selectionCount` int NOT NULL DEFAULT '0',
@@ -205,66 +585,23 @@ CREATE TABLE `TemplateStats` (
   `updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
   PRIMARY KEY (`templateId`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-CREATE TABLE `User` (
-  `id` binary(16) NOT NULL,
-  `oauthProvider` enum('KAKAO','NAVER','GOOGLE','APPLE') COLLATE utf8mb4_unicode_ci NOT NULL,
-  `oauthSubject` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `email` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `nickname` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `nicknameStatus` enum('PENDING','APPROVED','REJECTED') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'PENDING',
-  `tempNickname` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `profileImageUrl` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `profileImageStatus` enum('PENDING','APPROVED','REJECTED') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'PENDING',
-  `moderationCheckedAt` datetime(6) DEFAULT NULL,
-  `interestCategories` json NOT NULL,
-  `countryCode` char(2) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `birthDate` date DEFAULT NULL,
-  `gender` enum('MALE','FEMALE') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `platform` enum('ANDROID','IOS') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `appVersionCode` int DEFAULT NULL,
-  `appVersionName` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `osVersion` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `sdkInt` int DEFAULT NULL,
-  `deviceModel` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `manufacturer` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `lowRam` tinyint(1) DEFAULT NULL,
-  `deviceInfoUpdatedAt` datetime(6) DEFAULT NULL,
-  `nicknameChangedAt` datetime(6) DEFAULT NULL,
-  `deletedAt` datetime(6) DEFAULT NULL,
-  `createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uqUserNickname` (`nickname`),
-  UNIQUE KEY `uqUserOauth` (`oauthProvider`,`oauthSubject`),
-  CONSTRAINT `ckUserProfileImageUrl` CHECK (((`profileImageUrl` is null) or regexp_like(`profileImageUrl`,_utf8mb4'^https?://')))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-CREATE TABLE `UserAgreement` (
-  `id` binary(16) NOT NULL,
-  `userId` binary(16) NOT NULL,
-  `agreementType` enum('TERMS','PRIVACY','MARKETING') COLLATE utf8mb4_unicode_ci NOT NULL,
-  `version` varchar(16) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `agreedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-  `revokedAt` datetime(6) DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  KEY `fkUserAgreementUser` (`userId`),
-  CONSTRAINT `fkUserAgreementUser` FOREIGN KEY (`userId`) REFERENCES `User` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `VerificationDaily` (
   `id` binary(16) NOT NULL,
   `challengeMemberId` binary(16) NOT NULL,
   `challengeId` binary(16) NOT NULL,
   `userId` binary(16) NOT NULL,
   `targetDate` date NOT NULL,
-  `status` enum('PENDING','SUCCESS','FAILED','NOT_TARGET','NOT_REQUIRED') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'PENDING',
-  `method` varchar(40) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `failureReason` varchar(40) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `status` enum('PENDING','SUCCESS','FAILED_PROVISIONAL','FAILED','NOT_TARGET','NOT_REQUIRED') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'PENDING',
+  `method` varchar(40) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `failureReason` varchar(40) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `windowClosesAt` datetime(6) DEFAULT NULL,
   `finalizeAfter` datetime(6) DEFAULT NULL,
   `verifiedAt` datetime(6) DEFAULT NULL,
   `createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   `updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-  `verifiedVia` enum('AUTO','MANUAL','MANUAL_FALLBACK') COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'í™•ì • ê²½ë¡œ. AUTO=ì‹ í˜¸ìžë™ / MANUAL=ì •ê·œìˆ˜ë™ / MANUAL_FALLBACK=ì˜ˆë¹„í´ë°±(Â§11.6)',
+  `verifiedVia` enum('AUTO','MANUAL','MANUAL_FALLBACK','OBJECTION') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `disputeClosesAt` datetime(6) DEFAULT NULL COMMENT 'ì˜ˆë¹„ í´ë°± ì´ì˜ ìœˆë„ìš° ì¢…ë£Œ ì‹œê°. ì´ ì‹œê° ì§€ë‚˜ ì¹¨ë¬µ=ë™ì˜ë¡œ í™•ì •(Â§9.2)',
-  `fallbackApprovalStatus` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `fallbackApprovalStatus` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uqVerificationDailyMemberDate` (`challengeMemberId`,`targetDate`),
   KEY `idxVerificationDailyStatusFinalize` (`status`,`finalizeAfter`),
@@ -274,10 +611,10 @@ CREATE TABLE `VerificationDaily` (
 CREATE TABLE `VerificationMethodResult` (
   `id` binary(16) NOT NULL,
   `verificationDailyId` binary(16) NOT NULL,
-  `method` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `polarity` enum('ACHIEVEMENT','CONSTRAINT') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `method` varchar(40) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `polarity` enum('ACHIEVEMENT','CONSTRAINT') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `supported` tinyint(1) NOT NULL DEFAULT '1',
-  `status` enum('PENDING','SUCCESS','FAILED','NOT_TARGET','NOT_REQUIRED') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'PENDING',
+  `status` enum('PENDING','SUCCESS','FAILED','NOT_TARGET','NOT_REQUIRED') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'PENDING',
   `evidence` json DEFAULT NULL,
   `lastEvaluatedAt` datetime(6) DEFAULT NULL,
   `createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
@@ -291,14 +628,14 @@ CREATE TABLE `Watcher` (
   `invitationId` binary(16) NOT NULL,
   `challengeId` binary(16) NOT NULL,
   `inviterUserId` binary(16) NOT NULL,
-  `type` enum('USER','NON_USER') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `channel` enum('IN_APP','SMS') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `status` enum('INVITED','CONSENTED','ACTIVE','EXPIRED','REVOKED') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'INVITED',
+  `type` enum('USER','NON_USER') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `channel` enum('IN_APP','SMS') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `status` enum('INVITED','CONSENTED','ACTIVE','EXPIRED','REVOKED') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'INVITED',
   `watcherUserId` binary(16) DEFAULT NULL,
   `contactEnc` varbinary(512) DEFAULT NULL,
-  `contactMasked` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `displayName` varchar(40) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `unsubscribeToken` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `contactMasked` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `displayName` varchar(40) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `unsubscribeToken` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `consentedAt` datetime(6) DEFAULT NULL,
   `revokedAt` datetime(6) DEFAULT NULL,
   `invitedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
@@ -311,24 +648,24 @@ CREATE TABLE `Watcher` (
   KEY `ixWatcherChallengeStatus` (`challengeId`,`status`),
   CONSTRAINT `fkWatcherChallenge` FOREIGN KEY (`challengeId`) REFERENCES `Challenge` (`id`),
   CONSTRAINT `fkWatcherInvitation` FOREIGN KEY (`invitationId`) REFERENCES `WatcherInvitation` (`id`),
-  CONSTRAINT `fkWatcherInviter` FOREIGN KEY (`inviterUserId`) REFERENCES `User` (`id`)
+  CONSTRAINT `fkWatcherInviter` FOREIGN KEY (`inviterUserId`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `WatcherBlock` (
   `id` binary(16) NOT NULL,
   `inviterUserId` binary(16) NOT NULL,
-  `subjectKey` char(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `subjectKey` char(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `blockedUntil` datetime(6) NOT NULL,
   `createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   PRIMARY KEY (`id`),
   KEY `ixWatcherBlockLookup` (`inviterUserId`,`subjectKey`,`blockedUntil`),
-  CONSTRAINT `fkWatcherBlockInviter` FOREIGN KEY (`inviterUserId`) REFERENCES `User` (`id`)
+  CONSTRAINT `fkWatcherBlockInviter` FOREIGN KEY (`inviterUserId`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `WatcherInvitation` (
   `id` binary(16) NOT NULL,
-  `token` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `token` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `inviterUserId` binary(16) NOT NULL,
   `challengeId` binary(16) NOT NULL,
-  `status` enum('INVITED','CONSENTED','EXPIRED','REVOKED') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'INVITED',
+  `status` enum('INVITED','CONSENTED','EXPIRED','REVOKED') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'INVITED',
   `expiresAt` datetime(6) NOT NULL,
   `createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   PRIMARY KEY (`id`),
@@ -336,7 +673,7 @@ CREATE TABLE `WatcherInvitation` (
   KEY `fkWatcherInvitationInviter` (`inviterUserId`),
   KEY `ixWatcherInvitationChallengeStatus` (`challengeId`,`status`),
   CONSTRAINT `fkWatcherInvitationChallenge` FOREIGN KEY (`challengeId`) REFERENCES `Challenge` (`id`),
-  CONSTRAINT `fkWatcherInvitationInviter` FOREIGN KEY (`inviterUserId`) REFERENCES `User` (`id`)
+  CONSTRAINT `fkWatcherInvitationInviter` FOREIGN KEY (`inviterUserId`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `WatcherNotification` (
   `id` binary(16) NOT NULL,
@@ -344,8 +681,8 @@ CREATE TABLE `WatcherNotification` (
   `challengeId` binary(16) NOT NULL,
   `failedUserId` binary(16) NOT NULL,
   `targetDate` date NOT NULL,
-  `channel` enum('IN_APP','SMS') COLLATE utf8mb4_unicode_ci NOT NULL,
-  `status` enum('PENDING','SENT','SKIPPED') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'PENDING',
+  `channel` enum('IN_APP','SMS') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `status` enum('PENDING','SENT','SKIPPED') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'PENDING',
   `scheduledAt` datetime(6) NOT NULL,
   `sentAt` datetime(6) DEFAULT NULL,
   `createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
@@ -360,8 +697,8 @@ CREATE TABLE `WatcherOtp` (
   `id` binary(16) NOT NULL,
   `invitationId` binary(16) NOT NULL,
   `phoneEnc` varbinary(512) NOT NULL,
-  `phoneHash` char(64) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `codeHash` char(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `phoneHash` char(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `codeHash` char(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `expiresAt` datetime(6) NOT NULL,
   `resendAvailableAt` datetime(6) NOT NULL,
   `consumedAt` datetime(6) DEFAULT NULL,

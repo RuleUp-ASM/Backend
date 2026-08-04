@@ -37,14 +37,21 @@ public class TokenService {
         return new TokenPair(access, refresh, props.jwt().accessTokenTtl());
     }
 
-    /** Refresh 토큰 원문 → SHA-256 hex(64자). DB엔 이 hash만 저장. */
-    public static String sha256(String value) {
+    /** 회전 발급 — 기존 family 유지 + 직전 토큰 연결(refresh_tokens.parent_token_id). */
+    @Transactional
+    public TokenPair issueRotatedPair(User user, java.util.UUID familyId, java.util.UUID parentTokenId) {
+        String access = jwtProvider.issueAccessToken(user.getId());
+        String refresh = jwtProvider.issueRefreshToken(user.getId());
+        Instant expiresAt = Instant.now().plusSeconds(props.jwt().refreshTokenTtl());
+        refreshTokenRepository.save(RefreshToken.issue(user, sha256(refresh), expiresAt, familyId, parentTokenId));
+        return new TokenPair(access, refresh, props.jwt().accessTokenTtl());
+    }
+
+    /** Refresh 토큰 원문 → SHA-256 32바이트. DB엔 이 hash만 BINARY(32)로 저장. */
+    public static byte[] sha256(String value) {
         try {
-            byte[] hash = MessageDigest.getInstance("SHA-256")
+            return MessageDigest.getInstance("SHA-256")
                     .digest(value.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder(hash.length * 2);
-            for (byte b : hash) sb.append(String.format("%02x", b));
-            return sb.toString();
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException(e);
         }
