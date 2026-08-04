@@ -218,6 +218,12 @@ public class User extends AssignedIdEntity {
         if (deviceId != null) this.deviceId = deviceId;
     }
 
+    /** 설치 연결 해제 — 다른 계정이 이 설치를 인계받을 때(uq_users_installation_id 반환). */
+    public void detachInstallation() {
+        this.installationId = null;
+        this.deviceId = null;
+    }
+
     public void touchLastLogin()  { this.lastLoginAt = Instant.now(); }
     public void touchLastActive() { this.lastActiveAt = Instant.now(); }
 

@@ -61,6 +61,8 @@ public class AuthService {
     private final TokenService tokenService;
     private final JwtProvider jwtProvider;
     private final SignupTokenStore signupTokenStore;
+    private final LoginSessionService loginSessionService;
+    private final SocialTokenService socialTokenService;
     private final AppProperties props;
     private final ApplicationEventPublisher eventPublisher;
     private final CountryResolver countryResolver;
@@ -84,25 +86,8 @@ public class AuthService {
 
         // 2) DB 분기 (기존 회원이면 토큰 발급, 신규면 signupToken만)
         return userRepository.findByOauthProviderAndOauthSubject(provider, info.subject())
-                .map(user -> loginExisting(user, req))
+                .map(user -> loginSessionService.loginExisting(user.getId(), provider, req, info))
                 .orElseGet(() -> issueSignupToken(provider, req, info));
-    }
-
-    private OAuthLoginResponse loginExisting(User user, OAuthLoginRequest req) {
-        // 영구 정지 계정은 로그인 자체를 차단한다 (403 ACCOUNT_BANNED).
-        if (user.isBanned()) throw new BusinessException(ErrorCode.ACCOUNT_BANNED);
-
-        // 로그인마다: 기기 정보 갱신 + 국가 코드(서버가 요청에서 해석) 최신화.
-        // user는 트랜잭션 밖에서 조회된 detached 엔티티 → save(merge)로 반영(변경 없으면 UPDATE 생략).
-        applyDeviceInfo(user, req.deviceInfo());
-        user.updateCountryCode(countryResolver.resolve(deviceCountry(req.deviceInfo())));
-        user.touchLastLogin();
-        user.touchLastActive();
-        userRepository.save(user);
-        TokenService.TokenPair pair = tokenService.issueTokenPair(user);   // 내부에서 @Transactional
-        UserScoreSummary summary = scoreSummaryRepository.findById(user.getId()).orElse(null);
-        int flushIntervalSec = FlushIntervalPolicy.forUser(user);   // 기기 스펙 기반 sync 주기 부트스트랩
-        return OAuthLoginResponse.existing(pair, user, summary, flushIntervalSec, false);
     }
 
     private OAuthLoginResponse issueSignupToken(OAuthProvider provider, OAuthLoginRequest req, OAuthUserInfo info) {
@@ -114,6 +99,8 @@ public class AuthService {
         }
         // DB를 건드리지 않고 JWT(signupToken)만 만들어 돌려준다 → 트랜잭션 불필요
         String token = jwtProvider.issueSignupToken(info.subject(), provider.name(), info.email());
+        // 가입 완료 시 social_tokens 로 옮길 IdP 토큰을 jti 기준으로 보류해 둔다
+        socialTokenService.hold(jwtProvider.parse(token).getId(), info.idpTokens());
         return OAuthLoginResponse.newUser(token, props.jwt().signupTokenTtl(), info);
     }
 
@@ -213,6 +200,7 @@ public class AuthService {
         saveAgreements(user, ag);
         moderationRequestRepository.save(
                 ModerationRequest.request(user.getId(), ModerationTarget.NICKNAME, req.nickname()));
+        socialTokenService.flushPending(claims.getId(), user.getId(), provider);   // IdP 토큰 암호화 저장
 
         // 가입은 여기서 그대로 완료(닉네임 상태는 PENDING — 심사 중 기능 제한 없음).
         // 커밋 후 비동기로 LLM 검수 → 문제면 타인에게 임시 닉네임 + 알림.
@@ -301,7 +289,14 @@ public class AuthService {
 
         RefreshToken stored = refreshTokenRepository.findByTokenHash(TokenService.sha256(refreshTokenValue))
                 .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_EXPIRED));
-        if (stored.isRevoked()) throw new BusinessException(ErrorCode.SESSION_EXPIRED);
+
+        // 재사용 감지 — 이미 폐기된 토큰이 다시 제출되면 탈취 의심 → family 전체 revoke (DB 정리 §11.3)
+        // 401 예외로 이 트랜잭션이 롤백돼도 흔적·revoke 는 남아야 하므로 REQUIRES_NEW 로 커밋한다.
+        if (stored.isRevoked()) {
+            tokenService.recordReuseAndRevokeFamily(stored.getId(), stored.getFamilyId());
+            throw new BusinessException(ErrorCode.SESSION_EXPIRED);
+        }
+        if (stored.isExpired()) throw new BusinessException(ErrorCode.SESSION_EXPIRED);
 
         User user = userRepository.findByIdAndDeletedAtIsNull(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_EXPIRED));

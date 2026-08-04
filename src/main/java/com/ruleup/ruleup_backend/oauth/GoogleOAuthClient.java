@@ -40,14 +40,17 @@ public class GoogleOAuthClient implements OAuthClient {
     @Override
     public OAuthUserInfo fetchUserInfo(String code, String codeVerifier, String redirectUri) {
         try {
-            String accessToken = requestToken(code, codeVerifier, redirectUri);
+            GoogleTokenResponse token = requestToken(code, codeVerifier, redirectUri);
             GoogleUserResponse u = restClient.get().uri(USER_URI)
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.accessToken())
                     .retrieve().body(GoogleUserResponse.class);
             // 200이지만 바디가 비었거나 역직렬화 실패 시 body()가 null → NPE 누수 방지
             if (u == null || u.sub() == null)
                 throw new BusinessException(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
-            return new OAuthUserInfo(u.sub(), u.email(), u.name(), u.picture());
+            java.time.Instant expiresAt = (token.expiresIn() != null)
+                    ? java.time.Instant.now().plusSeconds(token.expiresIn()) : null;
+            return new OAuthUserInfo(u.sub(), u.email(), u.name(), u.picture(),
+                    new OAuthUserInfo.IdpTokens(token.accessToken(), token.refreshToken(), expiresAt));
         } catch (RestClientResponseException e) {
             log.warn("Google OAuth failed: status={}, body={}", e.getStatusCode(), e.getResponseBodyAsString());
             throw new BusinessException(e.getStatusCode().is4xxClientError()
@@ -57,7 +60,7 @@ public class GoogleOAuthClient implements OAuthClient {
         }
     }
 
-    private String requestToken(String code, String codeVerifier, String redirectUri) {
+    private GoogleTokenResponse requestToken(String code, String codeVerifier, String redirectUri) {
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("grant_type", "authorization_code");
         form.add("client_id", config.clientId());
@@ -75,9 +78,11 @@ public class GoogleOAuthClient implements OAuthClient {
                 .body(form).retrieve().body(GoogleTokenResponse.class);
         if (res == null || res.accessToken() == null)
             throw new BusinessException(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
-        return res.accessToken();
+        return res;
     }
 
-    record GoogleTokenResponse(@JsonProperty("access_token") String accessToken) {}
+    record GoogleTokenResponse(@JsonProperty("access_token") String accessToken,
+                               @JsonProperty("refresh_token") String refreshToken,
+                               @JsonProperty("expires_in") Long expiresIn) {}
     record GoogleUserResponse(String sub, String email, String name, String picture) {}
 }

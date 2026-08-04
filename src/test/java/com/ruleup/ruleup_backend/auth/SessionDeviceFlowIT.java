@@ -153,10 +153,13 @@ class SessionDeviceFlowIT {
         return postJson("/api/v1/auth/refresh", m);
     }
 
-    private MvcResult logout(String refreshToken) throws Exception {
+    private MvcResult logout(String accessToken, String refreshToken) throws Exception {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("refreshToken", refreshToken);
-        return postJson("/api/v1/auth/logout", m);
+        return mvc.perform(post("/api/v1/auth/logout")
+                .header("Authorization", "Bearer " + accessToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(om.writeValueAsString(m))).andReturn();
     }
 
     private void expectError(MvcResult res, int status, String code) throws Exception {
@@ -315,10 +318,12 @@ class SessionDeviceFlowIT {
         @DisplayName("로그아웃하면 해당 RT 는 무효가 되고, 로그아웃은 멱등이다")
         void logout_revokes_and_is_idempotent() throws Exception {
             String tag = uniq();
-            String rt = read(signup(tag), "$.data.refreshToken");
+            MvcResult signup = signup(tag);
+            String at = read(signup, "$.data.accessToken");
+            String rt = read(signup, "$.data.refreshToken");
 
-            assertThat(logout(rt).getResponse().getStatus()).isEqualTo(200);
-            assertThat(logout(rt).getResponse().getStatus()).isEqualTo(200);   // 멱등
+            assertThat(logout(at, rt).getResponse().getStatus()).isEqualTo(200);
+            assertThat(logout(at, rt).getResponse().getStatus()).isEqualTo(200);   // 멱등
             expectError(refresh(rt), 401, "SESSION_EXPIRED");
         }
     }
