@@ -288,6 +288,8 @@ class OnboardingApiContractIT extends AuthApiSupport {
             assertThat((Boolean) read(res, "$.data.valid")).isTrue();
             assertThat((Boolean) read(res, "$.data.available")).isTrue();
             assertThat((Object) read(res, "$.data.reason")).isNull();
+            assertThat((Object) read(res, "$.data.availableAt"))
+                    .as("잠금이 아닐 때는 해제 시각이 없다").isNull();
         }
 
         @Test
@@ -378,7 +380,11 @@ class OnboardingApiContractIT extends AuthApiSupport {
                     .header("Authorization", "Bearer " + at)).andReturn();
 
             assertThat(res.getResponse().getStatus()).isEqualTo(200);
-            assertThat((String) read(res, "$.data.profileImageUrl")).contains("/files/");
+            // 계약 필드명은 imageUrl — profileImageUrl 로 내리면 안드가 null 로 파싱해
+            // 온보딩 직후 사진이 화면에 안 붙고 "업로드 실패"로 집계된다(2026-08-03 계약)
+            assertThat((String) read(res, "$.data.imageUrl")).contains("/files/");
+            // 등록 직후는 항상 PENDING — 심사는 커밋 후 비동기라 응답 시점에는 결정되지 않았다
+            assertThat((String) read(res, "$.data.status")).isEqualTo("PENDING");
 
             User user = findUser(tag);
             assertThat(user.getProfileImageUrl()).isNotNull();

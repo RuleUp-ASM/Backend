@@ -14,6 +14,9 @@ public final class NicknamePolicy {
 
     public static final Duration CHANGE_INTERVAL = Duration.ofDays(30);   // 닉네임 변경 제한 주기
 
+    /** 변경으로 버린 이전 닉네임을 타인이 쓸 수 없는 기간 — 회원 정책 §3(사칭 방지). */
+    public static final Duration RELEASE_LOCK = Duration.ofDays(7);
+
     private NicknamePolicy() {}
 
     public static boolean isValid(String nickname) {

@@ -16,6 +16,7 @@ import com.ruleup.ruleup_backend.user.domain.InterestCategory;
 import com.ruleup.ruleup_backend.user.domain.NicknamePolicy;
 import com.ruleup.ruleup_backend.user.domain.NicknameStatus;
 import com.ruleup.ruleup_backend.user.domain.User;
+import com.ruleup.ruleup_backend.user.NicknameReleaseLockService;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
@@ -34,6 +35,7 @@ import java.util.UUID;
 public class ProfileService {
 
     private final UserRepository userRepository;
+    private final NicknameReleaseLockService releaseLockService;
     private final ReputationScoreRepository reputationScoreRepository;
     private final ModerationRequestRepository moderationRequestRepository;
     private final ImageStorageService imageStorage;
@@ -62,7 +64,15 @@ public class ProfileService {
                 throw new BusinessException(ErrorCode.NICKNAME_FORMAT_INVALID);
             if (userRepository.isNicknameTaken(req.nickname(), userId))
                 throw new BusinessException(ErrorCode.NICKNAME_DUPLICATED);
+            // 남이 버린 닉네임의 1주일 잠금(회원 정책 §3). 내가 버린 값을 되돌리는 건 허용된다.
+            releaseLockService.requireNotLocked(req.nickname(), userId);
+
+            // 지금 쓰던 닉네임은 이 시점부터 "버려진" 값이 된다 → 1주일간 타인 사용 불가.
+            // 승인 대기 중이던 값도 대상이다(타인에게 노출된 적은 없더라도 본인이 고른 값이므로).
+            String released = user.getNickname();
             user.changeNickname(req.nickname());   // 상태를 PENDING으로 되돌림 → 재검수 필요
+            releaseLockService.release(released, userId);
+            releaseLockService.clear(req.nickname());   // 내가 되돌린 값이면 잠금 행을 남기지 않는다
             submitModerationRequest(userId, ModerationTarget.NICKNAME, req.nickname());
             needsModeration = true;
         }
@@ -98,7 +108,8 @@ public class ProfileService {
         user.changeProfileImage(url);   // 상태 PENDING → 커밋 후 재검수
         submitModerationRequest(userId, ModerationTarget.PROFILE_IMAGE, url);
         eventPublisher.publishEvent(new UserModerationRequested(userId));
-        return new ProfileImageResponse(url);
+        // 등록 직후는 항상 PENDING — 심사는 커밋 후 비동기로 돈다(계약: {imageUrl, status})
+        return ProfileImageResponse.of(url, user.getProfileImageStatus());
     }
 
     /**
