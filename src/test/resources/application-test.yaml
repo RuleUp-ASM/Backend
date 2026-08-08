@@ -6,6 +6,10 @@ app:
   jwt:
     # HS256 키는 32바이트 이상이어야 함 (테스트 전용, 운영 비밀과 무관)
     secret: test-only-secret-please-change-this-must-be-at-least-32-bytes-long-0123456789
+  nickname-check:
+    # 통합 테스트는 전부 127.0.0.1 로 잡혀 한 윈도우를 공유한다 → 운영 한도(60/분)면
+    # 테스트 개수에 따라 429가 터진다. 한도 자체는 NicknameCheckRateLimiterTest 가 검증한다.
+    max-per-minute: 100000
   recommendation:
     # 짧은 테스트 동안 추천 재계산 배치가 끼어들지 않도록 첫 실행을 멀리 민다.
     rebuild-initial-delay-ms: 3600000

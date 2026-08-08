@@ -5,6 +5,7 @@ import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.response.ApiResponse;
 import com.ruleup.ruleup_backend.user.domain.OAuthProvider;
+import jakarta.servlet.http.HttpServletRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +25,7 @@ import java.net.URI;
 public class AuthController {
 
     private final AuthService authService;
+    private final NicknameCheckRateLimiter nicknameCheckRateLimiter;
 
     /**
      * 4.1 / 4.2 소셜 로그인.
@@ -73,9 +75,13 @@ public class AuthController {
         return ApiResponse.ok();        // 200 + {success:true, data:null, error:null}
     }
 
-    @Operation(summary = "닉네임 형식/중복 검사", description = "valid(형식)·available(중복) 동시 반환")
+    @Operation(summary = "닉네임 형식/중복/잠금 검사",
+            description = "valid(형식)·available(최종)·reason(FORMAT/DUPLICATED/RECENTLY_RELEASED) 동시 반환. "
+                    + "형식 위반도 400이 아니라 200 + valid:false 로 내린다.")
     @PostMapping("/api/v1/nicknames/check")
-    public ApiResponse<NicknameAvailabilityResponse> checkNickname(@RequestBody NicknameCheckRequest request) {
+    public ApiResponse<NicknameAvailabilityResponse> checkNickname(@RequestBody NicknameCheckRequest request,
+                                                                   HttpServletRequest httpRequest) {
+        nicknameCheckRateLimiter.check(httpRequest);   // 무인증 엔드포인트 — 열거·부하 방지
         return ApiResponse.ok(authService.checkNickname(request.nickname()));
     }
 
