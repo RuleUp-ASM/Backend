@@ -310,6 +310,68 @@ public class Challenge extends AssignedIdEntity {
     /** 설정 버전 +1 — 수정·가입·탈퇴·강퇴 등 수정 가능 범위가 바뀔 수 있는 모든 변화에서 호출. */
     public void bumpVersion() { this.version++; }
 
+    // ===== 항목별 심사(제목/설명/이미지) — 챌린지 생성·수정 스펙 =====
+
+    private static final java.time.Duration REJECT_WINDOW = java.time.Duration.ofHours(1);
+    private static final int REJECT_LIMIT = 3;
+    private static final java.time.Duration MODERATION_LOCK = java.time.Duration.ofHours(1);
+
+    public void markTitleInReview()       { this.moderationTitle = TargetModerationStatus.IN_REVIEW; }
+    public void markDescriptionInReview() { this.moderationDescription = TargetModerationStatus.IN_REVIEW; }
+    public void markImageInReview()       { this.moderationImage = TargetModerationStatus.IN_REVIEW; }
+
+    public void approveTitle()       { this.moderationTitle = TargetModerationStatus.APPROVED; }
+    public void approveDescription() { this.moderationDescription = TargetModerationStatus.APPROVED; }
+    public void approveImage()       { this.moderationImage = TargetModerationStatus.APPROVED; }
+
+    public void rejectTitle()        { this.moderationTitle = TargetModerationStatus.REJECTED; }
+    public void rejectDescription()  { this.moderationDescription = TargetModerationStatus.REJECTED; }
+
+    /** 이미지 거부 = 이미지 삭제(타인 화면은 이미 기본 이미지) + REJECTED 기록. */
+    public void rejectAndRemoveImage() {
+        this.moderationImage = TargetModerationStatus.REJECTED;
+        this.imageUrl = null;
+    }
+
+    /**
+     * 심사 거부 1회 기록(제목+설명 세트 1회 심사 = 카운트 1회).
+     * 1시간 롤링 윈도우로 세고, 3회에 도달하면 1시간 수정 잠금을 건다(심사 우회 반복 차단).
+     */
+    public void registerModerationRejection(Instant now) {
+        if (moderationRejectWindowStart == null
+                || now.isAfter(moderationRejectWindowStart.plus(REJECT_WINDOW))) {
+            this.moderationRejectWindowStart = now;
+            this.moderationRejectCount = 1;
+        } else {
+            this.moderationRejectCount++;
+        }
+        if (this.moderationRejectCount >= REJECT_LIMIT) {
+            this.moderationLockedUntil = now.plus(MODERATION_LOCK);
+        }
+    }
+
+    /** 반복 거부로 인한 수정 잠금 중인가(PATCH 429 MODERATION_LOCKED 판정). */
+    public boolean isModerationLocked(Instant now) {
+        return moderationLockedUntil != null && now.isBefore(moderationLockedUntil);
+    }
+
+    // ===== 대체 표시(타인 화면) — 부적절 콘텐츠 노출 0건 가드레일 =====
+
+    /** 타인 화면 제목: 심사 중·거부면 AI 임시 제목. */
+    public String publicTitle() {
+        return moderationTitle.isPubliclyVisible() ? title : aiTitle;
+    }
+
+    /** 타인 화면 설명: 심사 중·거부면 빈칸(null). */
+    public String publicDescription() {
+        return moderationDescription.isPubliclyVisible() ? description : null;
+    }
+
+    /** 타인 화면 이미지: 심사 중·거부면 기본 이미지(null). */
+    public String publicImageUrl() {
+        return moderationImage.isPubliclyVisible() ? imageUrl : null;
+    }
+
     // ===== 탐색 역정규화 갱신(배치 전용) =====
     public void applyTrendingScore(double score) { this.trendingScore = Math.max(0.0, score); }
     public void applyFailCount(int count) { this.failCount = Math.max(0, count); }

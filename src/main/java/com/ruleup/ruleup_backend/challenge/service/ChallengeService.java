@@ -96,8 +96,8 @@ public class ChallengeService {
     @Transactional(readOnly = true)
     public ChallengeDetailResponse getDetail(UUID userId, UUID challengeId) {
         Challenge c = loadActive(challengeId);
-        // 가시성 게이트(§3-3): 비-OWNER는 모더레이션 통과(NONE/APPROVED)만 조회. 그 외는 존재를 숨겨 404.
-        if (!c.isVisibleTo(userId)) throw new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND);
+        // 심사 중·거부여도 기능 제한 없음(구 비노출 게이트 폐기) — 타인 화면만 대체 표시로 가린다.
+        boolean ownerView = c.isOwner(userId);
 
         // 생성자 닉네임: 검수 전/거절이면 임시 닉네임(visibleNicknameTo) + 익명이면 추가 마스킹(§11.2).
         String ownerNickname = userRepository.findById(c.getCreatorId())
@@ -126,16 +126,18 @@ public class ChallengeService {
         var eligibility = new ChallengeDetailResponse.Eligibility(
                 canJoin, myManner, c.getMinMannerTemperature(), rejoinBlocked);
 
-        // fixDeadline 은 OWNER에게만 의미(REJECTED 1시간 수정창). 타인에겐 항상 null.
-        String fixDeadline = (c.isOwner(userId) && c.getFixDeadline() != null)
-                ? c.getFixDeadline().toString() : null;
+        // 구 1시간 수정창(fixDeadline) 폐기 — 계약 필드는 호환을 위해 null 고정.
+        String fixDeadline = null;
 
         // 요청자의 역할: OWNER / MANAGER / MEMBER / NONE.
         String myRole = c.isOwner(userId) ? MemberRole.OWNER.name()
                 : (isActiveMember ? myMembership.getRole().name() : "NONE");
 
         return new ChallengeDetailResponse(
-                c.getId().toString(), c.getTitle(), c.getDescription(), c.getImageUrl(),
+                c.getId().toString(),
+                ownerView ? c.getTitle() : c.publicTitle(),
+                ownerView ? c.getDescription() : c.publicDescription(),
+                ownerView ? c.getImageUrl() : c.publicImageUrl(),
                 c.getCategory(), c.getParticipationType().name(), c.getStatus().name(),
                 c.getModerationStatus().name(), fixDeadline, c.getAnonymity().name(),
                 new ChallengeDetailResponse.Owner(ownerNickname),
@@ -202,7 +204,7 @@ public class ChallengeService {
             c.changeSchedule(duration, start);
 
             if (imageChanged) {
-                c.resubmitModeration();   // PENDING_REVIEW 로 되돌리고 재검수(REJECTED 1h 수정 경로 포함)
+                c.markImageInReview();    // 고칠 때마다 재심사(항목별 상태) — 기능 제한 없음
                 eventPublisher.publishEvent(new ChallengeModerationRequested(c.getId()));
             }
         }

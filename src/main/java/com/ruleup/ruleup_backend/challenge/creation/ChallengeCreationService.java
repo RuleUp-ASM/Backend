@@ -22,9 +22,11 @@ import com.ruleup.ruleup_backend.routine.domain.VerificationConfig;
 import com.ruleup.ruleup_backend.routine.service.RoutineCatalog;
 import com.ruleup.ruleup_backend.score.UserScoreSummaryRepository;
 import com.ruleup.ruleup_backend.score.domain.Tier;
+import com.ruleup.ruleup_backend.challenge.moderation.ChallengeModerationRequested;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -76,6 +78,7 @@ public class ChallengeCreationService {
     private final ChallengeImageUploadRepository imageUploadRepository;
     private final RoutineCatalog catalog;
     private final UserScoreSummaryRepository scoreSummaryRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public CreateChallengeResponse create(UUID userId, String idempotencyKey, CreateChallengeRequest req) {
@@ -142,6 +145,13 @@ public class ChallengeCreationService {
         challenge.increaseParticipantCount();
 
         if (imageUpload != null) imageUpload.markRegistered(Instant.now());
+
+        // 심사 대상(수정된 텍스트·이미지)이 있으면 커밋 후 비동기 심사 — 생성 응답은 기다리지 않는다
+        if (moderationTitle == TargetModerationStatus.IN_REVIEW
+                || moderationDescription == TargetModerationStatus.IN_REVIEW
+                || moderationImage == TargetModerationStatus.IN_REVIEW) {
+            eventPublisher.publishEvent(new ChallengeModerationRequested(challenge.getId()));
+        }
 
         CreateChallengeResponse response = new CreateChallengeResponse(
                 challenge.getId().toString(),

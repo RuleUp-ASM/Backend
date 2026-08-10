@@ -6,8 +6,10 @@ public enum NotificationType {
     NICKNAME_REJECTED,
     /** 프로필 사진이 검수에서 거절됨 → "프로필 사진을 바꿔주세요" */
     PROFILE_IMAGE_REJECTED,
-    /** 챌린지 이름이 검수에서 거절됨 → "챌린지 이름을 바꿔주세요"(1시간 수정창) */
+    /** 챌린지 제목/설명이 심사에서 거절됨 → "제목·설명을 바꿔주세요"(대체 표시 유지) */
     CHALLENGE_NAME_REJECTED,
+    /** 챌린지 대표 이미지가 심사에서 거절됨 → 이미지 삭제 + "이미지를 바꿔주세요" */
+    CHALLENGE_IMAGE_REJECTED,
     /** 거절된 챌린지가 1시간 내 미수정으로 영구 닫힘 → "챌린지가 닫혔어요" */
     CHALLENGE_CLOSED,
     /** 챌린지가 검수를 통과해 공개됨 → 생성자에게 "챌린지가 공개되었어요" */
