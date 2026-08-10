@@ -1,9 +1,9 @@
 package com.ruleup.ruleup_backend.challenge.controller;
 
 import com.ruleup.ruleup_backend.challenge.dto.*;
+import com.ruleup.ruleup_backend.challenge.draft.ChallengeDraftService;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeService;
 import com.ruleup.ruleup_backend.common.response.ApiResponse;
-import com.ruleup.ruleup_backend.routine.dto.RoutineRecommendationRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -13,7 +13,6 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.http.MediaType;
 import org.springframework.web.multipart.MultipartFile;
 import com.ruleup.ruleup_backend.common.image.UploadRateLimiter;
-import com.ruleup.ruleup_backend.challenge.service.ChallengeRecommendationService;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeImageService;
 import com.ruleup.ruleup_backend.challenge.recommendation.RecommendationRateLimiter;
 
@@ -26,19 +25,28 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ChallengeController {
 
-    private final ChallengeRecommendationService challengeRecommendationService;
+    private final ChallengeDraftService challengeDraftService;
     private final ChallengeService challengeService;
     private final ChallengeImageService challengeImageService;
     private final UploadRateLimiter uploadRateLimiter;
     private final RecommendationRateLimiter recommendationRateLimiter;
 
-    @Operation(summary = "챌린지 추천(LLM)", description = "Step0 rate limit(1분 10회, 초과 시 429). Step1·2 차단 시 fallback:true. "
-            + "제목/설명을 루틴 템플릿과 매칭해 전체 챌린지 초안을 돌려준다(저장 X). maxMannerTemperature=생성자 온도 상한.")
-    @PostMapping("/recommendation")
-    public ApiResponse<ChallengeRecommendationResponse> recommend(@AuthenticationPrincipal String userId,
-                                                                  @RequestBody RoutineRecommendationRequest request) {
+    @Operation(summary = "챌린지 초안(경로 B, LLM 5-Step)",
+            description = "설명 1~200자만 입력하면 제목 포함 초안 전체를 AI가 생성. Step0 rate limit(1분 10회, 초과 429). "
+                    + "Step1·2 차단은 200 result=FALLBACK(재입력 복귀). 초안 원본은 draftId로 24시간 보관(origin=AI).")
+    @PostMapping("/draft")
+    public ApiResponse<DraftResponse> draft(@AuthenticationPrincipal String userId,
+                                            @RequestBody DraftRequest request) {
         recommendationRateLimiter.check(userId);   // Step0: 사용자당 1분 10회
-        return ApiResponse.ok(challengeRecommendationService.recommend(UUID.fromString(userId), request));
+        return ApiResponse.ok(challengeDraftService.draft(UUID.fromString(userId), request.description()));
+    }
+
+    @Operation(summary = "추천 3개(지금 시작하기 좋은 루틴)",
+            description = "어떤 경우에도 3개 보장. 진행 중 카테고리 루틴 제외(기타 예외)하되 3개 보장이 우선. "
+                    + "탭하면 by-template 호출(LLM 미경유).")
+    @GetMapping("/recommendations")
+    public ApiResponse<CreationRecommendationsResponse> recommendations(@AuthenticationPrincipal String userId) {
+        return ApiResponse.ok(challengeDraftService.recommendations(UUID.fromString(userId)));
     }
 
     @Operation(summary = "챌린지 생성", description = "추천을 수정·확정한 최종값으로 생성. UPCOMING으로 저장하고 생성자를 OWNER로 등록.")
@@ -90,11 +98,12 @@ public class ChallengeController {
         return ApiResponse.ok(challengeService.delete(UUID.fromString(userId), UUID.fromString(challengeId)));
     }
 
-    @Operation(summary = "추천 선택 → 초안(LLM 우회)", description = "추천 버튼에서 고른 templateId로 챌린지 초안을 바로 구성. LLM 안 거침.")
+    @Operation(summary = "추천 선택 → 초안(경로 A, LLM 미경유)",
+            description = "추천에서 고른 templateId로 템플릿 기본값 초안을 즉시 구성(대기 0초). "
+                    + "draft 응답과 동일 스키마 + draftId(origin=TEMPLATE, 24시간 보관).")
     @PostMapping("/recommendation/by-template")
-    public ApiResponse<ChallengeRecommendationResponse> recommendByTemplate(@AuthenticationPrincipal String userId,
-                                                                            @RequestBody TemplateRecommendationRequest request) {
-        return ApiResponse.ok(challengeRecommendationService.recommendByTemplate(
-                UUID.fromString(userId), request.templateId(), request.title(), request.description()));
+    public ApiResponse<TemplateDraftResponse> recommendByTemplate(@AuthenticationPrincipal String userId,
+                                                                  @RequestBody TemplateRecommendationRequest request) {
+        return ApiResponse.ok(challengeDraftService.byTemplate(UUID.fromString(userId), request.templateId()));
     }
 }

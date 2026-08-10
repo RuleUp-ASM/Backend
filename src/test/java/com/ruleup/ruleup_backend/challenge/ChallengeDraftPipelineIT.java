@@ -186,12 +186,13 @@ class ChallengeDraftPipelineIT extends ChallengeApiSupport {
             // 원본 초안 DB 보관: origin=AI, 24시간 만료, 제목=AI 제목
             Map<String, Object> row = jdbcTemplate.queryForMap(
                     "SELECT origin, title, template_id, " +
-                            " TIMESTAMPDIFF(HOUR, created_at, expires_at) AS ttl_hours " +
+                            " TIMESTAMPDIFF(MINUTE, created_at, expires_at) AS ttl_minutes " +
                             "FROM challenge_drafts WHERE id = UNHEX(REPLACE(?, '-', ''))", draftId);
             assertThat(row.get("origin")).isEqualTo("AI");
             assertThat(row.get("title")).isEqualTo("매일 아침 6시 기상");
             assertThat(((Number) row.get("template_id")).longValue()).isEqualTo(WAKE_TEMPLATE);
-            assertThat(((Number) row.get("ttl_hours")).intValue()).isEqualTo(24);
+            // 24시간 보관(생성-저장 사이 시계 오차 1분 허용)
+            assertThat(((Number) row.get("ttl_minutes")).intValue()).isBetween(24 * 60 - 1, 24 * 60);
         }
 
         @Test

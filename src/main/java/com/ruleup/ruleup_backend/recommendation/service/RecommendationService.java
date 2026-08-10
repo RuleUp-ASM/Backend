@@ -41,24 +41,6 @@ public class RecommendationService {
     /** 생성화면 추천 태그는 최대 3건만 노출. limit 파라미터가 더 커도 여기서 자른다. */
     private static final int MAX_RECOMMENDATIONS = 3;
 
-    /**
-     * 관심 카테고리(12종, 2026-08-03 확정) → 루틴 템플릿 카테고리(15종, 카탈로그 스키마) 매핑.
-     * 두 코드 체계는 별개라 명시적 매핑으로 연결한다. ETC 는 대응 카테고리 없음(탐색 폴백).
-     */
-    private static final Map<String, Set<String>> INTEREST_TO_ROUTINE = Map.ofEntries(
-            Map.entry("EXERCISE", Set.of("EXERCISE")),
-            Map.entry("WAKE_SLEEP", Set.of("WAKEUP")),
-            Map.entry("DIET_HEALTH", Set.of("HEALTH", "COOKING")),
-            Map.entry("STUDY", Set.of("STUDY", "CODING")),
-            Map.entry("READING", Set.of("READING")),
-            Map.entry("MIND", Set.of("MEDITATION", "WRITING")),
-            Map.entry("FINANCE", Set.of("FINANCE")),
-            Map.entry("HOBBY", Set.of("HOBBY", "MUSIC")),
-            Map.entry("HOUSEKEEPING", Set.of("ENVIRONMENT", "COOKING")),
-            Map.entry("CAREER_PRODUCTIVITY", Set.of("WORK", "CODING")),
-            Map.entry("DETOX", Set.of("MEDITATION")),
-            Map.entry("ETC", Set.of()));
-
     private final UserRepository userRepo;
     private final SegmentScoreReader segmentScoreReader;
     private final SegmentTypeWeightReader segmentTypeWeightReader;
@@ -80,10 +62,8 @@ public class RecommendationService {
                 segScore.merge(e.templateId(), w * e.score(), Double::sum);
             }
         }
-        // 2) 관심사 12종 → 루틴 카테고리 15종 매핑(별개 코드 체계 — InterestCategory 주석 참조)
-        Set<String> interests = user.getInterestCategories().stream()
-                .flatMap(c -> INTEREST_TO_ROUTINE.getOrDefault(c, Set.of()).stream())
-                .collect(Collectors.toSet());
+        // 2) 관심사 보너스 — 루틴 카테고리가 관심 카테고리와 같은 12종 코드로 통일됨(V4)
+        Set<String> interests = Set.copyOf(user.getInterestCategories());
         // 3) 진행 중 템플릿 제외
         Set<Long> active = activeTemplateIds(userId);
 

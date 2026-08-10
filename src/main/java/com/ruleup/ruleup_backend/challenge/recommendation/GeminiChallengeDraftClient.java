@@ -15,11 +15,9 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * Gemini 로 "루틴 매칭 + 챌린지 기본 설정"을 한 번에 받아오는 클라이언트(왕복 1회).
- *
- * 예전 분리 구조(GeminiRoutineMatchClient + GeminiChallengeSettingsClient)는 같은 입력으로
- * Gemini 를 직렬 두 번 불러 지연이 두 배였다. 둘 다 입력이 (제목, 설명)이고 서로 의존이 없어
- * 한 프롬프트로 합쳤다. LLM 의 책임 경계는 그대로다(인증·권한 값은 만들지 않는다).
+ * LLM 으로 "제목 생성 + 설명 교정 + 카테고리 분류 + 루틴 매칭 + 기본 설정"을 한 번에 받아오는
+ * 클라이언트(왕복 1회, 경로 B Step 1~4). 입력은 설명 한 줄뿐이다(API 명세 — 구 제목 입력 폐기).
+ * LLM 의 책임 경계는 그대로다(인증·권한·기간·정원·티어 값은 만들지 않는다).
  *
  * 실패/미설정/파싱오류는 ChallengeDraftSuggestion.empty() → 호출 측이 전부 폴백.
  */
@@ -45,14 +43,14 @@ public class GeminiChallengeDraftClient implements ChallengeDraftClient {
     }
 
     @Override
-    public ChallengeDraftSuggestion suggest(String title, String description, List<RoutineCandidate> candidates) {
+    public ChallengeDraftSuggestion suggest(String description, List<RoutineCandidate> candidates) {
         // [Step1] 입력 적합성 사전검사 — 명백히 부적합한 입력은 LLM 호출 전에 차단(fallback:true).
-        if (isObviouslyInvalid(title)) {
+        if (isObviouslyInvalid(description)) {
             log.debug("챌린지 초안 제안: 로컬 사전검사에서 무효 입력 감지 → Step1 차단(fallback)");
             return ChallengeDraftSuggestion.block();
         }
 
-        String content = llm.generateText(buildPrompt(title, description, candidates));
+        String content = llm.generateText(buildPrompt(description, candidates));
         if (content == null) {
             log.debug("챌린지 초안 제안: LLM 응답 없음 → 기본 템플릿 폴백 (후보 {}개)", candidates.size());
             return ChallengeDraftSuggestion.empty();
@@ -67,11 +65,12 @@ public class GeminiChallengeDraftClient implements ChallengeDraftClient {
             log.debug("챌린지 초안 제안: LLM 이 부적합 입력으로 판정(reason={}) → Step1·2 차단(fallback)", d.rejectReason());
             return ChallengeDraftSuggestion.block();
         }
-        log.debug("챌린지 초안 제안: templateId={} participationType={}",
-                d.templateId(), d.participationType());
+        log.debug("챌린지 초안 제안: templateId={} category={} participationType={}",
+                d.templateId(), d.category(), d.participationType());
         return new ChallengeDraftSuggestion(
                 new RoutineMatch(d.templateId(), toParamsMap(d.params())),
-                new ChallengeSettings(d.participationType(), d.repeatDays()),
+                new ChallengeSettings(d.title(), d.description(), d.category(),
+                        d.participationType(), d.repeatDays()),
                 false);
     }
 
@@ -89,15 +88,15 @@ public class GeminiChallengeDraftClient implements ChallengeDraftClient {
 
     /**
      * LLM 호출 전에 도는 값싼 사전검사(§ 잘못된 입력 빠른 감지).
-     * 의미 판단은 하지 않고, "습관 제목이 될 수 없는 형태"만 싸게 걸러낸다.
+     * 의미 판단은 하지 않고, "습관 설명이 될 수 없는 형태"만 싸게 걸러낸다.
      *  - null/blank
      *  - 공백 제거 후 2자 미만
      *  - 글자(문자)가 하나도 없음(숫자·기호·이모지만)
      * 애매하면 통과시키고 판단은 LLM/서버 sanitize 로 미룬다(과잉 차단 방지).
      */
-    private boolean isObviouslyInvalid(String title) {
-        if (title == null) return true;
-        String t = title.trim();
+    private boolean isObviouslyInvalid(String description) {
+        if (description == null) return true;
+        String t = description.trim();
         if (t.length() < 2) return true;
         // 유니코드 문자(한글/영문 등)가 하나라도 있어야 유효 후보로 본다.
         boolean hasLetter = t.codePoints().anyMatch(Character::isLetter);
@@ -109,7 +108,7 @@ public class GeminiChallengeDraftClient implements ChallengeDraftClient {
      * 컬럼: id | 이름 | 카테고리 | 목표값키 | 설명. 카탈로그 순서가 고정이라 이 블록은 요청마다 동일 →
      * 고정 프리픽스로 캐시된다(민감한 인증/권한 필드는 넣지 않는다).
      */
-    private String buildPrompt(String title, String description, List<RoutineCandidate> candidates) {
+    private String buildPrompt(String description, List<RoutineCandidate> candidates) {
         StringBuilder table = new StringBuilder("id | 이름 | 카테고리 | 목표값키 | 설명");
         for (RoutineCandidate c : candidates) {
             String keys = c.paramKeys().isEmpty() ? "-" : String.join(",", c.paramKeys());
@@ -118,7 +117,6 @@ public class GeminiChallengeDraftClient implements ChallengeDraftClient {
         }
 
         return prompts.render(PROMPT, Map.of(
-                "title", title == null ? "" : title,
                 "description", description == null ? "" : description,
                 "candidates", table.toString()));
     }
@@ -126,8 +124,11 @@ public class GeminiChallengeDraftClient implements ChallengeDraftClient {
     /** 통합 응답(날것). 적합성 플래그 + 루틴 매칭분 + 설정분을 한 JSON 으로 받는다. */
     @JsonIgnoreProperties(ignoreUnknown = true)
     record Draft(
-            Boolean usable,             // STEP 1 판정. false 면 초안 폐기(폴백). null(누락)은 관대하게 usable 취급.
+            Boolean usable,             // STEP 1·2 판정. false 면 초안 폐기(폴백). null(누락)은 관대하게 usable 취급.
             String rejectReason,        // usable=false 일 때 사유(로깅용)
+            String title,               // AI 생성 제목(STEP 4)
+            String description,         // AI 교정 설명(STEP 4)
+            String category,            // 12종 코드(STEP 4, 분류 불가 시 ETC)
             Long templateId,
             List<ParamKV> params,       // 목표값 key/value 배열(스키마 강제). toParamsMap 으로 Map 변환.
             String participationType,
