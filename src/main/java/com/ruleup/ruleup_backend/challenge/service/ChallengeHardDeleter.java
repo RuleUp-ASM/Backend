@@ -33,11 +33,11 @@ public class ChallengeHardDeleter {
                 "(SELECT id FROM WatcherInvitation WHERE challengeId = :cid)", challengeId);
         exec("DELETE FROM Watcher WHERE challengeId = :cid", challengeId);
         exec("DELETE FROM WatcherInvitation WHERE challengeId = :cid", challengeId);
-        exec("DELETE FROM ChallengeDelegation WHERE challengeId = :cid", challengeId);
+        exec("DELETE FROM challenge_delegations WHERE challenge_id = :cid", challengeId);
         exec("DELETE FROM NoticeRead WHERE noticeId IN (SELECT id FROM Notice WHERE challengeId = :cid)", challengeId);
         exec("DELETE FROM Notice WHERE challengeId = :cid", challengeId);
-        exec("DELETE FROM ChallengeMember WHERE challengeId = :cid", challengeId);
-        exec("DELETE FROM Challenge WHERE id = :cid", challengeId);
+        exec("DELETE FROM challenge_members WHERE challenge_id = :cid", challengeId);
+        exec("DELETE FROM challenges WHERE id = :cid", challengeId);
         // 네이티브 삭제는 1차 캐시를 갱신하지 않으므로, 삭제된 엔티티가 캐시에서 되살아나지 않도록 detach.
         entityManager.clear();
     }

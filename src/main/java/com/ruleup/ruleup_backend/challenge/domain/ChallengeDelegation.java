@@ -22,7 +22,7 @@ import java.util.UUID;
  *  - 수락 시점에 role swap 트랜잭션으로 성립(OWNER는 항상 정확히 1명 불변식).
  */
 @Entity
-@Table(name = "ChallengeDelegation")
+@Table(name = "challenge_delegations")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class ChallengeDelegation extends AssignedIdEntity {
@@ -36,33 +36,33 @@ public class ChallengeDelegation extends AssignedIdEntity {
     private UUID id;
 
     @JdbcTypeCode(SqlTypes.BINARY)
-    @Column(name = "challengeId", nullable = false, updatable = false)
+    @Column(name = "challenge_id", nullable = false, updatable = false)
     private UUID challengeId;
 
     @JdbcTypeCode(SqlTypes.BINARY)
-    @Column(name = "requesterId", nullable = false, updatable = false)
+    @Column(name = "requester_id", nullable = false, updatable = false)
     private UUID requesterId;
 
     @JdbcTypeCode(SqlTypes.BINARY)
-    @Column(name = "targetUserId", nullable = false, updatable = false)
+    @Column(name = "target_user_id", nullable = false, updatable = false)
     private UUID targetUserId;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
     private DelegationStatus status;
 
-    @Column(name = "expiresAt", nullable = false)
+    @Column(name = "expires_at", nullable = false)
     private Instant expiresAt;
 
-    @Column(name = "resolvedAt")
+    @Column(name = "resolved_at")
     private Instant resolvedAt;
 
     @Generated(event = EventType.INSERT)
-    @Column(name = "createdAt", nullable = false, updatable = false)
+    @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
     @Generated(event = {EventType.INSERT, EventType.UPDATE})
-    @Column(name = "updatedAt", nullable = false)
+    @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
     public static ChallengeDelegation request(UUID challengeId, UUID requesterId, UUID targetUserId, Instant now) {

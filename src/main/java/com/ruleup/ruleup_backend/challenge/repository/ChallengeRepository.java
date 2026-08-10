@@ -37,10 +37,10 @@ public interface ChallengeRepository extends JpaRepository<Challenge, UUID> {
      * FOR UPDATE SKIP LOCKED 로 선점. 다중 인스턴스에서도 잠긴 행은 건너뛰어 중복 처리 불가
      * (ShedLock 없이 DB 멱등 — 기존 확정 배치와 동일 패턴).
      */
-    @Query(value = "SELECT * FROM Challenge " +
-            "WHERE moderationStatus = 'REJECTED' AND fixDeadline IS NOT NULL AND fixDeadline <= :now " +
-            "AND deletedAt IS NULL " +
-            "ORDER BY fixDeadline LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
+    @Query(value = "SELECT * FROM challenges " +
+            "WHERE moderation_status = 'REJECTED' AND fix_deadline IS NOT NULL AND fix_deadline <= :now " +
+            "AND deleted_at IS NULL " +
+            "ORDER BY fix_deadline LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
     List<Challenge> findRejectedFixWindowExpiredForUpdate(@Param("now") Instant now, @Param("limit") int limit);
 
     /**
@@ -49,10 +49,10 @@ public interface ChallengeRepository extends JpaRepository<Challenge, UUID> {
      * 가입·노출이 막혀 있으므로 활성화 대상에서 제외한다.
      * 모더레이션 마감 배치와 동일한 DB 멱등 패턴(다중 인스턴스에서도 중복 전환 불가).
      */
-    @Query(value = "SELECT * FROM Challenge " +
-            "WHERE status = 'UPCOMING' AND moderationStatus IN ('NONE','APPROVED') AND startDate <= :today " +
-            "AND deletedAt IS NULL " +
-            "ORDER BY startDate LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
+    @Query(value = "SELECT * FROM challenges " +
+            "WHERE status = 'UPCOMING' AND moderation_status IN ('NONE','APPROVED') AND start_date <= :today " +
+            "AND deleted_at IS NULL " +
+            "ORDER BY start_date LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
     List<Challenge> findUpcomingDueForActivationForUpdate(@Param("today") LocalDate today, @Param("limit") int limit);
 
     /**
@@ -64,9 +64,9 @@ public interface ChallengeRepository extends JpaRepository<Challenge, UUID> {
      *    (= "AI 거친 뒤엔 재검 안 함").
      * 활성화/마감 배치와 동일한 DB 멱등 패턴(다중 인스턴스에서도 중복 검수·중복 알림 없음).
      */
-    @Query(value = "SELECT * FROM Challenge " +
-            "WHERE moderationStatus = 'PENDING_REVIEW' AND deletedAt IS NULL AND updatedAt <= :threshold " +
-            "ORDER BY updatedAt LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
+    @Query(value = "SELECT * FROM challenges " +
+            "WHERE moderation_status = 'PENDING_REVIEW' AND deleted_at IS NULL AND updated_at <= :threshold " +
+            "ORDER BY updated_at LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
     List<Challenge> findPendingModerationStalledForUpdate(@Param("threshold") Instant threshold, @Param("limit") int limit);
 
     /**
@@ -74,9 +74,9 @@ public interface ChallengeRepository extends JpaRepository<Challenge, UUID> {
      * endDate 는 마지막 활동일(포함)이므로 그 날을 넘긴(endDate < today) 것만 COMPLETED 로 넘긴다.
      * 활성화 배치와 동일한 DB 멱등 패턴.
      */
-    @Query(value = "SELECT * FROM Challenge " +
-            "WHERE status = 'ACTIVE' AND endDate < :today AND deletedAt IS NULL " +
-            "ORDER BY endDate LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
+    @Query(value = "SELECT * FROM challenges " +
+            "WHERE status = 'ACTIVE' AND end_date < :today AND deleted_at IS NULL " +
+            "ORDER BY end_date LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
     List<Challenge> findActiveDueForCompletionForUpdate(@Param("today") LocalDate today, @Param("limit") int limit);
 
     /**

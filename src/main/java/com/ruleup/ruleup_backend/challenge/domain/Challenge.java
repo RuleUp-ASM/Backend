@@ -22,7 +22,7 @@ import java.util.Map;
 import java.util.UUID;
 
 @Entity
-@Table(name = "Challenge")
+@Table(name = "challenges")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Challenge extends AssignedIdEntity {
@@ -34,7 +34,7 @@ public class Challenge extends AssignedIdEntity {
 
     // 방장(OWNER) 식별자. 위임(§7-2)으로 바뀔 수 있어 updatable(자동 언박싱 아님).
     @JdbcTypeCode(SqlTypes.BINARY)
-    @Column(name = "creatorId", nullable = false)
+    @Column(name = "owner_id", nullable = false)
     private UUID creatorId;
 
     @Column(name = "title", nullable = false, length = 30)
@@ -43,42 +43,42 @@ public class Challenge extends AssignedIdEntity {
     @Column(name = "description", length = 200)
     private String description;
 
-    @Column(name = "imageUrl", length = 500)
+    @Column(name = "image_url", length = 500)
     private String imageUrl;
 
     @Column(name = "category", nullable = false, length = 20)
     private String category;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "participationType", nullable = false)
+    @Column(name = "mode", nullable = false)
     private ParticipationType participationType;
 
-    @Column(name = "minMannerTemperature", precision = 4, scale = 1)
+    @Column(name = "min_manner_temperature", precision = 4, scale = 1)
     private BigDecimal minMannerTemperature;
 
     // 최대 참여 인원(정원). SOLO는 1 고정, GROUP은 방장이 지정(§3·§4). 방장만 수정, 현재 인원 미만 축소 불가.
-    @Column(name = "maxParticipants")
+    @Column(name = "capacity")
     private Integer maxParticipants;
 
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "repeatDays", nullable = false)
+    @Column(name = "repeat_days", nullable = false)
     private List<String> repeatDays = new ArrayList<>();
 
-    @Column(name = "durationDays", nullable = false)
+    @Column(name = "duration_days", nullable = false)
     private Integer durationDays;
 
-    @Column(name = "startDate", nullable = false)
+    @Column(name = "start_date", nullable = false)
     private LocalDate startDate;
 
-    @Column(name = "endDate", nullable = false)
+    @Column(name = "end_date", nullable = false)
     private LocalDate endDate;
 
     // ===== 루틴(인증) =====
-    @Column(name = "templateId")
+    @Column(name = "template_id")
     private Long templateId;                          // 매칭된 루틴 템플릿(직접 입력이면 null)
 
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "verificationConfig", nullable = false)
+    @Column(name = "verification_config", nullable = false)
     private VerificationConfig verificationConfig;    // 인증 방식 스냅샷
 
     @JdbcTypeCode(SqlTypes.JSON)
@@ -86,11 +86,11 @@ public class Challenge extends AssignedIdEntity {
     private Map<String, Object> params = new LinkedHashMap<>();   // 목표값(예: {"distance_km":5})
 
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "penaltyConfig", nullable = false)
+    @Column(name = "penalty_config", nullable = false)
     private PenaltyConfig penalty;
 
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "rewardConfig", nullable = false)
+    @Column(name = "reward_config", nullable = false)
     private RewardConfig reward;
 
     @Enumerated(EnumType.STRING)
@@ -103,40 +103,40 @@ public class Challenge extends AssignedIdEntity {
 
     // ===== 모더레이션(가시성) 게이트 (§5.1) — lifecycle status 와 독립 축 =====
     @Enumerated(EnumType.STRING)
-    @Column(name = "moderationStatus", nullable = false)
+    @Column(name = "moderation_status", nullable = false)
     private ChallengeModerationStatus moderationStatus;
 
-    @Column(name = "moderationDecidedAt")
+    @Column(name = "moderation_decided_at")
     private Instant moderationDecidedAt;       // APPROVED/REJECTED 확정 시각
 
-    @Column(name = "fixDeadline")
+    @Column(name = "fix_deadline")
     private Instant fixDeadline;               // REJECTED 1시간 수정창 마감(§5.1)
 
-    @Column(name = "aiAssisted", nullable = false)
+    @Column(name = "ai_assisted", nullable = false)
     private boolean aiAssisted;
 
-    @Column(name = "participantCount", nullable = false)
+    @Column(name = "participant_count", nullable = false)
     private int participantCount;
 
     // ===== 탐색 역정규화(탐색 스펙 §4) — 배치가 유지, 질의 시점 집계 없음 =====
-    @Column(name = "trendingScore", nullable = false)
+    @Column(name = "trending_score", nullable = false)
     private double trendingScore;          // 최근 24h 참여 지수감쇠 합(§2.1, 10분 배치)
 
-    @Column(name = "failCount", nullable = false)
+    @Column(name = "fail_count", nullable = false)
     private int failCount;                 // 방 확정 실패 인원(§3.2.4, 배치)
 
-    @Column(name = "verificationType", length = 10)
+    @Column(name = "verification_type", length = 10)
     private String verificationType;       // AUTO / MANUAL — verificationConfig.selectedMethod 승격(정렬·필터용)
 
-    @Column(name = "deletedAt")
+    @Column(name = "deleted_at")
     private Instant deletedAt;
 
     @Generated(event = EventType.INSERT)
-    @Column(name = "createdAt", nullable = false, updatable = false)
+    @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
     @Generated(event = {EventType.INSERT, EventType.UPDATE})
-    @Column(name = "updatedAt", nullable = false)
+    @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
     private static LocalDate deriveEndDate(LocalDate start, int durationDays) {
