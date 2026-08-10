@@ -102,7 +102,13 @@ public class ChallengeAutoDeleteService {
                 toUuid(id), c.get("template_id"), c.get("category"), c.get("status"),
                 c.get("participant_count"), c.get("start_date"), c.get("end_date"), c.get("image_url"));
 
-        // 3) 방 데이터 하드 삭제(인증 원본·이의·통계 보존은 HardDeleter 가 보장)
+        // 3) 남아 있던 참여자의 동시 참여 카운터 해제 — 안 하면 삭제된 방이 계속 3개 한도를 잡아먹는다
+        jdbc.update("UPDATE user_challenge_counters c " +
+                        "JOIN challenge_members m ON m.user_id = c.user_id " +
+                        "SET c.active_join_count = GREATEST(c.active_join_count - 1, 0) " +
+                        "WHERE m.challenge_id = ? AND m.status = 'ACTIVE'", (Object) id);
+
+        // 4) 방 데이터 하드 삭제(인증 원본·이의·통계 보존은 HardDeleter 가 보장)
         hardDeleter.hardDelete(toUuid(id));
     }
 

@@ -2,36 +2,23 @@ package com.ruleup.ruleup_backend.room.dto;
 
 import java.util.List;
 
-/** 공지 API 요청/응답 DTO 묶음(방 내부기능 §7.1~7.2). */
+/** 공지 API 문서의 순수 조회·커서 페이지 계약. */
 public final class NoticeDtos {
-
     private NoticeDtos() {}
 
-    // ===== 목록 =====
-    public record ListResponse(List<Item> notices) {
-        public record Item(String noticeId, String title, String preview,
-                           boolean pinned, boolean isRead, String createdAt) {}
+    public record Author(String userId, String nickname, String profileImageUrl) {}
+    public record ListResponse(List<Item> items, String nextCursor) {
+        public record Item(String noticeId, String title, String preview, boolean pinned,
+                           Author author, long commentCount, String createdAt, String updatedAt) {}
     }
-
-    // ===== 생성 =====
-    public record CreateRequest(String title, String content, Boolean pinned) {
-        public boolean pinnedOrFalse() { return Boolean.TRUE.equals(pinned); }
+    public record CreateRequest(String title, String content, Boolean sendPush) {
+        public boolean sendPushOrFalse() { return Boolean.TRUE.equals(sendPush); }
     }
-    public record CreateResponse(String noticeId, boolean pinned, String createdAt) {}
-
-    // ===== 상세 =====
+    public record CreateResponse(String noticeId, String createdAt) {}
     public record DetailResponse(String noticeId, String title, String content, boolean pinned,
-                                 Author author, String createdAt, String updatedAt) {
-        public record Author(String nickname, String profileImageUrl) {}
-    }
-
-    // ===== 수정 =====
-    public record EditRequest(String title, String content, Boolean resetRead) {
-        public boolean resetReadOrFalse() { return Boolean.TRUE.equals(resetRead); }
-    }
-    public record EditResponse(String noticeId, String updatedAt, boolean readReset) {}
-
-    // ===== 고정 =====
+                                 Author author, long commentCount, String createdAt, String updatedAt) {}
+    public record EditRequest(String title, String content) {}
+    public record EditResponse(String noticeId, String updatedAt) {}
     public record PinRequest(Boolean pinned) {
         public boolean pinnedOrFalse() { return Boolean.TRUE.equals(pinned); }
     }

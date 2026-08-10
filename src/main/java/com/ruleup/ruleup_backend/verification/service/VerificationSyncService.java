@@ -210,7 +210,7 @@ public class VerificationSyncService {
         daily.applyWindow(windowCloses, finalizeAfter);
 
         if (outcome.status() == VerificationStatus.FAILED) {
-            // 제약형 위반 등 sync 시점 실패(§8.7). 그룹은 잠정 실패(3일 이의 제기 창), 솔로는 즉시 확정.
+            // 제약형 위반 등 sync 시점 실패(§8.7). 그룹은 잠정 실패(1일 이의 제기 창), 솔로는 즉시 확정.
             if (challenge != null && challenge.isGroup()) {
                 daily.recordProvisionalFailure(method.name(), outcome.failureReason(),
                         now.plus(VerificationDaily.OBJECTION_WINDOW_DAYS, ChronoUnit.DAYS));   // 온도 미반영, 이벤트 없음(확정 아님)

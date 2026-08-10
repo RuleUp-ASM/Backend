@@ -62,4 +62,13 @@ public class IdempotencyKey {
     }
 
     public boolean sameRequest(String hash) { return requestHash.equals(hash); }
+
+    /** 아직 생성이 끝나지 않은 선점 행(스냅샷 미확정). */
+    public boolean isPending() { return responseSnapshot == null; }
+
+    /** 생성 성공 결과를 같은 트랜잭션에서 확정한다 — 뒤에 온 동일 키 요청이 이걸 재응답한다. */
+    public void completeWith(String responseSnapshot, UUID challengeId) {
+        this.responseSnapshot = responseSnapshot;
+        this.challengeId = challengeId;
+    }
 }

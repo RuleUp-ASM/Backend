@@ -89,7 +89,7 @@ public class VerificationFinalizeService {
             } else {
                 reason = failureReasonFor(method, config);
             }
-            // 실패 2단계(§8.7): 그룹은 잠정 실패(3일 이의 제기 창) → 온도/통지는 최종 lock에서.
+            // 실패 2단계(§8.7): 그룹은 잠정 실패(1일 이의 제기 창) → 온도/통지는 최종 lock에서.
             //                 솔로는 이의 제기가 무의미 → 즉시 FAILED 확정.
             if (challenge.isGroup()) {
                 daily.recordProvisionalFailure(method.name(), reason,

@@ -27,7 +27,7 @@ import java.util.UUID;
 
 /**
  * 이의 제기(§8.7): 잠정 실패(FAILED_PROVISIONAL) 일자에 대한 제출 / 방장·공동 관리자 처리.
- *  - 제출: 멤버 본인, 잠정 실패 상태 + 3일 창 안, 일자당 1회. 솔로 챌린지는 대상 아님.
+ *  - 제출: 멤버 본인, 잠정 실패 상태 + 1일 창 안, 일자당 1회. 솔로 챌린지는 대상 아님.
  *  - 처리: OWNER/MANAGER. 승인→SUCCESS(OBJECTION), 기각→FAILED(OBJECTION_REJECTED, 온도 반영).
  */
 @Service
@@ -65,7 +65,7 @@ public class ObjectionService {
                 .filter(VerificationDaily::isProvisionalFailure)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_OBJECTIONABLE));
 
-        // 3일 창 안.
+        // 이의 제기 창(1일) 안.
         Instant now = Instant.now();
         if (daily.getDisputeClosesAt() == null || now.isAfter(daily.getDisputeClosesAt()))
             throw new BusinessException(ErrorCode.OBJECTION_WINDOW_CLOSED);

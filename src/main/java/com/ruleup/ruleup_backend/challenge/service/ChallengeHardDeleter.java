@@ -31,6 +31,10 @@ public class ChallengeHardDeleter {
         exec("DELETE FROM Watcher WHERE challengeId = :cid", challengeId);
         exec("DELETE FROM WatcherInvitation WHERE challengeId = :cid", challengeId);
         exec("DELETE FROM challenge_delegations WHERE challenge_id = :cid", challengeId);
+        // 댓글은 자기 테이블을 부모로 참조(parent_comment_id)하므로 답글 → 원 댓글 순서로 지운다.
+        exec("DELETE FROM room_comments WHERE challenge_id = :cid AND parent_comment_id IS NOT NULL", challengeId);
+        exec("DELETE FROM room_comments WHERE challenge_id = :cid", challengeId);
+        exec("DELETE FROM challenge_invitations WHERE challenge_id = :cid", challengeId);
         exec("DELETE FROM NoticeRead WHERE noticeId IN (SELECT id FROM Notice WHERE challengeId = :cid)", challengeId);
         exec("DELETE FROM Notice WHERE challengeId = :cid", challengeId);
         exec("DELETE FROM challenge_members WHERE challenge_id = :cid", challengeId);

@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -25,19 +26,22 @@ public class NoticeController {
     @Operation(summary = "공지 목록", description = "고정 우선 → 최신순 최근 10건. 항목별 isRead. ACTIVE 멤버 전용.")
     @GetMapping
     public ApiResponse<NoticeDtos.ListResponse> list(@AuthenticationPrincipal String userId,
-                                                     @PathVariable UUID challengeId) {
-        return ApiResponse.ok(noticeService.list(UUID.fromString(userId), challengeId));
+                                                     @PathVariable UUID challengeId,
+                                                     @RequestParam(required = false) String cursor,
+                                                     @RequestParam(required = false) Integer size) {
+        return ApiResponse.ok(noticeService.list(UUID.fromString(userId), challengeId, cursor, size));
     }
 
     @Operation(summary = "공지 작성", description = "방장 전용. pinned=true면 기존 고정 자동 해제(단일 pin). ACTIVE 멤버(작성자 제외) 인앱 알림.")
     @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<NoticeDtos.CreateResponse> create(@AuthenticationPrincipal String userId,
                                                          @PathVariable UUID challengeId,
                                                          @RequestBody NoticeDtos.CreateRequest request) {
         return ApiResponse.ok(noticeService.create(UUID.fromString(userId), challengeId, request));
     }
 
-    @Operation(summary = "공지 상세", description = "본문 조회 + 서버 읽음 upsert(멱등). 작성자 닉네임은 visibleNicknameTo.")
+    @Operation(summary = "공지 상세", description = "부작용 없는 순수 조회. 읽음 상태는 관리하지 않는다.")
     @GetMapping("/{noticeId}")
     public ApiResponse<NoticeDtos.DetailResponse> detail(@AuthenticationPrincipal String userId,
                                                          @PathVariable UUID challengeId,
@@ -45,7 +49,7 @@ public class NoticeController {
         return ApiResponse.ok(noticeService.detail(UUID.fromString(userId), challengeId, noticeId));
     }
 
-    @Operation(summary = "공지 수정", description = "방장 전용. resetRead=true면 전 멤버 읽음 초기화 + 재발송.")
+    @Operation(summary = "공지 수정", description = "방장 전용. 수정 시 푸시를 재발송하지 않는다.")
     @PutMapping("/{noticeId}")
     public ApiResponse<NoticeDtos.EditResponse> edit(@AuthenticationPrincipal String userId,
                                                      @PathVariable UUID challengeId,

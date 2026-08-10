@@ -27,6 +27,14 @@ import java.util.UUID;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Challenge extends AssignedIdEntity {
 
+    /** 방장이 된 경위 — 3일 면책(정책 §11.3) 판정의 근거. */
+    public static final String GRANT_CREATE = "CREATE";
+    public static final String GRANT_TRANSFER = "TRANSFER";
+    public static final String GRANT_CLAIM = "CLAIM";
+
+    /** 원치 않는 승계에 대한 면책 창(정책 §11.3 — 선착순 방장은 3일 안에 나가면 감점 없음). */
+    public static final java.time.Duration SUCCESSION_GRACE = java.time.Duration.ofDays(3);
+
     @Id
     @JdbcTypeCode(SqlTypes.BINARY)
     @Column(name = "id", nullable = false, updatable = false)
@@ -34,8 +42,19 @@ public class Challenge extends AssignedIdEntity {
 
     // 방장(OWNER) 식별자. 위임(§7-2)으로 바뀔 수 있어 updatable(자동 언박싱 아님).
     @JdbcTypeCode(SqlTypes.BINARY)
-    @Column(name = "owner_id", nullable = false)
+    @Column(name = "owner_id")
     private UUID creatorId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "owner_type", nullable = false)
+    private OwnerType ownerType = OwnerType.USER;
+
+    @Column(name = "owner_granted_at")
+    private Instant ownerGrantedAt;
+
+    /** 방장이 된 경위 — CREATE / TRANSFER / CLAIM. 3일 면책은 CLAIM 만 대상(정책 §11.3). */
+    @Column(name = "owner_grant_reason", length = 10)
+    private String ownerGrantReason;
 
     @Column(name = "title", nullable = false, length = 30)
     private String title;
@@ -209,6 +228,9 @@ public class Challenge extends AssignedIdEntity {
         Challenge c = new Challenge();
         c.id = UuidGenerator.generate();
         c.creatorId = creatorId;
+        c.ownerType = OwnerType.USER;
+        c.ownerGrantedAt = Instant.now();
+        c.ownerGrantReason = GRANT_CREATE;
         c.title = title;
         c.description = description;
         c.imageUrl = imageUrl;
@@ -266,6 +288,9 @@ public class Challenge extends AssignedIdEntity {
         Challenge c = new Challenge();
         c.id = UuidGenerator.generate();
         c.creatorId = ownerId;
+        c.ownerType = OwnerType.USER;
+        c.ownerGrantedAt = Instant.now();
+        c.ownerGrantReason = GRANT_CREATE;
         c.title = title;
         c.aiTitle = aiTitle;
         c.description = description;
@@ -520,11 +545,53 @@ public class Challenge extends AssignedIdEntity {
     }
 
     /** 방장 위임 성립(§7-2): creatorId(=OWNER 식별자)를 새 방장으로 교체. 멤버 role swap은 호출부가 함께 수행. */
-    public void transferOwnership(UUID newOwnerUserId) { this.creatorId = newOwnerUserId; }
+    public void transferOwnership(UUID newOwnerUserId) { transferOwner(newOwnerUserId, Instant.now()); }
 
     public void increaseParticipantCount() { this.participantCount++; }
     public void decreaseParticipantCount() { if (this.participantCount > 0) this.participantCount--; }
     public void softDelete() { this.deletedAt = Instant.now(); }
-    public boolean isOwner(UUID userId) { return this.creatorId.equals(userId); }
+    public boolean isOwner(UUID userId) {
+        return ownerType == OwnerType.USER && creatorId != null && creatorId.equals(userId);
+    }
+
+    public boolean isBotOwned() { return ownerType == OwnerType.BOT || creatorId == null; }
+
+    public void transferOwner(UUID targetUserId, Instant at) {
+        transferOwner(targetUserId, at, GRANT_TRANSFER);
+    }
+
+    public void transferOwner(UUID targetUserId, Instant at, String grantReason) {
+        this.creatorId = targetUserId;
+        this.ownerType = OwnerType.USER;
+        this.ownerGrantedAt = at;
+        this.ownerGrantReason = grantReason;
+        bumpVersion();
+    }
+
+    /**
+     * 방장이 권한을 넘기지 않고 나감 → 즉시 봇방장 체제(정책 §11.2).
+     * 봇방장은 실질 권한 없이 "관리 주체가 존재한다"만 명시하며, 멤버 누구나 선착순 클레임할 수 있다.
+     */
+    public void convertToBotOwner(Instant at) {
+        this.creatorId = null;
+        this.ownerType = OwnerType.BOT;
+        this.ownerGrantedAt = at;
+        this.ownerGrantReason = null;
+        bumpVersion();
+    }
+
+    /**
+     * 원치 않는 승계에 대한 3일 면책 창 안인가 — <b>모든 멤버 기준</b>(정책 §11.3).
+     *
+     * <p>방장이 된 경위가 봇방장 전환이거나 선착순 클레임이면, 그 시점부터 3일간은 방장 본인뿐 아니라
+     * 잔류 멤버 누구나 나가도 감점하지 않는다("봇방장이나 스스로 방장이 된 사람을 신뢰할 수 없을 때
+     * 멤버들은 나가도 패널티를 면해준다"). 전 방장이 직접 넘겨준 TRANSFER 는 어느 정도 신뢰성이 있다고
+     * 보아 면책 대상이 아니다.
+     */
+    public boolean isWithinSuccessionGrace(Instant now) {
+        if (ownerGrantedAt == null) return false;
+        boolean untrustedSuccession = isBotOwned() || GRANT_CLAIM.equals(ownerGrantReason);
+        return untrustedSuccession && now.isBefore(ownerGrantedAt.plus(SUCCESSION_GRACE));
+    }
     public boolean isGroup() { return participationType == ParticipationType.GROUP; }
 }
