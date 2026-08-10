@@ -87,6 +87,7 @@ public class ChallengeMemberService {
             throw new BusinessException(ErrorCode.ALREADY_JOINED);
         }
         challengeRepository.incrementParticipantCount(challengeId);
+        c.bumpVersion();   // 참여 인원 변화 = 수정 가능 범위가 바뀔 수 있음 → version 증가(설정 수정과 충돌 감지)
         return joinResponse(c, MemberStatus.ACTIVE, joined.getSetupStatus());
     }
 
@@ -122,6 +123,7 @@ public class ChallengeMemberService {
 
         me.leave();   // ACTIVE → LEFT (dirty checking). 행은 남겨 재참여 금지.
         challengeRepository.decrementParticipantCount(challengeId);
+        c.bumpVersion();   // 참여 인원 변화 → version 증가
         return new LeaveResponse(penaltyApplied);
     }
 

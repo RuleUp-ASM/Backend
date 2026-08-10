@@ -355,6 +355,72 @@ public class Challenge extends AssignedIdEntity {
         return moderationLockedUntil != null && now.isBefore(moderationLockedUntil);
     }
 
+    // ===== 설정 수정(PATCH — merge patch, 파생 필드 정규화는 서버 책임) =====
+
+    /** 참여 방식 전환 + 파생 필드 정규화(§수정 계약): SOLO↔GROUP 에 따라 공개 범위·랭킹·정원·공유 패널티 재계산. */
+    public void changeModeNormalized(ParticipationType newMode, String requestedVisibility,
+                                     Boolean requestedRankingVisible) {
+        this.participationType = newMode;
+        if (newMode == ParticipationType.GROUP) {
+            this.visibility = (requestedVisibility != null) ? requestedVisibility : "PUBLIC";
+            this.rankingVisible = null;
+            if (this.maxParticipants == null || this.maxParticipants < 1) this.maxParticipants = 50;
+        } else {
+            this.visibility = null;
+            this.rankingVisible = (requestedRankingVisible != null) ? requestedRankingVisible : Boolean.TRUE;
+            this.maxParticipants = 1;
+        }
+        recalculatePenalties();
+    }
+
+    public void changeVisibility(String v)          { if (isGroup()) this.visibility = v; }
+    public void changeRankingVisible(Boolean v)     { if (!isGroup()) this.rankingVisible = v; }
+    public void changeMinTier(com.ruleup.ruleup_backend.score.domain.Tier tier) { this.minTier = tier; }
+
+    public void changePeriod(LocalDate start, LocalDate end) {
+        this.startDate = start;
+        this.endDate = end;
+        this.durationDays = (int) (end.toEpochDay() - start.toEpochDay()) + 1;
+    }
+
+    public void replaceParams(Map<String, Object> values,
+                              List<com.ruleup.ruleup_backend.challenge.draft.DraftView.DraftParam> specs) {
+        this.params = (values != null) ? new LinkedHashMap<>(values) : new LinkedHashMap<>();
+        this.paramSpecs = (specs != null) ? new ArrayList<>(specs) : new ArrayList<>();
+    }
+
+    /** 인증 방식 교체(AUTO→MANUAL 단방향은 서비스가 검증) + 점수 패널티 재계산. */
+    public void changeVerification(VerificationConfig config) {
+        this.verificationConfig = config;
+        this.verificationType = (config != null && config.selectedMethod() != null)
+                ? config.selectedMethod().name() : null;
+        recalculatePenalties();
+    }
+
+    public void changeWatcherPenalty(boolean watcher) {
+        this.penalties = new ChallengePenalties(
+                penalties != null && penalties.score(), penalties != null && penalties.groupShare(), watcher);
+        recalculatePenalties();
+    }
+
+    /** 서버 강제 패널티 재계산 — score=자동 인증 방, groupShare=그룹 방(watcher 는 사용자 선택 유지). */
+    private void recalculatePenalties() {
+        boolean auto = verificationConfig != null
+                && verificationConfig.selectedMethod() == com.ruleup.ruleup_backend.routine.domain.SelectedMethod.AUTO;
+        boolean watcher = penalties != null && penalties.watcher();
+        this.penalties = new ChallengePenalties(auto, isGroup(), watcher);
+    }
+
+    /** 이미지 교체: null = 기본 이미지로 되돌리기(심사 대상 없음), 새 URL = 재심사 대상. */
+    public void changeImage(String newImageUrl) {
+        this.imageUrl = newImageUrl;
+        if (newImageUrl == null) {
+            this.moderationImage = TargetModerationStatus.NONE;
+        } else {
+            this.moderationImage = TargetModerationStatus.IN_REVIEW;
+        }
+    }
+
     // ===== 대체 표시(타인 화면) — 부적절 콘텐츠 노출 0건 가드레일 =====
 
     /** 타인 화면 제목: 심사 중·거부면 AI 임시 제목. */

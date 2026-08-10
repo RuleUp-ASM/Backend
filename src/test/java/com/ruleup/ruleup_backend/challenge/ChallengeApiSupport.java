@@ -1,6 +1,8 @@
 package com.ruleup.ruleup_backend.challenge;
 
 import com.ruleup.ruleup_backend.auth.AuthApiSupport;
+import com.ruleup.ruleup_backend.routine.service.RoutineCatalog;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MvcResult;
@@ -20,6 +22,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  *  - challenges/challenge_members 픽스처 insert (배치·게이트 상황 재현용)
  */
 public abstract class ChallengeApiSupport extends AuthApiSupport {
+
+    @Autowired
+    protected RoutineCatalog routineCatalog;
 
     protected abstract JdbcTemplate jdbc();
 
@@ -50,6 +55,7 @@ public abstract class ChallengeApiSupport extends AuthApiSupport {
                         " autoRequiredPermissions, manualSignalSource, verificationMethod) " +
                         "VALUES (?, 'PHONE', 'USAGE', 'NONE', ?, 'SELF_CHECK', ?)",
                 id, permsJson, method);
+        routineCatalog.evict();   // 메모리 카탈로그 캐시 무효화 — 공유 컨텍스트에서도 새 픽스처가 보이게
     }
 
     /** 챌린지 1건 직접 insert(간이) — 상태·카테고리만 관심 있을 때. 반환: challengeId */

@@ -2,6 +2,7 @@ package com.ruleup.ruleup_backend.challenge.controller;
 
 import com.ruleup.ruleup_backend.challenge.dto.*;
 import com.ruleup.ruleup_backend.challenge.creation.ChallengeCreationService;
+import com.ruleup.ruleup_backend.challenge.settings.ChallengeSettingsService;
 import com.ruleup.ruleup_backend.challenge.draft.ChallengeDraftService;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeService;
 import com.ruleup.ruleup_backend.common.response.ApiResponse;
@@ -28,6 +29,7 @@ public class ChallengeController {
 
     private final ChallengeDraftService challengeDraftService;
     private final ChallengeCreationService challengeCreationService;
+    private final ChallengeSettingsService challengeSettingsService;
     private final ChallengeService challengeService;
     private final ChallengeImageService challengeImageService;
     private final UploadRateLimiter uploadRateLimiter;
@@ -90,12 +92,23 @@ public class ChallengeController {
         return ApiResponse.ok(challengeService.getDetail(UUID.fromString(userId), UUID.fromString(challengeId)));
     }
 
-    @Operation(summary = "챌린지 수정", description = "OWNER만. UPCOMING+멤버0명=전항목/그외=maxParticipants만. 변경 필드만 보냄.")
+    @Operation(summary = "챌린지 설정 조회(방장 전용)",
+            description = "수정 화면 진입용 — config 원본(심사 대체 미적용) + editableFields(서버 계산) + version + moderation.")
+    @GetMapping("/{challengeId}/settings")
+    public ApiResponse<ChallengeSettingsResponse> settings(@AuthenticationPrincipal String userId,
+                                                           @PathVariable String challengeId) {
+        return ApiResponse.ok(challengeSettingsService.settings(UUID.fromString(userId), UUID.fromString(challengeId)));
+    }
+
+    @Operation(summary = "챌린지 수정(방장)",
+            description = "JSON Merge Patch 유사 — 미포함 필드 미변경, null 은 imageUrl(기본 이미지 되돌리기)만 유효. "
+                    + "version 필수(불일치 409). 시작 전+혼자=카테고리 제외 전부, 그 외=제목·설명·정원·이미지. "
+                    + "제목·설명·이미지는 수정 시 재심사, 반복 거부 잠금 중 429.")
     @PatchMapping("/{challengeId}")
-    public ApiResponse<ChallengeResponse> update(@AuthenticationPrincipal String userId,
-                                                 @PathVariable String challengeId,
-                                                 @RequestBody UpdateChallengeRequest request) {
-        return ApiResponse.ok(challengeService.update(UUID.fromString(userId), UUID.fromString(challengeId), request));
+    public ApiResponse<PatchChallengeResponse> update(@AuthenticationPrincipal String userId,
+                                                      @PathVariable String challengeId,
+                                                      @RequestBody tools.jackson.databind.JsonNode body) {
+        return ApiResponse.ok(challengeSettingsService.patch(UUID.fromString(userId), UUID.fromString(challengeId), body));
     }
 
     @Operation(summary = "챌린지 삭제",
