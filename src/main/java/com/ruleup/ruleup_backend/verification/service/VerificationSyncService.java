@@ -5,6 +5,7 @@ import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
+import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.verification.domain.*;
@@ -125,9 +126,14 @@ public class VerificationSyncService {
             if (!member.isSetupReady()) continue;
 
             VerificationDaily daily = loadOrCreateDaily(member, challenge, today);
+            VerificationStatus before = daily.getStatus();
             VerificationStatus todayStatus = processMember(member, challenge, config, daily, signals, gaps, today, now);
 
             progressService.updateAfterSync(member, todayStatus, now);
+            if (becameFinal(before, todayStatus)) {
+                eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(
+                        challenge.getId(), "AUTO_VERIFICATION_FINALIZED"));
+            }
             updated.add(new SyncResponse.UpdatedChallenge(
                     member.getChallengeId().toString(), todayStatus.name(), member.getProgressRate()));
         }
@@ -138,6 +144,11 @@ public class VerificationSyncService {
         // flushIntervalSec: 기기 스펙 기반 산정값을 매 ACK마다 전체값으로 회신(§6 제어 모델).
         int flushIntervalSec = FlushIntervalPolicy.forUser(userRepository.findById(userId).orElse(null));
         return new SyncResponse(now.toString(), flushIntervalSec, updated, ignored);
+    }
+
+    private boolean becameFinal(VerificationStatus before, VerificationStatus after) {
+        boolean finalNow = after == VerificationStatus.SUCCESS || after == VerificationStatus.FAILED;
+        return finalNow && before != after;
     }
 
     private VerificationDaily loadOrCreateDaily(ChallengeMember member, Challenge challenge, LocalDate today) {

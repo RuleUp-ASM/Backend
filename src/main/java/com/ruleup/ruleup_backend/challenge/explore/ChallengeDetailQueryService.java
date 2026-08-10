@@ -10,6 +10,7 @@ import com.ruleup.ruleup_backend.challenge.domain.ParticipationType;
 import com.ruleup.ruleup_backend.challenge.dto.ChallengeDetailResponse;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
+import com.ruleup.ruleup_backend.challenge.repository.UserChallengeCounterRepository;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.routine.domain.RoutineTemplate;
@@ -45,9 +46,11 @@ import java.util.UUID;
 public class ChallengeDetailQueryService {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    private static final int FREE_CONCURRENT_LIMIT = 3;
 
     private final ChallengeRepository challengeRepository;
     private final ChallengeMemberRepository memberRepository;
+    private final UserChallengeCounterRepository counterRepository;
     private final UserRepository userRepository;
     private final UserScoreSummaryRepository scoreSummaryRepository;
     private final RoutineCatalog catalog;
@@ -128,9 +131,12 @@ public class ChallengeDetailQueryService {
             if (availableAt != null && Instant.now().isBefore(availableAt))
                 return JoinBlockReason.REJOIN_COOLDOWN;
         }
+        int activeJoinCount = counterRepository.findById(viewerId)
+                .map(counter -> counter.getActiveJoinCount()).orElse(0);
+        if (activeJoinCount >= FREE_CONCURRENT_LIMIT) return JoinBlockReason.FREE_LIMIT;
         if (c.getMaxParticipants() != null && activeCount >= c.getMaxParticipants()) return JoinBlockReason.FULL;
         if (!eligible) return JoinBlockReason.TIER_GATE;
-        return null;   // 동시 참여 3개는 사용자 행 락이 필요해 가입 시점에 확정된다
+        return null;
     }
 
     private ChallengeDetailResponse.Owner owner(Challenge c) {

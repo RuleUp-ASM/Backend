@@ -1,5 +1,7 @@
 package com.ruleup.ruleup_backend.challenge.explore;
 
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import com.ruleup.ruleup_backend.challenge.dto.ExploreResponse;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
@@ -49,11 +51,28 @@ public class ExploreQueryService {
 
     private final JdbcTemplate jdbc;
     private final UserScoreSummaryRepository scoreSummaryRepository;
+    private final MeterRegistry meterRegistry;
 
     @Transactional(readOnly = true)
     public ExploreResponse explore(UUID userId, String categoriesCsv, String verifyType,
                                    Boolean eligibleOnly, String sortRaw, String cursorRaw, Integer sizeRaw) {
-        ExploreSort sort = ExploreSort.parse(sortRaw);
+        Timer.Sample sample = Timer.start(meterRegistry);
+        ExploreSort sort = null;
+        try {
+            sort = ExploreSort.parse(sortRaw);
+            return executeExplore(userId, categoriesCsv, verifyType, eligibleOnly, cursorRaw, sizeRaw, sort);
+        } finally {
+            sample.stop(Timer.builder("explore_p95")
+                    .description("챌린지 탐색 목록 응답 시간")
+                    .publishPercentiles(0.95)
+                    .tag("sort", sort == null ? "INVALID" : sort.name())
+                    .register(meterRegistry));
+        }
+    }
+
+    private ExploreResponse executeExplore(UUID userId, String categoriesCsv, String verifyType,
+                                           Boolean eligibleOnly, String cursorRaw, Integer sizeRaw,
+                                           ExploreSort sort) {
         ExploreCursor cursor = ExploreCursor.decode(cursorRaw, sort);
         int size = normalizeSize(sizeRaw);
         List<String> categories = parseCategories(categoriesCsv);

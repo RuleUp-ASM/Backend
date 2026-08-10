@@ -16,6 +16,8 @@ import org.springframework.web.context.WebApplicationContext;
 
 import java.util.List;
 import java.util.UUID;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
@@ -289,6 +291,23 @@ class ChallengeExploreListIT extends ChallengeApiSupport {
             expectError(explore(token, "categories=NOT_A_CATEGORY"), 400, "INVALID_FILTER_VALUE");
             expectError(explore(token, "verifyType=SOMETHING"), 400, "INVALID_FILTER_VALUE");
             expectError(explore(token, "cursor=!!!broken!!!"), 400, "CURSOR_INVALID");
+        }
+
+        @Test
+        @DisplayName("Base64 JSON이어도 필수 정렬값의 타입이 틀리면 커서를 거부한다")
+        void rejectsWrongCursorTypes() throws Exception {
+            String token = memberToken(uniq("ex-cursor-type"));
+            String id = UUID.randomUUID().toString();
+            String wrongPrimary = Base64.getUrlEncoder().withoutPadding().encodeToString(
+                    ("{\"v\":1,\"sort\":\"POPULAR\",\"p\":{\"value\":1}," +
+                            "\"s\":\"1970-01-01 00:00:00\",\"id\":\"" + id + "\"}")
+                            .getBytes(StandardCharsets.UTF_8));
+            String missingSecondary = Base64.getUrlEncoder().withoutPadding().encodeToString(
+                    ("{\"v\":1,\"sort\":\"POPULAR\",\"p\":\"1\",\"s\":null," +
+                            "\"id\":\"" + id + "\"}").getBytes(StandardCharsets.UTF_8));
+
+            expectError(explore(token, "cursor=" + wrongPrimary), 400, "CURSOR_INVALID");
+            expectError(explore(token, "cursor=" + missingSecondary), 400, "CURSOR_INVALID");
         }
     }
 }

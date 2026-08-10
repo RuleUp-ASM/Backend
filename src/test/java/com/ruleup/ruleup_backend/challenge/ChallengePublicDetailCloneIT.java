@@ -136,6 +136,20 @@ class ChallengePublicDetailCloneIT extends ChallengeApiSupport {
         }
 
         @Test
+        @DisplayName("동시 참여 무료 한도도 가입 API와 같은 FREE_LIMIT으로 미리 알려준다")
+        void previewsFreeLimit() throws Exception {
+            var owner = member(uniq("d-limit-owner"));
+            var viewer = member(uniq("d-limit-viewer"));
+            UUID id = room(owner.id(), "GROUP", "PUBLIC", "ACTIVE");
+            jdbcTemplate.update("INSERT INTO user_challenge_counters (user_id, active_join_count) VALUES (?, 3) " +
+                            "ON DUPLICATE KEY UPDATE active_join_count = 3",
+                    (Object) bytes(viewer.id()));
+
+            MvcResult res = detail(viewer.token(), id);
+            assertThat((String) read(res, "$.data.joinBlockReason")).isEqualTo("FREE_LIMIT");
+        }
+
+        @Test
         @DisplayName("표본이 모자란 방은 완주율·유지율을 내려주지 않는다")
         void statsHiddenWhenSampleShort() throws Exception {
             var owner = member(uniq("d-stats"));
@@ -209,6 +223,31 @@ class ChallengePublicDetailCloneIT extends ChallengeApiSupport {
             // 볼 수 있는 사람(방장)에게는 "복제 불가"로 답한다
             expectError(cloneRoom(owner.token(), priv), 403, "NOT_CLONEABLE");
             expectError(cloneRoom(owner.token(), solo), 403, "NOT_CLONEABLE");
+        }
+
+        @Test
+        @DisplayName("심사 중·반려 원문은 복제 초안으로 새지 않고 공개 대체 문구만 복사한다")
+        void cloneUsesPubliclyVisibleTextOnly() throws Exception {
+            var owner = member(uniq("c-mod-owner"));
+            String cloner = memberToken(uniq("c-mod-cloner"));
+            UUID id = room(owner.id(), "GROUP", "PUBLIC", "ACTIVE");
+            jdbcTemplate.update("UPDATE challenges SET title = '반려된 원문', ai_title = '안전한 대체 제목', " +
+                            "description = '심사 중 원문', moderation_title = 'REJECTED', " +
+                            "moderation_description = 'IN_REVIEW' WHERE id = ?",
+                    (Object) bytes(id));
+
+            MvcResult res = cloneRoom(cloner, id);
+            assertThat((String) read(res, "$.data.draft.title")).isEqualTo("안전한 대체 제목");
+            assertThat((Object) read(res, "$.data.draft.description")).isNull();
+            assertThat(res.getResponse().getContentAsString())
+                    .doesNotContain("반려된 원문", "심사 중 원문");
+
+            String draftId = read(res, "$.data.draftId");
+            Map<String, Object> stored = jdbcTemplate.queryForMap(
+                    "SELECT title, description FROM challenge_drafts WHERE id = UNHEX(REPLACE(?, '-', ''))",
+                    draftId);
+            assertThat(stored.get("title")).isEqualTo("안전한 대체 제목");
+            assertThat(stored.get("description")).isNull();
         }
     }
 }

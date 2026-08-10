@@ -1,5 +1,9 @@
 package com.ruleup.ruleup_backend.challenge.explore;
 
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -8,7 +12,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.sql.Statement;
+import java.sql.Timestamp;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 인기 점수 갱신 배치 — 매시 정각 (탐색 백엔드 테크스펙 §9-2, 2026-08-11 10분→1시간 확정).
@@ -31,6 +40,18 @@ public class PopularityRefreshJob {
 
     private final JdbcTemplate jdbc;
     private final CacheManager cacheManager;
+    private final MeterRegistry meterRegistry;
+    private final AtomicReference<Instant> lastSuccessAt = new AtomicReference<>();
+
+    @PostConstruct
+    void registerMetrics() {
+        Gauge.builder("popularity_last_success_age", lastSuccessAt, value -> {
+                    Instant last = value.get();
+                    return last == null ? -1d : Math.max(0, Duration.between(last, Instant.now()).toSeconds());
+                })
+                .description("마지막 인기 배치 성공 후 경과 초")
+                .register(meterRegistry);
+    }
 
     /** 매시 정각 KST. */
     @Scheduled(cron = "0 0 * * * *", zone = "Asia/Seoul")
@@ -45,14 +66,35 @@ public class PopularityRefreshJob {
      *         — 새 값으로 덮어쓰지 않고 직전 값을 그대로 보여 주는 편이 빈 목록보다 낫다
      */
     public int runOnce() {
-        List<byte[]> targets = jdbc.query(
-                "SELECT id FROM challenges WHERE status IN ('UPCOMING', 'ACTIVE')",
-                (rs, i) -> rs.getBytes(1));
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            return refreshPopularity();
+        } finally {
+            sample.stop(Timer.builder("popularity_batch_duration")
+                    .description("인기 점수 전체 배치 실행 시간")
+                    .register(meterRegistry));
+        }
+    }
+
+    private int refreshPopularity() {
+        // 24시간 가입 이력은 배치 전체에서 한 번만 집계한다. 청크마다 같은 GROUP BY를
+        // 반복하면 1만 방 기준으로 가입 이력 전체를 수십 번 다시 읽게 된다.
+        List<Popularity> targets = jdbc.query(
+                "SELECT c.id, COALESCE(j.c, 0) AS recent_joins, j.last_joined_at " +
+                        "FROM challenges c " +
+                        "LEFT JOIN (SELECT challenge_id, COUNT(*) AS c, MAX(joined_at) AS last_joined_at " +
+                        "           FROM challenge_members " +
+                        "           WHERE joined_at >= DATE_SUB(NOW(6), INTERVAL 24 HOUR) " +
+                        "           GROUP BY challenge_id) j ON j.challenge_id = c.id " +
+                        "WHERE c.mode = 'GROUP' AND c.visibility = 'PUBLIC' " +
+                        "  AND c.status IN ('UPCOMING', 'ACTIVE') AND c.deleted_at IS NULL",
+                (rs, i) -> new Popularity(rs.getBytes("id"), rs.getInt("recent_joins"),
+                        rs.getTimestamp("last_joined_at")));
 
         int updated = 0;
         boolean allSucceeded = true;
         for (int from = 0; from < targets.size(); from += CHUNK) {
-            List<byte[]> chunk = targets.subList(from, Math.min(from + CHUNK, targets.size()));
+            List<Popularity> chunk = targets.subList(from, Math.min(from + CHUNK, targets.size()));
             try {
                 updated += updateChunk(chunk);
             } catch (Exception e) {
@@ -65,25 +107,28 @@ public class PopularityRefreshJob {
             // 갱신이 끝난 뒤에만 랭킹 캐시를 비운다 → 다음 요청이 새 Top 20 을 읽는다.
             var cache = cacheManager.getCache(TrendingRankingCache.CACHE);
             if (cache != null) cache.clear();
+            lastSuccessAt.set(Instant.now());
         }
         log.info("popularity_batch updated={} chunks={} allSucceeded={}",
                 updated, (targets.size() + CHUNK - 1) / CHUNK, allSucceeded);
         return updated;
     }
 
-    private int updateChunk(List<byte[]> chunk) {
-        String placeholders = String.join(",", java.util.Collections.nCopies(chunk.size(), "?"));
-        // 가입 이력이 없는 방은 0 으로 되돌린다(24시간이 지나 창을 벗어난 경우).
-        return jdbc.update(
-                "UPDATE challenge_stats s " +
-                        "LEFT JOIN (SELECT challenge_id, COUNT(*) AS c, MAX(joined_at) AS m " +
-                        "           FROM challenge_members " +
-                        "           WHERE joined_at >= DATE_SUB(NOW(6), INTERVAL 24 HOUR) " +
-                        "           GROUP BY challenge_id) j ON j.challenge_id = s.challenge_id " +
-                        "SET s.recent_joins_24h = COALESCE(j.c, 0), " +
-                        "    s.last_joined_at_24h = j.m, " +
-                        "    s.popularity_updated_at = NOW(6) " +
-                        "WHERE s.challenge_id IN (" + placeholders + ")",
-                chunk.toArray());
+    private int updateChunk(List<Popularity> chunk) {
+        int[][] counts = jdbc.batchUpdate(
+                "UPDATE challenge_stats SET recent_joins_24h = ?, last_joined_at_24h = ?, " +
+                        "popularity_updated_at = NOW(6) WHERE challenge_id = ?",
+                chunk,
+                CHUNK,
+                (ps, value) -> {
+                    ps.setInt(1, value.recentJoins());
+                    ps.setTimestamp(2, value.lastJoinedAt());
+                    ps.setBytes(3, value.challengeId());
+                });
+        return java.util.Arrays.stream(counts).flatMapToInt(java.util.Arrays::stream)
+                .map(count -> count == Statement.SUCCESS_NO_INFO ? 1 : Math.max(count, 0))
+                .sum();
     }
+
+    private record Popularity(byte[] challengeId, int recentJoins, Timestamp lastJoinedAt) {}
 }

@@ -4,6 +4,7 @@ import com.ruleup.ruleup_backend.common.verification.*;
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
+import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.verification.domain.*;
 import com.ruleup.ruleup_backend.verification.repository.ObjectionRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
@@ -22,6 +23,9 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.UUID;
 
 /**
  * 인증 확정 배치(§2.11~2.14). 두 작업:
@@ -53,28 +57,33 @@ public class VerificationFinalizeService {
     public void finalizeDue() {
         Instant now = Instant.now();
         List<VerificationDaily> due = dailyRepo.findDuePendingForUpdate(now, CLAIM_LIMIT);
+        Set<UUID> changedChallenges = new HashSet<>();
         for (VerificationDaily daily : due) {
-            finalizeOne(daily, now);
+            if (finalizeOne(daily, now)) changedChallenges.add(daily.getChallengeId());
         }
+        changedChallenges.forEach(challengeId -> eventPublisher.publishEvent(
+                ChallengeStatsRefreshRequested.of(challengeId, "VERIFICATION_FINALIZED")));
         if (!due.isEmpty()) {
             log.info("인증 확정 배치: 유예 끝난 PENDING {}건 확정 처리", due.size());
         }
     }
 
-    private void finalizeOne(VerificationDaily daily, Instant now) {
+    private boolean finalizeOne(VerificationDaily daily, Instant now) {
         Challenge challenge = challengeQuery.findChallenge(daily.getChallengeId()).orElse(null);
         if (challenge == null) {
             daily.recordResult(VerificationStatus.FAILED, null, "NO_SIGNAL_RECEIVED", now);
-            return;
+            return false;
         }
         VerificationConfig config = configFactory.build(challenge);
         VerificationMethod method = config.primaryMethod();
         Polarity polarity = polarityOf(config, method);
 
+        boolean finalDecision = false;
         boolean confirmedFail = false;
         if (polarity == Polarity.CONSTRAINT) {
             // 제약형(MAX·AVOID): 위반이면 sync에서 이미 잠정/확정 잠김 → 여기 온 건 무위반 → SUCCESS
             daily.recordResult(VerificationStatus.SUCCESS, method.name(), null, now);
+            finalDecision = true;
         } else {
             // 도달형: 창 닫힘·미충족. 신호 자체가 없었으면 NO_SIGNAL_RECEIVED.
             var mr = methodResultRepo.findByVerificationDailyIdAndMethod(daily.getId(), method.name()).orElse(null);
@@ -97,6 +106,7 @@ public class VerificationFinalizeService {
             } else {
                 daily.recordResult(VerificationStatus.FAILED, null, reason, now);
                 confirmedFail = true;
+                finalDecision = true;
             }
         }
 
@@ -108,6 +118,7 @@ public class VerificationFinalizeService {
             eventPublisher.publishEvent(new RoutineFailureConfirmed(
                     daily.getChallengeId(), member.getUserId(), daily.getTargetDate(), now));
         }
+        return finalDecision && member != null;
     }
 
     /**
@@ -120,6 +131,7 @@ public class VerificationFinalizeService {
         Instant now = Instant.now();
         List<VerificationDaily> due = dailyRepo.findProvisionalDueForLockForUpdate(now, CLAIM_LIMIT);
         int locked = 0;
+        Set<UUID> changedChallenges = new HashSet<>();
         for (VerificationDaily daily : due) {
             // 처리 대기 중인 이의 제기가 있으면 보류(결정 시점에 처리).
             if (objectionRepo.existsByChallengeMemberIdAndTargetDateAndStatus(
@@ -130,11 +142,14 @@ public class VerificationFinalizeService {
             ChallengeMember member = challengeQuery.findMember(daily.getChallengeMemberId()).orElse(null);
             refreshProgress(member, daily);
             if (member != null) {
+                changedChallenges.add(daily.getChallengeId());
                 eventPublisher.publishEvent(new RoutineFailureConfirmed(
                         daily.getChallengeId(), member.getUserId(), daily.getTargetDate(), now));
             }
             locked++;
         }
+        changedChallenges.forEach(challengeId -> eventPublisher.publishEvent(
+                ChallengeStatsRefreshRequested.of(challengeId, "PROVISIONAL_FAILURE_LOCKED")));
         if (locked > 0) log.info("잠정 실패 확정 배치: {}건 FAILED lock", locked);
     }
 
@@ -157,20 +172,26 @@ public class VerificationFinalizeService {
     public void rolloverFrequencyPeriods() {
         LocalDate today = LocalDate.now(KST);
         List<ChallengeMember> members = challengeQuery.findFrequencyRolloverTargets(today);
+        Set<UUID> changedChallenges = new HashSet<>();
         for (ChallengeMember m : members) {
             Challenge ch = challengeQuery.findActiveChallenge(m.getChallengeId()).orElse(null);
             if (ch == null) continue;
-            rolloverMember(m, ch, today);
-            progressService.recount(m);
+            if (rolloverMember(m, ch, today)) {
+                progressService.recount(m);
+                changedChallenges.add(ch.getId());
+            }
         }
+        changedChallenges.forEach(challengeId -> eventPublisher.publishEvent(
+                ChallengeStatsRefreshRequested.of(challengeId, "FREQUENCY_ROLLOVER")));
         if (!members.isEmpty()) {
             log.info("빈도형 주기 롤오버: 대상 {}건 정산", members.size());
         }
     }
 
     /** 종료된 주기를 따라잡으며 정산(다운타임으로 여러 주기가 밀렸어도 catch-up). */
-    private void rolloverMember(ChallengeMember m, Challenge ch, LocalDate today) {
+    private boolean rolloverMember(ChallengeMember m, Challenge ch, LocalDate today) {
         int guard = 0;
+        boolean changed = false;
         while (m.getCurPeriodEnd() != null && m.getCurPeriodEnd().isBefore(today) && guard++ < 400) {
             int need = (m.getPeriodTarget() != null) ? m.getPeriodTarget() : 0;
             int done = (m.getCurPeriodCompleted() != null) ? m.getCurPeriodCompleted() : 0;
@@ -180,13 +201,16 @@ public class VerificationFinalizeService {
             if (nextStart.isAfter(ch.getEndDate())) {
                 // 챌린지 종료: 마지막 주기 미달만 정산하고 advance 안 함(루프 종료)
                 m.rolloverPeriod(m.getCurPeriodStart(), m.getCurPeriodEnd(), shortfall);
+                changed = true;
                 break;
             }
             int periodDays = (m.getPeriodUnit() == PeriodUnit.WEEK) ? 7 : 30;
             LocalDate nextEnd = nextStart.plusDays(periodDays - 1L);
             if (nextEnd.isAfter(ch.getEndDate())) nextEnd = ch.getEndDate();
             m.rolloverPeriod(nextStart, nextEnd, shortfall);
+            changed = true;
         }
+        return changed;
     }
 
     private Polarity polarityOf(VerificationConfig c, VerificationMethod method) {

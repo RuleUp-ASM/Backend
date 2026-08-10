@@ -1,5 +1,8 @@
 package com.ruleup.ruleup_backend.challenge.stats;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,15 +25,26 @@ public class ChallengeStatsEventListener {
     private static final Logger log = LoggerFactory.getLogger(ChallengeStatsEventListener.class);
 
     private final ChallengeStatsProjectionService projectionService;
+    private final MeterRegistry meterRegistry;
 
     @Async
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onRefreshRequested(ChallengeStatsRefreshRequested event) {
+        Timer.Sample sample = Timer.start(meterRegistry);
         try {
             projectionService.refresh(event.challengeId());
         } catch (Exception e) {
+            Counter.builder("challenge_stats_refresh_failure_total")
+                    .description("challenge_stats 비동기 갱신 실패 횟수")
+                    .register(meterRegistry)
+                    .increment();
             log.error("challenge_stats_refresh_failure challengeId={} reason={}: {}",
                     event.challengeId(), event.reason(), e.getMessage(), e);
+        } finally {
+            sample.stop(Timer.builder("stats_refresh_duration")
+                    .description("챌린지 통계 Projection 재계산 시간")
+                    .tag("reason", event.reason())
+                    .register(meterRegistry));
         }
     }
 }

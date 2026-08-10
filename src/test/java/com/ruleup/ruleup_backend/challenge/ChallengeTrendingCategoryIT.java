@@ -145,6 +145,31 @@ class ChallengeTrendingCategoryIT extends ChallengeApiSupport {
         }
 
         @Test
+        @DisplayName("캐시 생성 뒤 비공개·솔로·종료로 바뀐 방도 응답 시점에 다시 제외한다")
+        void revalidatesCachedCandidates() throws Exception {
+            String token = memberToken(uniq("tr-stale"));
+            UUID kept = publicGroup("EXERCISE", "ACTIVE", 1, 30);
+            UUID privateAfterCache = publicGroup("EXERCISE", "ACTIVE", 4, 30);
+            UUID soloAfterCache = publicGroup("EXERCISE", "ACTIVE", 3, 30);
+            UUID completedAfterCache = publicGroup("EXERCISE", "ACTIVE", 2, 30);
+
+            popularityRefreshJob.runOnce();
+            evictCaches();
+            // 첫 요청으로 랭킹 ID 스냅샷을 캐시에 넣는다.
+            assertThat((List<String>) read(trending(token, null), "$.data.items[*].challengeId"))
+                    .contains(privateAfterCache.toString(), soloAfterCache.toString(), completedAfterCache.toString());
+
+            jdbcTemplate.update("UPDATE challenges SET visibility = 'PRIVATE' WHERE id = ?",
+                    (Object) bytes(privateAfterCache));
+            jdbcTemplate.update("UPDATE challenges SET mode = 'SOLO' WHERE id = ?", (Object) bytes(soloAfterCache));
+            jdbcTemplate.update("UPDATE challenges SET status = 'COMPLETED' WHERE id = ?",
+                    (Object) bytes(completedAfterCache));
+
+            List<String> ids = read(trending(token, null), "$.data.items[*].challengeId");
+            assertThat(ids).containsExactly(kept.toString());
+        }
+
+        @Test
         @DisplayName("시작 전(UPCOMING) 방은 인기 후보에 포함된다")
         void upcomingIncluded() throws Exception {
             String token = memberToken(uniq("tr-upcoming"));

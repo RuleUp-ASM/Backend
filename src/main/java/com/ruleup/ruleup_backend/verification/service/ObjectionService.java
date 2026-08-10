@@ -3,6 +3,7 @@ package com.ruleup.ruleup_backend.verification.service;
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
+import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.event.RoutineFailureConfirmed;
@@ -103,6 +104,7 @@ public class ObjectionService {
                 o.approve(adminId, now, req.reason());
                 daily.approveObjection(now);   // SUCCESS(OBJECTION) — 잠정 실패는 온도 미반영이라 복원 불필요
                 refreshProgress(member, daily);
+                eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "OBJECTION_APPROVED"));
                 return new ObjectionDecisionResponse(o.getId().toString(), o.getStatus().name(),
                         o.getTargetDate().toString(), VerificationStatus.SUCCESS.name(), "OBJECTION");
             }
@@ -110,6 +112,7 @@ public class ObjectionService {
                 o.reject(adminId, now, req.reason());
                 daily.rejectObjection(now);    // FAILED(OBJECTION_REJECTED) — 확정, 온도 반영
                 refreshProgress(member, daily);
+                eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "OBJECTION_REJECTED"));
                 if (member != null) {
                     eventPublisher.publishEvent(new RoutineFailureConfirmed(
                             challengeId, member.getUserId(), o.getTargetDate(), now));

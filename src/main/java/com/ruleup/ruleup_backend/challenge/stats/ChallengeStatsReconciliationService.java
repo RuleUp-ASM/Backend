@@ -1,5 +1,7 @@
 package com.ruleup.ruleup_backend.challenge.stats;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -9,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 import java.nio.ByteBuffer;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -26,6 +29,7 @@ public class ChallengeStatsReconciliationService {
 
     private final JdbcTemplate jdbc;
     private final ChallengeStatsProjectionService projectionService;
+    private final MeterRegistry meterRegistry;
 
     /** 매일 04:40 KST — 자동 삭제 배치(04:10) 뒤 저부하 시간대. */
     @Scheduled(cron = "0 40 4 * * *", zone = "Asia/Seoul")
@@ -49,13 +53,17 @@ public class ChallengeStatsReconciliationService {
             try {
                 Snapshot before = snapshot(id);
                 projectionService.refresh(challengeId);
-                if (!before.equals(snapshot(id))) diff++;
+                if (!Objects.equals(before, snapshot(id))) diff++;
             } catch (Exception e) {
                 // 방 단위 격리 — 한 방이 실패해도 나머지는 계속 본다
                 log.error("통계 재계산 실패 challengeId={}: {}", challengeId, e.getMessage(), e);
             }
         }
         if (diff > 0) {
+            Counter.builder("stats_reconciliation_diff_count")
+                    .description("원천과 달라 reconciliation에서 복구한 challenge_stats 수")
+                    .register(meterRegistry)
+                    .increment(diff);
             log.warn("stats_reconciliation_diff_count={} (대상 {}건) — 이벤트 유실 가능성 조사 필요",
                     diff, targets.size());
         }

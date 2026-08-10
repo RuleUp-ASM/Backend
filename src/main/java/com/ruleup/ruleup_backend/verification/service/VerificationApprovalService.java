@@ -3,6 +3,7 @@ package com.ruleup.ruleup_backend.verification.service;
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
+import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
@@ -16,6 +17,7 @@ import com.ruleup.ruleup_backend.verification.dto.FallbackApprovalResponse;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationMethodResultRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,6 +43,7 @@ public class VerificationApprovalService {
     private final VerificationMethodResultRepository methodResultRepo;
     private final VerificationProgressService progressService;
     private final NotificationService notificationService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public FallbackApprovalResponse decide(UUID ownerId, UUID challengeId, UUID verificationId,
@@ -77,6 +80,7 @@ public class VerificationApprovalService {
                 progressService.recountAndSetToday(member, VerificationStatus.SUCCESS);
             else
                 progressService.recount(member);
+            eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "FALLBACK_APPROVED"));
             notificationService.notify(member.getUserId(), NotificationType.FALLBACK_APPROVED,
                     "예비 인증이 승인되었어요",
                     daily.getTargetDate() + " 예비 인증이 방장 승인으로 인정되었어요.");

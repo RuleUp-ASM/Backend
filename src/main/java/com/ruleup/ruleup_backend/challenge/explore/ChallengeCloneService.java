@@ -75,8 +75,10 @@ public class ChallengeCloneService {
                 && origin.getVerificationConfig().selectedMethod() == SelectedMethod.AUTO;
 
         DraftView view = new DraftView(
-                origin.getTitle(),          // 이미 심사를 통과한 텍스트 — 고치지 않으면 생성 시 심사 면제
-                origin.getDescription(),
+                // 타인에게 공개 가능한 승인·면제 문구만 복제한다. 심사 중·거부 문구는
+                // 공개 상세와 같은 대체 규칙을 적용해 draft 심사 면제 경로로 새지 않게 한다.
+                origin.publicTitle(),
+                origin.publicDescription(),
                 origin.getCategory(),
                 ParticipationType.SOLO.name(),                 // 생성 기본값
                 null,                                          // 솔로는 공개 범위 없음

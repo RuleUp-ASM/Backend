@@ -17,6 +17,12 @@ import org.springframework.web.context.WebApplicationContext;
 import java.time.LocalDate;
 import java.util.Map;
 import java.util.UUID;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
@@ -188,6 +194,86 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
             assertThat(res.getResponse().getStatus()).isEqualTo(200);
             assertThat((String) read(res, "$.data.requiredPermissions[0]")).isEqualTo("PACKAGE_USAGE_STATS");
             assertThat((Boolean) read(res, "$.data.personalSetupRequired")).isTrue();
+        }
+
+        @Test
+        @DisplayName("같은 사용자가 서로 다른 두 방에 동시에 가입해도 동시 참여 3개를 넘지 않는다")
+        void concurrentJoinsForSameUserRespectFreeLimit() throws Exception {
+            Member joiner = member(uniq("race-user"));
+            UUID first = openGroup(member(uniq("race-owner-a")).id());
+            UUID second = openGroup(member(uniq("race-owner-b")).id());
+            setCounter(joiner.id(), 2);
+
+            List<MvcResult> results = joinConcurrently(
+                    List.of(joiner.token(), joiner.token()), List.of(first, second));
+
+            assertThat(results.stream().filter(r -> r.getResponse().getStatus() == 200)).hasSize(1);
+            List<String> reasons = new ArrayList<>();
+            for (MvcResult result : results) {
+                if (result.getResponse().getStatus() == 409) reasons.add(read(result, "$.error.reason"));
+            }
+            assertThat(reasons).containsExactly("FREE_LIMIT");
+            Integer count = jdbcTemplate.queryForObject(
+                    "SELECT active_join_count FROM user_challenge_counters WHERE user_id = ?",
+                    Integer.class, bytes(joiner.id()));
+            assertThat(count).isEqualTo(3);
+        }
+
+        @Test
+        @DisplayName("마지막 한 자리에 20명이 동시에 가입해도 정확히 한 명만 성공한다")
+        void concurrentLastSlotHasSingleWinner() throws Exception {
+            UUID challengeId = openGroup(member(uniq("race-slot-owner")).id());
+            jdbcTemplate.update("UPDATE challenges SET capacity = 2 WHERE id = ?", (Object) bytes(challengeId));
+
+            List<String> tokens = new ArrayList<>();
+            List<UUID> challengeIds = new ArrayList<>();
+            for (int i = 0; i < 20; i++) {
+                tokens.add(member(uniq("race-slot-" + i)).token());
+                challengeIds.add(challengeId);
+            }
+
+            List<MvcResult> results = joinConcurrently(tokens, challengeIds);
+
+            assertThat(results.stream().filter(r -> r.getResponse().getStatus() == 200)).hasSize(1);
+            assertThat(results.stream().filter(r -> r.getResponse().getStatus() == 409)).hasSize(19);
+            for (MvcResult result : results) {
+                if (result.getResponse().getStatus() == 409) {
+                    assertThat((String) read(result, "$.error.reason")).isEqualTo("FULL");
+                }
+            }
+            Integer activeMembers = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM challenge_members WHERE challenge_id = ? AND status = 'ACTIVE'",
+                    Integer.class, bytes(challengeId));
+            Integer participantCount = jdbcTemplate.queryForObject(
+                    "SELECT participant_count FROM challenges WHERE id = ?",
+                    Integer.class, bytes(challengeId));
+            assertThat(activeMembers).isEqualTo(2);
+            assertThat(participantCount).isEqualTo(2);
+        }
+    }
+
+    private List<MvcResult> joinConcurrently(List<String> tokens, List<UUID> challengeIds) throws Exception {
+        ExecutorService executor = Executors.newFixedThreadPool(tokens.size());
+        CountDownLatch ready = new CountDownLatch(tokens.size());
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            List<Future<MvcResult>> futures = new ArrayList<>();
+            for (int i = 0; i < tokens.size(); i++) {
+                String token = tokens.get(i);
+                UUID challengeId = challengeIds.get(i);
+                futures.add(executor.submit(() -> {
+                    ready.countDown();
+                    start.await();
+                    return join(token, challengeId);
+                }));
+            }
+            ready.await();
+            start.countDown();
+            List<MvcResult> results = new ArrayList<>();
+            for (Future<MvcResult> future : futures) results.add(future.get());
+            return results;
+        } finally {
+            executor.shutdownNow();
         }
     }
 
