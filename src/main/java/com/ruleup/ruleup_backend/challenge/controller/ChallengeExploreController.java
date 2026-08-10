@@ -3,9 +3,9 @@ package com.ruleup.ruleup_backend.challenge.controller;
 import com.ruleup.ruleup_backend.challenge.dto.CategoryGridResponse;
 import com.ruleup.ruleup_backend.challenge.dto.ExploreResponse;
 import com.ruleup.ruleup_backend.challenge.dto.TrendingResponse;
-import com.ruleup.ruleup_backend.challenge.service.ChallengeCategoryService;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeExploreService;
-import com.ruleup.ruleup_backend.challenge.service.TrendingService;
+import com.ruleup.ruleup_backend.challenge.explore.CategoryCountService;
+import com.ruleup.ruleup_backend.challenge.explore.TrendingService;
 import com.ruleup.ruleup_backend.common.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -28,20 +28,25 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ChallengeExploreController {
 
-    private final ChallengeCategoryService categoryService;
+    private final CategoryCountService categoryService;
     private final TrendingService trendingService;
     private final ChallengeExploreService exploreService;
 
-    @Operation(summary = "카테고리 그리드(홈)", description = "카테고리 정적 목록 + 진행 중(now<endAt) 챌린지 수. Caffeine 캐시(10분).")
+    @Operation(summary = "카테고리 그리드(홈)",
+            description = "관심 분야 정책 12종 고정 순서 + 진행 중 공개 그룹 방 수. "
+                    + "PUBLIC+GROUP+ACTIVE 만 집계 — 비공개·솔로·종료·시작 전은 세지 않는다. Caffeine 10분.")
     @GetMapping("/api/v1/challenge-categories")
     public ApiResponse<CategoryGridResponse> categories() {
         return ApiResponse.ok(categoryService.getCategories());
     }
 
-    @Operation(summary = "실시간 인기(홈)", description = "최근 24h 참여의 지수감쇠 합(반감기 6h) 기준 Top 20. 10분 배치 캐시(최대 10분 지연).")
+    @Operation(summary = "실시간 인기(홈)",
+            description = "최근 24시간 신규 참여 수 기준 Top 20(동점이면 최근 참여 우선). 1시간 배치 + Caffeine. "
+                    + "후보는 PUBLIC+GROUP+UPCOMING/ACTIVE. 티어 필터를 적용하지 않으며 못 들어가는 방은 joinable=false 로만 표시한다.")
     @GetMapping("/api/v1/challenges/trending")
-    public ApiResponse<TrendingResponse> trending(@AuthenticationPrincipal String userId) {
-        return ApiResponse.ok(trendingService.getTrending());
+    public ApiResponse<TrendingResponse> trending(@AuthenticationPrincipal String userId,
+                                                  @RequestParam(required = false) String category) {
+        return ApiResponse.ok(trendingService.getTrending(UUID.fromString(userId), category));
     }
 
     @Operation(summary = "둘러보기 목록", description = "전체 공개 챌린지 대상. 필터(AND) + 정렬 7종 + 커서 페이지네이션. "
