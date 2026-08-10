@@ -57,6 +57,12 @@ public class CacheConfig {
                 .expireAfterWrite(Duration.ofMinutes(10))
                 .build());
 
+        // 홈 인기 랭킹 — 1시간(2026-08-11 확정). 배치가 성공하면 즉시 evict 하므로 TTL 은 백스톱.
+        manager.registerCustomCache("challengeTrending", Caffeine.newBuilder()
+                .maximumSize(50)
+                .expireAfterWrite(Duration.ofHours(1))
+                .build());
+
         return manager;
     }
 }
