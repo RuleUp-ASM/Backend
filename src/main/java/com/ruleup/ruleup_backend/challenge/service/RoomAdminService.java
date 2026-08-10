@@ -10,11 +10,13 @@ import com.ruleup.ruleup_backend.challenge.repository.ChallengeInvitationReposit
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.challenge.repository.UserChallengeCounterRepository;
+import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.notification.NotificationService;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,6 +36,7 @@ public class RoomAdminService {
     private final ChallengeInvitationRepository invitationRepository;
     private final UserChallengeCounterRepository counterRepository;
     private final NotificationService notificationService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public RoomAdminDtos.InvitationResponse invite(UUID ownerId, UUID challengeId) {
@@ -71,6 +74,7 @@ public class RoomAdminService {
         challengeRepository.decrementParticipantCount(challengeId);
         counterRepository.decrement(targetUserId);   // 동시 참여 3개 카운터도 함께 정리
         challenge.bumpVersion();
+        eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "KICK"));
         notificationService.notify(targetUserId, NotificationType.CHALLENGE_MEMBER_KICKED,
                 "챌린지에서 내보내졌어요", normalized);
         return new RoomAdminDtos.KickResponse(true, targetUserId.toString(), rejoinAt.toString());
