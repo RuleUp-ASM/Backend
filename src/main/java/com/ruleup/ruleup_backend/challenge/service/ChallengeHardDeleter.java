@@ -8,10 +8,10 @@ import java.nio.ByteBuffer;
 import java.util.UUID;
 
 /**
- * 챌린지 하드 삭제(§8-4) — 챌린지와 자식 행을 FK 안전 순서로 물리 삭제한다.
- * 방장 삭제(ChallengeService)와 이미지 모더레이션 마감(ChallengeModerationCloseService)이 공유한다.
- * 삭제는 참여자 0명(방장만)일 때만 호출되므로 대상 데이터량은 작다.
- * 대표 이미지(S3)는 URL로만 참조하므로 DB 행 삭제와 무관하게 S3에 남는다 — 삭제 전 호출부가 imageUrl을 감사 로깅한다.
+ * 챌린지 하드 삭제 — 방 데이터(잔디·공지·감시자·멤버)를 FK 안전 순서로 물리 삭제한다.
+ * 자동 삭제 배치(만료·유령방)가 이력 스냅샷 적재 후 호출한다(방장 수동 삭제는 폐기).
+ * 인증 기록 원본(VerificationDaily)·이의·통계(RoutineOutcome)는 보존한다(소프트 참조 — V6).
+ * 대표 이미지는 URL로만 참조하므로 DB 행 삭제와 무관하게 스토리지에 남는다 — 호출부가 imageUrl을 로깅한다.
  */
 @Component
 public class ChallengeHardDeleter {
@@ -23,11 +23,8 @@ public class ChallengeHardDeleter {
     public void hardDelete(UUID challengeId) {
         // 대기 중인 영속 변경(알림 insert 등)을 먼저 DB에 반영(네이티브 삭제가 최신 상태를 지우도록).
         entityManager.flush();
-        exec("DELETE FROM VerificationMethodResult WHERE verificationDailyId IN " +
-                "(SELECT id FROM VerificationDaily WHERE challengeId = :cid)", challengeId);
-        exec("DELETE FROM VerificationDaily WHERE challengeId = :cid", challengeId);
-        exec("DELETE FROM Objection WHERE challengeId = :cid", challengeId);
-        exec("DELETE FROM RoutineOutcome WHERE challengeId = :cid", challengeId);
+        // 인증 기록 원본(VerificationDaily·MethodResult)·이의(Objection)·통계(RoutineOutcome)는 보존한다
+        // (자동 삭제 스펙: 잔디는 삭제, 인증 원본·통계값 보존 — V6 소프트 참조 전환).
         exec("DELETE FROM WatcherNotification WHERE challengeId = :cid", challengeId);
         exec("DELETE FROM WatcherOtp WHERE invitationId IN " +
                 "(SELECT id FROM WatcherInvitation WHERE challengeId = :cid)", challengeId);

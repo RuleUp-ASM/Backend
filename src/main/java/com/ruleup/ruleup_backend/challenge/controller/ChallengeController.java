@@ -111,15 +111,6 @@ public class ChallengeController {
         return ApiResponse.ok(challengeSettingsService.patch(UUID.fromString(userId), UUID.fromString(challengeId), body));
     }
 
-    @Operation(summary = "챌린지 삭제",
-            description = "OWNER만, 하드 삭제+감사 로깅. 참여자 0명일 때만. 판정: OWNER→참여자≥1(CHALLENGE_HAS_MEMBERS)"
-                    + "→COMPLETED(CHALLENGE_COMPLETED)→시작전 무패널티/진행중 success 이력 시 패널티. penaltyApplied 반환.")
-    @DeleteMapping("/{challengeId}")
-    public ApiResponse<DeleteChallengeResponse> delete(@AuthenticationPrincipal String userId,
-                                                       @PathVariable String challengeId) {
-        return ApiResponse.ok(challengeService.delete(UUID.fromString(userId), UUID.fromString(challengeId)));
-    }
-
     @Operation(summary = "추천 선택 → 초안(경로 A, LLM 미경유)",
             description = "추천에서 고른 templateId로 템플릿 기본값 초안을 즉시 구성(대기 0초). "
                     + "draft 응답과 동일 스키마 + draftId(origin=TEMPLATE, 24시간 보관).")

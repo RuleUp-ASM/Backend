@@ -148,37 +148,6 @@ public class ChallengeService {
                 c.getMaxParticipants(), stats, eligibility, myRole);
     }
 
-    // ===== §8 삭제 (하드 삭제 + 감사 로깅, OWNER만) — 판정 순서 고정 =====
-    /**
-     * 챌린지 삭제. 참여자(OWNER 제외) 0명일 때만. 7일 잠금·차등차감 폐기.
-     * 판정 순서: ① OWNER → ② 참여자 ≥1명(CHALLENGE_HAS_MEMBERS) → ③ COMPLETED(CHALLENGE_COMPLETED)
-     *            → ④ 시작 전이면 즉시 삭제(무패널티) / 진행 중이면 챌린지 내 success 이력 판정 후 삭제 + 패널티 트리거.
-     * 챌린지 행 락 → 참여자 수 재확인 → 하드 삭제(신규 가입 경합 차단).
-     */
-    @Transactional
-    public DeleteChallengeResponse delete(UUID userId, UUID challengeId) {
-        Challenge c = challengeRepository.findByIdForUpdate(challengeId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
-        // ① OWNER
-        ensureOwner(c, userId);
-        // ② 나 외 ACTIVE 멤버가 있으면 불가(이탈 경로: 임명→위임→탈퇴).
-        long activeCount = memberRepository.countByChallengeIdAndStatus(challengeId, MemberStatus.ACTIVE);
-        if (activeCount > 1)
-            throw new BusinessException(ErrorCode.CHALLENGE_HAS_MEMBERS);
-        // ③ 종료된 챌린지는 기록 보존 — 삭제 불가.
-        if (c.getStatus() == ChallengeStatus.COMPLETED)
-            throw new BusinessException(ErrorCode.CHALLENGE_COMPLETED);
-        // ④ 진행 중이면 챌린지 내 success 이력으로 탈퇴 패널티 트리거(시작 전은 무패널티).
-        boolean penaltyApplied = c.getStatus() == ChallengeStatus.ACTIVE
-                && verificationDailyRepository.existsByChallengeIdAndStatus(challengeId, VerificationStatus.SUCCESS);
-
-        // 하드 삭제 + 감사 로깅(§8-4). 대표 이미지(S3)는 DB와 무관하게 남으므로 imageUrl 을 함께 남긴다.
-        log.warn("[AUDIT] 챌린지 하드 삭제 challengeId={} ownerId={} status={} penaltyApplied={} imageUrl={}",
-                challengeId, userId, c.getStatus(), penaltyApplied, c.getImageUrl());
-        hardDeleter.hardDelete(challengeId);
-        return new DeleteChallengeResponse(penaltyApplied);
-    }
-
     // ====================== 내부 헬퍼 ======================
 
     private Challenge loadActive(UUID challengeId) {

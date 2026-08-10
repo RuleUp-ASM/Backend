@@ -37,6 +37,12 @@ public class GlobalExceptionHandler {
         return ResponseEntity.notFound().build();
     }
 
+    // 경로는 있으나 메서드가 없을 때(폐기된 API 호출 등) → 405 (만능 핸들러의 500 방지)
+    @ExceptionHandler(org.springframework.web.HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<Void> handleMethodNotSupported(org.springframework.web.HttpRequestMethodNotSupportedException e) {
+        return ResponseEntity.status(org.springframework.http.HttpStatus.METHOD_NOT_ALLOWED).build();
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleUnexpected(Exception e) {
         log.error("Unexpected error", e);

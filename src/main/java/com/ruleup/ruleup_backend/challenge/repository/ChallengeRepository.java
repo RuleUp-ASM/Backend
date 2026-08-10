@@ -33,13 +33,12 @@ public interface ChallengeRepository extends JpaRepository<Challenge, UUID> {
     Optional<Challenge> findByIdForUpdate(@Param("id") UUID id);
 
     /**
-     * 활성화 배치(§2): 시작일(startDate)이 도달한 UPCOMING·모더레이션 통과(NONE/APPROVED) 챌린지를
-     * FOR UPDATE SKIP LOCKED 로 선점. 모더레이션 미통과(PENDING_REVIEW/REJECTED) 챌린지는
-     * 가입·노출이 막혀 있으므로 활성화 대상에서 제외한다.
-     * 모더레이션 마감 배치와 동일한 DB 멱등 패턴(다중 인스턴스에서도 중복 전환 불가).
+     * 활성화 배치: 시작일(start_date)이 도달한 UPCOMING 챌린지를 FOR UPDATE SKIP LOCKED 로 선점.
+     * 심사 상태와 무관하게 활성화한다(심사 중 기능 제한 없음 — 대체 표시가 노출을 가린다).
+     * 다중 인스턴스에서도 중복 전환 불가(DB 멱등 패턴).
      */
     @Query(value = "SELECT * FROM challenges " +
-            "WHERE status = 'UPCOMING' AND moderation_status IN ('NONE','APPROVED') AND start_date <= :today " +
+            "WHERE status = 'UPCOMING' AND start_date <= :today " +
             "AND deleted_at IS NULL " +
             "ORDER BY start_date LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
     List<Challenge> findUpcomingDueForActivationForUpdate(@Param("today") LocalDate today, @Param("limit") int limit);
