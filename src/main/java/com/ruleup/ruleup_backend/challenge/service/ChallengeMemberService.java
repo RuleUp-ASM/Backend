@@ -8,6 +8,7 @@ import com.ruleup.ruleup_backend.challenge.dto.RoleChangeResponse;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.challenge.repository.UserChallengeCounterRepository;
+import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
@@ -21,6 +22,7 @@ import com.ruleup.ruleup_backend.verification.repository.VerificationDailyReposi
 import com.ruleup.ruleup_backend.user.domain.User;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -72,6 +74,7 @@ public class ChallengeMemberService {
     private final UserScoreSummaryRepository scoreSummaryRepository;
     private final VerificationDailyRepository verificationDailyRepository;
     private final NotificationService notificationService;
+    private final ApplicationEventPublisher eventPublisher;
     private final RoomAuthority roomAuthority;
     private final BlacklistService blacklistService;
 
@@ -140,6 +143,8 @@ public class ChallengeMemberService {
         challengeRepository.incrementParticipantCount(challengeId);
         counterRepository.increment(userId);
         c.bumpVersion();   // 참여 인원 변화 = 수정 가능 범위가 바뀔 수 있음 → 설정 수정과 충돌 감지
+        // 통계는 커밋 뒤에 다시 센다 — 실패해도 가입을 되돌리지 않는다
+        eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "JOIN"));
 
         // 사이클은 1주 고정 — 주 중간에 들어오면 판정은 다음 사이클 경계부터.
         LocalDate countFrom = ChallengeCycle.countFrom(c.getStartDate(), LocalDate.now(KST));
@@ -188,6 +193,7 @@ public class ChallengeMemberService {
         challengeRepository.decrementParticipantCount(challengeId);
         counterRepository.decrement(userId);
         c.bumpVersion();   // 참여 인원 변화 → version 증가
+        eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "LEAVE"));
 
         int scoreDelta = (exemptReason != null) ? 0 : LEAVE_SCORE_PENALTY;
         log.info("challenge_leave challengeId={} userId={} penalty_applied={} exempt={} botOwner={}",

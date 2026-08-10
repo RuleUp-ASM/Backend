@@ -14,6 +14,7 @@ import com.ruleup.ruleup_backend.challenge.dto.CreateChallengeResponse;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.challenge.repository.UserChallengeCounterRepository;
+import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsProjectionService;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.routine.domain.ParamSpec;
@@ -78,6 +79,7 @@ public class ChallengeCreationService {
     private final IdempotencyKeyRepository idempotencyKeyRepository;
     private final ChallengeImageUploadRepository imageUploadRepository;
     private final UserChallengeCounterRepository counterRepository;
+    private final ChallengeStatsProjectionService statsProjectionService;
     private final RoutineCatalog catalog;
     private final UserScoreSummaryRepository scoreSummaryRepository;
     private final ApplicationEventPublisher eventPublisher;
@@ -151,6 +153,8 @@ public class ChallengeCreationService {
         // 생성자도 그 방의 ACTIVE 멤버 → 동시 참여 3개 카운터에 포함시킨다(가입 게이트와 같은 대장을 쓴다).
         counterRepository.ensureRow(userId);
         counterRepository.increment(userId);
+        // 탐색 목록이 challenges JOIN challenge_stats 로 읽으므로 기본 행을 함께 만든다
+        statsProjectionService.createRow(challenge.getId());
 
         if (imageUpload != null) imageUpload.markRegistered(Instant.now());
 
