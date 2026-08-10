@@ -97,69 +97,6 @@ public class ChallengeService {
     }
 
     // ===== §3 상세 + 참여 자격 =====
-    @Transactional(readOnly = true)
-    public ChallengeDetailResponse getDetail(UUID userId, UUID challengeId) {
-        Challenge c = loadActive(challengeId);
-        // 심사 중·거부여도 기능 제한 없음(구 비노출 게이트 폐기) — 타인 화면만 대체 표시로 가린다.
-        boolean ownerView = c.isOwner(userId);
-
-        // 생성자 닉네임: 검수 전/거절이면 임시 닉네임(visibleNicknameTo) + 익명이면 추가 마스킹(§11.2).
-        String ownerNickname = userRepository.findById(c.getCreatorId())
-                .map(u -> c.getAnonymity().maskNickname(u.visibleNicknameTo(userId)))
-                .orElse(null);
-
-        // 통계
-        BigDecimal avgManner = averageActiveMannerTemperature(challengeId);
-        var stats = new ChallengeDetailResponse.Stats(
-                c.getParticipantCount(), avgManner, /* completionRate */ null);
-
-        // 참여 자격 미리보기 — 가입 API 게이트와 같은 순서·같은 reason enum 으로 계산한다.
-        ChallengeMember myMembership = memberRepository.findByChallengeIdAndUserId(challengeId, userId).orElse(null);
-        boolean isActiveMember = myMembership != null && myMembership.isActive();
-        boolean rejoinBlocked = myMembership != null && !myMembership.isActive();   // LEFT/REMOVED 이력
-        BigDecimal myManner = mannerTemp(userId);
-        long activeCount = memberRepository.countByChallengeIdAndStatus(challengeId, MemberStatus.ACTIVE);
-
-        Tier myTier = displayTier(userId);
-        boolean tierEligible = c.getMinTier() == null || myTier.ordinal() >= c.getMinTier().ordinal();
-        var gate = new ChallengeDetailResponse.Gate(
-                (c.getMinTier() != null) ? c.getMinTier().name() : null, myTier.name(), tierEligible);
-
-        JoinBlockReason blockReason = previewJoinBlock(c, userId, myMembership, activeCount, tierEligible);
-        boolean canJoin = blockReason == null;
-        String rejoinAvailableAt = (blockReason == JoinBlockReason.REJOIN_COOLDOWN)
-                ? myMembership.getRejoinAvailableAt().toString() : null;
-
-        // 사이클 1주 고정 — 주 중간에 들어오면 판정은 다음 경계부터.
-        String joinNote = ChallengeCycle.startsNextCycle(c.getStartDate(), LocalDate.now(KST))
-                ? "NEXT_CYCLE" : "IMMEDIATE";
-
-        var eligibility = new ChallengeDetailResponse.Eligibility(
-                canJoin, myManner, c.getMinMannerTemperature(), rejoinBlocked);
-
-        // 구 1시간 수정창(fixDeadline) 폐기 — 계약 필드는 호환을 위해 null 고정.
-        String fixDeadline = null;
-
-        // 요청자의 역할: OWNER / MANAGER / MEMBER / NONE.
-        String myRole = c.isOwner(userId) ? MemberRole.OWNER.name()
-                : (isActiveMember ? myMembership.getRole().name() : "NONE");
-
-        return new ChallengeDetailResponse(
-                c.getId().toString(),
-                ownerView ? c.getTitle() : c.publicTitle(),
-                ownerView ? c.getDescription() : c.publicDescription(),
-                ownerView ? c.getImageUrl() : c.publicImageUrl(),
-                c.getCategory(), c.getParticipationType().name(), c.getStatus().name(),
-                c.getModerationStatus().name(), fixDeadline, c.getAnonymity().name(),
-                new ChallengeDetailResponse.Owner(ownerNickname),
-                c.getRepeatDays(), c.getDurationDays(),
-                c.getStartDate().toString(), c.getEndDate().toString(),
-                c.getTemplateId(), c.getVerificationConfig(), c.getParams(),
-                c.getPenalty(), c.getReward(),
-                c.getMaxParticipants(), stats, eligibility, myRole,
-                c.getOwnerType().name(), gate,
-                (blockReason != null) ? blockReason.name() : null, rejoinAvailableAt, joinNote);
-    }
 
     // ====================== 내부 헬퍼 ======================
 
@@ -170,29 +107,8 @@ public class ChallengeService {
      *
      * @return 막히는 사유, 들어갈 수 있으면 null
      */
-    private JoinBlockReason previewJoinBlock(Challenge c, UUID userId, ChallengeMember myMembership,
-                                             long activeCount, boolean tierEligible) {
-        if (c.getStatus() == ChallengeStatus.COMPLETED) return JoinBlockReason.CHALLENGE_COMPLETED;
-        if (c.isOwner(userId) || (myMembership != null && myMembership.isActive()))
-            return JoinBlockReason.ALREADY_JOINED;
-        if (c.isGroup() && "PRIVATE".equals(c.getVisibility())) return JoinBlockReason.PRIVATE_INVITE_ONLY;
-        if (myMembership != null) {
-            Instant availableAt = myMembership.getRejoinAvailableAt();
-            if (availableAt != null && Instant.now().isBefore(availableAt))
-                return JoinBlockReason.REJOIN_COOLDOWN;
-        }
-        if (c.getMaxParticipants() != null && activeCount >= c.getMaxParticipants())
-            return JoinBlockReason.FULL;
-        if (!tierEligible) return JoinBlockReason.TIER_GATE;
-        return null;
-    }
 
     /** 표시 티어. 요약 행이 없거나 UNRANKED 면 BRONZE(가입 초기 티어). */
-    private Tier displayTier(UUID userId) {
-        Tier tier = scoreSummaryRepository.findById(userId)
-                .map(s -> s.getDisplayTier()).orElse(Tier.BRONZE);
-        return (tier == Tier.UNRANKED) ? Tier.BRONZE : tier;
-    }
 
     private Challenge loadActive(UUID challengeId) {
         return challengeRepository.findByIdAndDeletedAtIsNull(challengeId)

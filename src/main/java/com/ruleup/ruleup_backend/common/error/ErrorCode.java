@@ -213,9 +213,10 @@ public enum ErrorCode {
     SCREENTIME_CHANGE_COOLDOWN(HttpStatus.TOO_MANY_REQUESTS, "대상 앱 변경은 일정 기간(쿨다운) 후에 가능합니다."),
 
     // ===== 챌린지 탐색 (search 스펙) =====
-    INVALID_SORT_TYPE(HttpStatus.BAD_REQUEST, "정의되지 않은 정렬 키입니다."),
-    INVALID_FILTER_VALUE(HttpStatus.BAD_REQUEST, "정의되지 않은 필터 값입니다."),
-    CURSOR_INVALID(HttpStatus.BAD_REQUEST, "손상되었거나 만료된 커서입니다. 첫 페이지부터 다시 요청하세요."),
+    INVALID_SORT_TYPE(HttpStatus.BAD_REQUEST, "지원하지 않는 정렬이에요."),
+    INVALID_FILTER_VALUE(HttpStatus.BAD_REQUEST, "선택할 수 없는 필터 값이에요."),
+    CURSOR_INVALID(HttpStatus.BAD_REQUEST, "목록을 처음부터 다시 불러와 주세요."),
+    NOT_CLONEABLE(HttpStatus.FORBIDDEN, "이 챌린지는 템플릿으로 가져올 수 없어요."),
     INVALID_QUERY(HttpStatus.BAD_REQUEST, "검색어가 올바르지 않습니다."),
     PLACE_SEARCH_RATE_LIMIT(HttpStatus.TOO_MANY_REQUESTS, "장소 검색 요청이 너무 많습니다."),
 
