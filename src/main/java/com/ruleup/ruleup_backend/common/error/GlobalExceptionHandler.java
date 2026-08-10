@@ -19,7 +19,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleBusiness(BusinessException e) {
         ErrorCode code = e.getErrorCode();
         ErrorResponse body = (e.getDetail() != null)
-                ? ErrorResponse.of(code, e.getDetail())
+                ? ErrorResponse.of(code, e.getDetail(), e.getRejoinAvailableAt())
                 : ErrorResponse.of(code);
         return ResponseEntity.status(code.getStatus()).body(ApiResponse.fail(body));
     }

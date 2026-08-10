@@ -26,7 +26,7 @@ public class RoomAuthority {
         Challenge c = loadChallenge(challengeId);
         boolean member = challengeQuery.findMembership(challengeId, userId)
                 .map(ChallengeMember::isActive).orElse(false);
-        if (!member) throw new BusinessException(ErrorCode.NOT_A_MEMBER);
+        if (!member) throw new BusinessException(ErrorCode.NOT_CHALLENGE_MEMBER);
         return c;
     }
 
@@ -41,7 +41,7 @@ public class RoomAuthority {
     public ChallengeMember requireMembership(UUID challengeId, UUID userId) {
         return challengeQuery.findMembership(challengeId, userId)
                 .filter(ChallengeMember::isActive)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_A_MEMBER));
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_CHALLENGE_MEMBER));
     }
 
     private Challenge loadChallenge(UUID challengeId) {

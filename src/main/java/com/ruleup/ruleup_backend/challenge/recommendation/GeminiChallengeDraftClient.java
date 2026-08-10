@@ -71,7 +71,7 @@ public class GeminiChallengeDraftClient implements ChallengeDraftClient {
                 new RoutineMatch(d.templateId(), toParamsMap(d.params())),
                 new ChallengeSettings(d.title(), d.description(), d.category(),
                         d.participationType(), d.repeatDays()),
-                false);
+                false, false);
     }
 
     /** LLM 이 key/value 배열로 준 목표값을 서버가 쓰는 Map 으로 변환(값은 문자열 그대로, 검증은 ParamSpec). */

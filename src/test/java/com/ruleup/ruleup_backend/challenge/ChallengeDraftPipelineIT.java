@@ -21,6 +21,7 @@ import org.springframework.web.context.WebApplicationContext;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -211,7 +212,7 @@ class ChallengeDraftPipelineIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("LLM 장애(무응답) → 기본 템플릿 대체: result=OK + 수동 SELF_CHECK 초안 + draftId 발급")
+        @DisplayName("LLM 장애(무응답) → FALLBACK: 초안·draftId 없음 (사용자 원문이 AI 면제 경로로 새지 않는다)")
         void llmDown() throws Exception {
             String token = memberToken(uniq("draft-down"));
             LLM_RESPONSE.set(null);
@@ -219,14 +220,24 @@ class ChallengeDraftPipelineIT extends ChallengeApiSupport {
             MvcResult res = postJsonAuth("/api/v1/challenges/draft", token,
                     Map.of("description", "매일 저녁 스트레칭을 하고 싶어요"));
             assertThat(res.getResponse().getStatus()).isEqualTo(200);
-            assertThat((String) read(res, "$.data.result")).isEqualTo("OK");
-            assertThat((String) read(res, "$.data.draftId")).isNotBlank();
-            // 매칭 없음 = 수동 SELF_CHECK, 점수 패널티 OFF
-            assertThat((String) read(res, "$.data.draft.verification.type")).isEqualTo("MANUAL");
-            assertThat((String) read(res, "$.data.draft.verification.method")).isEqualTo("SELF_CHECK");
-            assertThat((Boolean) read(res, "$.data.draft.penalties.score")).isFalse();
-            // 제목은 비어 있으면 안 된다(설명 기반 대체)
-            assertThat((String) read(res, "$.data.draft.title")).isNotBlank();
+            assertThat((String) read(res, "$.data.result")).isEqualTo("FALLBACK");
+            assertThat((Object) read(res, "$.data.draftId")).isNull();
+            assertThat((Object) read(res, "$.data.draft")).isNull();
+            assertThat((String) read(res, "$.data.message")).isNotBlank();
+        }
+
+        @Test
+        @DisplayName("LLM 장애 시 초안을 저장하지 않는다 — 원문이 origin=AI 로 남으면 심사 면제(EXEMPT) 우회가 된다")
+        void llmDownPersistsNothing() throws Exception {
+            String token = memberToken(uniq("draft-down-db"));
+            LLM_RESPONSE.set(null);
+            String rawDescription = "심사를 우회하려는 문장 " + UUID.randomUUID();
+
+            postJsonAuth("/api/v1/challenges/draft", token, Map.of("description", rawDescription));
+
+            Integer saved = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM challenge_drafts WHERE description = ?", Integer.class, rawDescription);
+            assertThat(saved).isZero();
         }
 
         @Test

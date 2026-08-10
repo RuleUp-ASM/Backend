@@ -65,6 +65,9 @@ public class ChallengeDraftService {
     private static final List<String> ALL_DAYS =
             List.of("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN");
     private static final String FALLBACK_MESSAGE = "AI가 파악하지 못한 루틴이에요. 더 구체적으로 적어주세요.";
+    /** LLM 장애 — 사용자 입력에는 문제가 없으므로 재입력이 아니라 재시도를 안내한다. */
+    private static final String LLM_FAILURE_MESSAGE =
+            "지금은 추천을 만들 수 없어요. 잠시 후 다시 시도하거나 추천 루틴에서 골라주세요.";
 
     private final ChallengeDraftClient draftClient;
     private final RoutineCatalog catalog;
@@ -80,11 +83,15 @@ public class ChallengeDraftService {
     public DraftResponse draft(UUID userId, String description) {
         validateDescription(description);
 
-        // Step 1~4 — LLM 한 번 호출(차단이면 FALLBACK, 장애면 empty → 기본 템플릿 대체)
+        // Step 1~4 — LLM 한 번 호출.
+        // 차단(Step1·2)은 물론 LLM 장애·파싱 실패도 FALLBACK 이다. 장애 응답으로 초안을 만들면
+        // 사용자 원문이 그대로 AI 제목·설명이 되고, 생성 시 원본 대조에서 "AI가 쓴 그대로"로 보여
+        // 심사 면제(EXEMPT) 로 무심사 노출된다 — AI 면제의 신뢰 원본은 Step1·2를 통과한 결과뿐이다.
         ChallengeDraftSuggestion suggestion = draftClient.suggest(description, catalog.candidates());
-        if (suggestion.blocked()) {
-            log.info("draft_result success=false fallback_step=STEP1_2 userId={}", userId);
-            return DraftResponse.fallback(FALLBACK_MESSAGE);
+        if (suggestion.unusable()) {
+            log.info("draft_result success=false fallback_step={} userId={}",
+                    suggestion.blocked() ? "STEP1_2" : "LLM_FAILURE", userId);
+            return DraftResponse.fallback(suggestion.blocked() ? FALLBACK_MESSAGE : LLM_FAILURE_MESSAGE);
         }
 
         // Step 3 — 루틴 테이블 매칭(카탈로그 실재 검증)

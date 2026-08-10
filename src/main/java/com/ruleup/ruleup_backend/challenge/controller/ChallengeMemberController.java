@@ -3,8 +3,6 @@ package com.ruleup.ruleup_backend.challenge.controller;
 import com.ruleup.ruleup_backend.challenge.dto.JoinResponse;
 import com.ruleup.ruleup_backend.challenge.dto.LeaveResponse;
 import com.ruleup.ruleup_backend.challenge.dto.MemberListResponse;
-import com.ruleup.ruleup_backend.challenge.dto.RoleChangeRequest;
-import com.ruleup.ruleup_backend.challenge.dto.RoleChangeResponse;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeMemberService;
 import com.ruleup.ruleup_backend.common.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -31,7 +29,10 @@ public class ChallengeMemberController {
     private final ChallengeMemberService memberService;
 
     @Operation(summary = "챌린지 가입",
-            description = "승인 절차 없이 검증 통과 시 즉시 ACTIVE. 종료→재참여금지→정원→기준온도→모더레이션 순 판정.")
+            description = "승인 절차 없이 게이트 통과 시 즉시 ACTIVE. 종료→비공개(초대로만)→재입장 대기·차단→"
+                    + "동시 3개(사용자 행 락)→정원(챌린지 행 락)→최소 티어 순 판정. "
+                    + "거절은 전부 409 JOIN_BLOCKED + reason. 기기 권한은 서버가 검사하지 않는다 — "
+                    + "클라가 공개 상세의 requiredPermissions로 가입 전에 확보한다.")
     @PostMapping
     public ApiResponse<JoinResponse> join(@AuthenticationPrincipal String userId,
                                           @PathVariable String challengeId) {
@@ -47,22 +48,12 @@ public class ChallengeMemberController {
     }
 
     @Operation(summary = "챌린지 탈퇴",
-            description = "본인 탈퇴. 본인 success 이력 있으면 패널티 트리거. OWNER 불가(참여자 있으면 위임, 없으면 삭제). 탈퇴 후 재참여 영구 불가.")
+            description = "본인 탈퇴 — 방장도 자유롭게 나갈 수 있고, 넘기지 않고 나가면 즉시 봇방장 체제로 전환된다. "
+                    + "감점 면제는 1년 이상 성공(LONG_SUCCESS)·선착순 승계 3일 면책(SUCCESSION_GRACE). 재입장은 1주 대기.")
     @DeleteMapping("/me")
     public ApiResponse<LeaveResponse> leave(@AuthenticationPrincipal String userId,
                                             @PathVariable String challengeId) {
         return ApiResponse.ok(memberService.leave(UUID.fromString(userId), UUID.fromString(challengeId)));
     }
 
-    @Operation(summary = "공동 관리자 임명/해제",
-            description = "PROMOTE(MEMBER→MANAGER)/DEMOTE(MANAGER→MEMBER). OWNER만, 단 MANAGER 본인의 DEMOTE는 허용. OWNER 역할은 위임 API로만 변경.")
-    @PatchMapping("/{targetUserId}/role")
-    public ApiResponse<RoleChangeResponse> changeRole(@AuthenticationPrincipal String userId,
-                                                      @PathVariable String challengeId,
-                                                      @PathVariable String targetUserId,
-                                                      @RequestBody RoleChangeRequest request) {
-        return ApiResponse.ok(memberService.changeRole(
-                UUID.fromString(userId), UUID.fromString(challengeId),
-                UUID.fromString(targetUserId), request.action()));
-    }
 }

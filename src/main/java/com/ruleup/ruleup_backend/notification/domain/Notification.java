@@ -33,14 +33,24 @@ public class Notification {
     @Column(name = "type", nullable = false)
     private NotificationType type;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "class", nullable = false)
+    private NotificationClass notificationClass;
+
     @Column(name = "title", nullable = false, length = 100)
     private String title;
 
     @Column(name = "message", nullable = false, length = 500)
     private String message;
 
+    @Column(name = "deeplink", length = 500)
+    private String deeplink;
+
     @Column(name = "readAt")
     private Instant readAt;
+
+    @Column(name = "deletedAt")
+    private Instant deletedAt;
 
     @Generated(event = EventType.INSERT)
     @Column(name = "createdAt", nullable = false, updatable = false)
@@ -51,6 +61,7 @@ public class Notification {
         n.id = UuidGenerator.generate();
         n.userId = userId;
         n.type = type;
+        n.notificationClass = type.notificationClass();
         n.title = title;
         n.message = message;
         return n;
@@ -61,4 +72,5 @@ public class Notification {
     }
 
     public boolean isRead() { return readAt != null; }
+    public void delete() { this.deletedAt = Instant.now(); }
 }

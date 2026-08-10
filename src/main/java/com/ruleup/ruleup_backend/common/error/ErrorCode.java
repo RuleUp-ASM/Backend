@@ -83,9 +83,17 @@ public enum ErrorCode {
     CHALLENGE_NAME_REJECTED(HttpStatus.UNPROCESSABLE_ENTITY, "사용할 수 없는 챌린지 이름입니다."),
 
     // ===== 챌린지 - 참여/탈퇴/멤버 (§5·§6·§7) =====
+    /**
+     * 가입 거절 단일 코드. 어떤 게이트에 걸렸는지는 reason 으로 내려간다
+     * (PRIVATE_INVITE_ONLY / REJOIN_COOLDOWN / BANNED / FREE_LIMIT / FULL / TIER_GATE /
+     * ALREADY_JOINED / CHALLENGE_COMPLETED — {@code JoinBlockReason}).
+     * REJOIN_COOLDOWN 이면 rejoinAvailableAt 이 함께 실린다.
+     */
+    JOIN_BLOCKED(HttpStatus.CONFLICT, "지금은 이 챌린지에 들어갈 수 없어요."),
     MANNER_TEMPERATURE_BELOW_MINIMUM(HttpStatus.FORBIDDEN, "참여 기준 매너 온도를 충족하지 못했습니다."),
     ALREADY_JOINED(HttpStatus.CONFLICT, "이미 참여한 챌린지입니다."),
     REJOIN_FORBIDDEN(HttpStatus.CONFLICT, "탈퇴한 챌린지에는 다시 참여할 수 없습니다."),
+    REJOIN_NOT_AVAILABLE(HttpStatus.CONFLICT, "강퇴 후 재참여 대기 기간이 아직 끝나지 않았습니다."),
     CHALLENGE_FULL(HttpStatus.CONFLICT, "정원이 가득 찼습니다."),
     CHALLENGE_COMPLETED(HttpStatus.CONFLICT, "종료된 챌린지입니다."),
     MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "멤버를 찾을 수 없습니다."),
@@ -140,9 +148,34 @@ public enum ErrorCode {
     NOT_A_MEMBER(HttpStatus.FORBIDDEN, "챌린지 멤버만 접근할 수 있습니다."),
     INVALID_NOTICE_PAYLOAD(HttpStatus.BAD_REQUEST, "공지 제목/본문이 올바르지 않습니다."),
     NOTICE_NOT_FOUND(HttpStatus.NOT_FOUND, "공지를 찾을 수 없습니다."),
+    NOTICE_DAILY_QUOTA_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "공지는 하루에 3건까지만 작성할 수 있습니다."),
+    INVALID_COMMENT_PAYLOAD(HttpStatus.BAD_REQUEST, "댓글 내용을 확인해주세요."),
+    COMMENT_TARGET_NOT_FOUND(HttpStatus.NOT_FOUND, "댓글 대상을 찾을 수 없습니다."),
+    COMMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "댓글을 찾을 수 없습니다."),
+    REPLY_DEPTH_EXCEEDED(HttpStatus.BAD_REQUEST, "답글에는 다시 답글을 작성할 수 없습니다."),
+    NOT_COMMENT_DELETABLE(HttpStatus.FORBIDDEN, "댓글을 삭제할 권한이 없습니다."),
+    INVALID_RANKING_MODE(HttpStatus.BAD_REQUEST, "랭킹 모드가 올바르지 않습니다."),
+
+    // ===== 챌린지 방 운영 =====
+    NOT_PRIVATE_CHALLENGE(HttpStatus.CONFLICT, "비공개 그룹 챌린지만 초대 링크를 만들 수 있습니다."),
+    KICK_REASON_REQUIRED(HttpStatus.BAD_REQUEST, "강퇴 사유를 10자 이상 500자 이하로 입력해주세요."),
+    CANNOT_KICK_SELF(HttpStatus.BAD_REQUEST, "방장은 본인을 강퇴할 수 없습니다."),
+    TARGET_NOT_MEMBER(HttpStatus.NOT_FOUND, "대상 사용자는 현재 챌린지 멤버가 아닙니다."),
+    CANNOT_TRANSFER_TO_SELF(HttpStatus.BAD_REQUEST, "본인에게 방장 권한을 이전할 수 없습니다."),
+    OWNER_ALREADY_EXISTS(HttpStatus.CONFLICT, "이미 사용자 방장이 존재합니다."),
+
+    // ===== 신고·차단·다른 사용자 프로필 =====
+    INVALID_REPORT_TARGET(HttpStatus.BAD_REQUEST, "신고 대상이 올바르지 않습니다."),
+    INVALID_REPORT_REASON(HttpStatus.BAD_REQUEST, "신고 사유가 올바르지 않습니다."),
+    DETAIL_REQUIRED(HttpStatus.BAD_REQUEST, "신고 상세 내용을 입력해주세요."),
+    CANNOT_REPORT_SELF(HttpStatus.BAD_REQUEST, "본인을 신고할 수 없습니다."),
+    REPORT_SUSPENDED(HttpStatus.FORBIDDEN, "신고 기능이 일시적으로 제한되었습니다."),
+    USER_NOT_FOUND(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."),
+    BLACKLIST_ENTRY_NOT_FOUND(HttpStatus.NOT_FOUND, "차단 내역을 찾을 수 없습니다."),
 
     // ===== 알림 =====
     NOTIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "알림을 찾을 수 없습니다."),
+    INVALID_SETTING_KEY(HttpStatus.BAD_REQUEST, "알림 설정 항목이 올바르지 않습니다."),
 
     // ===== 인증 sync (§3.1) =====
     SYNC_TOO_FREQUENT(HttpStatus.TOO_MANY_REQUESTS, "sync 요청 간격이 너무 짧습니다."),

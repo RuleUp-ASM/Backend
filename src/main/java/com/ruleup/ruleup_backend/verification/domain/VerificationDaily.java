@@ -29,8 +29,12 @@ import java.util.UUID;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class VerificationDaily extends AssignedIdEntity {
 
-    /** 이의 제기 창 길이(잠정 실패 전환 시점부터, §8.7). */
-    public static final int OBJECTION_WINDOW_DAYS = 3;
+    /**
+     * 이의 제기 창 길이(잠정 실패 전환 시점부터) — 챌린지 생성 및 운영 정책 §7.2 기준 **1일**.
+     * 확정 시각은 고정 시각(00시·03시)이 아니라 인증 신호로 판정이 가능해진 때이므로,
+     * 창의 시작점도 그 확정 시각이다.
+     */
+    public static final int OBJECTION_WINDOW_DAYS = 1;
 
     @Id
     @JdbcTypeCode(SqlTypes.BINARY)
@@ -77,7 +81,11 @@ public class VerificationDaily extends AssignedIdEntity {
     private VerifiedVia verifiedVia;     // AUTO / MANUAL / MANUAL_FALLBACK (없으면 미확정)
 
     @Column(name = "disputeClosesAt")
-    private Instant disputeClosesAt;     // 이의 제기 창 마감(잠정 실패 전환 +3일, §8.7). 이 시각 후 미제기면 배치가 FAILED lock.
+    private Instant disputeClosesAt;     // 이의 제기 창 마감(잠정 실패 전환 +1일). 이 시각 후 미제기면 배치가 FAILED lock.
+
+    /** 방 피드에 실패 이벤트를 공유해도 되는 시각. 이의 제기 중에는 반드시 null이다. */
+    @Column(name = "shareableAt")
+    private Instant shareableAt;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "fallbackApprovalStatus", length = 20)
@@ -118,6 +126,8 @@ public class VerificationDaily extends AssignedIdEntity {
         if (status == VerificationStatus.SUCCESS && this.verifiedVia == null) {
             this.verifiedVia = VerifiedVia.AUTO;
         }
+        if (status == VerificationStatus.SUCCESS) this.shareableAt = verifiedAt;
+        if (status == VerificationStatus.FAILED) this.shareableAt = verifiedAt;
     }
 
     /** 정규 수동(PHOTO/SELF_CHECK) 확정 — 즉시 SUCCESS. */
@@ -128,6 +138,7 @@ public class VerificationDaily extends AssignedIdEntity {
         this.verifiedAt = verifiedAt;
         this.verifiedVia = VerifiedVia.MANUAL;
         this.disputeClosesAt = null;
+        this.shareableAt = verifiedAt;
     }
 
     /**
@@ -184,12 +195,14 @@ public class VerificationDaily extends AssignedIdEntity {
         this.verifiedVia = null;
         this.verifiedAt = null;
         this.disputeClosesAt = objectionClosesAt;
+        this.shareableAt = null;
     }
 
     /** 잠정 실패 → FAILED 확정(창 종료·미제기/기각). 온도 반영 트리거는 이 시점. failureReason 유지. */
     public void lockFailed(Instant verifiedAt) {
         this.status = VerificationStatus.FAILED;
         this.verifiedAt = verifiedAt;
+        this.shareableAt = verifiedAt;
     }
 
     /** 이의 제기 승인 → SUCCESS 확정(verifiedVia=OBJECTION). 잠정 실패는 온도 미반영이라 복원 불필요. */
@@ -198,6 +211,7 @@ public class VerificationDaily extends AssignedIdEntity {
         this.failureReason = null;
         this.verifiedVia = VerifiedVia.OBJECTION;
         this.verifiedAt = verifiedAt;
+        this.shareableAt = verifiedAt;
     }
 
     /** 이의 제기 기각 → FAILED 확정(lock, failureReason=OBJECTION_REJECTED). 재제기 불가. */
@@ -206,6 +220,7 @@ public class VerificationDaily extends AssignedIdEntity {
         this.failureReason = "OBJECTION_REJECTED";
         this.verifiedVia = null;
         this.verifiedAt = verifiedAt;
+        this.shareableAt = verifiedAt;
     }
 
     public boolean isProvisionalFailure() { return status == VerificationStatus.FAILED_PROVISIONAL; }

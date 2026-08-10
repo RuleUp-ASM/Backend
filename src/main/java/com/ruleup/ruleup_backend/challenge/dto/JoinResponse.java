@@ -1,27 +1,28 @@
 package com.ruleup.ruleup_backend.challenge.dto;
 
+import com.ruleup.ruleup_backend.routine.domain.SelectedMethod;
 import com.ruleup.ruleup_backend.routine.domain.VerificationConfig;
 
 import java.util.List;
 
 /**
- * 3.6 참여 신청 응답.
- *  - memberStatus : PENDING(승인 대기) / ACTIVE(즉시 참여).
- *  - setupStatus  : PENDING_SETUP(권한·셋업 전) / READY(평가 대상). 가입 직후엔 보통 PENDING_SETUP.
- *  - selectedMethod / requiredPermissions : 가입 직후 클라가 "무슨 권한을 받아 §11.4 /setup 을 해야 하는지"
- *    바로 알 수 있게 인증 스냅샷에서 내려준다. (실제 grant·확인은 /setup 에서)
+ * 챌린지 가입 응답 — 가입 API 명세 200 OK.
+ *
+ * @param countFromCycle        판정이 시작되는 날짜(사이클 중간 입장이면 다음 사이클 경계 — 사이클 1주 고정)
+ * @param requiredPermissions   필요한 OS 권한(수동 방이면 빈 배열). 실제 확보는 <b>가입 전</b> 클라 책임 —
+ *                              서버는 권한 보유를 가입 게이트로 검사하지 않는다(테크스펙 5-1 유형 3)
+ * @param personalSetupRequired 첫 입장 개인 설정(앵커·대상 앱) 필요 여부
  */
 public record JoinResponse(
-        String memberStatus,
-        String setupStatus,
-        String selectedMethod,
-        List<String> requiredPermissions
+        boolean joined,
+        String countFromCycle,
+        List<String> requiredPermissions,
+        boolean personalSetupRequired
 ) {
-    public static JoinResponse of(String memberStatus, String setupStatus, VerificationConfig snapshot) {
-        String method = (snapshot != null && snapshot.selectedMethod() != null)
-                ? snapshot.selectedMethod().name() : null;
+    public static JoinResponse of(String countFromCycle, VerificationConfig snapshot) {
+        boolean auto = snapshot != null && snapshot.selectedMethod() == SelectedMethod.AUTO;
         List<String> perms = (snapshot != null && snapshot.requiredPermissions() != null)
                 ? snapshot.requiredPermissions() : List.of();
-        return new JoinResponse(memberStatus, setupStatus, method, perms);
+        return new JoinResponse(true, countFromCycle, auto ? perms : List.of(), auto);
     }
 }

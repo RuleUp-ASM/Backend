@@ -13,6 +13,7 @@ import com.ruleup.ruleup_backend.challenge.dto.CreateChallengeRequest;
 import com.ruleup.ruleup_backend.challenge.dto.CreateChallengeResponse;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
+import com.ruleup.ruleup_backend.challenge.repository.UserChallengeCounterRepository;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.routine.domain.ParamSpec;
@@ -76,6 +77,7 @@ public class ChallengeCreationService {
     private final ChallengeDraftRepository draftRepository;
     private final IdempotencyKeyRepository idempotencyKeyRepository;
     private final ChallengeImageUploadRepository imageUploadRepository;
+    private final UserChallengeCounterRepository counterRepository;
     private final RoutineCatalog catalog;
     private final UserScoreSummaryRepository scoreSummaryRepository;
     private final ApplicationEventPublisher eventPublisher;
@@ -86,12 +88,15 @@ public class ChallengeCreationService {
         if (idempotencyKey == null || idempotencyKey.isBlank())
             throw new BusinessException(ErrorCode.IDEMPOTENCY_KEY_REQUIRED);
         String requestHash = sha256(canonicalJson(req));
-        var existing = idempotencyKeyRepository.findByUserIdAndIdempotencyKey(userId, idempotencyKey);
-        if (existing.isPresent()) {
-            if (!existing.get().sameRequest(requestHash))
-                throw new BusinessException(ErrorCode.IDEMPOTENCY_CONFLICT);
-            return readSnapshot(existing.get().getResponseSnapshot());
-        }
+        // 키 행을 먼저 선점하고 그 행을 잠근 채로 판정한다. 동시 재시도는 여기서 직렬화되며,
+        // 뒤에 온 요청은 앞선 요청의 커밋을 기다렸다가 확정된 스냅샷을 그대로 재응답한다.
+        idempotencyKeyRepository.reserve(userId, idempotencyKey, requestHash);
+        IdempotencyKey keyRow = idempotencyKeyRepository.lockRow(userId, idempotencyKey)
+                .orElseThrow(() -> new IllegalStateException("멱등 키 선점 실패"));
+        if (!keyRow.sameRequest(requestHash))
+            throw new BusinessException(ErrorCode.IDEMPOTENCY_CONFLICT);
+        if (!keyRow.isPending())
+            return readSnapshot(keyRow.getResponseSnapshot());
 
         // ② draft 원본 (본인 소유만 — 타인 draftId 는 존재를 숨겨 NOT_FOUND)
         ChallengeDraft draft = draftRepository.findByIdAndUserId(parseUuid(req.draftId()), userId)
@@ -143,6 +148,9 @@ public class ChallengeCreationService {
 
         memberRepository.save(ChallengeMember.owner(challenge.getId(), userId));
         challenge.increaseParticipantCount();
+        // 생성자도 그 방의 ACTIVE 멤버 → 동시 참여 3개 카운터에 포함시킨다(가입 게이트와 같은 대장을 쓴다).
+        counterRepository.ensureRow(userId);
+        counterRepository.increment(userId);
 
         if (imageUpload != null) imageUpload.markRegistered(Instant.now());
 
@@ -165,7 +173,7 @@ public class ChallengeCreationService {
                 auto,                                            // AUTO 면 개인 인증 설정 진입 필요
                 ZonedDateTime.now(KST).toOffsetDateTime().toString());
 
-        saveIdempotencyKey(userId, idempotencyKey, requestHash, response, challenge.getId());
+        keyRow.completeWith(writeSnapshot(response), challenge.getId());
         log.info("challenge_create_result success=true path={} verify_method={} challengeId={}",
                 draft.getOrigin(), response.verification().method(), challenge.getId());
         return response;
@@ -336,14 +344,9 @@ public class ChallengeCreationService {
 
     // ===== 멱등 스냅샷 =====
 
-    private void saveIdempotencyKey(UUID userId, String key, String hash,
-                                    CreateChallengeResponse response, UUID challengeId) {
+    private String writeSnapshot(CreateChallengeResponse response) {
         try {
-            idempotencyKeyRepository.save(IdempotencyKey.of(
-                    userId, key, hash, OM.writeValueAsString(response), challengeId));
-        } catch (DataIntegrityViolationException race) {
-            // 동시 재시도 경합 — 유니크 제약이 이겼다. 본 트랜잭션 결과가 곧 정답이므로 그대로 반환.
-            log.warn("멱등 키 저장 경합 userId={} key={}", userId, key);
+            return OM.writeValueAsString(response);
         } catch (com.fasterxml.jackson.core.JacksonException e) {
             throw new IllegalStateException("멱등 응답 스냅샷 직렬화 실패", e);
         }

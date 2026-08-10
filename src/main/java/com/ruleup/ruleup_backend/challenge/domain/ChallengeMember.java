@@ -150,6 +150,22 @@ public class ChallengeMember extends AssignedIdEntity {
     @Column(name = "ghost_pushed_at")
     private Instant ghostPushedAt;
 
+    @Column(name = "left_type", length = 10)
+    private String leftType;
+
+    @Column(name = "left_at")
+    private Instant leftAt;
+
+    @Column(name = "kick_reason", length = 500)
+    private String kickReason;
+
+    @Column(name = "kick_count", nullable = false)
+    private int kickCount;
+
+    /** 재입장 가능 시각 — 자진 탈퇴 1주 / 강퇴 배수. 영구 차단은 없으므로 이 값 하나로 전부 표현된다. */
+    @Column(name = "rejoin_available_at")
+    private Instant rejoinAvailableAt;
+
     private static ChallengeMember of(UUID challengeId, UUID userId, MemberRole role, MemberStatus status) {
         ChallengeMember m = new ChallengeMember();
         m.id = UuidGenerator.generate();
@@ -181,8 +197,37 @@ public class ChallengeMember extends AssignedIdEntity {
     /** 역할 변경(임명/해제 §7-1, 위임 role swap §7-2). OWNER 정확히 1명 불변식은 호출부가 보장. */
     public void changeRole(MemberRole role) { this.role = role; }
 
-    /** 탈퇴(§6): ACTIVE → LEFT. 재참여 금지를 위해 행은 남긴다(uq_member). */
-    public void leave() { this.status = MemberStatus.LEFT; }
+    /**
+     * 자진 탈퇴: ACTIVE → LEFT. 구 "재참여 영구 불가"는 폐기됐고(탈퇴 API 명세),
+     * 1주 대기 후 같은 행을 재활성화한다(uq_member 유지).
+     */
+    public void leave(Instant at, Instant rejoinAt) {
+        this.status = MemberStatus.LEFT;
+        this.role = MemberRole.MEMBER;      // 방장이 나가면 봇방장 전환 — 역할은 내려놓는다
+        this.leftType = "LEAVE";
+        this.leftAt = at;
+        this.rejoinAvailableAt = rejoinAt;
+    }
+
+    /** 강퇴. 사유(신고 누적·연속 실패·방장 재량·부정행위)와 무관하게 배수 백오프가 동일 적용된다(정책 §10.2). */
+    public void kick(String reason, Instant at, Instant rejoinAt) {
+        this.status = MemberStatus.REMOVED;
+        this.leftType = "KICK";
+        this.leftAt = at;
+        this.kickReason = reason;
+        this.kickCount++;
+        this.rejoinAvailableAt = rejoinAt;
+    }
+
+    /** 대기 기간이 끝난 뒤 재입장(자진 탈퇴·강퇴 공통). kickCount 는 배수 계산 근거라 남긴다. */
+    public void rejoin() {
+        this.status = MemberStatus.ACTIVE;
+        this.role = MemberRole.MEMBER;
+        this.leftType = null;
+        this.leftAt = null;
+        this.kickReason = null;
+        this.rejoinAvailableAt = null;
+    }
 
     // ===== 인증 진행률 비정규화 갱신 (sync·배치) =====
     public void setupFixedDays(int targetDays) {

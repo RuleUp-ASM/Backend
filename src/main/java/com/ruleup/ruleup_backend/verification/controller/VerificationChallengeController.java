@@ -81,7 +81,7 @@ public class VerificationChallengeController {
     }
 
     @Operation(summary = "이의 제기 제출(§8.7)",
-            description = "잠정 실패(FAILED_PROVISIONAL) 일자에 대해 3일 창 안에 본인이 제출(일자당 1회). 사진 포함 글 또는 글. 솔로는 대상 아님.")
+            description = "잠정 실패(FAILED_PROVISIONAL) 일자에 대해 1일 창 안에 본인이 제출(일자당 1회). 사진 포함 글 또는 글. 솔로는 대상 아님.")
     @PostMapping("/{challengeId}/objections")
     public ApiResponse<ObjectionResponse> submitObjection(@AuthenticationPrincipal String userId,
                                                           @PathVariable UUID challengeId,

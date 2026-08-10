@@ -26,11 +26,22 @@ public interface VerificationDailyRepository extends JpaRepository<VerificationD
     /** 챌린지 내 특정 상태(예: SUCCESS) 인증 이력 존재 여부 — 진행 중 삭제 패널티 트리거 판정(§8). */
     boolean existsByChallengeIdAndStatus(UUID challengeId, VerificationStatus status);
 
+    /**
+     * 그 멤버의 가장 이른 성공일. 중도 탈퇴 감점의 "1년 이상 성공을 이어왔는가"(정책 §10.1) 판정에 쓴다.
+     * 성공 이력이 없으면 null.
+     */
+    @Query("SELECT MIN(v.targetDate) FROM VerificationDaily v "
+            + "WHERE v.challengeMemberId = :memberId AND v.status = :status")
+    LocalDate findEarliestDate(@Param("memberId") UUID memberId, @Param("status") VerificationStatus status);
+
     /** 상세 화면 최근 로그(§3.3 dailyLogs). */
     List<VerificationDaily> findByChallengeMemberIdOrderByTargetDateDesc(UUID challengeMemberId);
 
     /** 캘린더 당일 보강: 유저의 특정 날짜 인증 행(RoutineOutcome 지연분 보완). */
     List<VerificationDaily> findByUserIdAndTargetDate(UUID userId, LocalDate targetDate);
+
+    List<VerificationDaily> findByChallengeIdAndStatusIn(
+            UUID challengeId, Collection<VerificationStatus> statuses);
 
     /** 처리 대기함(pending-reviews): 챌린지의 승인 대기 폴백 제출. */
     List<VerificationDaily> findByChallengeIdAndFallbackApprovalStatus(

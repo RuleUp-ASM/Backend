@@ -12,6 +12,8 @@ import com.ruleup.ruleup_backend.routine.service.ResolvedRoutine;
 import com.ruleup.ruleup_backend.routine.service.RoutineSelectionService;
 import com.ruleup.ruleup_backend.reputation.domain.ReputationScore;
 import com.ruleup.ruleup_backend.reputation.ReputationScoreRepository;
+import com.ruleup.ruleup_backend.score.UserScoreSummaryRepository;
+import com.ruleup.ruleup_backend.score.domain.Tier;
 import com.ruleup.ruleup_backend.user.domain.InterestCategory;
 import com.ruleup.ruleup_backend.user.domain.User;
 import com.ruleup.ruleup_backend.user.UserRepository;
@@ -25,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -49,6 +52,7 @@ public class ChallengeService {
     private final ChallengeMemberRepository memberRepository;
     private final UserRepository userRepository;
     private final ReputationScoreRepository reputationScoreRepository;
+    private final UserScoreSummaryRepository scoreSummaryRepository;
     private final RoutineSelectionService routineSelectionService;
     private final VerificationDailyRepository verificationDailyRepository;
     private final ChallengeHardDeleter hardDeleter;
@@ -109,19 +113,26 @@ public class ChallengeService {
         var stats = new ChallengeDetailResponse.Stats(
                 c.getParticipantCount(), avgManner, /* completionRate */ null);
 
-        // 참여 자격: 정원·기준온도·재참여·모더레이션·상태 종합.
+        // 참여 자격 미리보기 — 가입 API 게이트와 같은 순서·같은 reason enum 으로 계산한다.
         ChallengeMember myMembership = memberRepository.findByChallengeIdAndUserId(challengeId, userId).orElse(null);
         boolean isActiveMember = myMembership != null && myMembership.isActive();
         boolean rejoinBlocked = myMembership != null && !myMembership.isActive();   // LEFT/REMOVED 이력
         BigDecimal myManner = mannerTemp(userId);
-        boolean meetsMinManner = !c.isGroup() || c.getMinMannerTemperature() == null
-                || myManner.compareTo(c.getMinMannerTemperature()) >= 0;
         long activeCount = memberRepository.countByChallengeIdAndStatus(challengeId, MemberStatus.ACTIVE);
-        boolean hasRoom = c.getMaxParticipants() == null || activeCount < c.getMaxParticipants();
-        boolean canJoin = !isActiveMember && !rejoinBlocked && !c.isOwner(userId)
-                && meetsMinManner && hasRoom
-                && c.getStatus() != ChallengeStatus.COMPLETED
-                && c.isModerationCleared();
+
+        Tier myTier = displayTier(userId);
+        boolean tierEligible = c.getMinTier() == null || myTier.ordinal() >= c.getMinTier().ordinal();
+        var gate = new ChallengeDetailResponse.Gate(
+                (c.getMinTier() != null) ? c.getMinTier().name() : null, myTier.name(), tierEligible);
+
+        JoinBlockReason blockReason = previewJoinBlock(c, userId, myMembership, activeCount, tierEligible);
+        boolean canJoin = blockReason == null;
+        String rejoinAvailableAt = (blockReason == JoinBlockReason.REJOIN_COOLDOWN)
+                ? myMembership.getRejoinAvailableAt().toString() : null;
+
+        // 사이클 1주 고정 — 주 중간에 들어오면 판정은 다음 경계부터.
+        String joinNote = ChallengeCycle.startsNextCycle(c.getStartDate(), LocalDate.now(KST))
+                ? "NEXT_CYCLE" : "IMMEDIATE";
 
         var eligibility = new ChallengeDetailResponse.Eligibility(
                 canJoin, myManner, c.getMinMannerTemperature(), rejoinBlocked);
@@ -145,10 +156,43 @@ public class ChallengeService {
                 c.getStartDate().toString(), c.getEndDate().toString(),
                 c.getTemplateId(), c.getVerificationConfig(), c.getParams(),
                 c.getPenalty(), c.getReward(),
-                c.getMaxParticipants(), stats, eligibility, myRole);
+                c.getMaxParticipants(), stats, eligibility, myRole,
+                c.getOwnerType().name(), gate,
+                (blockReason != null) ? blockReason.name() : null, rejoinAvailableAt, joinNote);
     }
 
     // ====================== 내부 헬퍼 ======================
+
+    /**
+     * 가입 게이트 미리보기. 판정 순서는 가입 API 와 동일하게
+     * 종료 → 이미 참여 → 비공개 → 재입장 대기 → 정원 → 티어 순이다.
+     * 동시 참여 3개(FREE_LIMIT)는 사용자 행 락이 필요해 미리보기에서 제외한다 — 가입 시점에 확정된다.
+     *
+     * @return 막히는 사유, 들어갈 수 있으면 null
+     */
+    private JoinBlockReason previewJoinBlock(Challenge c, UUID userId, ChallengeMember myMembership,
+                                             long activeCount, boolean tierEligible) {
+        if (c.getStatus() == ChallengeStatus.COMPLETED) return JoinBlockReason.CHALLENGE_COMPLETED;
+        if (c.isOwner(userId) || (myMembership != null && myMembership.isActive()))
+            return JoinBlockReason.ALREADY_JOINED;
+        if (c.isGroup() && "PRIVATE".equals(c.getVisibility())) return JoinBlockReason.PRIVATE_INVITE_ONLY;
+        if (myMembership != null) {
+            Instant availableAt = myMembership.getRejoinAvailableAt();
+            if (availableAt != null && Instant.now().isBefore(availableAt))
+                return JoinBlockReason.REJOIN_COOLDOWN;
+        }
+        if (c.getMaxParticipants() != null && activeCount >= c.getMaxParticipants())
+            return JoinBlockReason.FULL;
+        if (!tierEligible) return JoinBlockReason.TIER_GATE;
+        return null;
+    }
+
+    /** 표시 티어. 요약 행이 없거나 UNRANKED 면 BRONZE(가입 초기 티어). */
+    private Tier displayTier(UUID userId) {
+        Tier tier = scoreSummaryRepository.findById(userId)
+                .map(s -> s.getDisplayTier()).orElse(Tier.BRONZE);
+        return (tier == Tier.UNRANKED) ? Tier.BRONZE : tier;
+    }
 
     private Challenge loadActive(UUID challengeId) {
         return challengeRepository.findByIdAndDeletedAtIsNull(challengeId)
