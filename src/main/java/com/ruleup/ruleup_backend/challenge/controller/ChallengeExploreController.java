@@ -3,8 +3,8 @@ package com.ruleup.ruleup_backend.challenge.controller;
 import com.ruleup.ruleup_backend.challenge.dto.CategoryGridResponse;
 import com.ruleup.ruleup_backend.challenge.dto.ExploreResponse;
 import com.ruleup.ruleup_backend.challenge.dto.TrendingResponse;
-import com.ruleup.ruleup_backend.challenge.service.ChallengeExploreService;
 import com.ruleup.ruleup_backend.challenge.explore.CategoryCountService;
+import com.ruleup.ruleup_backend.challenge.explore.ExploreQueryService;
 import com.ruleup.ruleup_backend.challenge.explore.TrendingService;
 import com.ruleup.ruleup_backend.common.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -30,7 +30,7 @@ public class ChallengeExploreController {
 
     private final CategoryCountService categoryService;
     private final TrendingService trendingService;
-    private final ChallengeExploreService exploreService;
+    private final ExploreQueryService exploreService;
 
     @Operation(summary = "카테고리 그리드(홈)",
             description = "관심 분야 정책 12종 고정 순서 + 진행 중 공개 그룹 방 수. "
@@ -49,20 +49,20 @@ public class ChallengeExploreController {
         return ApiResponse.ok(trendingService.getTrending(UUID.fromString(userId), category));
     }
 
-    @Operation(summary = "둘러보기 목록", description = "전체 공개 챌린지 대상. 필터(AND) + 정렬 7종 + 커서 페이지네이션. "
-            + "종료(now≥endAt)·삭제 제외. joinableOnly 기본 true(내 매너 온도 기준 서버 계산).")
+    @Operation(summary = "둘러보기 목록",
+            description = "① 노출 제외(비공개·솔로·종료·내가 신고한 방) → ② 필터 AND(카테고리 OR·인증방식·티어컷) "
+                    + "→ ③ 정렬 6종 단일 적용. 정원 마감 방은 빼지 않고 isFull 로 구분한다. "
+                    + "커서 페이징 기본 10·최대 20이며 totalCount 는 제공하지 않는다(무한 스크롤).")
     @GetMapping("/api/v1/challenges/explore")
     public ApiResponse<ExploreResponse> explore(
             @AuthenticationPrincipal String userId,
-            @RequestParam(required = false) String category,
-            @RequestParam(required = false) String participationType,
-            @RequestParam(required = false) String verificationType,
-            @RequestParam(required = false, defaultValue = "true") Boolean joinableOnly,
-            @RequestParam(required = false, defaultValue = "TRENDING") String sort,
+            @RequestParam(required = false) String categories,
+            @RequestParam(required = false) String verifyType,
+            @RequestParam(required = false, defaultValue = "false") Boolean eligibleOnly,
+            @RequestParam(required = false, defaultValue = "POPULAR") String sort,
             @RequestParam(required = false) String cursor,
-            @RequestParam(required = false, defaultValue = "5") Integer size) {
+            @RequestParam(required = false) Integer size) {
         return ApiResponse.ok(exploreService.explore(
-                UUID.fromString(userId), category, participationType, verificationType,
-                joinableOnly, sort, cursor, size));
+                UUID.fromString(userId), categories, verifyType, eligibleOnly, sort, cursor, size));
     }
 }
