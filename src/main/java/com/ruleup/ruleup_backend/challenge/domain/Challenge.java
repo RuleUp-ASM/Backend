@@ -40,6 +40,10 @@ public class Challenge extends AssignedIdEntity {
     @Column(name = "title", nullable = false, length = 30)
     private String title;
 
+    /** AI 임시 제목 — 심사 중·거부·신고 시 대체 표시. draft 행에서 서버가 복사(클라 전송 불가). */
+    @Column(name = "ai_title", length = 30)
+    private String aiTitle;
+
     @Column(name = "description", length = 200)
     private String description;
 
@@ -100,6 +104,57 @@ public class Challenge extends AssignedIdEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
     private ChallengeStatus status;
+
+    // ===== 신규 계약 필드 (챌린지 생성·라이프사이클 스펙) =====
+
+    /** 설정 버전 — 수정·가입·탈퇴 등 수정 가능 범위가 바뀔 수 있는 변화마다 +1 (PATCH 낙관 잠금). */
+    @Column(name = "version", nullable = false)
+    private int version;
+
+    /** 최소 입장 티어(표시 티어 기준). 구 매너온도 게이트 대체. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "min_tier")
+    private com.ruleup.ruleup_backend.score.domain.Tier minTier;
+
+    /** 그룹 공개 범위(PUBLIC/PRIVATE) — 솔로는 null. */
+    @Column(name = "visibility", length = 10)
+    private String visibility;
+
+    /** 솔로 랭킹 노출 여부 — 그룹은 null. */
+    @Column(name = "ranking_visible")
+    private Boolean rankingVisible;
+
+    /** 목표값 스펙 배열(확인·수정 폼 복원용) — [{key,value,defaultValue,kind,unit,min,max}]. */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "param_specs")
+    private List<com.ruleup.ruleup_backend.challenge.draft.DraftView.DraftParam> paramSpecs;
+
+    /** 패널티(서버 강제) — {score, groupShare, watcher}. */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "penalties")
+    private ChallengePenalties penalties;
+
+    // ===== 항목별 심사 상태 + 반복 거부 잠금 =====
+    @Enumerated(EnumType.STRING)
+    @Column(name = "moderation_title", nullable = false)
+    private TargetModerationStatus moderationTitle = TargetModerationStatus.EXEMPT;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "moderation_description", nullable = false)
+    private TargetModerationStatus moderationDescription = TargetModerationStatus.EXEMPT;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "moderation_image", nullable = false)
+    private TargetModerationStatus moderationImage = TargetModerationStatus.NONE;
+
+    @Column(name = "moderation_locked_until")
+    private Instant moderationLockedUntil;          // 1시간 3회 거부 → 1시간 수정 잠금
+
+    @Column(name = "moderation_reject_count", nullable = false)
+    private int moderationRejectCount;
+
+    @Column(name = "moderation_reject_window_start")
+    private Instant moderationRejectWindowStart;
 
     // ===== 모더레이션(가시성) 게이트 (§5.1) — lifecycle status 와 독립 축 =====
     @Enumerated(EnumType.STRING)
@@ -189,6 +244,71 @@ public class Challenge extends AssignedIdEntity {
         c.failCount = 0;
         return c;
     }
+
+    /**
+     * 신규 계약 생성(챌린지 생성·라이프사이클 스펙) — draft 원본 대조를 마친 확정값으로 조립한다.
+     *  - ai_title 은 draft 행에서 서버가 복사(대체 표시용), penalties 는 서버 강제값.
+     *  - 구 단일 moderationStatus 게이트는 사용하지 않는다(NONE 고정) — 항목별 상태가 대체.
+     *  - repeat_days·duration_days·penalty/reward JSON 은 인증·점수 모듈 호환용 내부 값(계약 미노출).
+     */
+    public static Challenge createFromDraft(UUID ownerId, String title, String aiTitle, String description,
+                                            String imageUrl, String category, ParticipationType mode,
+                                            String visibility, Boolean rankingVisible, Integer capacity,
+                                            com.ruleup.ruleup_backend.score.domain.Tier minTier,
+                                            LocalDate startDate, LocalDate endDate, List<String> repeatDays,
+                                            Long templateId, VerificationConfig verificationConfig,
+                                            Map<String, Object> params,
+                                            List<com.ruleup.ruleup_backend.challenge.draft.DraftView.DraftParam> paramSpecs,
+                                            ChallengePenalties penalties,
+                                            TargetModerationStatus moderationTitle,
+                                            TargetModerationStatus moderationDescription,
+                                            TargetModerationStatus moderationImage) {
+        Challenge c = new Challenge();
+        c.id = UuidGenerator.generate();
+        c.creatorId = ownerId;
+        c.title = title;
+        c.aiTitle = aiTitle;
+        c.description = description;
+        c.imageUrl = imageUrl;
+        c.category = category;
+        c.participationType = mode;
+        c.visibility = (mode == ParticipationType.GROUP) ? visibility : null;
+        c.rankingVisible = (mode == ParticipationType.SOLO)
+                ? (rankingVisible != null ? rankingVisible : Boolean.TRUE) : null;
+        c.maxParticipants = (mode == ParticipationType.SOLO) ? Integer.valueOf(1) : capacity;
+        c.minTier = minTier;
+        c.startDate = startDate;
+        c.endDate = endDate;
+        c.durationDays = (int) (endDate.toEpochDay() - startDate.toEpochDay()) + 1;
+        c.repeatDays = (repeatDays != null && !repeatDays.isEmpty())
+                ? new ArrayList<>(repeatDays)
+                : new ArrayList<>(List.of("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"));
+        c.templateId = templateId;
+        c.verificationConfig = verificationConfig;
+        c.params = (params != null) ? new LinkedHashMap<>(params) : new LinkedHashMap<>();
+        c.paramSpecs = (paramSpecs != null) ? new ArrayList<>(paramSpecs) : new ArrayList<>();
+        c.penalties = penalties;
+        // 인증·점수 모듈 호환용 레거시 JSON(계약 미노출) — 점수 반영 여부는 penalties.score 가 진실.
+        c.penalty = new PenaltyConfig(BigDecimal.ONE, new PenaltyConfig.SnsShare(false, null), false);
+        c.reward = new RewardConfig(BigDecimal.ONE);
+        c.anonymity = Anonymity.REAL;
+        c.status = ChallengeStatus.UPCOMING;
+        c.version = 0;
+        c.moderationTitle = moderationTitle;
+        c.moderationDescription = moderationDescription;
+        c.moderationImage = moderationImage;
+        c.moderationStatus = ChallengeModerationStatus.NONE;   // 구 게이트 미사용
+        c.aiAssisted = true;
+        c.participantCount = 0;
+        c.verificationType = (verificationConfig != null && verificationConfig.selectedMethod() != null)
+                ? verificationConfig.selectedMethod().name() : null;
+        c.trendingScore = 0.0;
+        c.failCount = 0;
+        return c;
+    }
+
+    /** 설정 버전 +1 — 수정·가입·탈퇴·강퇴 등 수정 가능 범위가 바뀔 수 있는 모든 변화에서 호출. */
+    public void bumpVersion() { this.version++; }
 
     // ===== 탐색 역정규화 갱신(배치 전용) =====
     public void applyTrendingScore(double score) { this.trendingScore = Math.max(0.0, score); }

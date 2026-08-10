@@ -1,6 +1,7 @@
 package com.ruleup.ruleup_backend.challenge.controller;
 
 import com.ruleup.ruleup_backend.challenge.dto.*;
+import com.ruleup.ruleup_backend.challenge.creation.ChallengeCreationService;
 import com.ruleup.ruleup_backend.challenge.draft.ChallengeDraftService;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeService;
 import com.ruleup.ruleup_backend.common.response.ApiResponse;
@@ -26,6 +27,7 @@ import java.util.UUID;
 public class ChallengeController {
 
     private final ChallengeDraftService challengeDraftService;
+    private final ChallengeCreationService challengeCreationService;
     private final ChallengeService challengeService;
     private final ChallengeImageService challengeImageService;
     private final UploadRateLimiter uploadRateLimiter;
@@ -49,22 +51,29 @@ public class ChallengeController {
         return ApiResponse.ok(challengeDraftService.recommendations(UUID.fromString(userId)));
     }
 
-    @Operation(summary = "챌린지 생성", description = "추천을 수정·확정한 최종값으로 생성. UPCOMING으로 저장하고 생성자를 OWNER로 등록.")
+    @Operation(summary = "챌린지 최종 생성",
+            description = "확인 화면에서 수정을 마친 초안으로 생성. Idempotency-Key 헤더 필수(DB 유니크 — 재시도 안전). "
+                    + "심사 대상은 서버가 draftId 원본 대조로 판정(자가 신고 없음). 201 + UPCOMING.")
     @PostMapping
-    public ApiResponse<ChallengeResponse> create(@AuthenticationPrincipal String userId,
-                                                 @RequestBody CreateChallengeRequest request) {
-        return ApiResponse.ok(challengeService.create(UUID.fromString(userId), request));
+    @ResponseStatus(org.springframework.http.HttpStatus.CREATED)
+    public ApiResponse<CreateChallengeResponse> create(
+            @AuthenticationPrincipal String userId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestBody CreateChallengeRequest request) {
+        return ApiResponse.ok(challengeCreationService.create(UUID.fromString(userId), idempotencyKey, request));
     }
 
     @Operation(summary = "챌린지 대표 이미지 업로드",
-            description = "jpg/png, 최대 10MB. 업로드 시 SafeSearch 동기 검수로 명백 위반은 422 IMAGE_REJECTED 차단. "
-                    + "반환된 imageUrl을 생성/수정 요청 body의 imageUrl에 넣는다.")
+            description = "jpg/png, 최대 10MB. 형식·크기만 검사하고 콘텐츠 심사는 등록 시점 비동기. "
+                    + "반환된 imageUrl은 본인 소유로 기록되며 생성/수정 body에 넣는다(타인·외부 URL 거절). "
+                    + "미등록 업로드는 24시간 후 정리.")
     @PostMapping(value = "/image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ApiResponse<ChallengeImageResponse> uploadImage(
             @AuthenticationPrincipal String userId,
             @RequestPart("image") MultipartFile image) {
         uploadRateLimiter.check(userId);
-        return ApiResponse.ok(new ChallengeImageResponse(challengeImageService.upload(image)));
+        return ApiResponse.ok(new ChallengeImageResponse(
+                challengeImageService.upload(UUID.fromString(userId), image)));
     }
 
     @Operation(summary = "내 챌린지 목록", description = "내가 참여 중인 챌린지 목록(멤버십 기준, 페이지네이션 없음). "
