@@ -3,6 +3,10 @@ package com.ruleup.ruleup_backend.challenge;
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
 import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsProjectionService;
 import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsReconciliationService;
+import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
+import com.ruleup.ruleup_backend.challenge.lifecycle.ChallengeActivationService;
+import com.ruleup.ruleup_backend.verification.dto.ManualVerificationRequest;
+import com.ruleup.ruleup_backend.verification.service.VerificationManualService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -13,6 +17,8 @@ import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.test.context.event.ApplicationEvents;
+import org.springframework.test.context.event.RecordApplicationEvents;
 import org.springframework.web.context.WebApplicationContext;
 
 import java.math.BigDecimal;
@@ -30,12 +36,16 @@ import static org.springframework.security.test.web.servlet.setup.SecurityMockMv
  */
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
+@RecordApplicationEvents
 class ChallengeStatsProjectionIT extends ChallengeApiSupport {
 
     @Autowired WebApplicationContext wac;
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired ChallengeStatsProjectionService projectionService;
     @Autowired ChallengeStatsReconciliationService reconciliationService;
+    @Autowired VerificationManualService manualVerificationService;
+    @Autowired ChallengeActivationService activationService;
+    @Autowired ApplicationEvents applicationEvents;
     MockMvc mvc;
 
     @Override protected MockMvc mvc() { return mvc; }
@@ -207,6 +217,42 @@ class ChallengeStatsProjectionIT extends ChallengeApiSupport {
         }
 
         @Test
+        @DisplayName("수동 인증 성공은 원본 커밋 뒤 통계 재계산 이벤트를 발행한다")
+        void manualSuccessPublishesStatsRefresh() throws Exception {
+            Member member = member(uniq("stats-manual"));
+            UUID challengeId = activeChallenge(member.id());
+            insertActiveMembership(challengeId, member.id(), "MEMBER");
+            jdbcTemplate.update("UPDATE challenges SET participant_count = 1, " +
+                    "start_date = DATE_SUB(CURDATE(), INTERVAL 1 DAY), " +
+                    "end_date = DATE_ADD(CURDATE(), INTERVAL 14 DAY) WHERE id = ?", (Object) bytes(challengeId));
+
+            manualVerificationService.submit(member.id(), challengeId,
+                    new ManualVerificationRequest("SELF_CHECK", null, null, null, false));
+
+            assertThat(applicationEvents.stream(ChallengeStatsRefreshRequested.class)
+                    .map(ChallengeStatsRefreshRequested::challengeId))
+                    .contains(challengeId);
+        }
+
+        @Test
+        @DisplayName("UPCOMING에서 ACTIVE 전환할 때 초기 통계 재계산 이벤트를 발행한다")
+        void activationPublishesStatsRefresh() throws Exception {
+            UUID owner = member(uniq("stats-activation")).id();
+            UUID challengeId = insertChallenge(owner, "EXERCISE", "UPCOMING", "GROUP");
+            jdbcTemplate.update("UPDATE challenges SET visibility = 'PUBLIC', " +
+                    "start_date = CURDATE() WHERE id = ?", (Object) bytes(challengeId));
+
+            activationService.activateDueChallenges();
+
+            assertThat(applicationEvents.stream(ChallengeStatsRefreshRequested.class)
+                    .map(ChallengeStatsRefreshRequested::challengeId))
+                    .contains(challengeId);
+            String status = jdbcTemplate.queryForObject(
+                    "SELECT status FROM challenges WHERE id = ?", String.class, bytes(challengeId));
+            assertThat(status).isEqualTo("ACTIVE");
+        }
+
+        @Test
         @DisplayName("탈퇴한 멤버는 그룹 통계에서 빠진다 — 재계산이 원천을 다시 읽는다")
         void leftMemberExcluded() throws Exception {
             UUID owner = member(uniq("left-owner")).id();
@@ -239,6 +285,22 @@ class ChallengeStatsProjectionIT extends ChallengeApiSupport {
             int repaired = reconciliationService.runOnce();
             assertThat(repaired).isPositive();
             assertThat(completionRate(challengeId)).isNotNull();
+        }
+
+        @Test
+        @DisplayName("stats 행이 통째로 없어도 reconciliation이 복구하고 diff로 센다")
+        void reconciliationCountsMissingRow() throws Exception {
+            UUID owner = member(uniq("recon-missing-owner")).id();
+            UUID challengeId = activeChallenge(owner);
+            jdbcTemplate.update("DELETE FROM challenge_stats WHERE challenge_id = ?", (Object) bytes(challengeId));
+
+            int repaired = reconciliationService.runOnce();
+
+            assertThat(repaired).isPositive();
+            Integer rows = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM challenge_stats WHERE challenge_id = ?",
+                    Integer.class, bytes(challengeId));
+            assertThat(rows).isEqualTo(1);
         }
     }
 }

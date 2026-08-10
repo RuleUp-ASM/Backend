@@ -3,6 +3,7 @@ package com.ruleup.ruleup_backend.verification.service;
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
+import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.verification.domain.VerificationConfig;
@@ -14,6 +15,7 @@ import com.ruleup.ruleup_backend.verification.dto.ManualVerificationResponse;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationMethodResultRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -43,6 +45,7 @@ public class VerificationManualService {
     private final VerificationConfigFactory configFactory;
     private final VerificationMemberSetup memberSetup;
     private final VerificationProgressService progressService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public ManualVerificationResponse submit(UUID userId, UUID challengeId, ManualVerificationRequest req) {
@@ -126,6 +129,7 @@ public class VerificationManualService {
             daily.approveFallback(now);
             if (targetDate.equals(today)) progressService.recountAndSetToday(member, VerificationStatus.SUCCESS);
             else progressService.recount(member);
+            eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "MANUAL_FALLBACK_SUCCESS"));
             return new ManualVerificationResponse(
                     daily.getId().toString(), targetDate.toString(), "SUCCESS",
                     method, null, "MANUAL_FALLBACK", null, member.getProgressRate());
@@ -137,6 +141,7 @@ public class VerificationManualService {
         daily.recordManual(method, now);
         if (targetDate.equals(today)) progressService.updateAfterSync(member, VerificationStatus.SUCCESS, now);
         else progressService.recount(member);
+        eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "MANUAL_SUCCESS"));
         return new ManualVerificationResponse(
                 daily.getId().toString(), targetDate.toString(), "SUCCESS",
                 method, null, "MANUAL", null, member.getProgressRate());

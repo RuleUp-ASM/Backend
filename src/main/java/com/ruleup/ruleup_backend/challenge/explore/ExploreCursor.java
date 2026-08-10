@@ -5,7 +5,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 
-import java.nio.charset.StandardCharsets;
+import java.math.BigDecimal;
+import java.sql.Timestamp;
+import java.time.LocalDate;
 import java.util.Base64;
 import java.util.UUID;
 
@@ -44,15 +46,64 @@ public record ExploreCursor(ExploreSort sort, String primary, String secondary, 
         if (raw == null || raw.isBlank()) return null;
         try {
             var node = OM.readTree(Base64.getUrlDecoder().decode(raw));
-            if (node.path("v").asInt() != VERSION) throw new IllegalArgumentException("version");
-            ExploreSort sort = ExploreSort.valueOf(node.path("sort").asText());
+            if (!node.isObject() || !node.path("v").isIntegralNumber()
+                    || node.path("v").intValue() != VERSION) {
+                throw new IllegalArgumentException("version");
+            }
+            if (!node.path("sort").isTextual() || !node.path("id").isTextual()
+                    || !node.path("p").isTextual()) {
+                throw new IllegalArgumentException("required field type");
+            }
+            ExploreSort sort = ExploreSort.valueOf(node.path("sort").textValue());
             if (sort != expected) throw new IllegalArgumentException("sort mismatch");
-            UUID id = UUID.fromString(node.path("id").asText());
-            String primary = node.path("p").isNull() ? null : node.path("p").asText();
-            String secondary = node.path("s").isNull() ? null : node.path("s").asText();
+            UUID id = UUID.fromString(node.path("id").textValue());
+            String primary = node.path("p").textValue();
+            String secondary = node.path("s").isTextual() ? node.path("s").textValue() : null;
+            validateSortValues(sort, primary, secondary, node.has("s") && !node.path("s").isNull());
             return new ExploreCursor(sort, primary, secondary, id);
         } catch (Exception e) {
             throw new BusinessException(ErrorCode.CURSOR_INVALID);
         }
+    }
+
+    private static void validateSortValues(ExploreSort sort, String primary, String secondary,
+                                           boolean hasNonNullSecondary) {
+        if (primary == null || primary.isBlank()) throw new IllegalArgumentException("primary");
+        switch (sort) {
+            case POPULAR -> {
+                requireNonNegativeInteger(primary);
+                if (!hasNonNullSecondary || secondary == null || secondary.isBlank()) {
+                    throw new IllegalArgumentException("secondary");
+                }
+                Timestamp.valueOf(secondary);
+            }
+            case PARTICIPANTS -> {
+                requireNonNegativeInteger(primary);
+                rejectSecondary(hasNonNullSecondary);
+            }
+            case COMPLETION_RATE, SUCCESS_FAIL_RATIO -> {
+                BigDecimal rate = new BigDecimal(primary);
+                if (rate.compareTo(BigDecimal.ZERO) < 0 || rate.compareTo(BigDecimal.ONE) > 0) {
+                    throw new IllegalArgumentException("rate");
+                }
+                rejectSecondary(hasNonNullSecondary);
+            }
+            case RECENT -> {
+                Timestamp.valueOf(primary);
+                rejectSecondary(hasNonNullSecondary);
+            }
+            case DEADLINE -> {
+                LocalDate.parse(primary);
+                rejectSecondary(hasNonNullSecondary);
+            }
+        }
+    }
+
+    private static void requireNonNegativeInteger(String value) {
+        if (Integer.parseInt(value) < 0) throw new IllegalArgumentException("negative");
+    }
+
+    private static void rejectSecondary(boolean hasNonNullSecondary) {
+        if (hasNonNullSecondary) throw new IllegalArgumentException("unexpected secondary");
     }
 }

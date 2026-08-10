@@ -2,10 +2,12 @@ package com.ruleup.ruleup_backend.challenge.lifecycle;
 
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
+import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,6 +34,7 @@ public class ChallengeActivationService {
     private static final int CLAIM_LIMIT = 200;
 
     private final ChallengeRepository challengeRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     /** 1분마다: 시작일이 도달한 시작 전(UPCOMING)·모더레이션 통과 챌린지를 ACTIVE 로 전환한다. */
     @Scheduled(fixedDelay = 60_000)
@@ -41,6 +44,7 @@ public class ChallengeActivationService {
         List<Challenge> due = challengeRepository.findUpcomingDueForActivationForUpdate(today, CLAIM_LIMIT);
         for (Challenge c : due) {
             c.activate();
+            eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(c.getId(), "CHALLENGE_ACTIVATED"));
         }
         if (!due.isEmpty()) {
             log.info("시작일 도달로 ACTIVE 전환한 챌린지 {}건", due.size());
