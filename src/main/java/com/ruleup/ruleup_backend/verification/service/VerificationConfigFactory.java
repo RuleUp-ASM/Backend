@@ -59,7 +59,7 @@ public class VerificationConfigFactory {
             case "SCREEN_TIME_MAX" -> screenTime = new ScreenTimeConfig(
                     ScreenTimeMode.MAX, Polarity.CONSTRAINT,
                     packages(params), intParam(params, "duration_min", 30), timeWindow(params), 1);
-            case "GPS_PRESENCE" -> gps = buildGps(params);
+            case "GPS_PRESENCE", "GPS_AVOID" -> gps = buildGps(params, "GPS_AVOID".equals(tag));
             // 움직임: 레거시 GPS_DISTANCE/ACTIVITY 태그도 v2에서는 HEALTH로 라우팅.
             case "HEALTH", "GPS_DISTANCE", "ACTIVITY" -> health = buildHealth(params);
             case "SLEEP" -> sleep = new SleepConfig(
@@ -75,8 +75,13 @@ public class VerificationConfigFactory {
     }
 
     // ===== GPS_PRESENCE (VISIT/AVOID) =====
-    private GpsConfig buildGps(Map<String, Object> params) {
-        boolean avoid = "AVOID".equalsIgnoreCase(strParam(params, "gps_presence"));
+    /**
+     * @param avoidByTemplate 루틴 템플릿이 "장소 피하기"({@code GPS_AVOID})로 정의된 경우.
+     *                        방문/회피는 방 단위 인증 방식이라 사용자가 고치는 목표값(params)이 아니라
+     *                        템플릿 쪽에 둔다. 레거시 {@code gps_presence} 파라미터도 계속 인정한다.
+     */
+    private GpsConfig buildGps(Map<String, Object> params, boolean avoidByTemplate) {
+        boolean avoid = avoidByTemplate || "AVOID".equalsIgnoreCase(strParam(params, "gps_presence"));
         GpsPresence presence = avoid ? GpsPresence.AVOID : GpsPresence.VISIT;
         Polarity polarity = avoid ? Polarity.CONSTRAINT : Polarity.ACHIEVEMENT;
         AnchorFillMode fillMode = "NEARBY_BRAND".equalsIgnoreCase(strParam(params, "anchor_fill_mode"))
@@ -136,7 +141,8 @@ public class VerificationConfigFactory {
         return switch (tag) {
             case "WAKE" -> VerificationMethod.WAKE;
             case "SCREEN_TIME_MIN", "SCREEN_TIME_MAX" -> VerificationMethod.SCREEN_TIME;
-            case "GPS_PRESENCE" -> VerificationMethod.GPS_PRESENCE;
+            // 방문(VISIT)·회피(AVOID) 는 같은 평가기가 처리한다 — 방향만 GpsConfig 에 실린다.
+            case "GPS_PRESENCE", "GPS_AVOID" -> VerificationMethod.GPS_PRESENCE;
             // v2: 움직임은 전부 HEALTH로. 커스텀 세션(GPS_DISTANCE 평가기)은 보존하되 라우팅 제외.
             case "HEALTH", "GPS_DISTANCE", "ACTIVITY" -> VerificationMethod.HEALTH;
             case "SLEEP" -> VerificationMethod.SLEEP;

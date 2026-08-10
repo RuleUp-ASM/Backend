@@ -39,7 +39,10 @@ public class RoutineCatalog {
 
     /** LLM 에 줄 후보 목록(전체 템플릿). */
     public List<RoutineCandidate> candidates() {
+        // 자동 인증이 가능한 루틴만 후보다. 초안 프롬프트가 이 목록을 "자동 인증이 가능한 루틴의
+        // 전체 목록"으로 제시하므로, 수동 전용 템플릿이 섞이면 그 전제가 깨진다.
         return cache().values().stream()
+                .filter(RoutineTemplate::supportsAuto)
                 .map(t -> new RoutineCandidate(
                         t.getId(), t.getName(), t.getCategory().name(), t.getDescription(),
                         t.paramSpecs().stream().map(s -> s.key()).toList()))
