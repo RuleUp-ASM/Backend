@@ -163,7 +163,8 @@ class ChallengeDraftPipelineIT extends ChallengeApiSupport {
             // 기간: 시작 = 생성일 +1일, 종료 = 시작 +2주
             LocalDate start = LocalDate.parse(read(res, "$.data.draft.period.start"));
             LocalDate end = LocalDate.parse(read(res, "$.data.draft.period.end"));
-            assertThat(start).isEqualTo(LocalDate.now().plusDays(1));
+            // 날짜 축은 KST — 시스템 기본 타임존으로 단정하면 UTC로 도는 CI에서 하루 어긋난다.
+            assertThat(start).isEqualTo(LocalDate.now(java.time.ZoneId.of("Asia/Seoul")).plusDays(1));
             assertThat(end).isEqualTo(start.plusDays(14));
 
             // 목표값: 템플릿 스펙 + LLM 값 병합

@@ -106,7 +106,8 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
             Member owner = member(uniq("cycle-owner"));
             Member joiner = member(uniq("cycle-joiner"));
             UUID challengeId = openGroup(owner.id());
-            LocalDate start = LocalDate.now().minusDays(3);
+            // 사이클 경계는 KST 기준으로 계산되므로 픽스처도 KST 로 잡는다.
+            LocalDate start = LocalDate.now(java.time.ZoneId.of("Asia/Seoul")).minusDays(3);
             jdbcTemplate.update("UPDATE challenges SET start_date = ? WHERE id = ?", start, bytes(challengeId));
 
             MvcResult res = join(joiner.token(), challengeId);
