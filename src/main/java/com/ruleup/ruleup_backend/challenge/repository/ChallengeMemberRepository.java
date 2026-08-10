@@ -51,10 +51,10 @@ public interface ChallengeMemberRepository extends JpaRepository<ChallengeMember
      * AUTO/소프트삭제 판정은 호출부가 챌린지를 로드해 걸러낸다(멤버 행만 잠가 다른 배치와 락 간섭 없음).
      * 다중 인스턴스에서도 잠긴 행은 건너뛰어 중복 발송 없음(활성화/완료 배치와 동일 DB 멱등 패턴).
      */
-    @Query(value = "SELECT * FROM ChallengeMember " +
-            "WHERE status = 'ACTIVE' AND setupStatus = 'PENDING_SETUP' " +
-            "AND (ghostPushedAt IS NULL OR ghostPushedAt <= :cooldownThreshold) " +
-            "ORDER BY joinedAt LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
+    @Query(value = "SELECT * FROM challenge_members " +
+            "WHERE status = 'ACTIVE' AND setup_status = 'PENDING_SETUP' " +
+            "AND (ghost_pushed_at IS NULL OR ghost_pushed_at <= :cooldownThreshold) " +
+            "ORDER BY joined_at LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
     List<ChallengeMember> findSetupPendingForGhostPushForUpdate(@Param("cooldownThreshold") Instant cooldownThreshold,
                                                                 @Param("limit") int limit);
 

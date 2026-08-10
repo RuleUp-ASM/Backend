@@ -33,50 +33,36 @@ public interface ChallengeRepository extends JpaRepository<Challenge, UUID> {
     Optional<Challenge> findByIdForUpdate(@Param("id") UUID id);
 
     /**
-     * 모더레이션 마감 배치(§5.1/§8): REJECTED 상태로 1시간 수정창(fixDeadline)이 지난 챌린지를
-     * FOR UPDATE SKIP LOCKED 로 선점. 다중 인스턴스에서도 잠긴 행은 건너뛰어 중복 처리 불가
-     * (ShedLock 없이 DB 멱등 — 기존 확정 배치와 동일 패턴).
+     * 활성화 배치: 시작일(start_date)이 도달한 UPCOMING 챌린지를 FOR UPDATE SKIP LOCKED 로 선점.
+     * 심사 상태와 무관하게 활성화한다(심사 중 기능 제한 없음 — 대체 표시가 노출을 가린다).
+     * 다중 인스턴스에서도 중복 전환 불가(DB 멱등 패턴).
      */
-    @Query(value = "SELECT * FROM Challenge " +
-            "WHERE moderationStatus = 'REJECTED' AND fixDeadline IS NOT NULL AND fixDeadline <= :now " +
-            "AND deletedAt IS NULL " +
-            "ORDER BY fixDeadline LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
-    List<Challenge> findRejectedFixWindowExpiredForUpdate(@Param("now") Instant now, @Param("limit") int limit);
-
-    /**
-     * 활성화 배치(§2): 시작일(startDate)이 도달한 UPCOMING·모더레이션 통과(NONE/APPROVED) 챌린지를
-     * FOR UPDATE SKIP LOCKED 로 선점. 모더레이션 미통과(PENDING_REVIEW/REJECTED) 챌린지는
-     * 가입·노출이 막혀 있으므로 활성화 대상에서 제외한다.
-     * 모더레이션 마감 배치와 동일한 DB 멱등 패턴(다중 인스턴스에서도 중복 전환 불가).
-     */
-    @Query(value = "SELECT * FROM Challenge " +
-            "WHERE status = 'UPCOMING' AND moderationStatus IN ('NONE','APPROVED') AND startDate <= :today " +
-            "AND deletedAt IS NULL " +
-            "ORDER BY startDate LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
+    @Query(value = "SELECT * FROM challenges " +
+            "WHERE status = 'UPCOMING' AND start_date <= :today " +
+            "AND deleted_at IS NULL " +
+            "ORDER BY start_date LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
     List<Challenge> findUpcomingDueForActivationForUpdate(@Param("today") LocalDate today, @Param("limit") int limit);
 
     /**
-     * 모더레이션 재검 배치(§5.1/§8): AI 검수가 결론을 못 낸 채(=UNAVAILABLE 또는 리스너 실패로)
-     * PENDING_REVIEW 로 지체된 챌린지를 FOR UPDATE SKIP LOCKED 로 선점해 다시 검수한다.
-     *  - 생성/이름변경 직후엔 AFTER_COMMIT 리스너가 곧 처리하므로, 마지막 변경(updatedAt)이
-     *    threshold 보다 오래된 것만 집어 정상 처리분과 겹치지 않게 한다.
-     *  - AI 가 한 번이라도 결론(APPROVED/REJECTED)을 내면 PENDING_REVIEW 를 벗어나 이 대상에서 빠진다
-     *    (= "AI 거친 뒤엔 재검 안 함").
-     * 활성화/마감 배치와 동일한 DB 멱등 패턴(다중 인스턴스에서도 중복 검수·중복 알림 없음).
+     * 심사 재시도 배치: 항목별 심사(제목/설명/이미지)가 결론을 못 낸 채(IN_REVIEW) 지체된 챌린지를
+     * FOR UPDATE SKIP LOCKED 로 선점해 다시 심사한다. 생성/수정 직후엔 AFTER_COMMIT 리스너가 곧
+     * 처리하므로, 마지막 변경(updated_at)이 threshold 보다 오래된 것만 집는다.
      */
-    @Query(value = "SELECT * FROM Challenge " +
-            "WHERE moderationStatus = 'PENDING_REVIEW' AND deletedAt IS NULL AND updatedAt <= :threshold " +
-            "ORDER BY updatedAt LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
-    List<Challenge> findPendingModerationStalledForUpdate(@Param("threshold") Instant threshold, @Param("limit") int limit);
+    @Query(value = "SELECT * FROM challenges " +
+            "WHERE (moderation_title = 'IN_REVIEW' OR moderation_description = 'IN_REVIEW' " +
+            "       OR moderation_image = 'IN_REVIEW') " +
+            "AND deleted_at IS NULL AND updated_at <= :threshold " +
+            "ORDER BY updated_at LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
+    List<Challenge> findModerationInReviewStalledForUpdate(@Param("threshold") Instant threshold, @Param("limit") int limit);
 
     /**
      * 완료 배치(§5.5/§5.7): 종료일(endDate)이 지난 ACTIVE 챌린지를 FOR UPDATE SKIP LOCKED 로 선점.
      * endDate 는 마지막 활동일(포함)이므로 그 날을 넘긴(endDate < today) 것만 COMPLETED 로 넘긴다.
      * 활성화 배치와 동일한 DB 멱등 패턴.
      */
-    @Query(value = "SELECT * FROM Challenge " +
-            "WHERE status = 'ACTIVE' AND endDate < :today AND deletedAt IS NULL " +
-            "ORDER BY endDate LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
+    @Query(value = "SELECT * FROM challenges " +
+            "WHERE status = 'ACTIVE' AND end_date < :today AND deleted_at IS NULL " +
+            "ORDER BY end_date LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
     List<Challenge> findActiveDueForCompletionForUpdate(@Param("today") LocalDate today, @Param("limit") int limit);
 
     /**

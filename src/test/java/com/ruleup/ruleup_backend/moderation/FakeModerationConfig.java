@@ -51,6 +51,18 @@ public class FakeModerationConfig {
                 return (bytes == null || bytes.length == 0)
                         ? ModerationResult.UNAVAILABLE : ModerationResult.APPROVED;
             }
+
+            @Override
+            public TextVerdicts moderateChallengeText(String title, String description) {
+                return new TextVerdicts(verdictOf(title), verdictOf(description));
+            }
+
+            private ModerationResult verdictOf(String text) {
+                if (text == null || text.isBlank()) return ModerationResult.APPROVED;
+                String lower = text.toLowerCase();
+                return BANNED.stream().anyMatch(lower::contains)
+                        ? ModerationResult.REJECTED : ModerationResult.APPROVED;
+            }
         };
     }
 }

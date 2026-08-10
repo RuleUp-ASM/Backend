@@ -78,8 +78,6 @@ public class ChallengeMemberService {
             throw new BusinessException(ErrorCode.MANNER_TEMPERATURE_BELOW_MINIMUM);
 
         // ⑤ 이미지 모더레이션 미통과(PENDING_REVIEW/REJECTED)면 모집 차단
-        if (!c.isModerationCleared())
-            throw new BusinessException(ErrorCode.CHALLENGE_UNDER_REVIEW);
 
         // 즉시 ACTIVE 등록. uq_member 로 동시 INSERT는 1건만 성공, 나머지는 중복으로 변환.
         ChallengeMember joined = ChallengeMember.join(challengeId, userId, MemberStatus.ACTIVE);
@@ -89,6 +87,7 @@ public class ChallengeMemberService {
             throw new BusinessException(ErrorCode.ALREADY_JOINED);
         }
         challengeRepository.incrementParticipantCount(challengeId);
+        c.bumpVersion();   // 참여 인원 변화 = 수정 가능 범위가 바뀔 수 있음 → version 증가(설정 수정과 충돌 감지)
         return joinResponse(c, MemberStatus.ACTIVE, joined.getSetupStatus());
     }
 
@@ -124,6 +123,7 @@ public class ChallengeMemberService {
 
         me.leave();   // ACTIVE → LEFT (dirty checking). 행은 남겨 재참여 금지.
         challengeRepository.decrementParticipantCount(challengeId);
+        c.bumpVersion();   // 참여 인원 변화 → version 증가
         return new LeaveResponse(penaltyApplied);
     }
 

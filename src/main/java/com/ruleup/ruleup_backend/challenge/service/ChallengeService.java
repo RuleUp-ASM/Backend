@@ -77,75 +77,6 @@ public class ChallengeService {
         return new ChallengeListResponse(items);
     }
 
-    // ===== 3.2 생성 =====
-    @Transactional
-    public ChallengeResponse create(UUID userId, CreateChallengeRequest req) {
-        // 이름(제목/설명) 모더레이션은 하지 않는다(생성 및 라이프사이클 §Non-Goals — LLM draft Step2가 대체).
-        validateTitle(req.title());
-        if (req.description() != null && req.description().length() > 200)
-            throw new BusinessException(ErrorCode.DESCRIPTION_TOO_LONG);
-
-        String category = validateCategory(req.category());
-        ParticipationType participationType = validateParticipationType(req.participationType());
-        // 익명/실명은 입력값 그대로 저장(§11.2 — silently-drop 금지). 익명이면 응답에서 닉네임 마스킹.
-        Anonymity anonymity = validateAnonymity(req.anonymity());
-        List<String> repeatDays = validateRepeatDays(req.repeatDays());
-        int durationDays = validateDuration(req.durationDays());
-        LocalDate startDate = validateStartDate(req.startDate());
-        validatePenalty(req.penalty());
-        validateReward(req.reward());
-        // 정원: GROUP은 필수(≥1), SOLO는 도메인에서 1로 고정.
-        validateMaxParticipants(participationType, req.maxParticipants());
-        if (participationType == ParticipationType.GROUP)
-            checkMinMannerNotAboveOwner(userId, req.minMannerTemperature());
-
-        // 루틴(인증) 검증 → 스냅샷 산출.
-        ResolvedRoutine routine = routineSelectionService.resolve(
-                req.templateId(), req.selectedMethod(), req.paramsOrEmpty());
-
-        // AUTO면 필요한 권한이 모두 grant됐는지 생성 시점 1회 검증(§11.2). 보유 상태는 저장하지 않는다(§5.6).
-        validateGrantedPermissions(routine.verification(), req.grantedPermissionsOrEmpty());
-
-        Challenge challenge = Challenge.create(
-                userId, req.title(), req.description(), req.imageUrl(),
-                category, participationType, req.minMannerTemperature(), req.maxParticipants(), repeatDays,
-                durationDays, startDate,
-                routine.templateId(), routine.verification(), routine.params(),
-                req.penalty(), req.reward(),
-                anonymity, /* aiAssisted */ true);
-
-        challengeRepository.save(challenge);
-
-        // 생성자 = OWNER, 즉시 ACTIVE. participant_count는 ACTIVE 멤버 수이므로 1로 시작.
-        memberRepository.save(ChallengeMember.owner(challenge.getId(), userId));
-        challenge.increaseParticipantCount();
-
-        // 이미지 검수만 비동기(§5.1) — 이미지가 있어 PENDING_REVIEW 인 경우에만 커밋 후 리스너가 검수.
-        // 이미지가 없으면 create()에서 이미 APPROVED(즉시 공개)라 검수 이벤트를 내지 않는다.
-        if (challenge.getModerationStatus() == ChallengeModerationStatus.PENDING_REVIEW) {
-            eventPublisher.publishEvent(new ChallengeModerationRequested(challenge.getId()));
-        }
-
-        // 추천 세그먼트 점수는 여기서 즉시 갱신하지 않는다(매 생성마다 바뀌면 추천 캐시 효율↓).
-        // SegmentScoreService 가 주기적으로 누적 챌린지를 재집계한다.
-        return ChallengeResponse.from(challenge);
-    }
-
-    /**
-     * AUTO 인증이면 스냅샷의 "즉시형" 권한이 모두 grantedPermissions 에 포함돼야 한다(§5.1/§11.2).
-     *  - 즉시형(알림·FINE위치·활동인식·HC·카메라 등)은 생성 버튼 시점 팝업으로 받으므로 여기서 강제.
-     *  - 설정형(백그라운드 위치·사용정보 접근)은 셋업(§11.4 /setup)으로 이연 → 생성 시 검증 제외.
-     * 미충족이면 ROUTINE_PERMISSION_REQUIRED. (보유 상태는 저장하지 않음 — 생성 시점 검증만, §5.6)
-     */
-    private void validateGrantedPermissions(com.ruleup.ruleup_backend.routine.domain.VerificationConfig v,
-                                            List<String> granted) {
-        if (v.selectedMethod() != com.ruleup.ruleup_backend.routine.domain.SelectedMethod.AUTO) return;
-        List<String> required = v.immediateRequiredPermissions();
-        if (required.isEmpty()) return;
-        if (granted == null || !granted.containsAll(required))
-            throw new BusinessException(ErrorCode.ROUTINE_PERMISSION_REQUIRED);
-    }
-
     /** 그룹 기준 매너 온도가 생성자 본인 온도보다 높으면 거부 (생성/수정 공용, §3). */
     private void checkMinMannerNotAboveOwner(UUID ownerId, BigDecimal minManner) {
         if (minManner == null) return;
@@ -165,8 +96,8 @@ public class ChallengeService {
     @Transactional(readOnly = true)
     public ChallengeDetailResponse getDetail(UUID userId, UUID challengeId) {
         Challenge c = loadActive(challengeId);
-        // 가시성 게이트(§3-3): 비-OWNER는 모더레이션 통과(NONE/APPROVED)만 조회. 그 외는 존재를 숨겨 404.
-        if (!c.isVisibleTo(userId)) throw new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND);
+        // 심사 중·거부여도 기능 제한 없음(구 비노출 게이트 폐기) — 타인 화면만 대체 표시로 가린다.
+        boolean ownerView = c.isOwner(userId);
 
         // 생성자 닉네임: 검수 전/거절이면 임시 닉네임(visibleNicknameTo) + 익명이면 추가 마스킹(§11.2).
         String ownerNickname = userRepository.findById(c.getCreatorId())
@@ -195,16 +126,18 @@ public class ChallengeService {
         var eligibility = new ChallengeDetailResponse.Eligibility(
                 canJoin, myManner, c.getMinMannerTemperature(), rejoinBlocked);
 
-        // fixDeadline 은 OWNER에게만 의미(REJECTED 1시간 수정창). 타인에겐 항상 null.
-        String fixDeadline = (c.isOwner(userId) && c.getFixDeadline() != null)
-                ? c.getFixDeadline().toString() : null;
+        // 구 1시간 수정창(fixDeadline) 폐기 — 계약 필드는 호환을 위해 null 고정.
+        String fixDeadline = null;
 
         // 요청자의 역할: OWNER / MANAGER / MEMBER / NONE.
         String myRole = c.isOwner(userId) ? MemberRole.OWNER.name()
                 : (isActiveMember ? myMembership.getRole().name() : "NONE");
 
         return new ChallengeDetailResponse(
-                c.getId().toString(), c.getTitle(), c.getDescription(), c.getImageUrl(),
+                c.getId().toString(),
+                ownerView ? c.getTitle() : c.publicTitle(),
+                ownerView ? c.getDescription() : c.publicDescription(),
+                ownerView ? c.getImageUrl() : c.publicImageUrl(),
                 c.getCategory(), c.getParticipationType().name(), c.getStatus().name(),
                 c.getModerationStatus().name(), fixDeadline, c.getAnonymity().name(),
                 new ChallengeDetailResponse.Owner(ownerNickname),
@@ -213,101 +146,6 @@ public class ChallengeService {
                 c.getTemplateId(), c.getVerificationConfig(), c.getParams(),
                 c.getPenalty(), c.getReward(),
                 c.getMaxParticipants(), stats, eligibility, myRole);
-    }
-
-    // ===== §4 수정 (OWNER만) =====
-    /**
-     * 챌린지 수정. UPCOMING + 멤버(본인 제외) 0명이면 전 항목, 그 외(멤버 존재 또는 진행 중)면 maxParticipants만.
-     * 인원 상한 외 필드가 포함됐는데 전 항목 수정 불가 상태면 CHALLENGE_NOT_EDITABLE.
-     */
-    @Transactional
-    public ChallengeResponse update(UUID userId, UUID challengeId, UpdateChallengeRequest req) {
-        // 인원 상한 축소 하한(현재 인원) 판정을 위해 행 잠금으로 로드.
-        Challenge c = challengeRepository.findByIdForUpdate(challengeId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
-        ensureOwner(c, userId);
-
-        long activeCount = memberRepository.countByChallengeIdAndStatus(challengeId, MemberStatus.ACTIVE);
-        // "전 항목 수정 가능" = 시작 전(UPCOMING) + 멤버(본인 제외) 0명.
-        boolean fullEditable = c.isUpcoming() && activeCount <= 1;
-
-        boolean touchesOtherFields = req.title() != null || req.description() != null || req.imageUrl() != null
-                || req.category() != null || req.repeatDays() != null || req.durationDays() != null
-                || req.startDate() != null || req.penalty() != null || req.reward() != null
-                || req.minMannerTemperature() != null || req.params() != null;
-        if (touchesOtherFields && !fullEditable)
-            throw new BusinessException(ErrorCode.CHALLENGE_NOT_EDITABLE);
-
-        // 최대 참여 인원: 유일하게 언제든(시작 전·진행 중) 수정 가능. 현재 인원 미만으로 축소 불가.
-        if (req.maxParticipants() != null && c.isGroup()) {
-            if (req.maxParticipants() < activeCount)
-                throw new BusinessException(ErrorCode.MAX_PARTICIPANTS_BELOW_CURRENT);
-            c.changeMaxParticipants(req.maxParticipants());
-        }
-
-        if (touchesOtherFields) {
-            if (req.title() != null) validateTitle(req.title());   // 이름 모더레이션 없음(§Non-Goals)
-            if (req.description() != null && req.description().length() > 200)
-                throw new BusinessException(ErrorCode.DESCRIPTION_TOO_LONG);
-
-            // imageUrl 이 실제로 바뀌면 재검수(§3-3) — 바꾸기 "전" 값과 비교.
-            boolean imageChanged = req.imageUrl() != null && !req.imageUrl().equals(c.getImageUrl());
-
-            c.changeTitle(req.title());
-            c.changeImageUrl(req.imageUrl());
-            c.changeDescription(req.description());
-            if (req.category() != null)   c.changeCategory(validateCategory(req.category()));
-            if (req.repeatDays() != null) c.changeRepeatDays(validateRepeatDays(req.repeatDays()));
-            if (req.params() != null)
-                c.changeParams(routineSelectionService.revalidateParams(c.getTemplateId(), req.params()));
-            c.changePenalty(req.penalty());
-            c.changeReward(req.reward());
-            if (c.isGroup())
-                checkMinMannerNotAboveOwner(c.getCreatorId(), req.minMannerTemperature());
-            c.changeMinMannerTemperature(req.minMannerTemperature());
-
-            Integer duration = (req.durationDays() != null) ? validateDuration(req.durationDays()) : null;
-            LocalDate start = (req.startDate() != null) ? validateStartDate(req.startDate()) : null;
-            c.changeSchedule(duration, start);
-
-            if (imageChanged) {
-                c.resubmitModeration();   // PENDING_REVIEW 로 되돌리고 재검수(REJECTED 1h 수정 경로 포함)
-                eventPublisher.publishEvent(new ChallengeModerationRequested(c.getId()));
-            }
-        }
-
-        return ChallengeResponse.from(c);
-    }
-
-    // ===== §8 삭제 (하드 삭제 + 감사 로깅, OWNER만) — 판정 순서 고정 =====
-    /**
-     * 챌린지 삭제. 참여자(OWNER 제외) 0명일 때만. 7일 잠금·차등차감 폐기.
-     * 판정 순서: ① OWNER → ② 참여자 ≥1명(CHALLENGE_HAS_MEMBERS) → ③ COMPLETED(CHALLENGE_COMPLETED)
-     *            → ④ 시작 전이면 즉시 삭제(무패널티) / 진행 중이면 챌린지 내 success 이력 판정 후 삭제 + 패널티 트리거.
-     * 챌린지 행 락 → 참여자 수 재확인 → 하드 삭제(신규 가입 경합 차단).
-     */
-    @Transactional
-    public DeleteChallengeResponse delete(UUID userId, UUID challengeId) {
-        Challenge c = challengeRepository.findByIdForUpdate(challengeId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
-        // ① OWNER
-        ensureOwner(c, userId);
-        // ② 나 외 ACTIVE 멤버가 있으면 불가(이탈 경로: 임명→위임→탈퇴).
-        long activeCount = memberRepository.countByChallengeIdAndStatus(challengeId, MemberStatus.ACTIVE);
-        if (activeCount > 1)
-            throw new BusinessException(ErrorCode.CHALLENGE_HAS_MEMBERS);
-        // ③ 종료된 챌린지는 기록 보존 — 삭제 불가.
-        if (c.getStatus() == ChallengeStatus.COMPLETED)
-            throw new BusinessException(ErrorCode.CHALLENGE_COMPLETED);
-        // ④ 진행 중이면 챌린지 내 success 이력으로 탈퇴 패널티 트리거(시작 전은 무패널티).
-        boolean penaltyApplied = c.getStatus() == ChallengeStatus.ACTIVE
-                && verificationDailyRepository.existsByChallengeIdAndStatus(challengeId, VerificationStatus.SUCCESS);
-
-        // 하드 삭제 + 감사 로깅(§8-4). 대표 이미지(S3)는 DB와 무관하게 남으므로 imageUrl 을 함께 남긴다.
-        log.warn("[AUDIT] 챌린지 하드 삭제 challengeId={} ownerId={} status={} penaltyApplied={} imageUrl={}",
-                challengeId, userId, c.getStatus(), penaltyApplied, c.getImageUrl());
-        hardDeleter.hardDelete(challengeId);
-        return new DeleteChallengeResponse(penaltyApplied);
     }
 
     // ====================== 내부 헬퍼 ======================

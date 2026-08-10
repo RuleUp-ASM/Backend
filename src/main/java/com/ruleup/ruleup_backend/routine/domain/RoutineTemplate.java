@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.routine.domain;
 
+import com.ruleup.ruleup_backend.user.domain.InterestCategory;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -40,7 +41,7 @@ public class RoutineTemplate {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "category", nullable = false)
-    private RoutineCategory category;
+    private InterestCategory category;
 
     // ===== 목표 파라미터 정의 =====
     @JdbcTypeCode(SqlTypes.JSON)

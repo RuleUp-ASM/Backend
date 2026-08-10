@@ -46,6 +46,11 @@ public class RoutineCatalog {
                 .toList();
     }
 
+    /** 캐시 무효화 — 시드/템플릿 변경 시(운영 반영·테스트 픽스처) 다음 조회에서 다시 읽는다. */
+    public void evict() {
+        this.byId = null;
+    }
+
     private Map<Long, RoutineTemplate> cache() {
         Map<Long, RoutineTemplate> local = byId;
         if (local == null) {

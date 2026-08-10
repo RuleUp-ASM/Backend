@@ -93,6 +93,42 @@ public class GeminiModerationClient implements ContentModerationClient {
         return "image/jpeg";   // jpg/jpeg 및 기본값
     }
 
+    @Override
+    public TextVerdicts moderateChallengeText(String title, String description) {
+        if (title == null && description == null)
+            return new TextVerdicts(ModerationResult.APPROVED, ModerationResult.APPROVED);
+        String content = llm.generateText(buildChallengeTextPrompt(title, description));
+        if (content == null) return TextVerdicts.unavailable();
+        TextVerdict v = llm.parseJson(content, TextVerdict.class);
+        if (v == null) return TextVerdicts.unavailable();
+        return new TextVerdicts(
+                (title == null || !Boolean.TRUE.equals(v.titleFlagged()))
+                        ? ModerationResult.APPROVED : ModerationResult.REJECTED,
+                (description == null || !Boolean.TRUE.equals(v.descriptionFlagged()))
+                        ? ModerationResult.APPROVED : ModerationResult.REJECTED);
+    }
+
+    /** 제목+설명을 한 프롬프트로 검수(왕복 1회), 판정은 항목별로 받는다. */
+    private String buildChallengeTextPrompt(String title, String description) {
+        return """
+            너는 습관 챌린지 커뮤니티의 검수자다. 아래 챌린지 제목/설명이 다른 사용자에게
+            노출되어도 되는지 각각 판단하라. 다음 중 하나라도 해당하면 문제 있음(true)이다:
+            - 욕설/혐오/비난/차별, 위협
+            - 음란/성적 표현
+            - 정치적 선동/특정 정당·정치인 비방
+            - 광고/스팸, 타인 사칭
+            - 불법 행위 조장, 자해 등 위험 행동 유도
+
+            애매하면 통과(false)시키되, 명백히 문제면 막아라.
+            반드시 JSON으로만 답하라(설명 금지).
+
+            제목: "%s"
+            설명: "%s"
+
+            출력 JSON 예: {"titleFlagged": false, "descriptionFlagged": false, "reason": ""}
+            """.formatted(title == null ? "" : title, description == null ? "" : description);
+    }
+
     private String buildNicknamePrompt(String nickname) {
         return """
             너는 커뮤니티 닉네임 검수자다. 아래 닉네임이 다른 사용자에게 노출되어도 되는지 판단하라.
@@ -131,4 +167,7 @@ public class GeminiModerationClient implements ContentModerationClient {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     record Verdict(boolean flagged, String reason) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record TextVerdict(Boolean titleFlagged, Boolean descriptionFlagged, String reason) {}
 }

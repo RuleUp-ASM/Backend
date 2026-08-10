@@ -35,7 +35,7 @@ import java.util.UUID;
  * 연관관계 대신 challengeId/userId만 보유(다른 도메인과 동일 패턴).
  */
 @Entity
-@Table(name = "ChallengeMember")
+@Table(name = "challenge_members")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class ChallengeMember extends AssignedIdEntity {
@@ -46,11 +46,11 @@ public class ChallengeMember extends AssignedIdEntity {
     private UUID id;
 
     @JdbcTypeCode(SqlTypes.BINARY)
-    @Column(name = "challengeId", nullable = false, updatable = false)
+    @Column(name = "challenge_id", nullable = false, updatable = false)
     private UUID challengeId;
 
     @JdbcTypeCode(SqlTypes.BINARY)
-    @Column(name = "userId", nullable = false, updatable = false)
+    @Column(name = "user_id", nullable = false, updatable = false)
     private UUID userId;
 
     @Enumerated(EnumType.STRING)
@@ -62,92 +62,92 @@ public class ChallengeMember extends AssignedIdEntity {
     private MemberStatus status;
 
     @Generated(event = EventType.INSERT)
-    @Column(name = "joinedAt", nullable = false, updatable = false)
+    @Column(name = "joined_at", nullable = false, updatable = false)
     private Instant joinedAt;            // 참여(또는 신청) 시각
 
     // ===== 진행률 비정규화 (인증 스펙 §4.2) — 인증 sync·확정 배치가 유지 =====
     @Enumerated(EnumType.STRING)
-    @Column(name = "scheduleType", nullable = false)
+    @Column(name = "schedule_type", nullable = false)
     private ScheduleType scheduleType = ScheduleType.FIXED_DAYS;
 
-    @Column(name = "targetDays", nullable = false)
+    @Column(name = "target_days", nullable = false)
     private int targetDays = 0;          // 전체 대상일(빈도형: 필요 횟수 ΣN)
 
-    @Column(name = "successDays", nullable = false)
+    @Column(name = "success_days", nullable = false)
     private int successDays = 0;
 
-    @Column(name = "failDays", nullable = false)
+    @Column(name = "fail_days", nullable = false)
     private int failDays = 0;
 
-    @Column(name = "progressRate", nullable = false, precision = 5, scale = 2)
+    @Column(name = "progress_rate", nullable = false, precision = 5, scale = 2)
     private BigDecimal progressRate = BigDecimal.ZERO;   // 진행률(%)
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "todayStatus")
+    @Column(name = "today_status")
     private VerificationStatus todayStatus;
 
-    @Column(name = "lastSyncedAt")
+    @Column(name = "last_synced_at")
     private Instant lastSyncedAt;
 
     // --- 빈도형(FREQUENCY) 전용 주기 카운터 ---
     @Enumerated(EnumType.STRING)
-    @Column(name = "periodUnit")
+    @Column(name = "period_unit")
     private PeriodUnit periodUnit;
 
-    @Column(name = "periodTarget")
+    @Column(name = "period_target")
     private Integer periodTarget;        // 주기당 N
 
-    @Column(name = "curPeriodStart")
+    @Column(name = "cur_period_start")
     private LocalDate curPeriodStart;
 
-    @Column(name = "curPeriodEnd")
+    @Column(name = "cur_period_end")
     private LocalDate curPeriodEnd;
 
-    @Column(name = "curPeriodCompleted")
+    @Column(name = "cur_period_completed")
     private Integer curPeriodCompleted;
 
     // ===== v2: 셋업 상태 + 멤버 바인딩 앵커(PER_MEMBER) + 예비 폴백 카운터 (테크스펙 v2 §4·§5·§9) =====
     @Enumerated(EnumType.STRING)
-    @Column(name = "setupStatus", nullable = false)
+    @Column(name = "setup_status", nullable = false)
     private SetupStatus setupStatus = SetupStatus.PENDING_SETUP;
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "anchors")
     private List<GeoAnchor> anchors;          // 멤버 GeoAnchor[] (없으면 null). config가 아니라 멤버에 저장.
 
-    @Column(name = "anchorUpdatedAt")
+    @Column(name = "anchor_updated_at")
     private Instant anchorUpdatedAt;          // 수정 쿨다운 기준
 
     // ===== SCREEN_TIME 측정 대상 앱(PER_MEMBER 바인딩, my-screen-apps API) =====
     // 현재 적용 세트 + 익일 적용 대기 세트(pending). 변경은 항상 익일 00:00부터 적용(당일 조작 방지).
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "screenApps")
+    @Column(name = "screen_apps")
     private List<ScreenApp> screenApps;               // 현재 적용 중인 세트(없으면 null)
 
-    @Column(name = "screenAppsAppliedFrom")
+    @Column(name = "screen_apps_applied_from")
     private Instant screenAppsAppliedFrom;            // 현재 세트 적용 시작 시각
 
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "pendingScreenApps")
+    @Column(name = "pending_screen_apps")
     private List<ScreenApp> pendingScreenApps;        // 익일 적용 대기 세트(없으면 null)
 
-    @Column(name = "pendingScreenAppsEffectiveDate")
+    @Column(name = "pending_screen_apps_effective_date")
     private LocalDate pendingScreenAppsEffectiveDate; // 대기 세트 적용 시작 날짜(익일)
 
-    @Column(name = "screenAppsUpdatedAt")
+    @Column(name = "screen_apps_updated_at")
     private Instant screenAppsUpdatedAt;             // 변경 쿨다운 기준(마지막 stage 시각)
 
-    @Column(name = "fallbackUsedPeriodStart")
+    @Column(name = "fallback_used_period_start")
     private LocalDate fallbackUsedPeriodStart;// 예비 폴백 주1회(롤링 7일) 윈도우 시작
 
-    @Column(name = "fallbackUsedCount", nullable = false)
+    @Column(name = "fallback_used_count", nullable = false)
     private int fallbackUsedCount = 0;
 
     /**
      * 셋업 미완료 고스트(무음) 푸시를 마지막으로 보낸 시각. 재발송 쿨다운 기준(스팸 방지).
      * NULL = 아직 보낸 적 없음. 셋업이 READY 되면 더는 대상이 아니라 이 값은 자연히 의미를 잃는다.
      */
-    @Column(name = "ghostPushedAt")
+    @Column(name = "ghost_pushed_at")
     private Instant ghostPushedAt;
 
     private static ChallengeMember of(UUID challengeId, UUID userId, MemberRole role, MemberStatus status) {
