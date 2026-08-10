@@ -32,6 +32,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -57,6 +58,7 @@ public class ChallengeDraftService {
 
     private static final Logger log = LoggerFactory.getLogger(ChallengeDraftService.class);
 
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final int DESCRIPTION_MAX = 200;
     private static final int TITLE_MAX = 30;
     private static final int DEFAULT_CAPACITY = 50;
@@ -211,7 +213,9 @@ public class ChallengeDraftService {
         boolean group = ParticipationType.GROUP.name().equals(mode);
         boolean auto = template != null && template.supportsAuto();
 
-        LocalDate start = LocalDate.now().plusDays(START_OFFSET_DAYS);
+        // 서버는 UTC로 도는데 챌린지 날짜 축은 전부 KST다. 타임존을 빼면 UTC 15시~24시
+        // (KST 자정~오전 9시)에 시작일이 "KST 오늘"이 되어 생성일+1 규칙이 깨진다.
+        LocalDate start = LocalDate.now(KST).plusDays(START_OFFSET_DAYS);
         LocalDate end = start.plusDays(PERIOD_DAYS);
 
         DraftView.Verification verification = auto

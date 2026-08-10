@@ -186,8 +186,10 @@ class ChallengePublicDetailCloneIT extends ChallengeApiSupport {
 
             MvcResult res = cloneRoom(cloner, id);
             assertThat((String) read(res, "$.data.draft.mode")).isEqualTo("SOLO");
+            // 날짜 축은 KST다. 시스템 기본 타임존으로 단정하면 UTC로 도는 CI에서 하루 어긋난다.
             assertThat((String) read(res, "$.data.draft.period.start"))
-                    .isEqualTo(java.time.LocalDate.now().plusDays(1).toString());
+                    .isEqualTo(java.time.LocalDate.now(java.time.ZoneId.of("Asia/Seoul"))
+                            .plusDays(1).toString());
             // 정원·티어는 생성 기본값으로 리셋, 이미지는 복사하지 않는다(초안 스키마에 이미지 없음)
             assertThat((Integer) read(res, "$.data.draft.capacity")).isEqualTo(50);
             assertThat((String) read(res, "$.data.draft.minTier")).isEqualTo("BRONZE");
