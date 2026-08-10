@@ -4,6 +4,8 @@ import com.ruleup.ruleup_backend.challenge.dto.*;
 import com.ruleup.ruleup_backend.challenge.creation.ChallengeCreationService;
 import com.ruleup.ruleup_backend.challenge.settings.ChallengeSettingsService;
 import com.ruleup.ruleup_backend.challenge.draft.ChallengeDraftService;
+import com.ruleup.ruleup_backend.challenge.explore.ChallengeCloneService;
+import com.ruleup.ruleup_backend.challenge.explore.ChallengeDetailQueryService;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeService;
 import com.ruleup.ruleup_backend.common.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -31,6 +33,8 @@ public class ChallengeController {
     private final ChallengeCreationService challengeCreationService;
     private final ChallengeSettingsService challengeSettingsService;
     private final ChallengeService challengeService;
+    private final ChallengeDetailQueryService detailQueryService;
+    private final ChallengeCloneService cloneService;
     private final ChallengeImageService challengeImageService;
     private final UploadRateLimiter uploadRateLimiter;
     private final RecommendationRateLimiter recommendationRateLimiter;
@@ -85,11 +89,26 @@ public class ChallengeController {
         return ApiResponse.ok(challengeService.myChallenges(UUID.fromString(userId)));
     }
 
-    @Operation(summary = "챌린지 상세 + 참여 자격")
+    @Operation(summary = "챌린지 공개 상세",
+            description = "비참여자용 상세 — 조건·통계·입장 자격. 멤버 전용 내부 화면은 /room 이 담당한다. "
+                    + "없는 방·비공개 방 비멤버·타인의 솔로 방은 전부 동일한 404(존재 은닉). "
+                    + "심사 상태(moderation)는 방장 본인 조회 시에만 내려간다.")
     @GetMapping("/{challengeId}")
     public ApiResponse<ChallengeDetailResponse> getDetail(@AuthenticationPrincipal String userId,
                                                           @PathVariable String challengeId) {
-        return ApiResponse.ok(challengeService.getDetail(UUID.fromString(userId), UUID.fromString(challengeId)));
+        return ApiResponse.ok(detailQueryService.detail(
+                UUID.fromString(userId), UUID.fromString(challengeId)));
+    }
+
+    @Operation(summary = "템플릿 복제해서 만들기",
+            description = "공개 그룹 방만 복제 가능(비공개·솔로는 403). 원본 설정을 프리필한 초안을 발급하고 "
+                    + "확인 화면·생성 API 를 그대로 재사용한다. 시작일은 생성일+1, mode·정원·티어는 생성 기본값으로 리셋, "
+                    + "이미지는 복사하지 않는다. 출처(origin=CLONE)는 서버가 draft 행에 기록한다.")
+    @PostMapping("/{challengeId}/clone")
+    public ApiResponse<CloneResponse> clone(@AuthenticationPrincipal String userId,
+                                            @PathVariable String challengeId) {
+        return ApiResponse.ok(cloneService.clone(
+                UUID.fromString(userId), UUID.fromString(challengeId)));
     }
 
     @Operation(summary = "챌린지 설정 조회(방장 전용)",

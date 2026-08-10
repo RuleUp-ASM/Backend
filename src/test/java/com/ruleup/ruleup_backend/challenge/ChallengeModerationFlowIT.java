@@ -151,6 +151,10 @@ class ChallengeModerationFlowIT extends ChallengeApiSupport {
             Member owner = member(uniq("mod-sub-o"));
             String id = createWith(owner.token(), "비속어 섞인 제목", "비속어 설명도 고침");
             awaitTitleDecided(id);
+            // 생성 기본값은 솔로라 타인에게는 존재가 숨겨진다(404). 여기서 보려는 것은 "대체 표시"이므로
+            // 타인이 볼 수 있는 공개 그룹 방으로 바꾼 뒤 확인한다.
+            jdbc().update("UPDATE challenges SET mode = 'GROUP', visibility = 'PUBLIC' " +
+                    "WHERE id = UNHEX(REPLACE(?, '-', ''))", id);
 
             // 방장 본인: 입력 원본 그대로
             MvcResult mine = getAuth("/api/v1/challenges/" + id, owner.token());
