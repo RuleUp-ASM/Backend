@@ -68,7 +68,8 @@ public class RecommendationService {
         Set<Long> active = activeTemplateIds(userId);
 
         int cap = Math.min(Math.max(limit, 1), MAX_RECOMMENDATIONS);
-        List<RecommendedRoutine> result = catalog.candidates().stream()
+        // 동점은 사용자별 결정적 키로 깬다(templateId 오름차순이면 전원에게 늘 같은 3건이 나간다 — RecommendationShuffle).
+        List<Scored> ranked = catalog.candidates().stream()
                 .filter(c -> !active.contains(c.id()))
                 .map(c -> {
                     double seg = segScore.getOrDefault(c.id(), 0.0);
@@ -79,8 +80,10 @@ public class RecommendationService {
                     return new Scored(c, score, reason);
                 })
                 .sorted(Comparator.comparingDouble((Scored s) -> s.score).reversed()
-                        .thenComparingLong(s -> s.candidate.id()))
-                .limit(cap)
+                        .thenComparingLong(s -> RecommendationShuffle.orderKey(userId, s.candidate.id())))
+                .toList();
+
+        List<RecommendedRoutine> result = pickDiverse(ranked, cap).stream()
                 .map(s -> new RecommendedRoutine(
                         s.candidate.id(),
                         s.candidate.name(),                 // 자동입력 제목 = 템플릿 이름
@@ -96,6 +99,35 @@ public class RecommendationService {
                     interests.size(), active.size());
         }
         return result;
+    }
+
+    /**
+     * 점수 순서를 유지하되 <b>카테고리가 겹치지 않게</b> 먼저 뽑고, 모자라면 겹침을 허용해 채운다.
+     *
+     * <p>다양성 제약이 없으면 3건이 거의 항상 한 카테고리로 몰린다. 관심사 보너스가 평평해서
+     * 한 카테고리 전체가 동점이 되고, 그 카테고리가 세 자리를 다 먹기 때문이다(관심사를 여러 개 골라도
+     * 정렬에서 앞서는 하나가 독식한다). 생성 화면의 추천은 "무엇을 시작할지 고르는" 화면이라
+     * 같은 결의 루틴 3개보다 다른 결 3개가 고를 거리가 된다.
+     *
+     * <p>3건 보장이 다양성보다 우선이라 두 번째 패스에서 겹침을 허용한다.
+     */
+    private List<Scored> pickDiverse(List<Scored> ranked, int cap) {
+        List<Scored> picked = new ArrayList<>(cap);
+        Set<String> usedCategories = new HashSet<>();
+        Set<Long> pickedIds = new HashSet<>();
+
+        for (Scored s : ranked) {
+            if (picked.size() >= cap) break;
+            if (usedCategories.add(s.candidate.category())) {
+                picked.add(s);
+                pickedIds.add(s.candidate.id());
+            }
+        }
+        for (Scored s : ranked) {           // 카테고리 수가 모자랄 때만 도는 폴백
+            if (picked.size() >= cap) break;
+            if (pickedIds.add(s.candidate.id())) picked.add(s);
+        }
+        return picked;
     }
 
     private Set<Long> activeTemplateIds(UUID userId) {

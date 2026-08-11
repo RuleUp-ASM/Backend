@@ -20,6 +20,8 @@ import com.ruleup.ruleup_backend.recommendation.dto.RecommendedRoutine;
 import com.ruleup.ruleup_backend.recommendation.service.RecommendationService;
 import com.ruleup.ruleup_backend.routine.domain.ParamSpec;
 import com.ruleup.ruleup_backend.routine.domain.RoutineTemplate;
+import com.ruleup.ruleup_backend.recommendation.service.RecommendationShuffle;
+import com.ruleup.ruleup_backend.routine.match.RoutineCandidate;
 import com.ruleup.ruleup_backend.routine.match.RoutineMatch;
 import com.ruleup.ruleup_backend.routine.service.RoutineCatalog;
 import com.ruleup.ruleup_backend.score.domain.Tier;
@@ -35,6 +37,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -153,27 +156,50 @@ public class ChallengeDraftService {
         List<CreationRecommendationsResponse.Item> items = new ArrayList<>();
         Set<Long> used = new HashSet<>();
 
-        // 1순위: 세그먼트·관심사 랭킹(진행 중 템플릿 제외 내장) 중 진행 중 카테고리가 아닌 것
+        // 이미 뽑은 카테고리 — 3건이 같은 결로 몰리지 않게 채움 단계에서도 피한다.
+        Set<String> pickedCategories = new HashSet<>();
+
+        // 1순위: 세그먼트·관심사 랭킹(진행 중 템플릿 제외 + 카테고리 다양성 내장)
         for (RecommendedRoutine r : recommendationService.recommendRoutines(userId, 3)) {
             if (items.size() >= 3) break;
             if (activeCategories.contains(r.category())) continue;
-            if (used.add(r.templateId())) items.add(toItem(r.templateId(), displayReason(r.reason())));
+            if (used.add(r.templateId())) {
+                items.add(toItem(r.templateId(), displayReason(r.reason())));
+                pickedCategories.add(r.category());
+            }
         }
-        // 2순위: 카탈로그 전체에서 진행 중 카테고리를 피해 채움
-        fill(items, used, activeCategories);
-        // 3순위: 그래도 부족하면 제외를 풀어서라도 3개 보장(스펙 — 3개 보장이 우선)
-        fill(items, used, Set.of());
+        // 2순위: 카탈로그에서 진행 중 카테고리 + 이미 뽑은 카테고리를 피해 채움
+        fill(userId, items, used, activeCategories, pickedCategories);
+        // 3순위: 카테고리 다양성을 포기하고 진행 중 카테고리만 피해 채움
+        fill(userId, items, used, activeCategories, Set.of());
+        // 4순위: 그래도 부족하면 제외를 전부 풀어서라도 3개 보장(스펙 — 3개 보장이 우선)
+        fill(userId, items, used, Set.of(), Set.of());
 
         return new CreationRecommendationsResponse(items);
     }
 
-    private void fill(List<CreationRecommendationsResponse.Item> items, Set<Long> used,
-                      Set<String> excludedCategories) {
+    /**
+     * 부족분 채우기. 후보 순회 순서를 사용자별 결정적 키로 섞는다 — 카탈로그 순서(=id 순)대로 채우면
+     * 모든 사용자에게 늘 같은 템플릿이 나가고 뒤쪽 시드는 영영 노출되지 않는다.
+     *
+     * @param excludedCategories 진행 중이라 피하고 싶은 카테고리
+     * @param pickedCategories   이번 응답에서 이미 쓴 카테고리(다양성 확보용, 마지막 패스에선 비운다)
+     */
+    private void fill(UUID userId, List<CreationRecommendationsResponse.Item> items, Set<Long> used,
+                      Set<String> excludedCategories, Set<String> pickedCategories) {
         if (items.size() >= 3) return;
-        for (var candidate : catalog.candidates()) {
+        Set<String> avoid = new HashSet<>(pickedCategories);   // 호출부 집합을 건드리지 않는다(불변 집합이 올 수 있다)
+        List<RoutineCandidate> ordered = catalog.candidates().stream()
+                .sorted(Comparator.comparingLong(c -> RecommendationShuffle.orderKey(userId, c.id())))
+                .toList();
+        for (RoutineCandidate candidate : ordered) {
             if (items.size() >= 3) break;
             if (excludedCategories.contains(candidate.category())) continue;
-            if (used.add(candidate.id())) items.add(toItem(candidate.id(), "전체 인기"));
+            if (avoid.contains(candidate.category())) continue;
+            if (used.add(candidate.id())) {
+                items.add(toItem(candidate.id(), "전체 인기"));
+                avoid.add(candidate.category());
+            }
         }
     }
 
