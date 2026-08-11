@@ -1,10 +1,12 @@
 package com.ruleup.ruleup_backend.challenge.lifecycle;
 
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
+import com.ruleup.ruleup_backend.challenge.explore.ChallengeGridChanged;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +33,7 @@ public class ChallengeCompletionService {
     private static final int CLAIM_LIMIT = 200;
 
     private final ChallengeRepository challengeRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     /** 1분마다: 종료일이 지난 진행중 챌린지를 COMPLETED 로 마감한다. */
     @Scheduled(fixedDelay = 60_000)
@@ -42,6 +45,8 @@ public class ChallengeCompletionService {
             c.complete();
         }
         if (!due.isEmpty()) {
+            // 종료된 방은 그리드 집계에서 빠진다 — 캐시를 버려야 화면의 수가 따라 내려간다.
+            eventPublisher.publishEvent(ChallengeGridChanged.of("CHALLENGE_COMPLETED"));
             log.info("종료일 경과로 COMPLETED 전환한 챌린지 {}건", due.size());
         }
     }

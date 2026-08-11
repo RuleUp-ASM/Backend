@@ -16,6 +16,7 @@ import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
+import com.ruleup.ruleup_backend.common.text.Texts;
 import com.ruleup.ruleup_backend.recommendation.dto.RecommendedRoutine;
 import com.ruleup.ruleup_backend.recommendation.service.RecommendationService;
 import com.ruleup.ruleup_backend.routine.domain.ParamSpec;
@@ -303,8 +304,8 @@ public class ChallengeDraftService {
         return (v == null) ? null : String.valueOf(v);
     }
 
+    /** 제목 30자·설명 200자 한도. 이모지(서로게이트 페어)를 반으로 쪼개지 않는다 — {@link Texts}. */
     private static String truncate(String s, int max) {
-        if (s == null) return null;
-        return (s.length() <= max) ? s : s.substring(0, max);
+        return Texts.truncate(s, max);
     }
 }

@@ -6,6 +6,7 @@ import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
+import com.ruleup.ruleup_backend.common.text.Texts;
 import com.ruleup.ruleup_backend.notification.NotificationService;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.room.RoomAuthority;
@@ -184,8 +185,9 @@ public class NoticeService {
             throw new BusinessException(ErrorCode.INVALID_NOTICE_PAYLOAD);
     }
 
+    /** 목록용 미리보기. 이모지가 경계에 걸려도 반쪽 char 가 남지 않게 코드포인트 기준으로 자른다. */
     private String preview(String content) {
-        return content.length() <= PREVIEW_LEN ? content : content.substring(0, PREVIEW_LEN);
+        return Texts.truncate(content, PREVIEW_LEN);
     }
 
     private String updatedAt(Notice notice) {

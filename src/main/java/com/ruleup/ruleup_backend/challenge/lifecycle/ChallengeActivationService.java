@@ -1,6 +1,7 @@
 package com.ruleup.ruleup_backend.challenge.lifecycle;
 
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
+import com.ruleup.ruleup_backend.challenge.explore.ChallengeGridChanged;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import lombok.RequiredArgsConstructor;
@@ -47,6 +48,8 @@ public class ChallengeActivationService {
             eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(c.getId(), "CHALLENGE_ACTIVATED"));
         }
         if (!due.isEmpty()) {
+            // 홈 카테고리 그리드는 ACTIVE 만 센다 — 여기서 버려야 "방금 시작한 방"이 바로 반영된다.
+            eventPublisher.publishEvent(ChallengeGridChanged.of("CHALLENGE_ACTIVATED"));
             log.info("시작일 도달로 ACTIVE 전환한 챌린지 {}건", due.size());
         }
     }

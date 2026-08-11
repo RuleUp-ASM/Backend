@@ -51,10 +51,12 @@ public class CacheConfig {
                 .expireAfterWrite(Duration.ofHours(24))
                 .build());
 
-        // 홈 카테고리 그리드 진행 중 수(탐색 §2.2) — 표시용, 10분 지연 허용.
+        // 홈 카테고리 그리드 진행 중 수(탐색 §2.2). 상태 전환 배치가 ChallengeGridChanged 로 즉시 evict 하므로
+        // TTL 은 백스톱이다. 다만 Caffeine 은 인스턴스 로컬이라 evict 가 자기 인스턴스에만 닿는다 —
+        // 다른 인스턴스가 따라오는 속도가 곧 TTL 이라, 10분이면 "수가 한참 안 바뀐다"로 보인다. 1분으로 줄인다.
         manager.registerCustomCache("challengeCategories", Caffeine.newBuilder()
                 .maximumSize(10)
-                .expireAfterWrite(Duration.ofMinutes(10))
+                .expireAfterWrite(Duration.ofMinutes(1))
                 .build());
 
         // 홈 인기 랭킹 — 1시간(2026-08-11 확정). 배치가 성공하면 즉시 evict 하므로 TTL 은 백스톱.

@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.challenge.lifecycle;
 
+import com.ruleup.ruleup_backend.challenge.explore.CategoryCountService;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeHardDeleter;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -35,6 +36,7 @@ public class ChallengeAutoDeleteService {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transactionTemplate;
     private final ChallengeHardDeleter hardDeleter;
+    private final CategoryCountService categoryCountService;
 
     /** 매일 04:10 KST — 만료·유령방 자동 삭제. */
     @Scheduled(cron = "0 10 4 * * *", zone = "Asia/Seoul")
@@ -59,6 +61,10 @@ public class ChallengeAutoDeleteService {
                 // 방 단위 격리 — 실패한 방은 다음 실행에서 재처리, 나머지는 계속 진행
                 log.error("챌린지 자동 삭제 실패 challengeId={}: {}", toUuid(id), e.getMessage(), e);
             }
+        }
+        if (deleted > 0) {
+            // 유령방(ACTIVE·멤버 0명)도 지우므로 그리드 집계가 줄어든다. 트랜잭션 밖이라 바로 버린다.
+            categoryCountService.evict();
         }
         if (!targets.isEmpty()) {
             log.info("챌린지 자동 삭제 배치: 대상 {}건 중 {}건 삭제", targets.size(), deleted);
