@@ -112,6 +112,7 @@ class ChallengeCreateApiIT extends ChallengeApiSupport {
         body.put("period", Map.of(
                 "start", (String) read(draftRes, "$.data.draft.period.start"),
                 "end", (String) read(draftRes, "$.data.draft.period.end")));
+        body.put("repeatDays", (List<String>) read(draftRes, "$.data.draft.repeatDays"));
         body.put("params", List.of(Map.of("key", "weekly_count", "value", "3")));
         body.put("verification", Map.of(
                 "type", (String) read(draftRes, "$.data.draft.verification.type"),
@@ -221,12 +222,13 @@ class ChallengeCreateApiIT extends ChallengeApiSupport {
             // DB: ai_title = 원본 제목, 생성자 OWNER 멤버십, 카운터·버전
             String challengeId = read(res, "$.data.challengeId");
             Map<String, Object> row = jdbcTemplate.queryForMap(
-                    "SELECT ai_title, version, participant_count, min_tier, status FROM challenges " +
+                    "SELECT ai_title, version, participant_count, min_tier, status, repeat_days FROM challenges " +
                             "WHERE id = UNHEX(REPLACE(?, '-', ''))", challengeId);
             assertThat(row.get("ai_title")).isEqualTo("주 3회 헬스장");
             assertThat(((Number) row.get("version")).intValue()).isEqualTo(0);
             assertThat(((Number) row.get("participant_count")).intValue()).isEqualTo(1);
             assertThat(row.get("min_tier")).isEqualTo("BRONZE");
+            assertThat(String.valueOf(row.get("repeat_days"))).contains("MON", "SUN");
 
             Integer owners = jdbcTemplate.queryForObject(
                     "SELECT COUNT(*) FROM challenge_members WHERE challenge_id = UNHEX(REPLACE(?, '-', '')) " +
@@ -376,6 +378,25 @@ class ChallengeCreateApiIT extends ChallengeApiSupport {
             Map<String, Object> body = createBodyFrom(templateDraft(token));
             body.put("params", List.of(Map.of("key", "weekly_count", "value", "99")));   // max 7
             expectError(create(token, UUID.randomUUID().toString(), body), 400, "INVALID_ROUTINE_PARAM");
+        }
+
+        @Test
+        @DisplayName("반복 요일 수정값을 저장하고, 중복·잘못된 요일은 400 INVALID_REPEAT_DAY")
+        void repeatDaysValidation() throws Exception {
+            String token = memberToken(uniq("cr-repeat"));
+            Map<String, Object> body = createBodyFrom(templateDraft(token));
+            body.put("repeatDays", List.of("MON", "WED", "FRI"));
+
+            MvcResult res = create(token, UUID.randomUUID().toString(), body);
+            assertThat(res.getResponse().getStatus()).isEqualTo(201);
+            String saved = jdbcTemplate.queryForObject(
+                    "SELECT repeat_days FROM challenges WHERE id = UNHEX(REPLACE(?, '-', ''))",
+                    String.class, (String) read(res, "$.data.challengeId"));
+            assertThat(saved.replace(" ", "")).isEqualTo("[\"MON\",\"WED\",\"FRI\"]");
+
+            Map<String, Object> invalid = createBodyFrom(templateDraft(token));
+            invalid.put("repeatDays", List.of("MON", "MON"));
+            expectError(create(token, UUID.randomUUID().toString(), invalid), 400, "INVALID_REPEAT_DAY");
         }
     }
 

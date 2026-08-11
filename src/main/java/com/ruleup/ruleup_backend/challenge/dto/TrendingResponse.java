@@ -13,7 +13,10 @@ public record TrendingResponse(String calculatedAt, List<Item> items) {
     /**
      * @param participantCount 응답 시점에 DB 에서 다시 읽은 현재 인원 — 공용 캐시에는 랭킹만 담는다
      * @param joinable         내 표시 티어로 들어갈 수 있는지. <b>필터가 아니라 잠금 아이콘용</b>이다 —
-     *                         못 들어가는 방도 인기 목록에는 보이며 이는 의도된 동작(정책 §3.1)
+     *                         못 들어가는 방도 인기 목록에는 보이며 이는 의도된 동작(정책 §3.1).
+     *                         티어만 본다 — 이미 참여 중인지는 {@code joined} 가 말한다
+     * @param joined           <b>내가 이미 들어가 있는 방인가</b>(방장 포함). 내가 만든 방도 인기 목록에
+     *                         뜨므로, true 면 참여 버튼 대신 "참여 중"으로 그려야 한다
      */
     public record Item(
             int rank,
@@ -26,6 +29,7 @@ public record TrendingResponse(String calculatedAt, List<Item> items) {
             String verificationType,
             String minTier,
             boolean joinable,
+            boolean joined,
             String endDate
     ) {}
 }

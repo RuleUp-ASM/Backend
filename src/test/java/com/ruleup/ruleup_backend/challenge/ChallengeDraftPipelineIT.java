@@ -167,6 +167,11 @@ class ChallengeDraftPipelineIT extends ChallengeApiSupport {
             assertThat(start).isEqualTo(LocalDate.now(java.time.ZoneId.of("Asia/Seoul")).plusDays(1));
             assertThat(end).isEqualTo(start.plusDays(14));
 
+            // 일정: 생성 진입에서 반복 요일과 주간 빈도수를 함께 내려준다.
+            assertThat((List<String>) read(res, "$.data.draft.repeatDays"))
+                    .containsExactly("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN");
+            assertThat((Integer) read(res, "$.data.draft.weeklyCount")).isEqualTo(7);
+
             // 목표값: 템플릿 스펙 + LLM 값 병합
             assertThat((String) read(res, "$.data.draft.params[0].key")).isEqualTo("target_time");
             assertThat((String) read(res, "$.data.draft.params[0].value")).isEqualTo("06:00");
@@ -242,6 +247,24 @@ class ChallengeDraftPipelineIT extends ChallengeApiSupport {
         }
 
         @Test
+        @DisplayName("LLM 반복 요일 3개 → repeatDays와 weeklyCount=3을 생성 진입 응답에 노출")
+        void weeklyFrequencyFromRepeatDays() throws Exception {
+            String token = memberToken(uniq("draft-freq"));
+            LLM_RESPONSE.set("""
+                    {"usable":true,"title":"주 3회 아침 운동","description":"월수금 아침에 운동해요.",
+                     "category":"EXERCISE","templateId":null,"params":[],"participationType":"SOLO",
+                     "repeatDays":["MON","WED","FRI"]}
+                    """);
+
+            MvcResult res = postJsonAuth("/api/v1/challenges/draft", token,
+                    Map.of("description", "월수금 아침마다 운동하고 싶어요"));
+
+            assertThat((List<String>) read(res, "$.data.draft.repeatDays"))
+                    .containsExactly("MON", "WED", "FRI");
+            assertThat((Integer) read(res, "$.data.draft.weeklyCount")).isEqualTo(3);
+        }
+
+        @Test
         @DisplayName("Step 0 rate limit: 1분 10회 초과 → 429 RECOMMENDATION_RATE_LIMITED")
         void rateLimited() throws Exception {
             String token = memberToken(uniq("draft-rl"));
@@ -296,6 +319,9 @@ class ChallengeDraftPipelineIT extends ChallengeApiSupport {
             assertThat((String) read(res, "$.data.draft.mode")).isEqualTo("SOLO");
             assertThat((Integer) read(res, "$.data.draft.capacity")).isEqualTo(50);
             assertThat((String) read(res, "$.data.draft.minTier")).isEqualTo("BRONZE");
+            assertThat((List<String>) read(res, "$.data.draft.repeatDays"))
+                    .containsExactly("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN");
+            assertThat((Integer) read(res, "$.data.draft.weeklyCount")).isEqualTo(7);
 
             // 목표값 = 템플릿 기본값
             assertThat((String) read(res, "$.data.draft.params[0].key")).isEqualTo("weekly_count");

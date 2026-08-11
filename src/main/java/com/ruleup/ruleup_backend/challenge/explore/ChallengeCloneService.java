@@ -73,6 +73,8 @@ public class ChallengeCloneService {
                 ? catalog.findById(origin.getTemplateId()).orElse(null) : null;
         boolean auto = origin.getVerificationConfig() != null
                 && origin.getVerificationConfig().selectedMethod() == SelectedMethod.AUTO;
+        int weeklyCount = origin.getWeeklyCount() != null
+                ? origin.getWeeklyCount() : Math.max(1, Math.min(7, origin.getRepeatDays().size()));
 
         DraftView view = new DraftView(
                 // 타인에게 공개 가능한 승인·면제 문구만 복제한다. 심사 중·거부 문구는
@@ -86,6 +88,7 @@ public class ChallengeCloneService {
                 DEFAULT_CAPACITY,
                 displayTier(userId).name(),                    // 내 표시 티어로 리셋
                 new DraftView.Period(start.toString(), end.toString()),
+                weeklyCount,
                 (origin.getParamSpecs() != null) ? origin.getParamSpecs() : List.of(),
                 new DraftView.Verification(
                         auto ? "AUTO" : "MANUAL",
@@ -98,7 +101,7 @@ public class ChallengeCloneService {
 
         ChallengeDraft saved = draftRepository.save(ChallengeDraft.of(
                 userId, ChallengeDraft.Origin.CLONE, origin.getTemplateId(), challengeId,
-                view, origin.getRepeatDays(), Instant.now()));
+                view, weeklyCount, Instant.now()));
 
         return new CloneResponse(saved.getId().toString(), challengeId.toString(), view);
     }

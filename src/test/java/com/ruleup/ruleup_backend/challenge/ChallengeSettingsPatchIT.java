@@ -74,6 +74,7 @@ class ChallengeSettingsPatchIT extends ChallengeApiSupport {
         body.put("period", Map.of(
                 "start", (String) read(draft, "$.data.draft.period.start"),
                 "end", (String) read(draft, "$.data.draft.period.end")));
+        body.put("repeatDays", (List<String>) read(draft, "$.data.draft.repeatDays"));
         body.put("params", List.of());
         body.put("verification", Map.of("type", "AUTO", "method", "GPS_PRESENCE"));
         body.put("penalties", Map.of("watcher", false));
@@ -140,12 +141,15 @@ class ChallengeSettingsPatchIT extends ChallengeApiSupport {
             assertThat((String) read(res, "$.data.config.verification.type")).isEqualTo("AUTO");
             assertThat((Boolean) read(res, "$.data.config.penalties.score")).isTrue();
             assertThat((Boolean) read(res, "$.data.config.penalties.groupShare")).isTrue();
+            assertThat((List<String>) read(res, "$.data.config.repeatDays"))
+                    .containsExactly("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN");
+            assertThat((Integer) read(res, "$.data.config.weeklyCount")).isEqualTo(7);
             // 목표값 스펙 복원(기본값 채움)
             assertThat((String) read(res, "$.data.config.params[0].key")).isEqualTo("weekly_count");
 
             List<String> editable = read(res, "$.data.editableFields");
             assertThat(editable).contains("title", "description", "capacity", "imageUrl",
-                    "minTier", "period", "params", "verification", "mode", "visibility");
+                    "minTier", "period", "repeatDays", "params", "verification", "mode", "visibility");
             assertThat(editable).doesNotContain("category");
 
             assertThat((Integer) read(res, "$.data.version")).isEqualTo(0);
@@ -303,6 +307,24 @@ class ChallengeSettingsPatchIT extends ChallengeApiSupport {
             assertThat((Object) read(after, "$.data.config.visibility")).isNull();
             assertThat((Boolean) read(after, "$.data.config.rankingVisible")).isTrue();
             assertThat((Boolean) read(after, "$.data.config.penalties.groupShare")).isFalse();
+        }
+
+        @Test
+        @DisplayName("시작 전+혼자일 때 반복 요일 수정 → weeklyCount도 함께 갱신")
+        void repeatDaysPatch() throws Exception {
+            Member owner = member(uniq("pat-repeat"));
+            String id = createGroupChallenge(owner.token());
+            int v = currentVersion(owner.token(), id);
+
+            MvcResult res = patchJsonAuth("/api/v1/challenges/" + id, owner.token(),
+                    Map.of("version", v, "repeatDays", List.of("MON", "WED", "FRI")));
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+            assertThat((Integer) read(res, "$.data.updated.weeklyCount")).isEqualTo(3);
+
+            MvcResult after = settings(owner.token(), id);
+            assertThat((List<String>) read(after, "$.data.config.repeatDays"))
+                    .containsExactly("MON", "WED", "FRI");
+            assertThat((Integer) read(after, "$.data.config.weeklyCount")).isEqualTo(3);
         }
     }
 }

@@ -5,7 +5,6 @@ import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus;
 import com.ruleup.ruleup_backend.challenge.domain.MemberStatus;
 import com.ruleup.ruleup_backend.challenge.domain.ParticipationType;
-import com.ruleup.ruleup_backend.challenge.domain.RepeatDay;
 import com.ruleup.ruleup_backend.challenge.dto.CreationRecommendationsResponse;
 import com.ruleup.ruleup_backend.challenge.dto.DraftResponse;
 import com.ruleup.ruleup_backend.challenge.dto.TemplateDraftResponse;
@@ -63,10 +62,9 @@ public class ChallengeDraftService {
     private static final int DESCRIPTION_MAX = 200;
     private static final int TITLE_MAX = 30;
     private static final int DEFAULT_CAPACITY = 50;
+    private static final int DEFAULT_WEEKLY_COUNT = 7;
     private static final int START_OFFSET_DAYS = 1;      // 시작일 = 생성일 + 1일
     private static final int PERIOD_DAYS = 14;           // 종료일 = 시작일 + 2주
-    private static final List<String> ALL_DAYS =
-            List.of("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN");
     private static final String FALLBACK_MESSAGE = "AI가 파악하지 못한 루틴이에요. 더 구체적으로 적어주세요.";
     /** LLM 장애 — 사용자 입력에는 문제가 없으므로 재입력이 아니라 재시도를 안내한다. */
     private static final String LLM_FAILURE_MESSAGE =
@@ -113,15 +111,15 @@ public class ChallengeDraftService {
                 ? template.getCategory().name()
                 : sanitizeCategory(s.category());
         String mode = sanitizeMode(s.participationType());
-        List<String> repeatDays = sanitizeRepeatDays(s.repeatDays());
+        int weeklyCount = sanitizeWeeklyCount(s.weeklyCount());
 
         DraftView view = assemble(userId, title, correctedDescription, category, mode,
-                template, match.paramsOrEmpty());
+                weeklyCount, template, match.paramsOrEmpty());
 
         ChallengeDraft saved = draftRepository.save(ChallengeDraft.of(
                 userId, ChallengeDraft.Origin.AI,
                 (template != null) ? template.getId() : null, null,
-                view, repeatDays, Instant.now()));
+                view, weeklyCount, Instant.now()));
         log.info("draft_result success=true origin=AI draftId={} templateId={}",
                 saved.getId(), saved.getTemplateId());
         return DraftResponse.ok(saved.getId().toString(), view);
@@ -137,11 +135,11 @@ public class ChallengeDraftService {
 
         DraftView view = assemble(userId, truncate(template.getName(), TITLE_MAX),
                 template.getDescription(), template.getCategory().name(),
-                ParticipationType.SOLO.name(), template, Map.of());
+                ParticipationType.SOLO.name(), DEFAULT_WEEKLY_COUNT, template, Map.of());
 
         ChallengeDraft saved = draftRepository.save(ChallengeDraft.of(
                 userId, ChallengeDraft.Origin.TEMPLATE, template.getId(), null,
-                view, ALL_DAYS, Instant.now()));
+                view, DEFAULT_WEEKLY_COUNT, Instant.now()));
         return new TemplateDraftResponse(saved.getId().toString(), view);
     }
 
@@ -210,7 +208,8 @@ public class ChallengeDraftService {
     // ===== 초안 조립(경로 공통) =====
 
     private DraftView assemble(UUID userId, String title, String description, String category,
-                               String mode, RoutineTemplate template, Map<String, Object> llmParams) {
+                               String mode, int weeklyCount,
+                               RoutineTemplate template, Map<String, Object> llmParams) {
         boolean group = ParticipationType.GROUP.name().equals(mode);
         boolean auto = template != null && template.supportsAuto();
 
@@ -231,6 +230,7 @@ public class ChallengeDraftService {
                 DEFAULT_CAPACITY,
                 displayTier(userId).name(),
                 new DraftView.Period(start.toString(), end.toString()),
+                weeklyCount,
                 buildParams(template, llmParams),
                 verification,
                 // 점수 패널티 = 자동 방 ON 고정 / 그룹 공유 = 그룹 ON 고정 / 감시자 기본 off
@@ -293,11 +293,9 @@ public class ChallengeDraftService {
         }
     }
 
-    private List<String> sanitizeRepeatDays(List<String> days) {
-        if (days == null || days.isEmpty()) return ALL_DAYS;
-        List<String> upper = days.stream().filter(d -> d != null)
-                .map(d -> d.trim().toUpperCase()).toList();
-        return (!upper.isEmpty() && RepeatDay.allValid(upper)) ? upper : ALL_DAYS;
+    private int sanitizeWeeklyCount(Integer weeklyCount) {
+        return (weeklyCount != null && weeklyCount >= 1 && weeklyCount <= 7)
+                ? weeklyCount : DEFAULT_WEEKLY_COUNT;
     }
 
     private static String asString(Object v) {

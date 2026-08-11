@@ -16,11 +16,14 @@ import java.util.Map;
 /**
  * 카테고리 그리드 카운트 (탐색 백엔드 테크스펙 §10).
  *
- * <p>집계 대상은 {@code PUBLIC + GROUP + ACTIVE} 뿐이다. 비공개 방은 <b>카운트로도</b> 존재가 새면
- * 안 되므로 제외하고, 시작 전(UPCOMING) 방도 세지 않는다 — 인기·목록이 UPCOMING 을 포함하는 것과
- * 다른 이 비대칭은 의도된 것이다. 그리드는 "지금 돌아가고 있는 방이 몇 개인가"를 보여준다.
+ * <p>집계 대상은 {@code PUBLIC + GROUP + (UPCOMING | ACTIVE)} 다. 비공개 방은 <b>카운트로도</b>
+ * 존재가 새면 안 되므로 제외한다. 시작 전(UPCOMING)을 포함하는 이유는 그리드의 수가 곧
+ * <b>"지금 들어갈 수 있는 방이 몇 개인가"</b>이기 때문이다 — 시작 전 방도 가입할 수 있고 인기·목록에도
+ * 이미 나오는데 그리드에서만 빠지면, 방을 만들어도 다음 날 활성화 배치가 돌기 전까지 수가 그대로라
+ * "업데이트가 안 된다"로 보인다. 이제 그리드·인기·목록의 후보 조건이 같다.
  *
- * <p>표시용 수치이고 정렬·가입 판정에 쓰지 않으므로 10분 지연을 허용한다(별도 테이블 없이 GROUP BY).
+ * <p>표시용 수치이고 정렬·가입 판정에 쓰지 않으므로 짧은 캐시 지연을 허용한다(별도 테이블 없이 GROUP BY).
+ * 대신 집계 대상이 실제로 바뀌는 지점(생성·상태 전환·삭제)에서 {@link ChallengeGridChanged} 로 즉시 버린다.
  */
 @Service
 @RequiredArgsConstructor
@@ -34,7 +37,8 @@ public class CategoryCountService {
     public CategoryGridResponse getCategories() {
         Map<String, Integer> counts = new HashMap<>();
         jdbc.query("SELECT category, COUNT(*) FROM challenges " +
-                        "WHERE mode = 'GROUP' AND visibility = 'PUBLIC' AND status = 'ACTIVE' " +
+                        "WHERE mode = 'GROUP' AND visibility = 'PUBLIC' " +
+                        "  AND status IN ('UPCOMING', 'ACTIVE') " +
                         "  AND deleted_at IS NULL " +
                         "GROUP BY category",
                 rs -> { counts.put(rs.getString(1), rs.getInt(2)); });

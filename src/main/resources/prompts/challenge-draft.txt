@@ -105,9 +105,9 @@ STEP 1~4 는 "무엇을 어떻게 판단하는가"만 다루고, 판단 결과�
 - **참여 방식**: 습관의 성격상 혼자 하는 것이 자연스러운지, 여럿이 함께 하는 것이
   자연스러운지 판단한다. "친구들과", "스터디", "같이" 처럼 함께함이 드러나면
   그룹이고, 애매하면 혼자로 둔다.
-- **반복 요일**: 한국 시간 기준으로 월~일 중 어느 요일에 반복할지 판단한다.
-  "평일만"은 월~금, "주말에"는 토·일이다. 빈도 언급이 전혀 없으면 매일 반복하는
-  것으로 본다.
+- **주간 빈도**: 일주일에 몇 번 수행할지 1~7 사이 정수로 판단한다. "주 3회"는 3,
+  "평일마다"는 5, "주말마다"는 2, "매일"은 7이다. 빈도 언급이 없으면 7로 둔다.
+  특정 요일은 정하지 않는다. 사용자는 한 주 안에서 아무 날이나 목표 횟수를 채우면 된다.
 
 기간, 시작일, 정원, 최소 티어 같은 나머지 설정은 서버가 정하므로 여기서 만들지
 않는다.
@@ -128,8 +128,7 @@ STEP 1~4 는 "무엇을 어떻게 판단하는가"만 다루고, 판단 결과�
   키만 사용한다. `value` 는 항상 문자열이다 — 숫자도 `"5"` 처럼, 시각은 `"07:00"`
   처럼 HH:mm 형식으로. 명시된 값이 없으면 빈 배열 `[]`
 - `participationType`: 혼자면 `"SOLO"`, 함께면 `"GROUP"`
-- `repeatDays`: `["MON","TUE","WED","THU","FRI","SAT","SUN"]` 중 해당 요일만 담은
-  배열. 매일이면 7개 전부
+- `weeklyCount`: 주간 수행 횟수(1~7 정수). 요일 배열은 출력하지 않는다.
 
 ### 부적합 시 (STEP 1 또는 STEP 2 에서 탈락)
 
@@ -158,12 +157,12 @@ STEP 1~4 는 "무엇을 어떻게 판단하는가"만 다루고, 판단 결과�
 **예시 1** — 명시된 목표값이 있고 루틴이 매칭되는 경우
 
 입력: `새벽 5시에 일어나는 사람이 되고싶다`
-출력: `{"usable":true,"title":"새벽 5시 기상","description":"새벽 5시에 일어나는 사람이 되고 싶다.","category":"WAKE_SLEEP","templateId":1503,"params":[{"key":"target_time","value":"05:00"}],"participationType":"SOLO","repeatDays":["MON","TUE","WED","THU","FRI","SAT","SUN"]}`
+출력: `{"usable":true,"title":"새벽 5시 기상","description":"새벽 5시에 일어나는 사람이 되고 싶다.","category":"WAKE_SLEEP","templateId":1503,"params":[{"key":"target_time","value":"05:00"}],"participationType":"SOLO","weeklyCount":7}`
 
 **예시 2** — 유효한 습관이지만 측정할 루틴이 표에 없는 경우 (STEP 1 거부가 아니다)
 
 입력: `매일 아침 스무디 만들어 먹기`
-출력: `{"usable":true,"title":"매일 아침 스무디 마시기","description":"매일 아침 스무디를 만들어 먹어요.","category":"DIET_HEALTH","templateId":null,"params":[],"participationType":"SOLO","repeatDays":["MON","TUE","WED","THU","FRI","SAT","SUN"]}`
+출력: `{"usable":true,"title":"매일 아침 스무디 마시기","description":"매일 아침 스무디를 만들어 먹어요.","category":"DIET_HEALTH","templateId":null,"params":[],"participationType":"SOLO","weeklyCount":7}`
 
 **예시 3** — 되풀이하는 행동이 아니라 상태·바람이라 습관이 성립하지 않는 경우
 

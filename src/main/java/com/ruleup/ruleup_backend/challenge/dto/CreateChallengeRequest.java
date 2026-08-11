@@ -22,6 +22,7 @@ public record CreateChallengeRequest(
         Integer capacity,             // 그룹 전용 1~10,000
         String minTier,               // ≤ 생성자 표시 티어
         Period period,
+        Integer weeklyCount,          // 1~7, 미전송 시 draft 원본 유지
         List<Param> params,
         Verification verification,    // AUTO→MANUAL 만 허용
         Penalties penalties,

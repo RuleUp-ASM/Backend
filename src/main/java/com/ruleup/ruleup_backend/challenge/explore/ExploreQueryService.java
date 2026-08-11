@@ -22,6 +22,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -51,6 +52,7 @@ public class ExploreQueryService {
 
     private final JdbcTemplate jdbc;
     private final UserScoreSummaryRepository scoreSummaryRepository;
+    private final MyMembershipReader myMembershipReader;
     private final MeterRegistry meterRegistry;
 
     @Transactional(readOnly = true)
@@ -78,6 +80,8 @@ public class ExploreQueryService {
         List<String> categories = parseCategories(categoriesCsv);
         String verification = parseVerifyType(verifyType);
         Tier myTier = displayTier(userId);
+        // 내가 이미 들어가 있는 방(내가 만든 방 포함)은 목록에서 빼지 않고 joined 로만 구분한다.
+        Set<UUID> myChallengeIds = myMembershipReader.activeChallengeIds(userId);
 
         List<Object> args = new ArrayList<>();
         StringBuilder sql = new StringBuilder(
@@ -121,7 +125,8 @@ public class ExploreQueryService {
         boolean hasNext = rows.size() > size;
         List<Row> page = hasNext ? rows.subList(0, size) : rows;
         LocalDate today = LocalDate.now(KST);
-        List<ExploreResponse.Item> items = page.stream().map(r -> toItem(r, myTier, today)).toList();
+        List<ExploreResponse.Item> items =
+                page.stream().map(r -> toItem(r, myTier, myChallengeIds, today)).toList();
         String nextCursor = hasNext ? cursorOf(sort, page.get(page.size() - 1)).encode() : null;
         return new ExploreResponse(items, nextCursor, hasNext);
     }
@@ -169,7 +174,7 @@ public class ExploreQueryService {
         return new ExploreCursor(sort, primary, secondary, r.id);
     }
 
-    private ExploreResponse.Item toItem(Row r, Tier myTier, LocalDate today) {
+    private ExploreResponse.Item toItem(Row r, Tier myTier, Set<UUID> myChallengeIds, LocalDate today) {
         boolean upcoming = "UPCOMING".equals(r.status);
         boolean full = r.capacity != null && r.participantCount >= r.capacity;
         boolean eligible = r.minTier == null || myTier.ordinal() >= Tier.valueOf(r.minTier).ordinal();
@@ -186,6 +191,7 @@ public class ExploreQueryService {
                 full,
                 r.minTier,
                 eligible,
+                myChallengeIds.contains(r.id),
                 // 시작 전 방은 진행 지표 자체가 없다
                 upcoming ? null : r.completionRate,
                 upcoming ? null : r.retentionRate,

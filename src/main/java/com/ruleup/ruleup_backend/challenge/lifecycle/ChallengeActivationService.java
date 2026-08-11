@@ -48,7 +48,8 @@ public class ChallengeActivationService {
             eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(c.getId(), "CHALLENGE_ACTIVATED"));
         }
         if (!due.isEmpty()) {
-            // 홈 카테고리 그리드는 ACTIVE 만 센다 — 여기서 버려야 "방금 시작한 방"이 바로 반영된다.
+            // 그리드는 UPCOMING·ACTIVE 를 함께 세므로 이 전환으로 합계가 바뀌진 않지만,
+            // 캐시가 상태를 스냅샷으로 들고 있으므로 전환이 있었으면 버려 최신값으로 맞춘다.
             eventPublisher.publishEvent(ChallengeGridChanged.of("CHALLENGE_ACTIVATED"));
             log.info("시작일 도달로 ACTIVE 전환한 챌린지 {}건", due.size());
         }

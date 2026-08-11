@@ -21,7 +21,8 @@ public record DraftView(
         Integer capacity,             // 기본 50
         String minTier,               // 기본 = 생성자 표시 티어(상한 동일)
         Period period,                // 시작=생성일+1일, 종료=시작+2주
-        List<DraftParam> params,      // 목표값 스펙 + 값
+        Integer weeklyCount,          // 주간 수행 횟수(1~7), 요일은 지정하지 않음
+        List<DraftParam> params,       // 목표값 스펙 + 값
         Verification verification,    // 방 단위 인증 스냅샷
         Penalties penalties           // score·groupShare 서버 고정, watcher 만 선택
 ) {

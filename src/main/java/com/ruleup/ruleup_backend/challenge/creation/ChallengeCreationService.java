@@ -11,6 +11,7 @@ import com.ruleup.ruleup_backend.challenge.draft.ChallengeDraftRepository;
 import com.ruleup.ruleup_backend.challenge.draft.DraftView;
 import com.ruleup.ruleup_backend.challenge.dto.CreateChallengeRequest;
 import com.ruleup.ruleup_backend.challenge.dto.CreateChallengeResponse;
+import com.ruleup.ruleup_backend.challenge.explore.ChallengeGridChanged;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.challenge.repository.UserChallengeCounterRepository;
@@ -115,6 +116,8 @@ public class ChallengeCreationService {
         Integer capacity = validateCapacity(mode, req.capacity());
         Tier minTier = validateMinTier(userId, req.minTier());
         LocalDate[] period = validatePeriod(req.period());
+        List<String> repeatDays = validateRepeatDays(
+                req.repeatDays() != null ? req.repeatDays() : draft.getPayload().repeatDays());
 
         RoutineTemplate template = (draft.getTemplateId() != null)
                 ? catalog.findById(draft.getTemplateId()).orElse(null) : null;
@@ -143,7 +146,7 @@ public class ChallengeCreationService {
                 userId, title, draft.getTitle(), description, req.imageUrl(),
                 category, mode, resolveVisibility(mode, req.visibility()), req.rankingVisible(),
                 capacity, minTier, period[0], period[1],
-                draft.getPayload().repeatDays(), draft.getTemplateId(),
+                repeatDays, draft.getTemplateId(),
                 verification, params.valueMap(), params.specs(), penalties,
                 moderationTitle, moderationDescription, moderationImage);
         challengeRepository.save(challenge);
@@ -155,6 +158,12 @@ public class ChallengeCreationService {
         counterRepository.increment(userId);
         // 탐색 목록이 challenges JOIN challenge_stats 로 읽으므로 기본 행을 함께 만든다
         statsProjectionService.createRow(challenge.getId());
+
+        // 홈 카테고리 그리드는 시작 전(UPCOMING) 방까지 세므로 방을 만든 순간 수가 바뀐다 →
+        // 캐시를 버려야 "만들었는데 카테고리 수가 그대로"가 안 생긴다. 집계 대상인 공개 그룹만.
+        if (challenge.isGroup() && "PUBLIC".equals(challenge.getVisibility())) {
+            eventPublisher.publishEvent(ChallengeGridChanged.of("CHALLENGE_CREATED"));
+        }
 
         if (imageUpload != null) imageUpload.markRegistered(Instant.now());
 
@@ -259,6 +268,16 @@ public class ChallengeCreationService {
         if (end.isBefore(start) || start.isBefore(LocalDate.now(KST)))
             throw new BusinessException(ErrorCode.INVALID_PERIOD);
         return new LocalDate[]{start, end};
+    }
+
+    /** 반복 요일은 1~7개의 서로 다른 MON~SUN 코드만 허용한다. weeklyCount 는 이 개수로 파생한다. */
+    private List<String> validateRepeatDays(List<String> days) {
+        if (days == null || days.isEmpty() || days.size() > 7
+                || !com.ruleup.ruleup_backend.challenge.domain.RepeatDay.allValid(days)
+                || days.stream().distinct().count() != days.size()) {
+            throw new BusinessException(ErrorCode.INVALID_REPEAT_DAY);
+        }
+        return List.copyOf(days);
     }
 
     /**

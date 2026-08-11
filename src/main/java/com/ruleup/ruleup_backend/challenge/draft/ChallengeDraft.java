@@ -62,7 +62,7 @@ public class ChallengeDraft extends AssignedIdEntity {
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "payload", nullable = false, updatable = false)
-    private DraftPayload payload;        // 초안 전 필드 + 내부 값(repeatDays 등)
+    private DraftPayload payload;        // 초안 전 필드 + 서버 확정 주간 빈도
 
     @Generated(event = EventType.INSERT)
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -71,12 +71,12 @@ public class ChallengeDraft extends AssignedIdEntity {
     @Column(name = "expires_at", nullable = false, updatable = false)
     private Instant expiresAt;
 
-    /** 초안 전 필드(계약 스키마 그대로) + API 로 노출하지 않는 내부 값. */
-    public record DraftPayload(DraftView draft, java.util.List<String> repeatDays) {}
+    /** 초안 전 필드(계약 스키마 그대로) + 생성 시 원본으로 쓸 주간 빈도. */
+    public record DraftPayload(DraftView draft, Integer weeklyCount) {}
 
     public static ChallengeDraft of(UUID userId, Origin origin, Long templateId,
                                     UUID sourceChallengeId, DraftView draft,
-                                    java.util.List<String> repeatDays, Instant now) {
+                                    Integer weeklyCount, Instant now) {
         ChallengeDraft d = new ChallengeDraft();
         d.id = UuidGenerator.generate();
         d.userId = userId;
@@ -85,7 +85,7 @@ public class ChallengeDraft extends AssignedIdEntity {
         d.sourceChallengeId = sourceChallengeId;
         d.title = draft.title();
         d.description = draft.description();
-        d.payload = new DraftPayload(draft, repeatDays);
+        d.payload = new DraftPayload(draft, weeklyCount);
         d.expiresAt = now.plus(TTL);
         return d;
     }
