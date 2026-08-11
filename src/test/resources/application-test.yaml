@@ -13,6 +13,13 @@ app:
   recommendation:
     # 짧은 테스트 동안 추천 재계산 배치가 끼어들지 않도록 첫 실행을 멀리 민다.
     rebuild-initial-delay-ms: 3600000
+  challenge:
+    # 운영은 테스트 기간 동안 꺼두지만(application.yaml), 판정 로직이 죽지 않도록 CI 에서는 켜고 검증한다.
+    # 꺼진 상태의 동작은 ConcurrentLimitDisabledIT 가 프로퍼티를 덮어써서 따로 검증한다.
+    concurrent-limit:
+      enabled: true
+      max: 3
+
   join-counter:
     # 동시 참여 카운터 보정 배치는 무차별이라, 멤버십 없이 카운터만 심어 FREE_LIMIT 을 검증하는
     # 테스트(ChallengeJoinGateIT 등)의 픽스처를 되돌려 놓는다 → 첫 실행을 멀리 밀어 사실상 끈다.

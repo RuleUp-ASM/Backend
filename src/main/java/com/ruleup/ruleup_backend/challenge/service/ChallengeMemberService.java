@@ -5,6 +5,7 @@ import com.ruleup.ruleup_backend.challenge.dto.JoinResponse;
 import com.ruleup.ruleup_backend.challenge.dto.LeaveResponse;
 import com.ruleup.ruleup_backend.challenge.dto.MemberListResponse;
 import com.ruleup.ruleup_backend.challenge.dto.RoleChangeResponse;
+import com.ruleup.ruleup_backend.challenge.counter.ConcurrentChallengeLimitPolicy;
 import com.ruleup.ruleup_backend.challenge.counter.UserJoinCounterService;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
@@ -57,8 +58,6 @@ public class ChallengeMemberService {
 
     private static final Logger log = LoggerFactory.getLogger(ChallengeMemberService.class);
 
-    /** 동시 참여 무료 한도(⚠️ BM 확정 대기 — 초과 시 reason=FREE_LIMIT). */
-    private static final int FREE_CONCURRENT_LIMIT = 3;
     /** 자진 탈퇴 후 재입장 대기(정책 §10.1 — 고정 1주). 강퇴 배수는 {@link RejoinBackoff}. */
     private static final Duration LEAVE_REJOIN_COOLDOWN = Duration.ofDays(7);
     /** "1년 이상 성공을 이어왔다" 면제 기준(정책 §10.1). */
@@ -72,6 +71,7 @@ public class ChallengeMemberService {
     private final ChallengeMemberRepository memberRepository;
     private final UserChallengeCounterRepository counterRepository;
     private final UserJoinCounterService joinCounterService;
+    private final ConcurrentChallengeLimitPolicy limitPolicy;
     private final UserRepository userRepository;
     private final UserScoreSummaryRepository scoreSummaryRepository;
     private final VerificationDailyRepository verificationDailyRepository;
@@ -128,7 +128,7 @@ public class ChallengeMemberService {
         // 트랜잭션의 읽기 스냅샷은 "첫 일반 SELECT" 시점에 고정되는데, 락을 기다리기 전에 스냅샷이
         // 잡히면 ⑤의 정원 카운트가 그 사이 커밋된 다른 가입을 못 본다 → 마지막 한 자리에 여러 명이 들어간다.
         int activeJoinCount = joinCounterService.countActiveSlots(userId);
-        if (activeJoinCount >= FREE_CONCURRENT_LIMIT) throw blocked(JoinBlockReason.FREE_LIMIT);
+        if (limitPolicy.exceeded(activeJoinCount)) throw blocked(JoinBlockReason.FREE_LIMIT);
 
         // ⑤ 정원(챌린지 행 락 하에서 판정 — "마지막 1자리 동시 가입" 차단)
         Integer cap = c.getMaxParticipants();

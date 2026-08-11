@@ -456,4 +456,33 @@ class ChallengeCreateApiIT extends ChallengeApiSupport {
             expectError(create(token, UUID.randomUUID().toString(), body), 403, "IMAGE_NOT_OWNED");
         }
     }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("동시 참여 한도 — 생성 경로")
+    class ConcurrentLimit {
+
+        @Test
+        @DisplayName("한도를 채운 사용자는 방을 새로 만들 수 없다 — 생성만 열어두면 한도가 무의미해진다")
+        void creationIsGatedToo() throws Exception {
+            Member me = member(uniq("limit-create"));
+            occupySlots(me.id(), 3);
+
+            Map<String, Object> body = createBodyFrom(templateDraft(me.token()));
+            expectError(create(me.token(), UUID.randomUUID().toString(), body),
+                    409, "CHALLENGE_LIMIT_EXCEEDED");
+        }
+
+        @Test
+        @DisplayName("한도 미만이면 그대로 만들어지고 슬롯이 하나 늘어난다")
+        void underLimitStillCreates() throws Exception {
+            Member me = member(uniq("limit-create-ok"));
+            occupySlots(me.id(), 2);
+
+            Map<String, Object> body = createBodyFrom(templateDraft(me.token()));
+            MvcResult res = create(me.token(), UUID.randomUUID().toString(), body);
+            assertThat(res.getResponse().getStatus()).isIn(200, 201);
+            assertThat(counterOf(me.id())).isEqualTo(3);
+        }
+    }
 }
