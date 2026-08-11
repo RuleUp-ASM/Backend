@@ -199,9 +199,11 @@ public class ChallengeMemberService {
 
         Instant rejoinAt = now.plus(LEAVE_REJOIN_COOLDOWN);
         me.leave(now, rejoinAt);
+        // 참여 인원 변화 → version 증가. decrementParticipantCount 는 clearAutomatically 라
+        // 그 뒤에서 부르면 c 가 준영속이 되어 증가가 조용히 사라진다(반드시 앞에서).
+        c.bumpVersion();
         challengeRepository.decrementParticipantCount(challengeId);
         counterRepository.decrement(userId);
-        c.bumpVersion();   // 참여 인원 변화 → version 증가
         eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "LEAVE"));
 
         int scoreDelta = (exemptReason != null) ? 0 : LEAVE_SCORE_PENALTY;

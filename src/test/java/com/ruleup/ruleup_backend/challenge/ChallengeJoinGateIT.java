@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -276,6 +277,48 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
     @Nested
     @DisplayName("탈퇴와 재입장")
     class LeaveAndRejoin {
+
+        /** 방의 낙관적 충돌 감지 버전. 설정 수정(PATCH)이 이 값으로 "그 사이 변한 게 있나"를 판정한다. */
+        private int versionOf(UUID challengeId) {
+            Integer v = jdbcTemplate.queryForObject(
+                    "SELECT version FROM challenges WHERE id = ?", Integer.class, bytes(challengeId));
+            return v != null ? v : 0;
+        }
+
+        @Test
+        @DisplayName("일반 멤버가 나가도 version 이 오른다 — 수정 화면이 인원 변화를 놓치지 않게")
+        void leaveBumpsVersion() throws Exception {
+            Member owner = member(uniq("leave-ver-owner"));
+            Member joiner = member(uniq("leave-ver-joiner"));
+            UUID challengeId = openGroup(owner.id());
+            join(joiner.token(), challengeId);
+            int before = versionOf(challengeId);
+
+            leave(joiner.token(), challengeId);
+
+            // 벌크 UPDATE(clearAutomatically) 뒤에서 bumpVersion 을 부르면 준영속이라 조용히 사라진다.
+            assertThat(versionOf(challengeId)).isGreaterThan(before);
+        }
+
+        @Test
+        @DisplayName("강퇴로 인원이 줄어도 version 이 오른다")
+        void kickBumpsVersion() throws Exception {
+            Member owner = member(uniq("kick-ver-owner"));
+            Member target = member(uniq("kick-ver-target"));
+            UUID challengeId = openGroup(owner.id());
+            join(target.token(), challengeId);
+            int before = versionOf(challengeId);
+
+            MvcResult res = mvc.perform(delete(
+                            "/api/v1/challenges/" + challengeId + "/members/" + target.id())
+                            .header("Authorization", "Bearer " + owner.token())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(OM.writeValueAsString(Map.of("reason", "규칙을 반복해서 어겼습니다"))))
+                    .andReturn();
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+
+            assertThat(versionOf(challengeId)).isGreaterThan(before);
+        }
 
         @Test
         @DisplayName("자진 탈퇴 → 감점 + 재입장 1주 대기, 그 안에 재가입하면 REJOIN_COOLDOWN")
