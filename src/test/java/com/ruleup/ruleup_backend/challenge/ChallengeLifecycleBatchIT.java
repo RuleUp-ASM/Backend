@@ -285,4 +285,82 @@ class ChallengeLifecycleBatchIT extends ChallengeApiSupport {
             assertThat(res.getResponse().getStatus()).isIn(404, 405);
         }
     }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("동시 참여 슬롯 회수")
+    class JoinSlotRelease {
+
+        /** 방 하나를 어제 끝난 것으로 만든다(종료 배치가 집도록). */
+        private void endYesterday(UUID challengeId) {
+            jdbcTemplate.update("UPDATE challenges SET start_date = DATE_SUB(CURDATE(), INTERVAL 10 DAY), " +
+                    "end_date = DATE_SUB(CURDATE(), INTERVAL 1 DAY) WHERE id = ?", (Object) bytes(challengeId));
+        }
+
+        @Test
+        @DisplayName("종료 배치가 끝난 방의 슬롯을 돌려준다 — 막혀 있던 가입이 통과한다")
+        void completionReleasesSlot() throws Exception {
+            Member user = member(uniq("slot-done"));
+            Member owner = member(uniq("slot-done-owner"));
+            var rooms = occupySlots(user.id(), 3);
+            assertThat(counterOf(user.id())).isEqualTo(3);
+
+            // 한 방이 어제로 끝났다 → 슬롯 하나가 풀려야 한다
+            endYesterday(rooms.get(0));
+            completionService.completeEndedChallenges();
+
+            assertThat(counterOf(user.id())).isEqualTo(2);
+
+            UUID target = insertChallenge(owner.id(), "STUDY", "ACTIVE", "GROUP");
+            insertActiveMembership(target, owner.id(), "OWNER");
+            jdbcTemplate.update("UPDATE challenges SET visibility = 'PUBLIC' WHERE id = ?", (Object) bytes(target));
+            MvcResult joined = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                    .post("/api/v1/challenges/" + target + "/members")
+                    .header("Authorization", "Bearer " + user.token())).andReturn();
+            assertThat(joined.getResponse().getStatus()).isEqualTo(200);
+        }
+
+        @Test
+        @DisplayName("멤버 행은 ACTIVE 로 남는다 — 카운터에서만 뺀다(완주 기록·최종 랭킹의 근거)")
+        void keepsMembershipRow() throws Exception {
+            Member user = member(uniq("slot-keep"));
+            var rooms = occupySlots(user.id(), 1);
+            endYesterday(rooms.get(0));
+
+            completionService.completeEndedChallenges();
+
+            String memberStatus = jdbcTemplate.queryForObject(
+                    "SELECT status FROM challenge_members WHERE challenge_id = ? AND user_id = ?",
+                    String.class, bytes(rooms.get(0)), bytes(user.id()));
+            assertThat(memberStatus).isEqualTo("ACTIVE");
+            assertThat(counterOf(user.id())).isZero();
+        }
+
+        @Test
+        @DisplayName("종료 배치를 두 번 돌려도 카운터가 더 내려가지 않는다(재계산은 멱등)")
+        void completionIsIdempotent() throws Exception {
+            Member user = member(uniq("slot-idem"));
+            var rooms = occupySlots(user.id(), 2);
+            endYesterday(rooms.get(0));
+
+            completionService.completeEndedChallenges();
+            completionService.completeEndedChallenges();
+
+            assertThat(counterOf(user.id())).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("자동 삭제도 슬롯을 돌려주며, 두 번 돌아도 음수가 되지 않는다")
+        void autoDeleteReleasesSlotOnce() throws Exception {
+            Member user = member(uniq("slot-del"));
+            var rooms = occupySlots(user.id(), 1);
+            jdbcTemplate.update("UPDATE challenges SET status = 'COMPLETED' WHERE id = ?",
+                    (Object) bytes(rooms.get(0)));
+
+            autoDeleteService.runOnce();
+            autoDeleteService.runOnce();
+
+            assertThat(counterOf(user.id())).isZero();
+        }
+    }
 }

@@ -1,7 +1,11 @@
 package com.ruleup.ruleup_backend.challenge;
 
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
+import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
+import com.ruleup.ruleup_backend.common.verification.PeriodUnit;
+import com.ruleup.ruleup_backend.common.verification.ScheduleType;
 import com.ruleup.ruleup_backend.llm.LlmClient;
+import com.ruleup.ruleup_backend.verification.service.VerificationConfigFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -66,6 +70,8 @@ class ChallengeCreateApiIT extends ChallengeApiSupport {
 
     @Autowired WebApplicationContext wac;
     @Autowired JdbcTemplate jdbcTemplate;
+    @Autowired ChallengeRepository challengeRepository;
+    @Autowired VerificationConfigFactory verificationConfigFactory;
 
     MockMvc mvc;
 
@@ -80,8 +86,8 @@ class ChallengeCreateApiIT extends ChallengeApiSupport {
         mvc = MockMvcBuilders.webAppContextSetup(wac).apply(springSecurity()).build();
         LLM_RESPONSE.set(null);
         if (!fixtures) {
-            insertAutoTemplate(GYM_TEMPLATE, "주 3회 헬스장", "퇴근 후 운동 습관", "EXERCISE",
-                    "{\"weekly_count\":{\"default\":3,\"unit\":\"회\",\"min\":1,\"max\":7}}",
+            insertAutoTemplate(GYM_TEMPLATE, "헬스장 가기", "퇴근 후 운동 습관", "EXERCISE",
+                    "{\"duration_min\":{\"default\":60,\"unit\":\"min\",\"min\":10,\"max\":480}}",
                     "GPS_PRESENCE", "[\"ACCESS_FINE_LOCATION\",\"ACCESS_BACKGROUND_LOCATION\"]");
             fixtures = true;
         }
@@ -112,8 +118,8 @@ class ChallengeCreateApiIT extends ChallengeApiSupport {
         body.put("period", Map.of(
                 "start", (String) read(draftRes, "$.data.draft.period.start"),
                 "end", (String) read(draftRes, "$.data.draft.period.end")));
-        body.put("repeatDays", (List<String>) read(draftRes, "$.data.draft.repeatDays"));
-        body.put("params", List.of(Map.of("key", "weekly_count", "value", "3")));
+        body.put("weeklyCount", (Integer) read(draftRes, "$.data.draft.weeklyCount"));
+        body.put("params", List.of(Map.of("key", "duration_min", "value", "60")));
         body.put("verification", Map.of(
                 "type", (String) read(draftRes, "$.data.draft.verification.type"),
                 "method", (String) read(draftRes, "$.data.draft.verification.method")));
@@ -222,13 +228,13 @@ class ChallengeCreateApiIT extends ChallengeApiSupport {
             // DB: ai_title = 원본 제목, 생성자 OWNER 멤버십, 카운터·버전
             String challengeId = read(res, "$.data.challengeId");
             Map<String, Object> row = jdbcTemplate.queryForMap(
-                    "SELECT ai_title, version, participant_count, min_tier, status, repeat_days FROM challenges " +
+                    "SELECT ai_title, version, participant_count, min_tier, status, weekly_count FROM challenges " +
                             "WHERE id = UNHEX(REPLACE(?, '-', ''))", challengeId);
-            assertThat(row.get("ai_title")).isEqualTo("주 3회 헬스장");
+            assertThat(row.get("ai_title")).isEqualTo("헬스장 가기");
             assertThat(((Number) row.get("version")).intValue()).isEqualTo(0);
             assertThat(((Number) row.get("participant_count")).intValue()).isEqualTo(1);
             assertThat(row.get("min_tier")).isEqualTo("BRONZE");
-            assertThat(String.valueOf(row.get("repeat_days"))).contains("MON", "SUN");
+            assertThat(((Number) row.get("weekly_count")).intValue()).isEqualTo(7);
 
             Integer owners = jdbcTemplate.queryForObject(
                     "SELECT COUNT(*) FROM challenge_members WHERE challenge_id = UNHEX(REPLACE(?, '-', '')) " +
@@ -252,7 +258,7 @@ class ChallengeCreateApiIT extends ChallengeApiSupport {
             Map<String, Object> row = jdbcTemplate.queryForMap(
                     "SELECT title, ai_title FROM challenges WHERE id = UNHEX(REPLACE(?, '-', ''))", challengeId);
             assertThat(row.get("title")).isEqualTo("내가 고쳐 쓴 제목");
-            assertThat(row.get("ai_title")).isEqualTo("주 3회 헬스장");
+            assertThat(row.get("ai_title")).isEqualTo("헬스장 가기");
         }
 
         @Test
@@ -312,7 +318,7 @@ class ChallengeCreateApiIT extends ChallengeApiSupport {
             LLM_RESPONSE.set("""
                     {"usable":true,"title":"저녁 스트레칭","description":"매일 저녁 스트레칭을 해요.",
                      "category":"EXERCISE","templateId":null,"params":[],
-                     "participationType":"SOLO","repeatDays":["MON","TUE","WED","THU","FRI","SAT","SUN"]}
+                     "participationType":"SOLO","weeklyCount":7}
                     """);
             MvcResult draftRes = postJsonAuth("/api/v1/challenges/draft", token,
                     Map.of("description", "매일 저녁 스트레칭을 하고 싶어요"));
@@ -376,27 +382,33 @@ class ChallengeCreateApiIT extends ChallengeApiSupport {
         void invalidParam() throws Exception {
             String token = memberToken(uniq("cr-param"));
             Map<String, Object> body = createBodyFrom(templateDraft(token));
-            body.put("params", List.of(Map.of("key", "weekly_count", "value", "99")));   // max 7
+            body.put("params", List.of(Map.of("key", "duration_min", "value", "999")));   // max 480
             expectError(create(token, UUID.randomUUID().toString(), body), 400, "INVALID_ROUTINE_PARAM");
         }
 
         @Test
-        @DisplayName("반복 요일 수정값을 저장하고, 중복·잘못된 요일은 400 INVALID_REPEAT_DAY")
-        void repeatDaysValidation() throws Exception {
+        @DisplayName("주간 횟수 수정값을 저장하고 1~7 밖은 400 INVALID_WEEKLY_COUNT")
+        void weeklyCountValidation() throws Exception {
             String token = memberToken(uniq("cr-repeat"));
             Map<String, Object> body = createBodyFrom(templateDraft(token));
-            body.put("repeatDays", List.of("MON", "WED", "FRI"));
+            body.put("weeklyCount", 3);
 
             MvcResult res = create(token, UUID.randomUUID().toString(), body);
             assertThat(res.getResponse().getStatus()).isEqualTo(201);
-            String saved = jdbcTemplate.queryForObject(
-                    "SELECT repeat_days FROM challenges WHERE id = UNHEX(REPLACE(?, '-', ''))",
-                    String.class, (String) read(res, "$.data.challengeId"));
-            assertThat(saved.replace(" ", "")).isEqualTo("[\"MON\",\"WED\",\"FRI\"]");
+            Integer saved = jdbcTemplate.queryForObject(
+                    "SELECT weekly_count FROM challenges WHERE id = UNHEX(REPLACE(?, '-', ''))",
+                    Integer.class, (String) read(res, "$.data.challengeId"));
+            assertThat(saved).isEqualTo(3);
+
+            var config = verificationConfigFactory.build(challengeRepository.findById(
+                    UUID.fromString((String) read(res, "$.data.challengeId"))).orElseThrow());
+            assertThat(config.scheduleType()).isEqualTo(ScheduleType.FREQUENCY);
+            assertThat(config.frequency().unit()).isEqualTo(PeriodUnit.WEEK);
+            assertThat(config.frequency().count()).isEqualTo(3);
 
             Map<String, Object> invalid = createBodyFrom(templateDraft(token));
-            invalid.put("repeatDays", List.of("MON", "MON"));
-            expectError(create(token, UUID.randomUUID().toString(), invalid), 400, "INVALID_REPEAT_DAY");
+            invalid.put("weeklyCount", 8);
+            expectError(create(token, UUID.randomUUID().toString(), invalid), 400, "INVALID_WEEKLY_COUNT");
         }
     }
 

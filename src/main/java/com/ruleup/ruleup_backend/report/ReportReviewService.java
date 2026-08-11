@@ -1,6 +1,8 @@
 package com.ruleup.ruleup_backend.report;
 
+import com.ruleup.ruleup_backend.challenge.counter.UserJoinCounterService;
 import com.ruleup.ruleup_backend.challenge.domain.RejoinBackoff;
+import com.ruleup.ruleup_backend.challenge.repository.UserChallengeCounterRepository;
 import com.ruleup.ruleup_backend.common.UuidGenerator;
 import com.ruleup.ruleup_backend.llm.LlmClient;
 import com.ruleup.ruleup_backend.notification.NotificationService;
@@ -22,6 +24,8 @@ public class ReportReviewService {
     private final JdbcTemplate jdbc;
     private final LlmClient llm;
     private final NotificationService notificationService;
+    private final UserChallengeCounterRepository counterRepository;
+    private final UserJoinCounterService joinCounterService;
 
     private record ReportRow(UUID id, UUID reporterId, String targetType, UUID targetUserId,
                              UUID targetChallengeId, String contextType, String reason, String detail) {}
@@ -68,6 +72,10 @@ public class ReportReviewService {
     }
 
     private void kickNonOwner(UUID challengeId, UUID targetUserId) {
+        // 락 순서를 사용자부터로 맞춘다(가입·방장 강퇴와 동일). 여기만 순서가 달라지면 데드락이 난다.
+        counterRepository.ensureRow(targetUserId);
+        counterRepository.lockCount(targetUserId);
+
         var row = jdbc.query("SELECT role,status,kick_count FROM challenge_members " +
                         "WHERE challenge_id=? AND user_id=? FOR UPDATE",
                 rs -> rs.next() ? new Object[]{rs.getString(1), rs.getString(2), rs.getInt(3)} : null,
@@ -83,6 +91,10 @@ public class ReportReviewService {
                 bytes(challengeId), bytes(targetUserId));
         jdbc.update("UPDATE challenges SET participant_count=GREATEST(0,participant_count-1),version=version+1 WHERE id=?",
                 bytes(challengeId));
+        // 동시 참여 슬롯도 함께 돌려준다 — 안 하면 강퇴당한 사용자가 영구히 슬롯 하나를 잃는다.
+        // 방금 REMOVED 로 바꾼 것이 반영돼야 하므로 반드시 <b>같은 트랜잭션</b>에서 센다
+        // (새 트랜잭션으로 재계산하면 미커밋 강퇴가 안 보여 옛값을 쓴다).
+        counterRepository.setCount(targetUserId, joinCounterService.countActiveSlots(targetUserId));
         notificationService.notify(targetUserId, NotificationType.CHALLENGE_MEMBER_KICKED,
                 "챌린지에서 내보내졌어요", "유효한 신고가 누적되어 자동 조치되었습니다.");
     }

@@ -5,6 +5,7 @@ import com.ruleup.ruleup_backend.challenge.dto.JoinResponse;
 import com.ruleup.ruleup_backend.challenge.dto.LeaveResponse;
 import com.ruleup.ruleup_backend.challenge.dto.MemberListResponse;
 import com.ruleup.ruleup_backend.challenge.dto.RoleChangeResponse;
+import com.ruleup.ruleup_backend.challenge.counter.UserJoinCounterService;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.challenge.repository.UserChallengeCounterRepository;
@@ -70,6 +71,7 @@ public class ChallengeMemberService {
     private final ChallengeRepository challengeRepository;
     private final ChallengeMemberRepository memberRepository;
     private final UserChallengeCounterRepository counterRepository;
+    private final UserJoinCounterService joinCounterService;
     private final UserRepository userRepository;
     private final UserScoreSummaryRepository scoreSummaryRepository;
     private final VerificationDailyRepository verificationDailyRepository;
@@ -91,7 +93,7 @@ public class ChallengeMemberService {
         // 락 순서 고정: 사용자 행을 먼저 잡는다. 챌린지 행만 잠그면 서로 다른 두 방에 동시 가입할 때
         // 각자 다른 행을 잡아 둘 다 "현재 2개"로 읽어 동시 3개 제한이 뚫린다(P0).
         counterRepository.ensureRow(userId);
-        int activeJoinCount = orZero(counterRepository.lockCount(userId));
+        counterRepository.lockCount(userId);   // 락만 잡는다 — 판정은 ④에서 원천을 세서 한다
 
         Challenge c = challengeRepository.findByIdForUpdate(challengeId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
@@ -119,6 +121,13 @@ public class ChallengeMemberService {
         }
 
         // ④ 동시 참여 3개(사용자 행 락 하에서 판정)
+        // 저장 카운터가 아니라 원천(멤버십)을 센다. 저장값으로 판정하면 어딘가에서 해제가 한 번 누락된
+        // 사용자가 "실제로는 0개 참여 중인데 가입 불가"에 갇히고, 종료된 방은 탈퇴도 못 해 스스로 풀 수 없다.
+        //
+        // ⚠️ 이 COUNT 를 챌린지 행 락보다 <b>앞</b>으로 옮기면 안 된다. MySQL REPEATABLE READ 에서
+        // 트랜잭션의 읽기 스냅샷은 "첫 일반 SELECT" 시점에 고정되는데, 락을 기다리기 전에 스냅샷이
+        // 잡히면 ⑤의 정원 카운트가 그 사이 커밋된 다른 가입을 못 본다 → 마지막 한 자리에 여러 명이 들어간다.
+        int activeJoinCount = joinCounterService.countActiveSlots(userId);
         if (activeJoinCount >= FREE_CONCURRENT_LIMIT) throw blocked(JoinBlockReason.FREE_LIMIT);
 
         // ⑤ 정원(챌린지 행 락 하에서 판정 — "마지막 1자리 동시 가입" 차단)
@@ -201,6 +210,60 @@ public class ChallengeMemberService {
         return new LeaveResponse(true, scoreDelta, exemptReason, rejoinAt.toString(), botOwnerActivated);
     }
 
+    // ===== 회원 탈퇴에 따른 일괄 정리 =====
+    /**
+     * 탈퇴하는 회원을 참여 중인 <b>모든</b> 방에서 내보낸다. 정리한 방 수를 반환.
+     *
+     * <p>멤버십을 그대로 두는 선택지도 있었지만, 인증하지 않는 유령 멤버가 남의 방 정원을 먹고
+     * 그 방은 "ACTIVE 멤버 0명" 유령방 삭제 대상에서도 빠져 영영 남는다 — 남은 참여자가 피해를 본다.
+     * 그래서 계정 복구(1년 내 재로그인) 시에도 방은 되돌아오지 않는다.
+     *
+     * <p>{@link #leave} 와 다른 점 셋:
+     * <ul>
+     *   <li>종료(COMPLETED)된 방도 정리한다 — 이건 사용자 행동이 아니라 계정 정리라 탈퇴 거부 규칙 밖이다.</li>
+     *   <li>중도 이탈 감점을 매기지 않는다 — 사라지는 계정에 점수를 남길 이유가 없고, 복구하면 억울해진다.</li>
+     *   <li>재입장 대기를 걸지 않는다 — 계정이 돌아와도 그 방으로는 안 돌아간다.</li>
+     * </ul>
+     * 방장이었으면 자진 탈퇴와 동일하게 봇방장으로 전환하고 잔류 멤버에게 알린다.
+     */
+    @Transactional
+    public int leaveAllForWithdrawal(UUID userId) {
+        Instant now = Instant.now();
+        // 락 순서 고정(사용자 → 챌린지). 탈퇴도 예외가 아니다.
+        counterRepository.ensureRow(userId);
+        counterRepository.lockCount(userId);
+
+        // 엔티티가 아니라 id 만 먼저 모은다. decrementParticipantCount 가 clearAutomatically 라
+        // 방 하나를 처리할 때마다 영속성 컨텍스트가 비워져, 미리 들고 있던 엔티티는 준영속이 되고
+        // 그 뒤의 변경(leave·봇방장 전환)이 조용히 사라진다. 반복마다 새로 읽는다.
+        List<UUID> challengeIds = memberRepository.findByUserIdAndStatus(userId, MemberStatus.ACTIVE)
+                .stream().map(ChallengeMember::getChallengeId).toList();
+
+        int left = 0;
+        for (UUID challengeId : challengeIds) {
+            ChallengeMember me = memberRepository.findByChallengeIdAndUserId(challengeId, userId)
+                    .filter(ChallengeMember::isActive).orElse(null);
+            if (me == null) continue;
+            Challenge c = challengeRepository.findByIdForUpdate(challengeId).orElse(null);
+            if (c == null) continue;   // 이미 삭제된 방 — 멤버 행도 곧 사라진다
+
+            if (me.isOwner()) {
+                c.convertToBotOwner(now);
+                notifyBotOwnerActivated(c, userId);
+            }
+            me.leave(now, null);       // rejoinAt=null — 재입장 대기 없음
+            c.bumpVersion();
+            // flushAutomatically 라 위 변경들이 먼저 반영된 뒤 실행된다(그 다음 컨텍스트가 비워진다).
+            challengeRepository.decrementParticipantCount(challengeId);
+            eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "WITHDRAW"));
+            left++;
+        }
+
+        counterRepository.setCount(userId, joinCounterService.countActiveSlots(userId));
+        if (left > 0) log.info("회원 탈퇴 정리 userId={} 나간 방 {}건", userId, left);
+        return left;
+    }
+
     /**
      * 감점 면제 사유. 우선순위는 1년 이상 성공 → 승계 3일 면책.
      * 승계 면책은 <b>모든 멤버 기준</b>이다 — 봇방장 전환·선착순 클레임 시점부터 3일간은 잔류 멤버 누구나 면책이고,
@@ -231,7 +294,6 @@ public class ChallengeMemberService {
         return new BusinessException(ErrorCode.JOIN_BLOCKED, reason.name());
     }
 
-    private static int orZero(Integer v) { return (v != null) ? v : 0; }
 
     // ===== §7 멤버 목록 =====
     @Transactional(readOnly = true)

@@ -54,7 +54,7 @@ public class ChallengeSettingsService {
     /** 시작 전 + 방장 혼자일 때 수정 가능한 전체 필드(카테고리 제외 — 어떤 상황에도 불변). */
     private static final List<String> FULL_EDITABLE = List.of(
             "title", "description", "imageUrl", "capacity", "mode", "visibility",
-            "rankingVisible", "minTier", "period", "repeatDays", "params", "verification", "penalties.watcher");
+            "rankingVisible", "minTier", "period", "weeklyCount", "params", "verification", "penalties.watcher");
 
     /** 참여자 발생·시작 이후에도 수정 가능한 필드. */
     private static final List<String> LIMITED_EDITABLE = List.of(
@@ -79,7 +79,7 @@ public class ChallengeSettingsService {
                         c.getVisibility(), c.getRankingVisible(), c.getMaxParticipants(),
                         (c.getMinTier() != null) ? c.getMinTier().name() : null,
                         new DraftView.Period(c.getStartDate().toString(), c.getEndDate().toString()),
-                        c.getRepeatDays(), c.getRepeatDays().size(),
+                        c.getWeeklyCount(),
                         (c.getParamSpecs() != null) ? c.getParamSpecs() : List.of(),
                         verificationView(c),
                         new ChallengeSettingsResponse.Penalties(
@@ -122,7 +122,7 @@ public class ChallengeSettingsService {
         if (body.has("category")) rejectNotEditable(c);
         if (!fullEditable) {
             for (String field : List.of("mode", "visibility", "rankingVisible", "minTier",
-                    "period", "repeatDays", "params", "verification", "penalties")) {
+                    "period", "weeklyCount", "params", "verification", "penalties")) {
                 if (body.has(field)) rejectNotEditable(c);
             }
         }
@@ -141,7 +141,7 @@ public class ChallengeSettingsService {
             applyRankingVisible(c, body, updated);
             applyMinTier(c, userId, body, updated);
             applyPeriod(c, body, updated);
-            applyRepeatDays(c, body, updated);
+            applyWeeklyCount(c, body, updated);
             applyParams(c, body, updated);
             applyVerification(c, body, updated);
             applyWatcher(c, body, updated);
@@ -303,24 +303,17 @@ public class ChallengeSettingsService {
         updated.put("period", Map.of("start", start.toString(), "end", end.toString()));
     }
 
-    private void applyRepeatDays(Challenge c, JsonNode body, Map<String, Object> updated) {
-        if (!body.has("repeatDays")) return;
-        JsonNode node = body.get("repeatDays");
-        if (node.isNull() || !node.isArray() || node.isEmpty() || node.size() > 7)
-            throw new BusinessException(ErrorCode.INVALID_REPEAT_DAY);
-        List<String> days = new ArrayList<>();
-        for (JsonNode item : node) {
-            if (!item.isString()) throw new BusinessException(ErrorCode.INVALID_REPEAT_DAY);
-            days.add(item.stringValue());
+    private void applyWeeklyCount(Challenge c, JsonNode body, Map<String, Object> updated) {
+        if (!body.has("weeklyCount")) return;
+        JsonNode node = body.get("weeklyCount");
+        if (node.isNull() || !node.isIntegralNumber()
+                || node.intValue() < 1 || node.intValue() > 7) {
+            throw new BusinessException(ErrorCode.INVALID_WEEKLY_COUNT);
         }
-        if (!com.ruleup.ruleup_backend.challenge.domain.RepeatDay.allValid(days)
-                || days.stream().distinct().count() != days.size()) {
-            throw new BusinessException(ErrorCode.INVALID_REPEAT_DAY);
-        }
-        if (days.equals(c.getRepeatDays())) return;
-        c.changeRepeatDays(days);
-        updated.put("repeatDays", List.copyOf(days));
-        updated.put("weeklyCount", days.size());
+        int weeklyCount = node.intValue();
+        if (Integer.valueOf(weeklyCount).equals(c.getWeeklyCount())) return;
+        c.changeWeeklyCount(weeklyCount);
+        updated.put("weeklyCount", weeklyCount);
     }
 
     private void applyParams(Challenge c, JsonNode body, Map<String, Object> updated) {

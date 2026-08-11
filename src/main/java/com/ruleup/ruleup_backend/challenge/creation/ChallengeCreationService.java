@@ -68,6 +68,7 @@ public class ChallengeCreationService {
     private static final Logger log = LoggerFactory.getLogger(ChallengeCreationService.class);
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final int CAPACITY_MAX = 10_000;
+    private static final int DEFAULT_WEEKLY_COUNT = 7;
     private static final int TITLE_MAX = 30;
     private static final int DESCRIPTION_MAX = 200;
 
@@ -116,8 +117,11 @@ public class ChallengeCreationService {
         Integer capacity = validateCapacity(mode, req.capacity());
         Tier minTier = validateMinTier(userId, req.minTier());
         LocalDate[] period = validatePeriod(req.period());
-        List<String> repeatDays = validateRepeatDays(
-                req.repeatDays() != null ? req.repeatDays() : draft.getPayload().repeatDays());
+        Integer draftWeeklyCount = draft.getPayload().weeklyCount() != null
+                ? draft.getPayload().weeklyCount() : original.weeklyCount();
+        int weeklyCount = validateWeeklyCount(req.weeklyCount() != null
+                ? req.weeklyCount()
+                : (draftWeeklyCount != null ? draftWeeklyCount : DEFAULT_WEEKLY_COUNT));
 
         RoutineTemplate template = (draft.getTemplateId() != null)
                 ? catalog.findById(draft.getTemplateId()).orElse(null) : null;
@@ -146,7 +150,7 @@ public class ChallengeCreationService {
                 userId, title, draft.getTitle(), description, req.imageUrl(),
                 category, mode, resolveVisibility(mode, req.visibility()), req.rankingVisible(),
                 capacity, minTier, period[0], period[1],
-                repeatDays, draft.getTemplateId(),
+                weeklyCount, draft.getTemplateId(),
                 verification, params.valueMap(), params.specs(), penalties,
                 moderationTitle, moderationDescription, moderationImage);
         challengeRepository.save(challenge);
@@ -270,14 +274,10 @@ public class ChallengeCreationService {
         return new LocalDate[]{start, end};
     }
 
-    /** 반복 요일은 1~7개의 서로 다른 MON~SUN 코드만 허용한다. weeklyCount 는 이 개수로 파생한다. */
-    private List<String> validateRepeatDays(List<String> days) {
-        if (days == null || days.isEmpty() || days.size() > 7
-                || !com.ruleup.ruleup_backend.challenge.domain.RepeatDay.allValid(days)
-                || days.stream().distinct().count() != days.size()) {
-            throw new BusinessException(ErrorCode.INVALID_REPEAT_DAY);
-        }
-        return List.copyOf(days);
+    private int validateWeeklyCount(Integer weeklyCount) {
+        if (weeklyCount == null || weeklyCount < 1 || weeklyCount > 7)
+            throw new BusinessException(ErrorCode.INVALID_WEEKLY_COUNT);
+        return weeklyCount;
     }
 
     /**

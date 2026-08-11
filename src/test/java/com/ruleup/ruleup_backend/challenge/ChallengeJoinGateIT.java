@@ -69,11 +69,6 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
         return challengeId;
     }
 
-    private void setCounter(UUID userId, int count) {
-        jdbcTemplate.update("INSERT INTO user_challenge_counters (user_id, active_join_count) VALUES (?, ?) "
-                + "ON DUPLICATE KEY UPDATE active_join_count = VALUES(active_join_count)", bytes(userId), count);
-    }
-
     private void expectBlocked(MvcResult res, String reason) throws Exception {
         assertThat(res.getResponse().getStatus()).isEqualTo(409);
         assertThat((String) read(res, "$.error.code")).isEqualTo("JOIN_BLOCKED");
@@ -137,7 +132,7 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
             Member owner = member(uniq("gate-limit-owner"));
             Member joiner = member(uniq("gate-limit-joiner"));
             UUID challengeId = openGroup(owner.id());
-            setCounter(joiner.id(), 3);
+            occupySlots(joiner.id(), 3);   // 카운터만 심으면 안 된다 — 게이트는 원천(멤버십)을 센다
 
             expectBlocked(join(joiner.token(), challengeId), "FREE_LIMIT");
         }
@@ -202,7 +197,7 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
             Member joiner = member(uniq("race-user"));
             UUID first = openGroup(member(uniq("race-owner-a")).id());
             UUID second = openGroup(member(uniq("race-owner-b")).id());
-            setCounter(joiner.id(), 2);
+            occupySlots(joiner.id(), 2);
 
             List<MvcResult> results = joinConcurrently(
                     List.of(joiner.token(), joiner.token()), List.of(first, second));

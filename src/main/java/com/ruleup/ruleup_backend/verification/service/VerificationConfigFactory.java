@@ -40,9 +40,11 @@ public class VerificationConfigFactory {
         String tag = resolveTag(challenge, snap, params);
         VerificationMethod method = methodOf(tag);
 
-        // 일정: 현재 Challenge는 repeatDays(고정요일)만 → FIXED_DAYS. (빈도형 입력 연결은 추후)
-        ScheduleType scheduleType = ScheduleType.FIXED_DAYS;
-        Frequency frequency = null;
+        // 일정: 특정 요일 고정 없이 한 주 안에 weeklyCount만 채우는 빈도형.
+        Integer weeklyCount = challenge.getWeeklyCount();
+        boolean frequencySchedule = weeklyCount != null && weeklyCount >= 1 && weeklyCount <= 7;
+        ScheduleType scheduleType = frequencySchedule ? ScheduleType.FREQUENCY : ScheduleType.FIXED_DAYS;
+        Frequency frequency = frequencySchedule ? new Frequency(PeriodUnit.WEEK, weeklyCount) : null;
 
         WakeConfig wake = null;
         ScreenTimeConfig screenTime = null;

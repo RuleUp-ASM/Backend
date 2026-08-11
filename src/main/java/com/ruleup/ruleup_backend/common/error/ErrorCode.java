@@ -63,6 +63,7 @@ public enum ErrorCode {
     VERIFICATION_METHOD_REQUIRED(HttpStatus.BAD_REQUEST, "인증 방식을 1개 이상 선택해야 합니다."),
     INVALID_VERIFICATION_METHOD(HttpStatus.BAD_REQUEST, "유효하지 않은 인증 방식입니다."),
     INVALID_REPEAT_DAY(HttpStatus.BAD_REQUEST, "유효하지 않은 반복 요일입니다."),
+    INVALID_WEEKLY_COUNT(HttpStatus.BAD_REQUEST, "주간 수행 횟수는 1~7이어야 합니다."),
     INVALID_DURATION(HttpStatus.BAD_REQUEST, "기간(일)은 1 이상이어야 합니다."),
     INVALID_PENALTY(HttpStatus.BAD_REQUEST, "패널티 설정이 올바르지 않습니다."),
     INVALID_REWARD(HttpStatus.BAD_REQUEST, "보상 설정이 올바르지 않습니다."),

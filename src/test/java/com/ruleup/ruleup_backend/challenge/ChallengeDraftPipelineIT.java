@@ -85,8 +85,8 @@ class ChallengeDraftPipelineIT extends ChallengeApiSupport {
             insertAutoTemplate(WAKE_TEMPLATE, "아침 기상", "일찍 일어나는 습관", "WAKE_SLEEP",
                     "{\"target_time\":{\"default\":\"07:00\",\"unit\":\"hh:mm\"}}",
                     "WAKE", "[\"PACKAGE_USAGE_STATS\"]");
-            insertAutoTemplate(GYM_TEMPLATE, "주 3회 헬스장", "퇴근 후 운동 습관", "EXERCISE",
-                    "{\"weekly_count\":{\"default\":3,\"unit\":\"회\",\"min\":1,\"max\":7}}",
+            insertAutoTemplate(GYM_TEMPLATE, "헬스장 가기", "퇴근 후 운동 습관", "EXERCISE",
+                    "{\"duration_min\":{\"default\":60,\"unit\":\"min\",\"min\":10,\"max\":480}}",
                     "GPS_PRESENCE", "[\"ACCESS_FINE_LOCATION\",\"ACCESS_BACKGROUND_LOCATION\"]");
             insertAutoTemplate(WALK_TEMPLATE, "매일 만보 걷기", "걷기 습관", "EXERCISE",
                     "{\"steps\":{\"default\":10000,\"unit\":\"보\",\"min\":1000,\"max\":50000}}",
@@ -104,7 +104,7 @@ class ChallengeDraftPipelineIT extends ChallengeApiSupport {
                  "templateId":%s,
                  "params":[{"key":"target_time","value":"06:00"}],
                  "participationType":"SOLO",
-                 "repeatDays":["MON","TUE","WED","THU","FRI","SAT","SUN"]}
+                 "weeklyCount":7}
                 """.formatted(templateId == null ? "null" : templateId.toString());
     }
 
@@ -167,9 +167,8 @@ class ChallengeDraftPipelineIT extends ChallengeApiSupport {
             assertThat(start).isEqualTo(LocalDate.now(java.time.ZoneId.of("Asia/Seoul")).plusDays(1));
             assertThat(end).isEqualTo(start.plusDays(14));
 
-            // 일정: 생성 진입에서 반복 요일과 주간 빈도수를 함께 내려준다.
-            assertThat((List<String>) read(res, "$.data.draft.repeatDays"))
-                    .containsExactly("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN");
+            // 일정: 특정 요일 없이 주간 수행 횟수만 내려준다.
+            assertThat(res.getResponse().getContentAsString()).doesNotContain("\"repeatDays\"");
             assertThat((Integer) read(res, "$.data.draft.weeklyCount")).isEqualTo(7);
 
             // 목표값: 템플릿 스펙 + LLM 값 병합
@@ -247,20 +246,19 @@ class ChallengeDraftPipelineIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("LLM 반복 요일 3개 → repeatDays와 weeklyCount=3을 생성 진입 응답에 노출")
-        void weeklyFrequencyFromRepeatDays() throws Exception {
+        @DisplayName("LLM 주 3회 → 요일 없이 weeklyCount=3만 생성 진입 응답에 노출")
+        void weeklyFrequency() throws Exception {
             String token = memberToken(uniq("draft-freq"));
             LLM_RESPONSE.set("""
                     {"usable":true,"title":"주 3회 아침 운동","description":"월수금 아침에 운동해요.",
                      "category":"EXERCISE","templateId":null,"params":[],"participationType":"SOLO",
-                     "repeatDays":["MON","WED","FRI"]}
+                     "weeklyCount":3}
                     """);
 
             MvcResult res = postJsonAuth("/api/v1/challenges/draft", token,
                     Map.of("description", "월수금 아침마다 운동하고 싶어요"));
 
-            assertThat((List<String>) read(res, "$.data.draft.repeatDays"))
-                    .containsExactly("MON", "WED", "FRI");
+            assertThat(res.getResponse().getContentAsString()).doesNotContain("\"repeatDays\"");
             assertThat((Integer) read(res, "$.data.draft.weeklyCount")).isEqualTo(3);
         }
 
@@ -314,18 +312,17 @@ class ChallengeDraftPipelineIT extends ChallengeApiSupport {
             assertThat(draftId).isNotBlank();
 
             // 템플릿 기본값 — 제목 = 템플릿명(임시 제목 역할)
-            assertThat((String) read(res, "$.data.draft.title")).isEqualTo("주 3회 헬스장");
+            assertThat((String) read(res, "$.data.draft.title")).isEqualTo("헬스장 가기");
             assertThat((String) read(res, "$.data.draft.category")).isEqualTo("EXERCISE");
             assertThat((String) read(res, "$.data.draft.mode")).isEqualTo("SOLO");
             assertThat((Integer) read(res, "$.data.draft.capacity")).isEqualTo(50);
             assertThat((String) read(res, "$.data.draft.minTier")).isEqualTo("BRONZE");
-            assertThat((List<String>) read(res, "$.data.draft.repeatDays"))
-                    .containsExactly("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN");
+            assertThat(res.getResponse().getContentAsString()).doesNotContain("\"repeatDays\"");
             assertThat((Integer) read(res, "$.data.draft.weeklyCount")).isEqualTo(7);
 
             // 목표값 = 템플릿 기본값
-            assertThat((String) read(res, "$.data.draft.params[0].key")).isEqualTo("weekly_count");
-            assertThat((String) read(res, "$.data.draft.params[0].value")).isEqualTo("3");
+            assertThat((String) read(res, "$.data.draft.params[0].key")).isEqualTo("duration_min");
+            assertThat((String) read(res, "$.data.draft.params[0].value")).isEqualTo("60");
             assertThat((String) read(res, "$.data.draft.params[0].kind")).isEqualTo("NUMBER");
 
             // 자동 인증 루틴 → AUTO + 권한 목록

@@ -87,6 +87,10 @@ public class Challenge extends AssignedIdEntity {
     @Column(name = "repeat_days", nullable = false)
     private List<String> repeatDays = new ArrayList<>();
 
+    /** 주간 수행 목표 횟수. 요일을 고정하지 않고 한 주 안에 이 횟수만 채우는 FREQUENCY 일정이다. */
+    @Column(name = "weekly_count", nullable = false)
+    private Integer weeklyCount;
+
     @Column(name = "duration_days", nullable = false)
     private Integer durationDays;
 
@@ -240,6 +244,8 @@ public class Challenge extends AssignedIdEntity {
         // SOLO는 정원 1 고정, GROUP은 방장이 지정한 값(생성 서비스에서 필수 검증). Integer 유지(자동 언박싱 NPE 방지).
         c.maxParticipants = (participationType == ParticipationType.SOLO) ? Integer.valueOf(1) : maxParticipants;
         c.repeatDays = (repeatDays != null) ? new ArrayList<>(repeatDays) : new ArrayList<>();
+        c.weeklyCount = (repeatDays != null && !repeatDays.isEmpty())
+                ? Math.min(repeatDays.size(), 7) : 7;
         c.durationDays = durationDays;
         c.startDate = startDate;
         c.endDate = deriveEndDate(startDate, durationDays);
@@ -271,13 +277,14 @@ public class Challenge extends AssignedIdEntity {
      * 신규 계약 생성(챌린지 생성·라이프사이클 스펙) — draft 원본 대조를 마친 확정값으로 조립한다.
      *  - ai_title 은 draft 행에서 서버가 복사(대체 표시용), penalties 는 서버 강제값.
      *  - 구 단일 moderationStatus 게이트는 사용하지 않는다(NONE 고정) — 항목별 상태가 대체.
-     *  - repeat_days·duration_days·penalty/reward JSON 은 인증·점수 모듈 호환용 내부 값(계약 미노출).
+     *  - repeat_days 는 레거시 호환용으로 월~일 전체를 저장하고, 실제 일정은 weekly_count 기반 FREQUENCY다.
+     *  - duration_days·penalty/reward JSON 은 인증·점수 모듈 호환용 내부 값(계약 미노출).
      */
     public static Challenge createFromDraft(UUID ownerId, String title, String aiTitle, String description,
                                             String imageUrl, String category, ParticipationType mode,
                                             String visibility, Boolean rankingVisible, Integer capacity,
                                             com.ruleup.ruleup_backend.score.domain.Tier minTier,
-                                            LocalDate startDate, LocalDate endDate, List<String> repeatDays,
+                                            LocalDate startDate, LocalDate endDate, Integer weeklyCount,
                                             Long templateId, VerificationConfig verificationConfig,
                                             Map<String, Object> params,
                                             List<com.ruleup.ruleup_backend.challenge.draft.DraftView.DraftParam> paramSpecs,
@@ -305,9 +312,9 @@ public class Challenge extends AssignedIdEntity {
         c.startDate = startDate;
         c.endDate = endDate;
         c.durationDays = (int) (endDate.toEpochDay() - startDate.toEpochDay()) + 1;
-        c.repeatDays = (repeatDays != null && !repeatDays.isEmpty())
-                ? new ArrayList<>(repeatDays)
-                : new ArrayList<>(List.of("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"));
+        // FREQUENCY 일정은 특정 요일을 고르지 않는다. repeat_days는 구 판정 경로 호환을 위해 전체 요일로 둔다.
+        c.repeatDays = new ArrayList<>(List.of("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"));
+        c.weeklyCount = weeklyCount;
         c.templateId = templateId;
         c.verificationConfig = verificationConfig;
         c.params = (params != null) ? new LinkedHashMap<>(params) : new LinkedHashMap<>();
@@ -524,6 +531,7 @@ public class Challenge extends AssignedIdEntity {
     public void changeDescription(String v)  { this.description = v; }
     public void changeCategory(String v)     { if (v != null) this.category = v; }
     public void changeRepeatDays(List<String> v) { if (v != null) this.repeatDays = new ArrayList<>(v); }
+    public void changeWeeklyCount(Integer v) { if (v != null) this.weeklyCount = v; }
     public void changeParams(Map<String, Object> v) { if (v != null) this.params = new LinkedHashMap<>(v); }
     public void changePenalty(PenaltyConfig v) { if (v != null) this.penalty = v; }
     public void changeReward(RewardConfig v)   { if (v != null) this.reward = v; }
