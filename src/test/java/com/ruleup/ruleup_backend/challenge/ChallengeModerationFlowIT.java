@@ -56,8 +56,8 @@ class ChallengeModerationFlowIT extends ChallengeApiSupport {
     void setUp() {
         mvc = MockMvcBuilders.webAppContextSetup(wac).apply(springSecurity()).build();
         if (!fixtures) {
-            insertAutoTemplate(TEMPLATE, "주 3회 헬스장", "퇴근 후 운동 습관", "EXERCISE",
-                    "{\"weekly_count\":{\"default\":3,\"unit\":\"회\",\"min\":1,\"max\":7}}",
+            insertAutoTemplate(TEMPLATE, "헬스장 가기", "퇴근 후 운동 습관", "EXERCISE",
+                    "{\"duration_min\":{\"default\":60,\"unit\":\"min\",\"min\":10,\"max\":480}}",
                     "GPS_PRESENCE", "[\"ACCESS_FINE_LOCATION\"]");
             fixtures = true;
         }
@@ -165,7 +165,7 @@ class ChallengeModerationFlowIT extends ChallengeApiSupport {
             Member other = member(uniq("mod-sub-x"));
             MvcResult theirs = getAuth("/api/v1/challenges/" + id, other.token());
             assertThat(theirs.getResponse().getStatus()).isEqualTo(200);
-            assertThat((String) read(theirs, "$.data.title")).isEqualTo("주 3회 헬스장");
+            assertThat((String) read(theirs, "$.data.title")).isEqualTo("헬스장 가기");
             assertThat((Object) read(theirs, "$.data.description")).isNull();
         }
 

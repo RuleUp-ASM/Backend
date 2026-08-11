@@ -69,7 +69,7 @@ class ChallengeSchemaMigrationIT {
             Set<String> cols = columnsOf("challenges");
             assertThat(cols).contains(
                     "id", "owner_id", "title", "description", "image_url", "category",
-                    "mode", "capacity", "repeat_days", "start_date", "end_date",
+                    "mode", "capacity", "repeat_days", "weekly_count", "start_date", "end_date",
                     "template_id", "verification_config", "params", "status",
                     "participant_count", "created_at", "updated_at");
             // camelCase 잔재 없음

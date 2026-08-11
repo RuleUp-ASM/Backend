@@ -27,6 +27,7 @@ public record ChallengeSettingsResponse(
             Integer capacity,
             String minTier,
             DraftView.Period period,
+            int weeklyCount,
             List<DraftView.DraftParam> params,
             DraftView.Verification verification,
             Penalties penalties

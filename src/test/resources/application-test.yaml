@@ -13,6 +13,11 @@ app:
   recommendation:
     # 짧은 테스트 동안 추천 재계산 배치가 끼어들지 않도록 첫 실행을 멀리 민다.
     rebuild-initial-delay-ms: 3600000
+  join-counter:
+    # 동시 참여 카운터 보정 배치는 무차별이라, 멤버십 없이 카운터만 심어 FREE_LIMIT 을 검증하는
+    # 테스트(ChallengeJoinGateIT 등)의 픽스처를 되돌려 놓는다 → 첫 실행을 멀리 밀어 사실상 끈다.
+    # 배치 자체는 각 IT 가 runOnce() 를 직접 불러 검증한다.
+    reconcile-initial-delay-ms: 3600000
   # 인트로 버전 게이트: 플랫폼별 최소 버전을 다르게 둬서 "platform 에 따라 판정이 갈리는지"를 검증한다.
   client:
     android:

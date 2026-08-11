@@ -168,3 +168,10 @@ logging:
 
 server:
   forward-headers-strategy: framework
+  # 요청·응답 charset 을 UTF-8 로 못 박는다(CharacterEncodingFilter).
+  # JSON 은 규격상 UTF-8 이지만 Content-Type 에 charset 이 없으면 latin1 로 디코딩하는
+  # 클라이언트가 아직 있어서, 한글이 깨져 보이는 사고의 단골 원인이 된다.
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true

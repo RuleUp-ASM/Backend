@@ -4,6 +4,7 @@ import com.ruleup.ruleup_backend.agreement.UserAgreementRepository;
 import com.ruleup.ruleup_backend.agreement.domain.AgreementType;
 import com.ruleup.ruleup_backend.agreement.domain.UserAgreement;
 import com.ruleup.ruleup_backend.auth.RefreshTokenRepository;
+import com.ruleup.ruleup_backend.challenge.service.ChallengeMemberService;
 import com.ruleup.ruleup_backend.auth.dto.UserResponse;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
@@ -26,8 +27,8 @@ import java.util.UUID;
 /**
  * 회원 계정 관리 — 탈퇴(소프트)·내 프로필 조회.
  * 탈퇴(회원 정책 §6 · DB 정리 §12.1): status=WITHDRAWN + deleted_at, 기기 연결 해제,
- * RT 전부 revoke. 개인정보 S3 아카이브·1년 파기 배치·참여 챌린지 자동 탈퇴는 후속 이슈
- * (기능 스펙 6-2 #6 — W1은 deleted_at 기록까지).
+ * RT 전부 revoke, <b>참여 중인 모든 방에서 탈퇴</b>(방장이면 봇방장 전환).
+ * 개인정보 S3 아카이브·1년 파기 배치는 후속 이슈.
  */
 @Service
 @RequiredArgsConstructor
@@ -50,6 +51,7 @@ public class UserAccountService {
     }};
 
     private final UserRepository userRepository;
+    private final ChallengeMemberService challengeMemberService;
     private final RefreshTokenRepository refreshTokenRepository;
     private final UserAgreementRepository userAgreementRepository;
     private final UserScoreSummaryRepository scoreSummaryRepository;
@@ -67,6 +69,9 @@ public class UserAccountService {
         if (!user.isWithdrawn()) {
             user.withdraw();                                                    // WITHDRAWN + deleted_at + 기기 해제
             refreshTokenRepository.revokeAllByUserId(userId, Instant.now());    // 전 세션 종료
+            // 참여 중인 방에서도 전부 나간다. 남겨두면 인증하지 않는 유령 멤버가 남의 방 정원을 먹고,
+            // 그 방은 유령방 자동 삭제 대상에서도 빠져 영영 남는다.
+            challengeMemberService.leaveAllForWithdrawal(userId);
         }
         Instant archiveExpiresAt = user.getDeletedAt().plus(ARCHIVE_RETENTION_DAYS, ChronoUnit.DAYS);
         return new WithdrawResponse(true, archiveExpiresAt.toString(), RESTORE_NOTE);

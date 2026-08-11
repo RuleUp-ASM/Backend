@@ -102,6 +102,8 @@ public class ChallengeDetailQueryService {
                         ? myMembership.getRejoinAvailableAt().toString() : null,
                 ChallengeCycle.startsNextCycle(c.getStartDate(), today) ? "NEXT_CYCLE" : "IMMEDIATE",
                 cloneable(c),
+                // 방장은 멤버 행과 무관하게 참여 중이다(솔로 방·시작 전 방도 마찬가지).
+                isOwner || isActiveMember,
                 myRole(c, viewerId, myMembership, isOwner, isActiveMember),
                 isOwner ? new ChallengeDetailResponse.Moderation(
                         c.getModerationTitle().name(), c.getModerationDescription().name(),

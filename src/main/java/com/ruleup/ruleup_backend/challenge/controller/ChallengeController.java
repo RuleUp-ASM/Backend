@@ -92,7 +92,9 @@ public class ChallengeController {
     @Operation(summary = "챌린지 공개 상세",
             description = "비참여자용 상세 — 조건·통계·입장 자격. 멤버 전용 내부 화면은 /room 이 담당한다. "
                     + "없는 방·비공개 방 비멤버·타인의 솔로 방은 전부 동일한 404(존재 은닉). "
-                    + "심사 상태(moderation)는 방장 본인 조회 시에만 내려간다.")
+                    + "심사 상태(moderation)는 방장 본인 조회 시에만 내려간다. "
+                    + "참여 버튼 노출은 joined 로 판단한다 — joinBlockReason 은 종료가 최우선이라 "
+                    + "종료된 방에서는 참여 중이어도 CHALLENGE_COMPLETED 가 내려간다.")
     @GetMapping("/{challengeId}")
     public ApiResponse<ChallengeDetailResponse> getDetail(@AuthenticationPrincipal String userId,
                                                           @PathVariable String challengeId) {

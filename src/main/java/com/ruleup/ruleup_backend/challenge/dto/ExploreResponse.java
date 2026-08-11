@@ -15,6 +15,9 @@ public record ExploreResponse(List<Item> items, String nextCursor, boolean hasNe
      * @param isFull         정원 마감. <b>true 여도 목록에는 남는다</b> — 탈퇴로 자리가 나거나
      *                       정원이 늘 수 있어 숨기지 않고 뱃지로만 구분한다(정책 §4.1)
      * @param eligible       내 표시 티어로 들어갈 수 있는지
+     * @param joined         <b>내가 이미 들어가 있는 방인가</b>(방장 포함). 내 방도 목록에 그대로
+     *                       나오므로, 이 값이 true 면 참여 버튼이 아니라 "참여 중"으로 그려야 한다 —
+     *                       가입을 시도해도 서버가 {@code ALREADY_JOINED} 로 막는다
      * @param completionRate 완주율 0~1. 표본 미달이면 null(화면 미표시)
      * @param retentionRate  유지율 0~1. 표본 미달이면 null
      */
@@ -30,6 +33,7 @@ public record ExploreResponse(List<Item> items, String nextCursor, boolean hasNe
             boolean isFull,
             String minTier,
             boolean eligible,
+            boolean joined,
             Double completionRate,
             Double retentionRate,
             Integer dday,

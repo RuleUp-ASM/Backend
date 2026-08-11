@@ -6,7 +6,6 @@ import com.ruleup.ruleup_backend.challenge.domain.RewardConfig;
 import com.ruleup.ruleup_backend.routine.domain.VerificationConfig;
 
 import java.math.BigDecimal;
-import java.util.List;
 import java.util.Map;
 
 public record ChallengeResponse(
@@ -20,7 +19,7 @@ public record ChallengeResponse(
         String participationType,
         String anonymity,
         BigDecimal minMannerTemperature,
-        List<String> repeatDays,
+        Integer weeklyCount,
         Integer durationDays,
         String startDate,
         String endDate,
@@ -36,7 +35,7 @@ public record ChallengeResponse(
                 c.getTitle(), c.getDescription(),
                 c.getImageUrl(), c.getCategory(), c.getParticipationType().name(),
                 c.getAnonymity().name(),
-                c.getMinMannerTemperature(), c.getRepeatDays(), c.getDurationDays(),
+                c.getMinMannerTemperature(), c.getWeeklyCount(), c.getDurationDays(),
                 c.getStartDate().toString(), c.getEndDate().toString(),
                 c.getTemplateId(), c.getVerificationConfig(), c.getParams(),
                 c.getPenalty(), c.getReward());

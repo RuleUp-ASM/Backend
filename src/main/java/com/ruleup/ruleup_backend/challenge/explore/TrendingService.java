@@ -22,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
@@ -40,6 +41,7 @@ public class TrendingService {
     private final TrendingRankingCache rankingCache;
     private final ChallengeRepository challengeRepository;
     private final UserScoreSummaryRepository scoreSummaryRepository;
+    private final MyMembershipReader myMembershipReader;
     private final CacheManager cacheManager;
     private final MeterRegistry meterRegistry;
     private final AtomicLong cacheHits = new AtomicLong();
@@ -65,6 +67,8 @@ public class TrendingService {
         Map<UUID, Challenge> byId = challengeRepository.findAllById(ids).stream()
                 .collect(Collectors.toMap(Challenge::getId, Function.identity()));
         Tier myTier = displayTier(userId);
+        // 내가 만든 방·이미 가입한 방도 인기 목록에는 그대로 남는다 — joined 로만 구분한다.
+        Set<UUID> myChallengeIds = myMembershipReader.activeChallengeIds(userId);
 
         List<TrendingResponse.Item> items = new ArrayList<>();
         int rank = 1;
@@ -82,6 +86,7 @@ public class TrendingService {
                     verificationType(c),
                     (c.getMinTier() != null) ? c.getMinTier().name() : null,
                     joinable(myTier, c),
+                    myChallengeIds.contains(c.getId()),
                     c.getEndDate().toString()));
         }
         return new TrendingResponse(ranking.calculatedAt(), items);

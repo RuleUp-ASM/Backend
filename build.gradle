@@ -18,6 +18,13 @@ repositories {
 	mavenCentral()
 }
 
+// 소스 인코딩 고정. JDK 18+(JEP 400) 부터 기본 charset 이 UTF-8 이라 지금은 명시하지 않아도
+// 통과하지만, 빌드 환경(로케일·러너·IDE)에 따라 달라지는 값을 컴파일 결과가 물려받게 두면
+// 소스에 박힌 한글 상수(추천 사유·안내 문구)가 통째로 깨진다. 빌드에서 못 박는다.
+tasks.withType(JavaCompile).configureEach {
+	options.encoding = 'UTF-8'
+}
+
 dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
 	implementation 'org.springframework.boot:spring-boot-starter-validation'

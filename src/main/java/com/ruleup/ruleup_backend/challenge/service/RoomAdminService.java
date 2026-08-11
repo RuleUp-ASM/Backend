@@ -71,9 +71,11 @@ public class RoomAdminService {
         // 재입장 대기는 1주 → 2주 → 4주 매번 두 배(제재 정책 §4.3). kickCount는 이번 강퇴 반영 전 값.
         Instant rejoinAt = RejoinBackoff.availableAt(now, target.getKickCount());
         target.kick(normalized, now, rejoinAt);
+        // 참여 인원 변화 → version 증가. decrementParticipantCount 는 clearAutomatically 라
+        // 그 뒤에서 부르면 challenge 가 준영속이 되어 증가가 조용히 사라진다(반드시 앞에서).
+        challenge.bumpVersion();
         challengeRepository.decrementParticipantCount(challengeId);
         counterRepository.decrement(targetUserId);   // 동시 참여 3개 카운터도 함께 정리
-        challenge.bumpVersion();
         eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "KICK"));
         notificationService.notify(targetUserId, NotificationType.CHALLENGE_MEMBER_KICKED,
                 "챌린지에서 내보내졌어요", normalized);

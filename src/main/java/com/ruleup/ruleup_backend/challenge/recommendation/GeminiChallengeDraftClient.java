@@ -70,7 +70,7 @@ public class GeminiChallengeDraftClient implements ChallengeDraftClient {
         return new ChallengeDraftSuggestion(
                 new RoutineMatch(d.templateId(), toParamsMap(d.params())),
                 new ChallengeSettings(d.title(), d.description(), d.category(),
-                        d.participationType(), d.repeatDays()),
+                        d.participationType(), d.weeklyCount()),
                 false, false);
     }
 
@@ -132,7 +132,7 @@ public class GeminiChallengeDraftClient implements ChallengeDraftClient {
             Long templateId,
             List<ParamKV> params,       // 목표값 key/value 배열(스키마 강제). toParamsMap 으로 Map 변환.
             String participationType,
-            List<String> repeatDays
+            Integer weeklyCount
     ) {}
 
     /** 목표값 한 쌍(스키마상 value 는 문자열; 숫자/시간 강제는 서버 ParamSpec 이 한다). */

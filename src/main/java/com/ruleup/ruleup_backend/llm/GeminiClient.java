@@ -3,6 +3,7 @@ package com.ruleup.ruleup_backend.llm;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.ruleup.ruleup_backend.common.text.Texts;
 import com.ruleup.ruleup_backend.config.AppProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -199,8 +200,7 @@ public class GeminiClient implements LlmClient {
     /** 에러 응답 바이트를 로그용 문자열로(앞부분만). */
     private static String errorBody(byte[] bytes) {
         if (bytes == null || bytes.length == 0) return "";
-        String s = new String(bytes, StandardCharsets.UTF_8);
-        return (s.length() > 300) ? s.substring(0, 300) : s;
+        return Texts.truncate(new String(bytes, StandardCharsets.UTF_8), 300);
     }
 
     // extractJson/parseJson 은 LlmClient 기본 메서드(LlmJson 위임)를 상속 — provider 공통 처리로 단일화.

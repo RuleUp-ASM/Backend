@@ -244,8 +244,8 @@ class ChallengeTrendingCategoryIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("진행 중 공개 그룹만 센다 — 비공개·솔로·종료·시작 전은 카운트에서 빠진다")
-        void countsActivePublicGroupOnly() throws Exception {
+        @DisplayName("들어갈 수 있는 공개 그룹만 센다 — 시작 전은 세고, 비공개·솔로·종료는 빠진다")
+        void countsJoinablePublicGroupOnly() throws Exception {
             String token = memberToken(uniq("cat-count"));
             publicGroup("READING", "ACTIVE", 0, 30);          // 셈
 
@@ -253,13 +253,14 @@ class ChallengeTrendingCategoryIT extends ChallengeApiSupport {
             jdbcTemplate.update("UPDATE challenges SET visibility = 'PRIVATE' WHERE id = ?", (Object) bytes(priv));
             UUID solo = publicGroup("READING", "ACTIVE", 0, 30);
             jdbcTemplate.update("UPDATE challenges SET mode = 'SOLO' WHERE id = ?", (Object) bytes(solo));
-            publicGroup("READING", "COMPLETED", 0, 30);
-            publicGroup("READING", "UPCOMING", 0, 30);        // 그리드는 ACTIVE 만(의도된 비대칭)
+            publicGroup("READING", "COMPLETED", 0, 30);       // 안 셈 — 들어갈 수 없다
+            // 시작 전 방도 가입할 수 있고 인기·목록에도 나온다 → 그리드도 센다(2026-08-11 변경).
+            publicGroup("READING", "UPCOMING", 0, 30);        // 셈
 
             evictCaches();
             MvcResult res = getAuth("/api/v1/challenge-categories", token);
             List<Integer> reading = read(res, "$.data.items[?(@.code == 'READING')].activeGroupCount");
-            assertThat(reading).containsExactly(1);
+            assertThat(reading).containsExactly(2);
         }
     }
 }
