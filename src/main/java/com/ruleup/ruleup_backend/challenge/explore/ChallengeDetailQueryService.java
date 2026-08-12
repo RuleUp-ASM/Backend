@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.challenge.explore;
 
+import com.ruleup.ruleup_backend.challenge.counter.ConcurrentChallengeLimitPolicy;
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeCycle;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
@@ -46,7 +47,6 @@ import java.util.UUID;
 public class ChallengeDetailQueryService {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
-    private static final int FREE_CONCURRENT_LIMIT = 3;
 
     private final ChallengeRepository challengeRepository;
     private final ChallengeMemberRepository memberRepository;
@@ -54,6 +54,7 @@ public class ChallengeDetailQueryService {
     private final UserRepository userRepository;
     private final UserScoreSummaryRepository scoreSummaryRepository;
     private final RoutineCatalog catalog;
+    private final ConcurrentChallengeLimitPolicy limitPolicy;
     private final JdbcTemplate jdbc;
 
     @Transactional(readOnly = true)
@@ -135,7 +136,7 @@ public class ChallengeDetailQueryService {
         }
         int activeJoinCount = counterRepository.findById(viewerId)
                 .map(counter -> counter.getActiveJoinCount()).orElse(0);
-        if (activeJoinCount >= FREE_CONCURRENT_LIMIT) return JoinBlockReason.FREE_LIMIT;
+        if (limitPolicy.exceeded(activeJoinCount)) return JoinBlockReason.FREE_LIMIT;
         if (c.getMaxParticipants() != null && activeCount >= c.getMaxParticipants()) return JoinBlockReason.FULL;
         if (!eligible) return JoinBlockReason.TIER_GATE;
         return null;

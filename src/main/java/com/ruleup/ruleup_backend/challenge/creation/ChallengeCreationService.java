@@ -11,6 +11,8 @@ import com.ruleup.ruleup_backend.challenge.draft.ChallengeDraftRepository;
 import com.ruleup.ruleup_backend.challenge.draft.DraftView;
 import com.ruleup.ruleup_backend.challenge.dto.CreateChallengeRequest;
 import com.ruleup.ruleup_backend.challenge.dto.CreateChallengeResponse;
+import com.ruleup.ruleup_backend.challenge.counter.ConcurrentChallengeLimitPolicy;
+import com.ruleup.ruleup_backend.challenge.counter.UserJoinCounterService;
 import com.ruleup.ruleup_backend.challenge.explore.ChallengeGridChanged;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
@@ -81,6 +83,8 @@ public class ChallengeCreationService {
     private final IdempotencyKeyRepository idempotencyKeyRepository;
     private final ChallengeImageUploadRepository imageUploadRepository;
     private final UserChallengeCounterRepository counterRepository;
+    private final UserJoinCounterService joinCounterService;
+    private final ConcurrentChallengeLimitPolicy limitPolicy;
     private final ChallengeStatsProjectionService statsProjectionService;
     private final RoutineCatalog catalog;
     private final UserScoreSummaryRepository scoreSummaryRepository;
@@ -108,6 +112,15 @@ public class ChallengeCreationService {
         if (draft.isExpired(Instant.now()))
             throw new BusinessException(ErrorCode.DRAFT_EXPIRED);
         DraftView original = draft.getPayload().draft();
+
+        // ②-1 동시 참여 한도 — 생성도 슬롯을 쓴다(생성자가 그 방의 ACTIVE 멤버가 된다).
+        // 가입에만 걸면 "방은 얼마든지 만들 수 있는데 남의 방에는 못 들어가는" 비대칭이 생긴다.
+        // 락 순서는 전 경로와 동일하게 사용자 행부터. 커밋까지 쥐고 있어 동시 생성도 직렬화된다.
+        // ⚠️ 테스트 기간에는 ConcurrentChallengeLimitPolicy 가 꺼져 있어 이 판정이 통과한다.
+        counterRepository.ensureRow(userId);
+        counterRepository.lockCount(userId);
+        if (limitPolicy.exceeded(joinCounterService.countActiveSlots(userId)))
+            throw new BusinessException(ErrorCode.CHALLENGE_LIMIT_EXCEEDED);
 
         // ③ 값 검증
         String title = validateTitle(req.title());
@@ -157,8 +170,8 @@ public class ChallengeCreationService {
 
         memberRepository.save(ChallengeMember.owner(challenge.getId(), userId));
         challenge.increaseParticipantCount();
-        // 생성자도 그 방의 ACTIVE 멤버 → 동시 참여 3개 카운터에 포함시킨다(가입 게이트와 같은 대장을 쓴다).
-        counterRepository.ensureRow(userId);
+        // 생성자도 그 방의 ACTIVE 멤버 → 동시 참여 카운터에 포함시킨다(가입 게이트와 같은 대장을 쓴다).
+        // 행 보장·락은 ②-1 에서 이미 잡았다.
         counterRepository.increment(userId);
         // 탐색 목록이 challenges JOIN challenge_stats 로 읽으므로 기본 행을 함께 만든다
         statsProjectionService.createRow(challenge.getId());

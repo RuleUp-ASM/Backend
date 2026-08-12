@@ -46,6 +46,14 @@ app:
     access-token-ttl: 1800        # 30분 (초)
     refresh-token-ttl: 604800    # 7일 (60*60*24*7)
     signup-token-ttl: 300         # 5분
+  challenge:
+    # 동시 참여 한도(가입·생성 공통). 판정 로직은 전부 구현돼 있고 스위치만 내려둔 상태다 —
+    # 테스트 기간에는 한도가 검증을 방해하기만 하므로 끄고, 정식 배포 전에 enabled 를 true 로 켠다.
+    # (env 로도 켤 수 있다: CHALLENGE_LIMIT_ENABLED=true)
+    concurrent-limit:
+      enabled: ${CHALLENGE_LIMIT_ENABLED:false}   # ⚠️ 배포 전 true
+      max: ${CHALLENGE_LIMIT_MAX:3}
+
   # 추천 세그먼트 점수 윈도우 배치 튜닝(SegmentScoreService, 매일 04:00 KST).
   recommendation:
     segment-window-days: ${RECO_SEGMENT_WINDOW_DAYS:30}        # 최근 N일 생성 챌린지만 인기도 집계
