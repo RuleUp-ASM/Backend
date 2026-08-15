@@ -60,22 +60,6 @@ public class UserScoreSummary extends AssignedIdEntity {
     @Override
     public UUID getId() { return userId; }   // Persistable(신규 판별)용 — PK는 user_id
 
-    /**
-     * 기기 승계로 만든 요약 — 같은 설치에서 탈퇴한 이전 계정의 점수·티어를 그대로 물려받는다.
-     * 탈퇴로 점수를 리셋할 수 없게 하는 장치다(회원 정책 §6).
-     *
-     * <p>tier_grace_until(강등 유예)은 물려받지 않는다 — 이전 계정의 타임라인에 매인 값이라
-     * 새 계정에 옮기면 유예가 실제보다 길어진다.
-     */
-    public static UserScoreSummary carriedOverFrom(UUID userId, UserScoreSummary source) {
-        UserScoreSummary s = new UserScoreSummary();
-        s.userId = userId;
-        s.totalScore = source.totalScore;
-        s.actualTier = source.actualTier;
-        s.displayTier = source.displayTier;
-        return s;
-    }
-
     /** 가입 시 초기 요약 — 브론즈 10점. */
     public static UserScoreSummary initialize(UUID userId) {
         UserScoreSummary s = new UserScoreSummary();

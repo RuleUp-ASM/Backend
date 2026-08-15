@@ -61,6 +61,10 @@ public class AuthController {
                     카카오는 null 이어도 된다**(카카오톡 간편 로그인 경로에서는 SDK가 내부 처리한다).
                     `deviceId`·`deviceInfo` 는 두 provider 모두 필수이며, 외부 호출 전에 먼저 검증해서 거절한다.
 
+                    **신규 분기에는 설치 게이트가 걸린다.** `installationId` 에 이미 묶인 계정이 있으면
+                    (탈퇴한 계정도 포함) `isNewUser=true` 를 주지 않고 403 `INSTALLATION_ALREADY_REGISTERED` 로 막는다.
+                    기존 회원 로그인은 이 게이트와 무관하다 — 원래 쓰던 소셜 계정으로는 같은 기기에서 언제든 돌아올 수 있다.
+
                     로그인은 **단일 활성 기기** 정책이다. 다른 기기에서 로그인하면 기존 기기의 refreshToken 이 전부 무효가 되고
                     이전 기기에는 세션 종료 알림이 나간다. 같은 기기에서 다시 로그인하는 경우에는 세션을 끊지 않는다.
 
@@ -148,16 +152,12 @@ public class AuthController {
                     - `gender` — 필수 필드. UI 에서 성별 입력을 건너뛰더라도 클라이언트가 `NON_BINARY` 를 보내야 한다.
                     - `agreements` — 6종 전부 보낸다. 필수 3종(이용약관·개인정보·위치기반)이 모두 `agreed=true` 여야 가입되고,
                       선택 3종(마케팅·이벤트·야간알림)은 전부 거부해도 가입된다. `version` 을 생략하면 서버 현행 버전으로 기록한다.
-                    - `installationId` — 필수. 이미 다른 활성 계정이 쓰고 있는 설치면 403 `INSTALLATION_ALREADY_REGISTERED`
-                      로 막고 기존 계정 로그인을 유도한다(동일 기기 다계정 차단).
+                    - `installationId` — 필수. **이 설치에 묶인 계정이 하나라도 있으면**(탈퇴한 계정 포함)
+                      403 `INSTALLATION_ALREADY_REGISTERED` 로 막고 기존 계정 로그인을 유도한다.
+                      탈퇴자도 세는 이유는 소셜 계정만 바꿔 같은 기기에서 새로 시작하는 것이 곧 점수·제재 리셋이기 때문이다.
+                      돌아오려면 원래 소셜 계정으로 로그인해야 하고, 그 경로는 복원이라 기록이 그대로 따라온다.
 
-                    **같은 기기에서 1년 이내에 탈퇴한 계정이 있으면 그 상태를 승계한다.**
-                    소셜 계정이 달라도 `installationId` 가 같으면 이어붙이며, 점수·티어·매너온도와 제재 상태(LOCKED/BANNED)를
-                    그대로 물려받는다. 탈퇴 후 다른 소셜로 재가입하는 것이 점수·제재 리셋 수단이 되지 않게 하려는 것이다.
-                    가입 자체를 막지는 않으므로 응답은 200 이지만, 정지를 승계한 경우 `user.accountStatus=BANNED` 이고
-                    발급된 토큰으로는 보호 API 가 전부 403 이다. 앱을 지웠다 깔면 `installationId` 가 바뀌어 승계는 끊긴다.
-
-                    승계 대상이 없으면 가입 직후 상태는 항상 같다 — 티어 BRONZE·점수 10, `nicknameStatus=PENDING`, `accountStatus=ACTIVE`.
+                    가입 직후 상태는 항상 같다 — 티어 BRONZE·점수 10, `nicknameStatus=PENDING`, `accountStatus=ACTIVE`.
                     닉네임은 커밋 후 비동기로 검수되며, **심사 중이라고 기능이 제한되지는 않는다**.
                     검수에서 거부되면 타인에게만 임시 닉네임이 보이고 본인에게는 알림이 간다.
 

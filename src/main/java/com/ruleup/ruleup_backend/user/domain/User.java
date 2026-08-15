@@ -346,12 +346,6 @@ public class User extends AssignedIdEntity {
         return (statusBeforeWithdrawal != null) ? statusBeforeWithdrawal : UserStatus.ACTIVE;
     }
 
-    /** 기기 승계로 이전 계정의 상태를 물려받는다(가입 트랜잭션 전용). */
-    public void inheritStatus(UserStatus inherited) {
-        if (inherited == UserStatus.LOCKED || inherited == UserStatus.BANNED) {
-            this.status = inherited;
-        }
-    }
 
     public void lock()  { this.status = UserStatus.LOCKED; }
     public void ban()   { this.status = UserStatus.BANNED; }

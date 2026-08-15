@@ -60,13 +60,10 @@ public record UserResponse(
         Boolean onboardingCompleted,
 
         @Schema(description = """
-                계정 상태.
-                · ACTIVE — 정상
-                · LOCKED — 열람 전용. 조회는 되지만 쓰기 요청이 403 ACCOUNT_LOCKED 로 막힌다(로그아웃·탈퇴는 허용)
-                · BANNED — 영구 정지. 조회 포함 모든 보호 API 가 403 ACCOUNT_BANNED 다(로그아웃·탈퇴만 허용).
-                  로그인은 애초에 403 이라 이 값은 실질적으로 '가입 응답'에서만 보인다 —
-                  같은 기기에서 정지 계정이 탈퇴한 뒤 다른 소셜로 재가입해 제재를 승계한 경우다""",
-                example = "ACTIVE", allowableValues = {"ACTIVE", "LOCKED", "BANNED"})
+                계정 상태. ACTIVE 또는 LOCKED.
+                LOCKED 는 열람 전용이라 조회는 되지만 쓰기 요청이 403 ACCOUNT_LOCKED 로 막힌다(로그아웃·탈퇴는 허용).
+                정지(BANNED)는 로그인·재가입이 모두 403 이라 이 값으로 내려오지 않는다.""",
+                example = "ACTIVE", allowableValues = {"ACTIVE", "LOCKED"})
         String accountStatus,
 
         @Schema(description = "잠금 상세. accountStatus=LOCKED 일 때만 채워지고 그 외에는 null.")

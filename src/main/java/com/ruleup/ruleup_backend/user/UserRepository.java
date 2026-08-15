@@ -50,20 +50,17 @@ public interface UserRepository extends JpaRepository<User, UUID> {
             """)
     Optional<User> findActiveHolderOfInstallation(@Param("installationId") String installationId);
 
-    /**
-     * 이 설치에서 가장 최근에 탈퇴한 계정 — 재가입 상태·점수 승계의 원본.
-     *
-     * <p>여러 건이어도 최신 1건이면 된다. 승계받은 상태는 그 계정이 다시 탈퇴할 때 함께 남아
-     * 사슬로 전파되기 때문이다(A 정지 → B 승계 → B 탈퇴 → C 는 B 에서 승계).
-     */
-    Optional<User> findFirstByInstallationIdAndDeletedAtAfterOrderByDeletedAtDesc(
-            String installationId, java.time.Instant withdrawnAfter);
 
-    /** 동일 설치(installationId)에 연결된 활성(미탈퇴) 계정 존재 여부 — 다계정 가입 차단(회원 정책 §1). */
+    /**
+     * 이 설치에 묶인 계정이 하나라도 있는지 — 신규 가입 분기 차단(회원 정책 §1).
+     *
+     * <p><b>탈퇴한 계정도 센다.</b> 탈퇴로 설치가 풀리면 소셜 계정만 바꿔 같은 기기에서
+     * 새 계정을 만들 수 있고, 그게 곧 점수·제재 세탁이 된다. 돌아오려면 원래 소셜 계정으로
+     * 로그인해야 하고(그 경로는 복원이라 기록이 그대로 따라온다), 다른 소셜로는 열어주지 않는다.
+     */
     @Query("""
             select count(u) > 0 from User u
             where u.installationId = :installationId
-              and u.status <> com.ruleup.ruleup_backend.user.domain.UserStatus.WITHDRAWN
             """)
-    boolean existsActiveByInstallationId(@Param("installationId") String installationId);
+    boolean existsByInstallationId(@Param("installationId") String installationId);
 }

@@ -70,26 +70,6 @@ public class ReputationScore {
         return r;
     }
 
-    /**
-     * 기기 승계 — 같은 설치에서 탈퇴한 이전 계정의 온도를 그대로 물려받는다(회원 정책 §6).
-     *
-     * <p>온도만 복사하면 다음 배치가 V=B=0 에서 다시 계산해 36.5 쪽으로 되돌려버린다.
-     * 그래서 계산 상태(V·B·자격일)까지 함께 옮겨야 승계가 유지된다.
-     */
-    public static ReputationScore carriedOverFrom(User user, ReputationScore source) {
-        ReputationScore r = new ReputationScore();
-        r.user = user;
-        r.mannerTemperature = source.mannerTemperature;
-        r.volumeIndex = source.volumeIndex;
-        r.tenureBonus = source.tenureBonus;
-        r.qualifyingDays = source.qualifyingDays;
-        r.lastQualifyingDate = source.lastQualifyingDate;
-        r.lastCalculatedDate = source.lastCalculatedDate;
-        r.peakTemperature = source.peakTemperature;
-        r.peakAchievedAt = source.peakAchievedAt;
-        return r;
-    }
-
     /** 이미 오늘자 계산이 반영됐는지(멱등 가드). */
     public boolean isCalculatedFor(LocalDate today) {
         return lastCalculatedDate != null && !lastCalculatedDate.isBefore(today);

@@ -19,7 +19,7 @@ public enum ErrorCode {
     ACCOUNT_BANNED(HttpStatus.FORBIDDEN, "영구 정지된 계정입니다."),
     ACCOUNT_LOCKED(HttpStatus.FORBIDDEN, "잠금 상태의 계정은 이 기능을 사용할 수 없습니다."),
     INSTALLATION_ALREADY_REGISTERED(HttpStatus.FORBIDDEN,
-            "이 기기(설치)에 이미 사용 중인 계정이 있습니다. 기존 계정으로 로그인해주세요."),
+            "이 기기에서 이미 가입한 계정이 있어요. 그 계정으로 로그인해주세요."),
 
     // ===== 가입 세션 토큰 (signupToken) (4.3) =====
     // 계약: 만료/위조 모두 400 INVALID_SIGNUP_TOKEN 로 단일화.
