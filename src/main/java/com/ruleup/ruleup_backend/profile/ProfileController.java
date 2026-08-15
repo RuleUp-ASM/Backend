@@ -51,7 +51,7 @@ public class ProfileController {
                     잠금(LOCKED) 계정도 조회할 수 있다 — 열람 전용이라 읽기는 허용된다.
                     """
     )
-    @ApiErrorCodes({ErrorCode.LOGIN_REQUIRED})
+    @ApiErrorCodes({ErrorCode.LOGIN_REQUIRED, ErrorCode.ACCOUNT_BANNED})
     @GetMapping
     public ApiResponse<ProfileResponse> getMyProfile(@AuthenticationPrincipal String userId) {
         return ApiResponse.ok(profileService.getMyProfile(UUID.fromString(userId)));
@@ -88,6 +88,7 @@ public class ProfileController {
             ErrorCode.LOGIN_REQUIRED,
             ErrorCode.NICKNAME_CHANGE_LOCKED,
             ErrorCode.ACCOUNT_LOCKED,
+            ErrorCode.ACCOUNT_BANNED,
             ErrorCode.NICKNAME_DUPLICATED,
             ErrorCode.NICKNAME_RECENTLY_RELEASED
     })
@@ -116,6 +117,7 @@ public class ProfileController {
             ErrorCode.IMAGE_CORRUPTED,
             ErrorCode.LOGIN_REQUIRED,
             ErrorCode.ACCOUNT_LOCKED,
+            ErrorCode.ACCOUNT_BANNED,
             ErrorCode.IMAGE_TOO_LARGE,
             ErrorCode.IMAGE_INVALID_TYPE,
             ErrorCode.TOO_MANY_REQUESTS
@@ -139,7 +141,7 @@ public class ProfileController {
                     응답 본문은 없다 — `{"success": true, "data": null, "error": null}`.
                     """
     )
-    @ApiErrorCodes({ErrorCode.LOGIN_REQUIRED, ErrorCode.ACCOUNT_LOCKED})
+    @ApiErrorCodes({ErrorCode.LOGIN_REQUIRED, ErrorCode.ACCOUNT_LOCKED, ErrorCode.ACCOUNT_BANNED})
     @DeleteMapping("/image")
     public ApiResponse<Void> deleteImage(@AuthenticationPrincipal String userId) {
         profileService.deleteImage(UUID.fromString(userId));

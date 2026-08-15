@@ -50,7 +50,7 @@ public class UserAccountController {
                     잠금(LOCKED) 계정도 조회할 수 있다 — 열람 전용이라 마이페이지·본인 기록 확인은 허용된다.
                     """
     )
-    @ApiErrorCodes({ErrorCode.LOGIN_REQUIRED})
+    @ApiErrorCodes({ErrorCode.LOGIN_REQUIRED, ErrorCode.ACCOUNT_BANNED})
     @GetMapping("/api/v1/users/me")
     public ApiResponse<UserMeResponse> me(@AuthenticationPrincipal String userId) {
         return ApiResponse.ok(userAccountService.me(UUID.fromString(userId)));
@@ -75,6 +75,7 @@ public class UserAccountController {
             ErrorCode.IMAGE_CORRUPTED,
             ErrorCode.LOGIN_REQUIRED,
             ErrorCode.ACCOUNT_LOCKED,
+            ErrorCode.ACCOUNT_BANNED,
             ErrorCode.IMAGE_TOO_LARGE,
             ErrorCode.IMAGE_INVALID_TYPE,
             ErrorCode.TOO_MANY_REQUESTS
@@ -99,7 +100,8 @@ public class UserAccountController {
 
                     **소프트 탈퇴**다. 계정은 WITHDRAWN 으로 바뀌고 다음이 함께 일어난다.
                     - 모든 refreshToken 폐기 → 전 기기 세션 종료
-                    - 기기·설치 연결 해제 → 같은 기기에서 다른 계정으로 가입할 수 있게 된다
+                    - 기기 연결 해제 → 같은 기기에서 다른 계정으로 가입할 수 있게 된다
+                      (설치 ID 자체는 승계 근거로 남는다 — 아래 참고)
                     - 닉네임 점유 해제 → 다른 사람이 곧바로 쓸 수 있다
                     - **참여 중인 모든 챌린지에서 탈퇴**(방장이던 방은 봇 방장으로 전환) —
                       남겨두면 인증하지 않는 유령 멤버가 남의 방 정원을 차지한다
@@ -110,14 +112,14 @@ public class UserAccountController {
                     그 전에 **같은 소셜 계정으로 다시 로그인하면 신규 가입이 아니라 복원**이며 기존 기록이 살아난다
                     (그사이 닉네임을 남이 가져갔다면 재설정을 요구한다).
 
-                    영구 정지(BANNED) 계정은 탈퇴할 수 없다 — 탈퇴 후 재가입으로 제재를 지우는 경로를 막는다.
-                    잠금(LOCKED) 계정은 탈퇴할 수 있다.
+                    **정지(BANNED)·잠금(LOCKED) 계정도 탈퇴할 수 있다.** 대신 제재가 따라온다 —
+                    탈퇴 직전 상태와 설치 ID 가 계정에 남아, 1년 안에 **같은 기기에서 재가입하면 소셜 계정이 달라도**
+                    그 상태와 점수를 그대로 승계한다. 정지 상태로 탈퇴한 계정은 같은 소셜로 재로그인해도 복원되지 않고 403 이다.
                     """
     )
     @ApiErrorCodes({
             ErrorCode.CONFIRM_PHRASE_MISMATCH,
-            ErrorCode.LOGIN_REQUIRED,
-            ErrorCode.ACCOUNT_BANNED
+            ErrorCode.LOGIN_REQUIRED
     })
     @DeleteMapping("/api/v1/users/me")
     public ApiResponse<WithdrawResponse> withdraw(@AuthenticationPrincipal String userId,

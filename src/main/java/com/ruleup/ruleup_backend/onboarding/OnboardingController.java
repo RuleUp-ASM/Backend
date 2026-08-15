@@ -50,7 +50,8 @@ public class OnboardingController {
                     응답 본문은 없다 — `{"success": true, "data": null, "error": null}`.
                     """
     )
-    @ApiErrorCodes({ErrorCode.INVALID_REQUEST, ErrorCode.LOGIN_REQUIRED, ErrorCode.ACCOUNT_LOCKED})
+    @ApiErrorCodes({ErrorCode.INVALID_REQUEST, ErrorCode.LOGIN_REQUIRED,
+            ErrorCode.ACCOUNT_LOCKED, ErrorCode.ACCOUNT_BANNED})
     @PutMapping("/api/v1/onboarding/me")
     public ApiResponse<Void> onboarding(@AuthenticationPrincipal String userId,
                                         @RequestBody DemographicsRequest request) {

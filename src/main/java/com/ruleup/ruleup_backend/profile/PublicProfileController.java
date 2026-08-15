@@ -50,7 +50,7 @@ public class PublicProfileController {
                     존재하지 않는 사용자면 404 다.
                     """
     )
-    @ApiErrorCodes({ErrorCode.LOGIN_REQUIRED, ErrorCode.USER_NOT_FOUND})
+    @ApiErrorCodes({ErrorCode.LOGIN_REQUIRED, ErrorCode.ACCOUNT_BANNED, ErrorCode.USER_NOT_FOUND})
     @GetMapping
     public ApiResponse<PublicProfileResponse> get(@AuthenticationPrincipal String userId,
 

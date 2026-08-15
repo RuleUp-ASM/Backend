@@ -39,6 +39,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
@@ -61,6 +62,8 @@ public class AuthService {
     private static final String OAUTH_IDENTITY_CONSTRAINT = "uq_users_oauth_identity";
     /** 만 14세 미만 가입 불가 — 법적 요구사항(가드레일: 통과 0건). */
     private static final int MIN_AGE_YEARS = 14;
+    /** 기기 승계를 인정하는 기간 — 탈퇴 아카이브 보존 기간(1년)과 같은 창. */
+    private static final java.time.Duration CARRY_OVER_WINDOW = java.time.Duration.ofDays(365);
 
     private final OAuthClientResolver resolver;
     private final UserRepository userRepository;
@@ -249,8 +252,11 @@ public class AuthService {
         // 잠금이 만료된 뒤 이 닉네임을 가져간 경우 — 죽은 잠금 행을 남겨두지 않는다
         releaseLockService.clear(req.nickname());
 
-        reputationScoreRepository.save(ReputationScore.createDefault(user));   // 매너온도 병존(전환 전)
-        UserScoreSummary summary = scoreSummaryRepository.save(UserScoreSummary.initialize(user.getId()));   // 브론즈 10점
+        // 기기 승계 — 같은 설치에서 1년 이내 탈퇴한 계정이 있으면 소셜 계정이 달라도 그 상태를 물려받는다.
+        // 탈퇴 → 다른 소셜로 재가입이 점수·제재 리셋 수단이 되지 않게 한다(회원 정책 §6).
+        User predecessor = carryOverSource(req.installationId()).orElse(null);
+        UserScoreSummary summary = createScoreRecords(user, predecessor);
+        if (predecessor != null) user.inheritStatus(predecessor.carriedOverStatus());
         milestoneService.recordSignup(user.getId(), LocalDate.now(KST));
         invitationService.recordSignup(req.inviteCode(), user.getId(), java.time.Instant.now());   // 친구 초대 기록(선택)
         saveAgreements(user, ag);
@@ -265,6 +271,38 @@ public class AuthService {
         TokenService.TokenPair pair = tokenService.issueTokenPair(user);
         int flushIntervalSec = FlushIntervalPolicy.forUser(user);   // deviceInfo 확정 저장 시점 → 주기 부트스트랩
         return SignupResponse.from(pair, user, summary, flushIntervalSec);
+    }
+
+    /**
+     * 이 설치에서 1년 이내에 탈퇴한 계정 — 재가입 승계의 원본.
+     *
+     * <p>탈퇴 행은 installation_id 를 그대로 들고 있다(UNIQUE 는 생성 컬럼이 탈퇴 행을 제외한다).
+     * 앱을 지웠다 깔면 설치 ID 가 바뀌어 승계가 끊기는데, 작정한 세탁까지 막는 게 목적이 아니라
+     * 무심코 재가입하는 경로를 잡는 장치라 이 한계는 수용한다.
+     */
+    private java.util.Optional<User> carryOverSource(String installationId) {
+        if (installationId == null || installationId.isBlank()) return java.util.Optional.empty();
+        Instant since = Instant.now().minus(CARRY_OVER_WINDOW);
+        return userRepository.findFirstByInstallationIdAndDeletedAtAfterOrderByDeletedAtDesc(
+                installationId, since);
+    }
+
+    /**
+     * 점수·매너온도 행 생성. 승계할 이전 계정이 있으면 그 값을, 없으면 신규 기본값(BRONZE 10 / 36.5)을 쓴다.
+     * 탈퇴는 소프트 삭제라 이전 계정의 점수 행이 살아 있어 그대로 읽을 수 있다.
+     */
+    private UserScoreSummary createScoreRecords(User user, User predecessor) {
+        ReputationScore priorTemperature = (predecessor != null)
+                ? reputationScoreRepository.findById(predecessor.getId()).orElse(null) : null;
+        reputationScoreRepository.save(priorTemperature != null
+                ? ReputationScore.carriedOverFrom(user, priorTemperature)
+                : ReputationScore.createDefault(user));
+
+        UserScoreSummary priorScore = (predecessor != null)
+                ? scoreSummaryRepository.findById(predecessor.getId()).orElse(null) : null;
+        return scoreSummaryRepository.save(priorScore != null
+                ? UserScoreSummary.carriedOverFrom(user.getId(), priorScore)
+                : UserScoreSummary.initialize(user.getId()));
     }
 
     /** 임시 승인 닉네임 UNIQUE 위반인지 — 이 경우에만 새 후보로 가입을 재시도한다. */

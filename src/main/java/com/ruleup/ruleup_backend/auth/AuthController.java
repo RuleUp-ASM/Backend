@@ -50,6 +50,8 @@ public class AuthController {
                     신규 가입이 아니라 **기존 계정 복원**이며 이전 데이터가 그대로 살아난다.
                     이때 닉네임을 그사이 다른 사람이 가져갔다면 `user.nicknameStatus=CONFLICT` 로 내려가므로,
                     클라이언트는 닉네임 재설정 화면을 띄운다.
+                    복원은 제재도 함께 되돌린다 — 잠금 상태로 탈퇴했으면 잠금인 채로 복원되고,
+                    **정지 상태로 탈퇴했으면 복원 자체가 403** 이다(탈퇴가 제재를 지우는 수단이 되지 않게).
 
                     `oauthProfile` 은 온보딩 화면 **프리필 힌트**일 뿐이라 그대로 가입되지 않는다.
                     `nicknameHint` 는 중복일 수 있으니 `POST /api/v1/nicknames/check` 로 확인해야 하고,
@@ -149,7 +151,13 @@ public class AuthController {
                     - `installationId` — 필수. 이미 다른 활성 계정이 쓰고 있는 설치면 403 `INSTALLATION_ALREADY_REGISTERED`
                       로 막고 기존 계정 로그인을 유도한다(동일 기기 다계정 차단).
 
-                    가입 직후 상태는 항상 같다 — 티어 BRONZE·점수 10, `nicknameStatus=PENDING`, `accountStatus=ACTIVE`.
+                    **같은 기기에서 1년 이내에 탈퇴한 계정이 있으면 그 상태를 승계한다.**
+                    소셜 계정이 달라도 `installationId` 가 같으면 이어붙이며, 점수·티어·매너온도와 제재 상태(LOCKED/BANNED)를
+                    그대로 물려받는다. 탈퇴 후 다른 소셜로 재가입하는 것이 점수·제재 리셋 수단이 되지 않게 하려는 것이다.
+                    가입 자체를 막지는 않으므로 응답은 200 이지만, 정지를 승계한 경우 `user.accountStatus=BANNED` 이고
+                    발급된 토큰으로는 보호 API 가 전부 403 이다. 앱을 지웠다 깔면 `installationId` 가 바뀌어 승계는 끊긴다.
+
+                    승계 대상이 없으면 가입 직후 상태는 항상 같다 — 티어 BRONZE·점수 10, `nicknameStatus=PENDING`, `accountStatus=ACTIVE`.
                     닉네임은 커밋 후 비동기로 검수되며, **심사 중이라고 기능이 제한되지는 않는다**.
                     검수에서 거부되면 타인에게만 임시 닉네임이 보이고 본인에게는 알림이 간다.
 
