@@ -166,7 +166,7 @@ public class AuthController {
 
                     입력별 규칙:
                     - `nickname` — 형식 검사 후 중복 검사. 심사(PENDING) 중인 남의 닉네임도 점유로 본다.
-                      최근 누군가 변경하며 버린 닉네임은 1주일간 잠기고 409 `NICKNAME_RECENTLY_RELEASED` 로 거절된다.
+                      남이 변경을 신청해 심사 중인 이전 닉네임도 아직 그 사람 것이라 409 `NICKNAME_DUPLICATED` 다.
                     - `interestCategories` — 0~6개(건너뛰기 허용). 중복 값은 서버가 제거한 뒤 개수를 세므로,
                       중복 때문에 상한에 걸리지는 않는다. 정의되지 않은 코드는 400 `CATEGORY_INVALID`.
                     - `birthDate` — 필수. `YYYY-MM-DD` 이고 미래일 수 없다. **만 14세 미만은 가입 불가**(법적 요구사항).
@@ -198,8 +198,7 @@ public class AuthController {
             ErrorCode.INVALID_REQUEST,
             ErrorCode.ACCOUNT_BANNED,
             ErrorCode.INSTALLATION_ALREADY_REGISTERED,
-            ErrorCode.NICKNAME_DUPLICATED,
-            ErrorCode.NICKNAME_RECENTLY_RELEASED
+            ErrorCode.NICKNAME_DUPLICATED
     })
     @PostMapping("/api/v1/auth/signup")
     public ApiResponse<SignupResponse> signup(@RequestBody SignupRequest request) {
@@ -261,9 +260,8 @@ public class AuthController {
                     응답 조합은 네 가지다.
                     - `valid:true,  available:true,  reason:null` — 사용 가능
                     - `valid:false, available:false, reason:"FORMAT"` — 형식 위반
-                    - `valid:true,  available:false, reason:"DUPLICATED"` — 이미 누군가 쓰는 중(심사 중인 신청도 점유로 본다)
-                    - `valid:true,  available:false, reason:"RECENTLY_RELEASED"` — 최근 변경으로 버려진 닉네임.
-                      `availableAt` 에 잠금 해제 시각(ISO-8601)이 함께 실린다
+                    - `valid:true,  available:false, reason:"DUPLICATED"` — 이미 누군가 쓰는 중.
+                      본인이 심사 중인 신청값과, 변경 심사 중이라 아직 안 풀린 이전 닉네임도 점유로 본다
 
                     이 검사를 통과해도 가입/변경 제출 시점에 다른 사람이 먼저 가져갈 수 있다.
                     최종 판정은 제출 시점의 409 응답이며, 클라이언트는 그 경우도 처리해야 한다.

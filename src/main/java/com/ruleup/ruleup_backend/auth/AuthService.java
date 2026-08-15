@@ -75,7 +75,6 @@ public class AuthService {
     private final JwtProvider jwtProvider;
     private final SignupTokenStore signupTokenStore;
     private final TempNicknameAllocator tempNicknameAllocator;
-    private final NicknameReleaseLockService releaseLockService;
     private final TransactionTemplate transactionTemplate;
     private final LoginSessionService loginSessionService;
     private final SocialTokenService socialTokenService;
@@ -227,8 +226,6 @@ public class AuthService {
             throw new BusinessException(ErrorCode.NICKNAME_FORMAT_INVALID);
         if (userRepository.isNicknameTaken(req.nickname(), null))
             throw new BusinessException(ErrorCode.NICKNAME_DUPLICATED);
-        // 남이 변경으로 버린 닉네임의 1주일 잠금 — 신규 가입자는 절대 그 "본인"일 수 없다(회원 정책 §3)
-        releaseLockService.requireNotLocked(req.nickname(), null);
 
         // 관심 카테고리: 코드 유효성(12종) → 중복 제거 → 개수(0~6, 건너뛰기 허용).
         // 중복은 user_interests PK(user_id, category) 위반이라 그대로 두면 500 이 된다. 클라 버그로
@@ -273,8 +270,6 @@ public class AuthService {
         user.attachInstallation(req.installationId(), req.deviceId());
         user.updateCountryCode(countryResolver.resolve(deviceCountry(req.deviceInfo())));   // 지오 헤더 → 기기 지역 → Accept-Language
         userRepository.save(user);
-        // 잠금이 만료된 뒤 이 닉네임을 가져간 경우 — 죽은 잠금 행을 남겨두지 않는다
-        releaseLockService.clear(req.nickname());
 
         reputationScoreRepository.save(ReputationScore.createDefault(user));   // 매너온도 병존(전환 전)
         UserScoreSummary summary = scoreSummaryRepository.save(UserScoreSummary.initialize(user.getId()));   // 브론즈 10점
@@ -530,11 +525,7 @@ public class AuthService {
             return NicknameAvailabilityResponse.formatFail();        // valid:false, reason:FORMAT
         if (userRepository.isNicknameTaken(nickname, null))
             return NicknameAvailabilityResponse.duplicated();        // valid:true, available:false, reason:DUPLICATED
-        // 변경으로 버려진 닉네임의 1주일 잠금(회원 정책 §3). 무인증 API라 "본인 되돌리기" 예외를
-        // 판정할 수 없어 버린 본인에게도 잠김으로 보인다 — 변경 주기가 월 1회라 실제로는 겹치지 않는다.
-        return releaseLockService.lockedUntilFor(nickname, null)
-                .map(NicknameAvailabilityResponse::recentlyReleased)
-                .orElseGet(NicknameAvailabilityResponse::ok);        // valid:true, available:true
+        return NicknameAvailabilityResponse.ok();                     // valid:true, available:true
     }
 
     // ===== 토큰 파싱 헬퍼 =====

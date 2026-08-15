@@ -70,8 +70,8 @@ public class ProfileController {
 
                     변경이 성공하면 이런 일이 함께 일어난다.
                     - 상태가 `PENDING` 으로 돌아가고 재검수에 들어간다. **승인 전까지 타인에게는 임시 닉네임이 보인다**
-                    - 쓰던 닉네임은 "버려진" 값이 되어 **1주일간 타인이 쓸 수 없다**(사칭 방지).
-                      승인 대기 중이던 값도 대상이다. 본인이 그 값으로 되돌리는 건 잠금과 무관하게 허용된다
+                    - **쓰던 닉네임은 심사가 끝날 때까지 계속 본인 것**이다. 남이 가져가려 하면 409 `NICKNAME_DUPLICATED` 다.
+                      새 닉네임이 **승인되는 순간** 이전 값이 풀려 누구나 쓸 수 있게 된다(별도 유예 기간은 없다)
 
                     `interestCategories` 는 보낸 배열로 **통째로 교체**된다(추가가 아니다). 0~6개이며 빈 배열이면 전부 해제된다.
 
@@ -89,8 +89,7 @@ public class ProfileController {
             ErrorCode.NICKNAME_CHANGE_LOCKED,
             ErrorCode.ACCOUNT_LOCKED,
             ErrorCode.ACCOUNT_BANNED,
-            ErrorCode.NICKNAME_DUPLICATED,
-            ErrorCode.NICKNAME_RECENTLY_RELEASED
+            ErrorCode.NICKNAME_DUPLICATED
     })
     @PatchMapping
     public ApiResponse<ProfileResponse> updateMyProfile(@AuthenticationPrincipal String userId,

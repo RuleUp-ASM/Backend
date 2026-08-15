@@ -292,8 +292,6 @@ class OnboardingApiContractIT extends AuthApiSupport {
             assertThat((Boolean) read(res, "$.data.valid")).isTrue();
             assertThat((Boolean) read(res, "$.data.available")).isTrue();
             assertThat((Object) read(res, "$.data.reason")).isNull();
-            assertThat((Object) read(res, "$.data.availableAt"))
-                    .as("잠금이 아닐 때는 해제 시각이 없다").isNull();
         }
 
         @Test

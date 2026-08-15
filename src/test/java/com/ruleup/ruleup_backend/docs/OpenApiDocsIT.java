@@ -150,7 +150,7 @@ class OpenApiDocsIT {
             Map<String, Object> conflict = doc().read(
                     "$.paths['/api/v1/auth/signup'].post.responses['409']"
                             + ".content['application/json'].examples");
-            assertThat(conflict).containsKeys("NICKNAME_DUPLICATED", "NICKNAME_RECENTLY_RELEASED");
+            assertThat(conflict).containsKey("NICKNAME_DUPLICATED");
         }
 
         @Test
@@ -161,7 +161,7 @@ class OpenApiDocsIT {
         }
 
         @Test
-        @DisplayName("프로필 수정 — 닉네임 30일 잠금(403)과 중복/해제잠금(409)이 갈라져 있다")
+        @DisplayName("프로필 수정 — 닉네임 30일 변경 제한(403)과 중복(409)이 갈라져 있다")
         void profileUpdateNicknameErrors() throws Exception {
             assertThat(doc().<Map<String, Object>>read(
                     "$.paths['/api/v1/profile'].patch.responses['403']"
@@ -171,7 +171,7 @@ class OpenApiDocsIT {
             assertThat(doc().<Map<String, Object>>read(
                     "$.paths['/api/v1/profile'].patch.responses['409']"
                             + ".content['application/json'].examples"))
-                    .containsKeys("NICKNAME_DUPLICATED", "NICKNAME_RECENTLY_RELEASED");
+                    .containsKey("NICKNAME_DUPLICATED");
         }
 
         @Test
