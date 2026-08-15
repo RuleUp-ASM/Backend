@@ -278,16 +278,6 @@ class SignupFlowIT {
         }
 
         @Test
-        @DisplayName("성별 건너뛰기 시 클라가 보내는 NON_BINARY 가 그대로 저장된다 (4종 전수는 OnboardingApiContractIT)")
-        void signup_non_binary_gender_stored() throws Exception {
-            String tag = uniq();
-            Map<String, Object> body = preparedSignup(tag, "논바이유저" + SEQ.get());
-            body.put("gender", "NON_BINARY");
-            assertThat(postJson("/api/v1/auth/signup", body).getResponse().getStatus()).isEqualTo(200);
-            assertThat(findUser(tag).getGender()).isEqualTo(Gender.NON_BINARY);
-        }
-
-        @Test
         @DisplayName("선택 약관(마케팅·이벤트·야간)은 모두 거부해도 가입된다")
         void signup_optional_agreements_all_false_allowed() throws Exception {
             Map<String, Object> body = preparedSignup(uniq(), "선택거부" + SEQ.get());
