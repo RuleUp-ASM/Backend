@@ -175,7 +175,8 @@ class WithdrawRestoreFlowIT {
     // ==================================================================
 
     @Nested
-    class 탈퇴 {
+    @DisplayName("탈퇴")
+    class Withdrawal {
 
         @Test
         @DisplayName("확인 문구와 함께 탈퇴하면 소프트 탈퇴되고 세션이 모두 끊긴다")
@@ -242,7 +243,8 @@ class WithdrawRestoreFlowIT {
     // ==================================================================
 
     @Nested
-    class 자원_해제 {
+    @DisplayName("자원 해제")
+    class ResourceRelease {
 
         @Test
         @DisplayName("탈퇴자의 닉네임은 해제되어 신규 가입자가 사용할 수 있다")
@@ -278,7 +280,8 @@ class WithdrawRestoreFlowIT {
     // ==================================================================
 
     @Nested
-    class 복원 {
+    @DisplayName("복원")
+    class Restoration {
 
         @Test
         @DisplayName("탈퇴 1년 내 동일 소셜 계정 재로그인은 신규 가입이 아니라 복원이다 — restored=true·데이터 유지")
@@ -342,7 +345,8 @@ class WithdrawRestoreFlowIT {
     // ==================================================================
 
     @Nested
-    class 내_프로필 {
+    @DisplayName("내 프로필")
+    class MyProfile {
 
         @Test
         @DisplayName("GET /users/me — user 블록 + 생일·성별·약관 6종 상태를 내려준다")

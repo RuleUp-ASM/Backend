@@ -68,7 +68,8 @@ class OAuthLoginContractIT extends AuthApiSupport {
     // ==================================================================
 
     @Nested
-    class 구글_로그인 {
+    @DisplayName("구글 로그인")
+    class GoogleLogin {
 
         @Test
         @DisplayName("구글 신규 로그인 → signupToken + 프리필, 가입 후 재로그인은 기존 회원으로 잡힌다")
@@ -123,7 +124,8 @@ class OAuthLoginContractIT extends AuthApiSupport {
     // ==================================================================
 
     @Nested
-    class 요청_형식 {
+    @DisplayName("요청 형식")
+    class RequestFormat {
 
         @Test
         @DisplayName("code 누락은 400 LOGIN_FAILED — 검증 자체가 불가")
@@ -186,7 +188,8 @@ class OAuthLoginContractIT extends AuthApiSupport {
     // ==================================================================
 
     @Nested
-    class IdP_실패 {
+    @DisplayName("IdP 실패")
+    class IdpFailure {
 
         @Test
         @DisplayName("인가 코드 검증 실패는 400 LOGIN_FAILED")
@@ -221,7 +224,8 @@ class OAuthLoginContractIT extends AuthApiSupport {
     // ==================================================================
 
     @Nested
-    class 기기_정보 {
+    @DisplayName("기기 정보")
+    class DeviceInfo {
 
         @Test
         @DisplayName("로그인도 deviceId·deviceInfo 가 필수다 — 400 INVALID_DEVICE_INFO")

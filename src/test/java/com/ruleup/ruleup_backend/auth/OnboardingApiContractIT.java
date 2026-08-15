@@ -86,7 +86,8 @@ class OnboardingApiContractIT extends AuthApiSupport {
     // ==================================================================
 
     @Nested
-    class 성별_저장 {
+    @DisplayName("성별 저장")
+    class GenderPersistence {
 
         @ParameterizedTest(name = "gender={0} 로 가입하면 그대로 저장된다")
         @ValueSource(strings = {"MALE", "FEMALE", "NON_BINARY", "PREFER_NOT_TO_SAY"})
@@ -115,7 +116,8 @@ class OnboardingApiContractIT extends AuthApiSupport {
     // ==================================================================
 
     @Nested
-    class 온보딩_수정 {
+    @DisplayName("온보딩 수정")
+    class OnboardingUpdate {
 
         @Test
         @DisplayName("gender 를 보내지 않으면 기존 값이 유지된다")
@@ -172,7 +174,8 @@ class OnboardingApiContractIT extends AuthApiSupport {
     // ==================================================================
 
     @Nested
-    class 인트로 {
+    @DisplayName("인트로")
+    class Intro {
 
         /** 테스트 설정: ANDROID 최소 100 / IOS 최소 200 (application-test.yaml). */
         private MvcResult intro(String platform, Integer versionCode) throws Exception {
@@ -272,7 +275,8 @@ class OnboardingApiContractIT extends AuthApiSupport {
     // ==================================================================
 
     @Nested
-    class 닉네임_확인 {
+    @DisplayName("닉네임 확인")
+    class NicknameCheck {
 
         private MvcResult check(String nickname) throws Exception {
             Map<String, Object> body = new LinkedHashMap<>();
@@ -338,7 +342,8 @@ class OnboardingApiContractIT extends AuthApiSupport {
     // ==================================================================
 
     @Nested
-    class 카테고리_마스터 {
+    @DisplayName("카테고리 마스터")
+    class CategoryMaster {
 
         @Test
         @DisplayName("관심 카테고리 12종과 최대 선택 개수(6)를 로그인 없이 조회할 수 있다")
@@ -367,7 +372,8 @@ class OnboardingApiContractIT extends AuthApiSupport {
     // ==================================================================
 
     @Nested
-    class 프로필_사진 {
+    @DisplayName("프로필 사진")
+    class ProfileImage {
 
         @Test
         @DisplayName("문서 계약 경로(/api/v1/users/me/profile-image)로 사진을 등록할 수 있다")

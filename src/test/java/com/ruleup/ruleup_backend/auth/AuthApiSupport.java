@@ -22,10 +22,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 public abstract class AuthApiSupport {
 
     /** Spring Boot 4는 Jackson 3를 쓰므로 fasterxml ObjectMapper 는 빈이 아니다 — 직렬화용으로만 직접 생성. */
+    //Map 형태를 Json으로 바꿔주는 역할
     protected static final ObjectMapper OM = new ObjectMapper();
 
+    // 테스트 병렬 진행을 할 수 있게 동시성 보장
     private static final AtomicInteger SEQ = new AtomicInteger();
 
+    // 테스트용 라이브러리
     protected abstract MockMvc mvc();
 
     /** 테스트마다 유일한 식별자 — MockOAuthClient 는 code 를 그대로 subject 로 쓴다. */
@@ -37,6 +40,7 @@ public abstract class AuthApiSupport {
         return SEQ.get();
     }
 
+    // 디바이스 정보 입력
     protected static Map<String, Object> deviceInfo() {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("platform", "ANDROID");
@@ -50,6 +54,7 @@ public abstract class AuthApiSupport {
         return m;
     }
 
+    // 로그인 정보 입력
     protected static Map<String, Object> loginBody(String code, String installationId, String deviceId) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("code", code);
@@ -80,6 +85,7 @@ public abstract class AuthApiSupport {
         return ag;
     }
 
+    // 회원가입 정보 입력
     protected static Map<String, Object> signupBody(String signupToken, String nickname,
                                                     String installationId, String deviceId) {
         Map<String, Object> m = new LinkedHashMap<>();

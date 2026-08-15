@@ -175,7 +175,8 @@ class SessionDeviceFlowIT {
     // ==================================================================
 
     @Nested
-    class 계정_상태_분기 {
+    @DisplayName("계정 상태 분기")
+    class AccountStatusBranching {
 
         @Test
         @DisplayName("영구 정지(BANNED) 계정은 로그인 자체가 403 ACCOUNT_BANNED — 재가입 경로도 없다")
@@ -296,7 +297,8 @@ class SessionDeviceFlowIT {
     // ==================================================================
 
     @Nested
-    class 단일_활성_기기 {
+    @DisplayName("단일 활성 기기")
+    class SingleActiveDevice {
 
         @Test
         @DisplayName("다른 기기 로그인 시: 기존 RT 전부 revoke + 기기정보 교체 + 세션 종료 알림")
@@ -367,7 +369,8 @@ class SessionDeviceFlowIT {
     // ==================================================================
 
     @Nested
-    class 토큰_회전 {
+    @DisplayName("토큰 회전")
+    class TokenRotation {
 
         @Test
         @DisplayName("refresh 는 회전: 새 페어 발급 + 기존 RT 즉시 무효")
@@ -418,7 +421,8 @@ class SessionDeviceFlowIT {
     // ==================================================================
 
     @Nested
-    class 소셜_토큰 {
+    @DisplayName("소셜 토큰")
+    class SocialTokenStorage {          // 도메인 엔티티 SocialToken 과 이름이 겹치면 안이 가려진다
 
         @Test
         @DisplayName("가입·로그인 시 IdP 토큰이 암호화되어 social_tokens 에 저장된다 (unlink 근거)")
