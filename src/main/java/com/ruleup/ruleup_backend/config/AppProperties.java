@@ -69,12 +69,26 @@ public record AppProperties(Jwt jwt, Oauth oauth, Llm llm, Client client) {
          * 현행 약관 버전 — 인트로 응답으로 내려 클라 하드코딩을 막고, 가입 시 동의 버전 기록의
          * 서버 기준값으로도 쓴다(클라가 version 을 안 보내면 이 값으로 저장).
          */
+        @io.swagger.v3.oas.annotations.media.Schema(name = "TermsVersions", description = """
+                현행 약관 버전 6종. 가입 시 동의 버전 기록의 서버 기준값이며,
+                내 프로필의 저장 버전과 비교해 약관 개정 재동의 여부를 판단한다.""")
         public record TermsVersions(
+                @io.swagger.v3.oas.annotations.media.Schema(description = "이용약관 (필수)", example = "1.0")
                 String termsOfService,
+
+                @io.swagger.v3.oas.annotations.media.Schema(description = "개인정보 처리방침 (필수)", example = "1.0")
                 String privacyPolicy,
+
+                @io.swagger.v3.oas.annotations.media.Schema(description = "위치기반 서비스 이용약관 (필수)", example = "1.0")
                 String locationService,
+
+                @io.swagger.v3.oas.annotations.media.Schema(description = "마케팅 정보 수신 (선택)", example = "1.0")
                 String marketing,
+
+                @io.swagger.v3.oas.annotations.media.Schema(description = "이벤트·혜택 알림 (선택)", example = "1.0")
                 String event,
+
+                @io.swagger.v3.oas.annotations.media.Schema(description = "야간 푸시 알림 (선택)", example = "1.0")
                 String nightPush
         ) {}
 

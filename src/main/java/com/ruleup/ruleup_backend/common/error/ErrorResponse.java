@@ -9,7 +9,20 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * rejoinAvailableAt: REJOIN_COOLDOWN 일 때만 함께 실린다. 그 외엔 생략.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record ErrorResponse(String code, String message, String reason, String rejoinAvailableAt) {
+@io.swagger.v3.oas.annotations.media.Schema(description = "에러 상세. 분기는 code 로 하고, message 는 사용자에게 그대로 보여줄 수 있다.")
+public record ErrorResponse(
+
+        @io.swagger.v3.oas.annotations.media.Schema(description = "에러 코드 — 클라이언트 분기 키", example = "NICKNAME_DUPLICATED")
+        String code,
+
+        @io.swagger.v3.oas.annotations.media.Schema(description = "사용자 안내 문구", example = "이미 사용 중인 닉네임입니다.")
+        String message,
+
+        @io.swagger.v3.oas.annotations.media.Schema(description = "세부 사유 — 해당 코드에만 실린다. 없으면 필드가 생략된다.")
+        String reason,
+
+        @io.swagger.v3.oas.annotations.media.Schema(description = "재참여 가능 시각 — JOIN_BLOCKED + REJOIN_COOLDOWN 일 때만 실린다.")
+        String rejoinAvailableAt) {
 
     public static ErrorResponse of(ErrorCode errorCode) {
         return new ErrorResponse(errorCode.name(), errorCode.getMessage(), null, null);
