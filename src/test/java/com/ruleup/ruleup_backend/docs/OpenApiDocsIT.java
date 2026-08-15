@@ -72,7 +72,10 @@ class OpenApiDocsIT {
                 "/api/v1/categories",
                 "/api/v1/onboarding/me",
                 "/api/v1/users/me",
-                "/api/v1/users/me/profile-image");
+                "/api/v1/users/me/profile-image",
+                "/api/v1/profile",
+                "/api/v1/profile/image",
+                "/api/v1/users/{targetUserId}/profile");
     }
 
     @Test
@@ -80,13 +83,22 @@ class OpenApiDocsIT {
     void tagsAreOrderedByCallOrder() throws Exception {
         List<String> names = doc().read("$.tags[*].name");
 
-        assertThat(names.subList(0, 5))
-                .containsExactly("Intro", "Auth", "Category", "Onboarding", "Account");
+        assertThat(names.subList(0, 6))
+                .containsExactly("Intro", "Auth", "Category", "Onboarding", "Account", "Profile");
         // 같은 태그가 두 번 실리면 Swagger UI 에 그룹이 중복으로 그려진다.
         assertThat(names).doesNotHaveDuplicates();
 
         List<String> descriptions = doc().read("$.tags[*].description");
-        assertThat(descriptions.subList(0, 5)).noneMatch(d -> d == null || d.isBlank());
+        assertThat(descriptions.subList(0, 6)).noneMatch(d -> d == null || d.isBlank());
+    }
+
+    @Test
+    @DisplayName("사진 업로드 2곳은 multipart 로 그려진다 — application/json 이면 파일 선택 UI가 안 나온다")
+    void imageUploadsAreMultipart() throws Exception {
+        for (String path : List.of("/api/v1/users/me/profile-image", "/api/v1/profile/image")) {
+            Map<String, Object> content = doc().read("$.paths['" + path + "'].post.requestBody.content");
+            assertThat(content).as(path).containsOnlyKeys("multipart/form-data");
+        }
     }
 
     @Nested
@@ -147,6 +159,29 @@ class OpenApiDocsIT {
             Map<String, Object> responses = doc().read("$.paths['/api/v1/nicknames/check'].post.responses");
             assertThat(responses).containsKey("429").doesNotContainKey("400");
         }
+
+        @Test
+        @DisplayName("프로필 수정 — 닉네임 30일 잠금(403)과 중복/해제잠금(409)이 갈라져 있다")
+        void profileUpdateNicknameErrors() throws Exception {
+            assertThat(doc().<Map<String, Object>>read(
+                    "$.paths['/api/v1/profile'].patch.responses['403']"
+                            + ".content['application/json'].examples"))
+                    .containsKey("NICKNAME_CHANGE_LOCKED");
+
+            assertThat(doc().<Map<String, Object>>read(
+                    "$.paths['/api/v1/profile'].patch.responses['409']"
+                            + ".content['application/json'].examples"))
+                    .containsKeys("NICKNAME_DUPLICATED", "NICKNAME_RECENTLY_RELEASED");
+        }
+
+        @Test
+        @DisplayName("타인 프로필 — 없는 사용자는 404 로 문서화된다")
+        void publicProfileNotFound() throws Exception {
+            assertThat(doc().<Map<String, Object>>read(
+                    "$.paths['/api/v1/users/{targetUserId}/profile'].get.responses['404']"
+                            + ".content['application/json'].examples"))
+                    .containsKey("USER_NOT_FOUND");
+        }
     }
 
     @Nested
@@ -162,7 +197,8 @@ class OpenApiDocsIT {
                     "SignupRequest", "Agreements", "AgreementItem", "SignupResponse",
                     "UserResponse", "TokenResponse", "NicknameAvailabilityResponse",
                     "CategoryListResponse", "DemographicsRequest",
-                    "UserMeResponse", "WithdrawRequest", "WithdrawResponse");
+                    "UserMeResponse", "WithdrawRequest", "WithdrawResponse",
+                    "ProfileResponse", "UpdateProfileRequest", "PublicProfileResponse");
         }
 
         @Test

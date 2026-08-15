@@ -67,7 +67,7 @@ public class OpenApiConfig {
             """;
 
     /**
-     * 화면 맨 위에 오는 태그 — 앱이 실제로 호출하는 순서(인트로 → 로그인/가입 → 온보딩 → 계정)다.
+     * 화면 맨 위에 오는 태그 — 앱이 실제로 호출하는 순서(인트로 → 로그인/가입 → 온보딩 → 계정 → 프로필)다.
      * 여기 없는 태그는 뒤에 이름순으로 붙는다({@link #tagOrderCustomizer()}).
      */
     private static final List<Tag> ONBOARDING_FLOW_TAGS = List.of(
@@ -80,7 +80,9 @@ public class OpenApiConfig {
             new Tag().name("Onboarding")
                     .description("가입 후 최초 접속 시 수집하는 선택 정보"),
             new Tag().name("Account")
-                    .description("내 프로필 조회 · 프로필 사진 등록 · 회원 탈퇴"));
+                    .description("내 프로필 조회 · 프로필 사진 등록 · 회원 탈퇴"),
+            new Tag().name("Profile")
+                    .description("프로필 조회 · 수정 · 사진 — 검수(PENDING/APPROVED/REJECTED)에 따라 타인에게 보이는 값이 달라진다"));
 
     @Bean
     public OpenAPI ruleupOpenAPI() {
