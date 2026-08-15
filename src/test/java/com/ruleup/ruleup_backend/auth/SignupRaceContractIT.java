@@ -63,7 +63,8 @@ class SignupRaceContractIT extends AuthApiSupport {
     }
 
     @Nested
-    class 동시_가입 {
+    @DisplayName("동시 가입")
+    class ConcurrentSignup {
 
         @Test
         @DisplayName("사전 조회를 통과한 뒤 (provider, subject) 가 이미 있으면 기존 유저 로그인으로 수렴한다")
@@ -105,7 +106,8 @@ class SignupRaceContractIT extends AuthApiSupport {
     }
 
     @Nested
-    class 중복_카테고리 {
+    @DisplayName("중복 카테고리")
+    class DuplicateCategories {
 
         @Test
         @DisplayName("중복 관심 카테고리는 서버가 제거하고 가입을 통과시킨다 — 500 이 아니다")

@@ -63,12 +63,97 @@ class OAuthLoginContractIT extends AuthApiSupport {
         return m;
     }
 
+    /** 구글로 가입까지 마친다. */
+    private MvcResult googleSignup(String tag, String nickname, String installationId) throws Exception {
+        MvcResult login = postJson("/api/v1/auth/oauth/google",
+                googleLoginBody(tag, installationId, "dev-" + tag));
+        assertThat(login.getResponse().getStatus()).isEqualTo(200);
+        MvcResult res = postJson("/api/v1/auth/signup",
+                signupBody(read(login, "$.data.signupToken"), nickname, installationId, "dev-" + tag));
+        assertThat(res.getResponse().getStatus()).isEqualTo(200);
+        return res;
+    }
+
+    private void withdraw(String accessToken) throws Exception {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("confirmPhrase", "탈퇴할게요");
+        MvcResult res = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .delete("/api/v1/users/me")
+                .header("Authorization", "Bearer " + accessToken)
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content(OM.writeValueAsString(m))).andReturn();
+        assertThat(res.getResponse().getStatus()).isEqualTo(200);
+    }
+
+    // ==================================================================
+    // 0) 설치 게이트는 provider 에 대칭이다 — 어느 쪽으로 먼저 가입했든 같게 동작해야 한다
+    // ==================================================================
+
+    @Nested
+    @DisplayName("설치 게이트 — provider 대칭")
+    class InstallationGateAcrossProviders {
+
+        @Test
+        @DisplayName("구글로 가입·탈퇴한 기기에서 카카오로 가입하려 하면 막고, 구글로 가라고 알려준다")
+        void google_first_then_kakao_is_blocked() throws Exception {
+            String tag = uniq("g");
+            String install = "inst-" + tag;
+            withdraw(read(googleSignup(tag, "구글먼저" + seq(), install), "$.data.accessToken"));
+
+            MvcResult kakao = postJson("/api/v1/auth/oauth/kakao",
+                    loginBody(uniq("k"), install, "dev-" + tag));
+            expectError(kakao, 403, "INSTALLATION_ALREADY_REGISTERED");
+            assertThat((String) read(kakao, "$.error.reason")).isEqualTo("GOOGLE");
+        }
+
+        @Test
+        @DisplayName("카카오로 가입·탈퇴한 기기에서 구글로 가입하려 하면 막고, 카카오로 가라고 알려준다")
+        void kakao_first_then_google_is_blocked() throws Exception {
+            String tag = uniq("k");
+            String install = "inst-" + tag;
+            withdraw(read(signup(tag, "카카오먼저" + seq()), "$.data.accessToken"));
+
+            MvcResult google = postJson("/api/v1/auth/oauth/google",
+                    googleLoginBody(uniq("g"), install, "dev-" + tag));
+            expectError(google, 403, "INSTALLATION_ALREADY_REGISTERED");
+            assertThat((String) read(google, "$.error.reason")).isEqualTo("KAKAO");
+        }
+
+        @Test
+        @DisplayName("구글로 탈퇴했다가 구글로 돌아오는 건 통과한다 — 막히는 건 다른 소셜뿐")
+        void google_owner_can_come_back() throws Exception {
+            String tag = uniq("g");
+            String install = "inst-" + tag;
+            MvcResult first = googleSignup(tag, "구글복귀" + seq(), install);
+            String firstUserId = read(first, "$.data.user.id");
+            withdraw(read(first, "$.data.accessToken"));
+
+            MvcResult login = postJson("/api/v1/auth/oauth/google",
+                    googleLoginBody(tag, install, "dev-" + tag));
+            assertThat(login.getResponse().getStatus()).isEqualTo(200);
+            assertThat((Boolean) read(login, "$.data.isNewUser")).isTrue();
+            assertThat((Boolean) read(login, "$.data.returningUser")).isTrue();
+
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("signupToken", read(login, "$.data.signupToken"));
+            body.put("installationId", install);
+            body.put("deviceId", "dev-" + tag);
+            body.put("deviceInfo", deviceInfo());
+            MvcResult res = postJson("/api/v1/auth/signup", body);   // 입력 없이 복원
+
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+            assertThat((Boolean) read(res, "$.data.restored")).isTrue();
+            assertThat((String) read(res, "$.data.user.id")).isEqualTo(firstUserId);
+        }
+    }
+
     // ==================================================================
     // 1) 구글 경로
     // ==================================================================
 
     @Nested
-    class 구글_로그인 {
+    @DisplayName("구글 로그인")
+    class GoogleLogin {
 
         @Test
         @DisplayName("구글 신규 로그인 → signupToken + 프리필, 가입 후 재로그인은 기존 회원으로 잡힌다")
@@ -123,7 +208,8 @@ class OAuthLoginContractIT extends AuthApiSupport {
     // ==================================================================
 
     @Nested
-    class 요청_형식 {
+    @DisplayName("요청 형식")
+    class RequestFormat {
 
         @Test
         @DisplayName("code 누락은 400 LOGIN_FAILED — 검증 자체가 불가")
@@ -186,7 +272,8 @@ class OAuthLoginContractIT extends AuthApiSupport {
     // ==================================================================
 
     @Nested
-    class IdP_실패 {
+    @DisplayName("IdP 실패")
+    class IdpFailure {
 
         @Test
         @DisplayName("인가 코드 검증 실패는 400 LOGIN_FAILED")
@@ -221,7 +308,8 @@ class OAuthLoginContractIT extends AuthApiSupport {
     // ==================================================================
 
     @Nested
-    class 기기_정보 {
+    @DisplayName("기기 정보")
+    class DeviceInfo {
 
         @Test
         @DisplayName("로그인도 deviceId·deviceInfo 가 필수다 — 400 INVALID_DEVICE_INFO")

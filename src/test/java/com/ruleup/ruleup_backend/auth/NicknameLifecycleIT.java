@@ -33,11 +33,11 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 /**
  * 닉네임 변경 생애주기 — <b>이전 닉네임은 새 닉네임이 승인될 때까지 점유된다.</b>
  *
- * <p>회원 정책 §3(사칭 방지)·§4.1(거부 시 직전 승인본으로 복귀)의 실질적 요구.
+ * <p>회원 정책 §3·§4.1(거부 시 직전 승인본으로 복귀)의 실질적 요구.
  * 심사 중에 이전 닉네임이 풀려 남이 채가면, 심사가 거부됐을 때 돌아갈 자리가 없어진다.
- * 그래서 이전 닉네임은 두 단계로 보호된다:
+ * 그래서 보호 구간은 정확히 <b>심사 중</b>이다:
  *  1) 새 닉네임 <b>승인 전</b>까지는 점유(DUPLICATED) — 거부 시 돌아갈 자리 보존(2026-08-04 확정)
- *  2) 승인 후에는 변경 시점부터 <b>1주일 잠금</b>(RECENTLY_RELEASED) — 사칭 방지(회원 정책 §3)
+ *  2) 승인되는 <b>순간</b> 이전 닉네임은 풀린다 — 별도 유예 기간은 없다(1주일 잠금 폐지)
  *
  * <p>검수는 비동기라 자동 승인되면 관측 창이 사라진다 → 이 테스트에서는 검수를 "보류"로
  * 고정해 심사 중 상태를 유지하고, 승인은 직접 반영해 전후를 비교한다.
@@ -83,13 +83,9 @@ class NicknameLifecycleIT extends AuthApiSupport {
         return read(check(nickname), "$.data.available");
     }
 
-    /** 사용 불가 사유 — DUPLICATED(점유) / RECENTLY_RELEASED(잠금). */
+    /** 사용 불가 사유 — 지금은 FORMAT / DUPLICATED 두 가지뿐이다. */
     private String reasonFor(String nickname) throws Exception {
         return read(check(nickname), "$.data.reason");
-    }
-
-    private String availableAtFor(String nickname) throws Exception {
-        return read(check(nickname), "$.data.availableAt");
     }
 
     private MvcResult changeNickname(String accessToken, String nickname) throws Exception {
@@ -133,8 +129,8 @@ class NicknameLifecycleIT extends AuthApiSupport {
     }
 
     @Test
-    @DisplayName("새 닉네임이 승인되면 이전 닉네임의 점유는 풀리지만 1주일 잠금으로 넘어간다")
-    void previousNicknameHandsOffFromOccupancyToReleaseLock() throws Exception {
+    @DisplayName("새 닉네임이 승인되는 순간 이전 닉네임이 풀린다 — 유예 기간 없이 곧바로 남이 쓸 수 있다")
+    void previousNicknameIsReleasedTheMomentTheNewOneIsApproved() throws Exception {
         String tag = uniq("nl2");
         String oldNickname = "해제전" + tag.substring(3, 8);
         String newNickname = "해제후" + tag.substring(3, 8);
@@ -147,15 +143,13 @@ class NicknameLifecycleIT extends AuthApiSupport {
         approveNickname(tag);                                   // 새 닉네임 승인 → 점유 해제
 
         assertThat(findUser(tag).getApprovedNickname()).isEqualTo(newNickname);
-        // 점유가 풀렸다고 곧바로 남이 쓸 수 있으면 사칭이 가능해진다 — 회원 정책 §3의 1주일 잠금이 이어받는다
-        assertThat(isAvailable(oldNickname)).as("점유 해제 후에도 잠금 때문에 사용 불가").isFalse();
-        assertThat(reasonFor(oldNickname)).isEqualTo("RECENTLY_RELEASED");
-        assertThat((String) availableAtFor(oldNickname))
-                .as("언제 풀리는지 함께 내려줘야 클라가 안내할 수 있다").isNotNull();
+        assertThat(isAvailable(oldNickname)).as("승인과 동시에 사용 가능해진다").isTrue();
+        assertThat((Object) reasonFor(oldNickname)).isNull();
 
-        // 다른 사람의 가입도 같은 사유로 막힌다(409)
-        expectError(postJson("/api/v1/auth/signup", preparedSignup(uniq("nl2o"), oldNickname)),
-                409, "NICKNAME_RECENTLY_RELEASED");
+        // 다른 사람이 곧바로 가져갈 수 있다(1주일 잠금 폐지 — 보호 구간은 심사 중으로 한정)
+        MvcResult taken = postJson("/api/v1/auth/signup", preparedSignup(uniq("nl2o"), oldNickname));
+        assertThat(taken.getResponse().getStatus()).isEqualTo(200);
+        assertThat((String) read(taken, "$.data.user.nickname")).isEqualTo(oldNickname);
     }
 
     @Test

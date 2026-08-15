@@ -49,9 +49,9 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         JwtAuthenticationFilter jwtFilter = new JwtAuthenticationFilter(jwtProvider);
-        // 잠금 계정 열람 전용 강제(§7.2) — 인증이 세팅된 뒤 쓰기 요청만 검사한다.
+        // 제재 상태 강제(§7) — 잠금은 열람 전용, 영구 정지는 전면 차단. 인증이 세팅된 뒤 검사한다.
         // (@Component 로 두면 Boot 가 서블릿 필터로도 자동 등록해 이중 실행되므로 여기서 직접 만든다)
-        LockedAccountFilter lockedFilter = new LockedAccountFilter(userRepository);
+        AccountStatusFilter accountStatusFilter = new AccountStatusFilter(userRepository);
 
         http
                 .csrf(AbstractHttpConfigurer::disable)
@@ -74,7 +74,7 @@ public class SecurityConfig {
                 )
                 .exceptionHandling(ex -> ex.authenticationEntryPoint(entryPoint))
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
-                .addFilterAfter(lockedFilter, JwtAuthenticationFilter.class);
+                .addFilterAfter(accountStatusFilter, JwtAuthenticationFilter.class);
 
         return http.build();
     }

@@ -196,7 +196,8 @@ class SignupFlowIT {
     // ==================================================================
 
     @Nested
-    class 성공 {
+    @DisplayName("성공")
+    class Success {
 
         @Test
         @DisplayName("정상 가입: 응답 계약(브론즈 10점·PENDING 닉네임·ACTIVE) + DB 전 상태가 만들어진다")
@@ -277,16 +278,6 @@ class SignupFlowIT {
         }
 
         @Test
-        @DisplayName("성별 건너뛰기 시 클라가 보내는 NON_BINARY 가 그대로 저장된다 (4종 전수는 OnboardingApiContractIT)")
-        void signup_non_binary_gender_stored() throws Exception {
-            String tag = uniq();
-            Map<String, Object> body = preparedSignup(tag, "논바이유저" + SEQ.get());
-            body.put("gender", "NON_BINARY");
-            assertThat(postJson("/api/v1/auth/signup", body).getResponse().getStatus()).isEqualTo(200);
-            assertThat(findUser(tag).getGender()).isEqualTo(Gender.NON_BINARY);
-        }
-
-        @Test
         @DisplayName("선택 약관(마케팅·이벤트·야간)은 모두 거부해도 가입된다")
         void signup_optional_agreements_all_false_allowed() throws Exception {
             Map<String, Object> body = preparedSignup(uniq(), "선택거부" + SEQ.get());
@@ -304,7 +295,8 @@ class SignupFlowIT {
     // ==================================================================
 
     @Nested
-    class 생일_성별 {
+    @DisplayName("생일·성별")
+    class BirthDateAndGender {
 
         @Test
         @DisplayName("만 14세 미만은 가입할 수 없다 — 400 BIRTHDATE_UNDERAGE (가드레일: 통과 0건)")
@@ -360,7 +352,8 @@ class SignupFlowIT {
     // ==================================================================
 
     @Nested
-    class 약관_관심사 {
+    @DisplayName("약관·관심사")
+    class AgreementsAndInterests {
 
         @Test
         @DisplayName("필수 약관(위치기반) 미동의는 400 REQUIRED_AGREEMENT_MISSING")
@@ -426,7 +419,8 @@ class SignupFlowIT {
     // ==================================================================
 
     @Nested
-    class 닉네임 {
+    @DisplayName("닉네임")
+    class Nickname {
 
         @Test
         @DisplayName("모음만 나열한 닉네임(ㅏㅏㅏ)은 400 — 회원 정책 §3 불허")
@@ -490,7 +484,8 @@ class SignupFlowIT {
     // ==================================================================
 
     @Nested
-    class 토큰_기기 {
+    @DisplayName("토큰·기기")
+    class TokenAndDevice {
 
         @Test
         @DisplayName("위조 signupToken 은 400 INVALID_SIGNUP_TOKEN")
@@ -567,7 +562,8 @@ class SignupFlowIT {
     // ==================================================================
 
     @Nested
-    class 차단_대상 {
+    @DisplayName("차단 대상")
+    class BlockedCases {
 
         @Test
         @DisplayName("동일 설치(installationId)에 활성 계정이 있으면 가입은 403 INSTALLATION_ALREADY_REGISTERED")
@@ -594,6 +590,8 @@ class SignupFlowIT {
             MvcResult res = postJson("/api/v1/auth/oauth/kakao",
                     loginBody(uniq(), "inst-" + tag, "dev-" + tag));
             expectError(res, 403, "INSTALLATION_ALREADY_REGISTERED");
+            // "가입이 안 된다"로 끝내면 사용자가 할 게 없다 — 어느 소셜로 가야 하는지 알려준다
+            assertThat((String) read(res, "$.error.reason")).isEqualTo("KAKAO");
         }
 
         @Test
@@ -622,7 +620,8 @@ class SignupFlowIT {
     // ==================================================================
 
     @Nested
-    class 신규_분기_프리필 {
+    @DisplayName("신규 분기 프리필")
+    class NewUserPrefill {
 
         @Test
         @DisplayName("신규 로그인 응답: nicknameHint 프리필 제공, birthdayHint/genderHint 는 항상 null")

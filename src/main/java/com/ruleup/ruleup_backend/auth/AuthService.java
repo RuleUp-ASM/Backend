@@ -14,6 +14,7 @@ import com.ruleup.ruleup_backend.moderation.ModerationRequestRepository;
 import com.ruleup.ruleup_backend.moderation.UserModerationRequested;
 import com.ruleup.ruleup_backend.moderation.domain.ModerationRequest;
 import com.ruleup.ruleup_backend.moderation.domain.ModerationTarget;
+import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.oauth.OAuthClient;
 import com.ruleup.ruleup_backend.oauth.OAuthClientResolver;
 import com.ruleup.ruleup_backend.oauth.OAuthUserInfo;
@@ -39,6 +40,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
@@ -73,7 +75,6 @@ public class AuthService {
     private final JwtProvider jwtProvider;
     private final SignupTokenStore signupTokenStore;
     private final TempNicknameAllocator tempNicknameAllocator;
-    private final NicknameReleaseLockService releaseLockService;
     private final TransactionTemplate transactionTemplate;
     private final LoginSessionService loginSessionService;
     private final SocialTokenService socialTokenService;
@@ -82,6 +83,7 @@ public class AuthService {
     private final CountryResolver countryResolver;
     private final com.ruleup.ruleup_backend.reputation.MilestoneService milestoneService;
     private final com.ruleup.ruleup_backend.invitation.InvitationService invitationService;
+    private final com.ruleup.ruleup_backend.notification.NotificationService notificationService;
 
     // ===== OAuth 로그인 =====
     // ⚠️ 일부러 @Transactional 을 붙이지 않는다.
@@ -99,24 +101,32 @@ public class AuthService {
         // 1) 외부 IdP 호출 (트랜잭션 밖)
         OAuthUserInfo info = client.fetchUserInfo(req.code(), req.codeVerifier(), req.redirectUri());
 
-        // 2) DB 분기 (기존 회원이면 토큰 발급, 신규면 signupToken만)
-        return userRepository.findByOauthProviderAndOauthSubject(provider, info.subject())
-                .map(user -> loginSessionService.loginExisting(user.getId(), provider, req, info))
-                .orElseGet(() -> issueSignupToken(provider, req, info));
+        // 2) DB 분기 — 활성 회원이면 토큰 발급, 그 외(신규·탈퇴)는 signupToken 만.
+        //    탈퇴 계정을 여기서 되살리지 않는 이유: 복귀도 "회원가입을 거쳐 로그인"하는 흐름이기 때문이다.
+        //    복원 판단은 가입 요청 시점에 한다(회원 정책 §6).
+        User active = userRepository.findByOauthProviderAndOauthSubject(provider, info.subject())
+                .filter(u -> !u.isWithdrawn())
+                .orElse(null);
+        if (active != null) {
+            return loginSessionService.loginExisting(active.getId(), provider, req, info);
+        }
+        return issueSignupToken(provider, req, info);
     }
 
     private OAuthLoginResponse issueSignupToken(OAuthProvider provider, OAuthLoginRequest req, OAuthUserInfo info) {
-        // 동일 설치(installationId)에 이미 활성 계정이 있으면 신규 가입 분기를 차단한다(회원 정책 §1).
-        // → 기존 계정 로그인을 유도 (403 INSTALLATION_ALREADY_REGISTERED)
-        if (req.installationId() != null && !req.installationId().isBlank()
-                && userRepository.existsActiveByInstallationId(req.installationId())) {
-            throw new BusinessException(ErrorCode.INSTALLATION_ALREADY_REGISTERED);
-        }
+        // 이 설치의 주인이 다른 소셜 계정이면(활성·탈퇴 무관) 여기서 막는다 — 온보딩을 다 채운 뒤
+        // 거절당하지 않도록 가장 이른 지점에서 끊는다. 본인이 돌아오는 경우는 통과시킨다.
+        requireInstallationAvailable(req.installationId(), provider, info.subject());
         // DB를 건드리지 않고 JWT(signupToken)만 만들어 돌려준다 → 트랜잭션 불필요
         String token = jwtProvider.issueSignupToken(info.subject(), provider.name(), info.email());
         // 가입 완료 시 social_tokens 로 옮길 IdP 토큰을 jti 기준으로 보류해 둔다
         socialTokenService.hold(jwtProvider.parse(token).getId(), info.idpTokens());
-        return OAuthLoginResponse.newUser(token, props.jwt().signupTokenTtl(), info);
+
+        // 돌아온 사람인지 미리 알려준다 — 클라는 true 면 온보딩 입력 화면을 건너뛰고 바로 가입을 요청한다.
+        // (이전 정보가 있으면 입력받을 게 없다. 실제 판정은 가입 요청에서 서버가 다시 한다)
+        boolean returning = userRepository
+                .findByOauthProviderAndOauthSubject(provider, info.subject()).isPresent();
+        return OAuthLoginResponse.newUser(token, props.jwt().signupTokenTtl(), info, returning);
     }
 
     // ===== iOS 카카오 로그인용 서버 콜백 브리지 =====
@@ -155,7 +165,7 @@ public class AuthService {
         for (int attempt = 1; ; attempt++) {
             try {
                 final int current = attempt;
-                return transactionTemplate.execute(status -> register(req, tokenConsumed, current));
+                return requireNotBanned(transactionTemplate.execute(status -> register(req, tokenConsumed, current)));
             } catch (DataIntegrityViolationException e) {
                 // 동시 가입 경합 — 사전 조회 후 다른 요청이 먼저 가입했다.
                 // 계약: "후발 요청은 기존 유저 로그인으로 수렴"(테크 스펙 4-3).
@@ -177,6 +187,17 @@ public class AuthService {
         }
     }
 
+    /**
+     * 정지 계정이면 토큰을 주지 않는다 — <b>가입(복원)은 커밋된 뒤</b> 응답만 403 으로 돌린다.
+     * "회원가입까지는 되고 로그인이 막힌다"는 정책이라, 트랜잭션 안에서 던져 복원을 롤백시키면 안 된다.
+     */
+    private SignupResponse requireNotBanned(SignupResponse res) {
+        if (res != null && res.user() != null
+                && UserStatus.BANNED.name().equals(res.user().accountStatus()))
+            throw new BusinessException(ErrorCode.ACCOUNT_BANNED);
+        return res;
+    }
+
     /** 가입 본체(트랜잭션 안). 임시 닉네임 충돌로 재시도될 수 있으므로 부수효과는 전부 트랜잭션 안에 둔다. */
     private SignupResponse register(SignupRequest req, boolean[] tokenConsumed, int attempt) {
         Claims claims = parseSignupToken(req.signupToken());
@@ -189,17 +210,22 @@ public class AuthService {
         if (!tokenConsumed[0] && signupTokenStore.isUsed(claims.getId()))
             throw new BusinessException(ErrorCode.INVALID_SIGNUP_TOKEN);
 
-        // (provider, subject) 중복 가입 차단 — 경합 시 후발 요청은 기존 유저 로그인으로 수렴(테크 스펙 4-3)
+        // (provider, subject) 로 이전 계정을 먼저 본다.
+        //  · 살아 있는 계정 → 동시 가입 경합. 후발 요청은 기존 유저 로그인으로 수렴(테크 스펙 4-3)
+        //  · 탈퇴한 계정 → <b>복귀</b>. 입력값을 받지 않고 이전 정보를 그대로 살려 로그인시킨다(회원 정책 §6)
         User existing = userRepository.findByOauthProviderAndOauthSubject(provider, oauthSubject).orElse(null);
-        if (existing != null) return loginResponseFor(existing);
+        if (existing != null && !existing.isWithdrawn()) return loginResponseFor(existing);
+        if (existing != null) return restoreAndLogin(existing, req, claims, tokenConsumed);
+
+        // 이 설치의 주인이 다른 소셜 계정이면 신규 가입을 막는다(로그인 단계에서 이미 걸렀지만 서버 단독으로도 성립해야 한다).
+        // 소셜만 바꿔 점수·제재를 리셋하는 우회로를 닫는 것이다 — 돌아오려면 원래 소셜 계정으로 와야 한다.
+        requireInstallationAvailable(req.installationId(), provider, oauthSubject);
 
         // 닉네임 형식 → 중복(신청 PENDING·승인 닉네임 모두 점유로 본다)
         if (!NicknamePolicy.isValid(req.nickname()))
             throw new BusinessException(ErrorCode.NICKNAME_FORMAT_INVALID);
         if (userRepository.isNicknameTaken(req.nickname(), null))
             throw new BusinessException(ErrorCode.NICKNAME_DUPLICATED);
-        // 남이 변경으로 버린 닉네임의 1주일 잠금 — 신규 가입자는 절대 그 "본인"일 수 없다(회원 정책 §3)
-        releaseLockService.requireNotLocked(req.nickname(), null);
 
         // 관심 카테고리: 코드 유효성(12종) → 중복 제거 → 개수(0~6, 건너뛰기 허용).
         // 중복은 user_interests PK(user_id, category) 위반이라 그대로 두면 500 이 된다. 클라 버그로
@@ -225,8 +251,6 @@ public class AuthService {
         requireValidDevice(req.deviceId(), req.deviceInfo());
         if (req.installationId() == null || req.installationId().isBlank())
             throw new BusinessException(ErrorCode.INVALID_REQUEST);
-        if (userRepository.existsActiveByInstallationId(req.installationId()))
-            throw new BusinessException(ErrorCode.INSTALLATION_ALREADY_REGISTERED);
 
         // signupToken 1회용 — 검증을 모두 통과한 시점에 jti를 소모한다.
         // 재시도(2회차 이상)는 이미 이 요청이 소모한 것이므로 다시 소모하지 않는다.
@@ -246,8 +270,6 @@ public class AuthService {
         user.attachInstallation(req.installationId(), req.deviceId());
         user.updateCountryCode(countryResolver.resolve(deviceCountry(req.deviceInfo())));   // 지오 헤더 → 기기 지역 → Accept-Language
         userRepository.save(user);
-        // 잠금이 만료된 뒤 이 닉네임을 가져간 경우 — 죽은 잠금 행을 남겨두지 않는다
-        releaseLockService.clear(req.nickname());
 
         reputationScoreRepository.save(ReputationScore.createDefault(user));   // 매너온도 병존(전환 전)
         UserScoreSummary summary = scoreSummaryRepository.save(UserScoreSummary.initialize(user.getId()));   // 브론즈 10점
@@ -265,6 +287,69 @@ public class AuthService {
         TokenService.TokenPair pair = tokenService.issueTokenPair(user);
         int flushIntervalSec = FlushIntervalPolicy.forUser(user);   // deviceInfo 확정 저장 시점 → 주기 부트스트랩
         return SignupResponse.from(pair, user, summary, flushIntervalSec);
+    }
+
+    /**
+     * 이 설치에서 가입을 진행해도 되는지 — 하나의 설치는 하나의 소셜 계정에만 묶인다(회원 정책 §1).
+     *
+     * <p>점유자가 <b>본인</b>(같은 provider + subject)이면 통과시킨다. 탈퇴했다가 돌아오는 경로이기 때문이다.
+     * 다른 계정이면 활성·탈퇴 가리지 않고 막는다 — 소셜만 바꿔 점수·제재를 리셋하는 우회로이기 때문이다.
+     * 앱을 지웠다 깔면 installationId 가 바뀌므로 기기 재사용 자체가 막히지는 않는다.
+     *
+     * <p>거절할 때 어느 소셜로 가야 하는지 알려준다 — {@code error.reason} 에 그 계정의 provider 를 싣는다.
+     * 이게 없으면 사용자는 "가입이 안 된다"만 알고 무엇을 해야 할지 모른다.
+     */
+    private void requireInstallationAvailable(String installationId, OAuthProvider provider, String subject) {
+        if (installationId == null || installationId.isBlank()) return;
+        User holder = userRepository.findActiveHolderOfInstallation(installationId)
+                .or(() -> userRepository.findWithdrawnHolderOfInstallation(installationId))
+                .orElse(null);
+        if (holder == null || holder.hasIdentity(provider, subject)) return;
+        throw new BusinessException(ErrorCode.INSTALLATION_ALREADY_REGISTERED,
+                holder.getOauthProvider().name());
+    }
+
+    /**
+     * 탈퇴 계정의 복귀 — 가입 요청으로 들어오지만 실제로는 <b>복원 + 로그인</b>이다.
+     *
+     * <p>이전 정보(닉네임·관심사·생일·성별·점수·매너온도)가 그대로 살아 있으므로 요청 바디의
+     * 온보딩 입력은 보지 않는다. 클라이언트도 로그인 응답의 {@code returningUser=true} 를 보고
+     * 입력 화면을 띄우지 않는다.
+     *
+     * <p>정지 상태로 탈퇴했다면 여기서 막지 않는다 — 복원까지 마치고 커밋한 뒤
+     * {@link #signup} 이 응답만 403 으로 돌린다("가입은 되고 로그인이 막힌다").
+     */
+    private SignupResponse restoreAndLogin(User user, SignupRequest req, Claims claims, boolean[] tokenConsumed) {
+        requireValidDevice(req.deviceId(), req.deviceInfo());
+        if (req.installationId() == null || req.installationId().isBlank())
+            throw new BusinessException(ErrorCode.INVALID_REQUEST);
+
+        if (!tokenConsumed[0]) {
+            if (!signupTokenStore.consume(claims.getId()))
+                throw new BusinessException(ErrorCode.INVALID_SIGNUP_TOKEN);
+            tokenConsumed[0] = true;
+        }
+
+        // 쓰던 닉네임을 그사이 타인이 가져갔으면 임시 닉네임으로 들여보내고 변경을 요청한다.
+        // 여기서 가입을 막으면 "닉네임 때문에 못 돌아오는" 상태가 된다.
+        boolean nicknameTaken = userRepository.isNicknameTaken(user.getApprovedNickname(), user.getId())
+                || (user.isNicknamePending() && userRepository.isNicknameTaken(user.getNickname(), user.getId()));
+        if (nicknameTaken) {
+            tempNicknameAllocator.assign(user, candidate -> userRepository.isNicknameTaken(candidate, user.getId()));
+            user.markNicknameConflict();
+            notificationService.notify(user.getId(), NotificationType.SYSTEM,
+                    "닉네임을 변경해주세요",
+                    "쓰시던 닉네임을 다른 분이 사용 중이라 임시 닉네임으로 시작했어요. 프로필에서 새 닉네임을 정해주세요.");
+        }
+
+        user.restore(req.installationId(), req.deviceId());   // 탈퇴 직전 상태(정지·잠금 포함)로 되돌린다
+        applyDeviceInfo(user, req.deviceInfo());
+        user.updateCountryCode(countryResolver.resolve(deviceCountry(req.deviceInfo())));
+        socialTokenService.flushPending(claims.getId(), user.getId(), user.getOauthProvider());
+
+        TokenService.TokenPair pair = tokenService.issueTokenPair(user);
+        UserScoreSummary summary = scoreSummaryRepository.findById(user.getId()).orElse(null);
+        return SignupResponse.restored(pair, user, summary, FlushIntervalPolicy.forUser(user));
     }
 
     /** 임시 승인 닉네임 UNIQUE 위반인지 — 이 경우에만 새 후보로 가입을 재시도한다. */
@@ -295,7 +380,7 @@ public class AuthService {
         if (existing.isBanned()) throw new BusinessException(ErrorCode.ACCOUNT_BANNED);
         TokenService.TokenPair pair = tokenService.issueTokenPair(existing);
         UserScoreSummary summary = scoreSummaryRepository.findById(existing.getId()).orElse(null);
-        return new SignupResponse(false, pair.accessToken(), pair.refreshToken(), "Bearer",
+        return new SignupResponse(false, false, pair.accessToken(), pair.refreshToken(), "Bearer",
                 pair.expiresIn(), FlushIntervalPolicy.forUser(existing),
                 UserResponse.from(existing, summary));
     }
@@ -440,11 +525,7 @@ public class AuthService {
             return NicknameAvailabilityResponse.formatFail();        // valid:false, reason:FORMAT
         if (userRepository.isNicknameTaken(nickname, null))
             return NicknameAvailabilityResponse.duplicated();        // valid:true, available:false, reason:DUPLICATED
-        // 변경으로 버려진 닉네임의 1주일 잠금(회원 정책 §3). 무인증 API라 "본인 되돌리기" 예외를
-        // 판정할 수 없어 버린 본인에게도 잠김으로 보인다 — 변경 주기가 월 1회라 실제로는 겹치지 않는다.
-        return releaseLockService.lockedUntilFor(nickname, null)
-                .map(NicknameAvailabilityResponse::recentlyReleased)
-                .orElseGet(NicknameAvailabilityResponse::ok);        // valid:true, available:true
+        return NicknameAvailabilityResponse.ok();                     // valid:true, available:true
     }
 
     // ===== 토큰 파싱 헬퍼 =====

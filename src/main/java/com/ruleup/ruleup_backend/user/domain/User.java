@@ -56,6 +56,14 @@ public class User extends AssignedIdEntity {
     @Column(name = "status", nullable = false)
     private UserStatus status = UserStatus.ACTIVE;
 
+    /**
+     * 탈퇴 직전 상태(ACTIVE/LOCKED/BANNED). 탈퇴한 적 없으면 null.
+     * status 가 WITHDRAWN 으로 덮이면 정지·잠금 여부가 지워지므로, 재가입 승계용으로 따로 남긴다.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status_before_withdrawal")
+    private UserStatus statusBeforeWithdrawal;
+
     /** 사용자가 신청한 닉네임(본인 화면 표시용). 변경 시 새 신청값으로 교체된다. */
     @Column(name = "nickname", nullable = false)
     private String nickname;
@@ -308,20 +316,41 @@ public class User extends AssignedIdEntity {
         return approvedProfileImageUrl;
     }
 
-    /** 소프트 탈퇴 — status=WITHDRAWN + deleted_at. 기기 연결 해제(installation UNIQUE 반환). */
+    /**
+     * 소프트 탈퇴 — status=WITHDRAWN + deleted_at.
+     *
+     * <p>installation_id 는 <b>지우지 않는다</b>. 재가입 시 "이 기기에서 누가 탈퇴했는지"를 보고
+     * 상태·점수를 승계해야 하기 때문이다. UNIQUE 는 생성 컬럼(active_installation_id)이
+     * 탈퇴 행을 제외하므로, 값을 들고 있어도 같은 기기에서 새 계정을 만들 수 있다.
+     *
+     * <p>device_id 는 그대로 해제한다 — 단일 활성 기기 판정용 현재 상태일 뿐 승계 근거가 아니다.
+     */
     public void withdraw() {
+        this.statusBeforeWithdrawal = this.status;   // WITHDRAWN 으로 덮이기 전에 보존
         this.status = UserStatus.WITHDRAWN;
         this.deletedAt = Instant.now();
-        this.installationId = null;
         this.deviceId = null;
     }
 
     /** 탈퇴 복원 — 1년 내 동일 소셜 계정 재로그인. 닉네임 충돌 처리는 호출측에서 별도 수행. */
     public void restore(String installationId, String deviceId) {
-        this.status = UserStatus.ACTIVE;
+        // 정지·잠금 상태로 탈퇴했다면 그대로 되돌린다 — 탈퇴가 제재를 지우는 수단이 되면 안 된다.
+        this.status = (statusBeforeWithdrawal != null) ? statusBeforeWithdrawal : UserStatus.ACTIVE;
+        this.statusBeforeWithdrawal = null;
         this.deletedAt = null;
         attachInstallation(installationId, deviceId);
     }
+
+    /** 이 계정이 그 소셜 신원(provider + subject)인지 — 설치 점유자가 본인인지 판정용. */
+    public boolean hasIdentity(OAuthProvider provider, String subject) {
+        return this.oauthProvider == provider && subject != null && subject.equals(this.oauthSubject);
+    }
+
+    /** 재가입 계정이 물려받을 상태 — 탈퇴 직전 값(기록이 없으면 ACTIVE). */
+    public UserStatus carriedOverStatus() {
+        return (statusBeforeWithdrawal != null) ? statusBeforeWithdrawal : UserStatus.ACTIVE;
+    }
+
 
     public void lock()  { this.status = UserStatus.LOCKED; }
     public void ban()   { this.status = UserStatus.BANNED; }

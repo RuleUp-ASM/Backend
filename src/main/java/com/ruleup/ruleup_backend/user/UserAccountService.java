@@ -56,7 +56,14 @@ public class UserAccountService {
     private final UserAgreementRepository userAgreementRepository;
     private final UserScoreSummaryRepository scoreSummaryRepository;
 
-    /** 회원 탈퇴 — 멱등(이미 탈퇴 상태면 무해하게 같은 응답). BANNED는 제재 세탁 방지를 위해 불가. */
+    /**
+     * 회원 탈퇴 — 멱등(이미 탈퇴 상태면 무해하게 같은 응답).
+     *
+     * <p>정지(BANNED) 계정도 탈퇴할 수 있다. 예전에는 제재 세탁을 막으려고 403 으로 거절했지만,
+     * 그러면 정지된 사람은 계정을 지울 수조차 없었다. 이제는 <b>막는 대신 따라오게</b> 한다 —
+     * 탈퇴 직전 상태와 설치 ID 가 계정 행에 남아, 같은 기기에서 재가입하면 그 상태를 승계한다
+     * (회원 정책 §6, {@code User#withdraw()}).
+     */
     @Transactional
     public WithdrawResponse withdraw(UUID userId, String confirmPhrase) {
         if (!CONFIRM_PHRASE.equals(confirmPhrase))
@@ -64,10 +71,9 @@ public class UserAccountService {
 
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.LOGIN_REQUIRED));
-        if (user.isBanned()) throw new BusinessException(ErrorCode.ACCOUNT_BANNED);
 
         if (!user.isWithdrawn()) {
-            user.withdraw();                                                    // WITHDRAWN + deleted_at + 기기 해제
+            user.withdraw();                                                    // WITHDRAWN + deleted_at + 직전 상태 보존
             refreshTokenRepository.revokeAllByUserId(userId, Instant.now());    // 전 세션 종료
             // 참여 중인 방에서도 전부 나간다. 남겨두면 인증하지 않는 유령 멤버가 남의 방 정원을 먹고,
             // 그 방은 유령방 자동 삭제 대상에서도 빠져 영영 남는다.

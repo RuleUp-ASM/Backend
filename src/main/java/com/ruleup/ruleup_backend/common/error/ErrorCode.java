@@ -18,8 +18,9 @@ public enum ErrorCode {
     INVALID_REDIRECT_URI(HttpStatus.BAD_REQUEST, "redirectUri가 올바르지 않습니다."),
     ACCOUNT_BANNED(HttpStatus.FORBIDDEN, "영구 정지된 계정입니다."),
     ACCOUNT_LOCKED(HttpStatus.FORBIDDEN, "잠금 상태의 계정은 이 기능을 사용할 수 없습니다."),
+    /** reason 에 그 계정의 소셜 제공자(KAKAO/GOOGLE)를 실어 보낸다 — 클라가 "카카오로 로그인" 까지 안내할 수 있게. */
     INSTALLATION_ALREADY_REGISTERED(HttpStatus.FORBIDDEN,
-            "이 기기(설치)에 이미 사용 중인 계정이 있습니다. 기존 계정으로 로그인해주세요."),
+            "이 기기는 다른 계정으로 가입한 이력이 있어요. 처음 가입할 때 쓰신 계정으로 로그인해주세요."),
 
     // ===== 가입 세션 토큰 (signupToken) (4.3) =====
     // 계약: 만료/위조 모두 400 INVALID_SIGNUP_TOKEN 로 단일화.
@@ -31,7 +32,6 @@ public enum ErrorCode {
     // ===== 닉네임 / 카테고리 / 약관 / 온보딩 (4.3 / 4.6 / 4.9) =====
     NICKNAME_FORMAT_INVALID(HttpStatus.BAD_REQUEST, "닉네임 형식이 올바르지 않습니다."),
     NICKNAME_DUPLICATED(HttpStatus.CONFLICT, "이미 사용 중인 닉네임입니다."),
-    NICKNAME_RECENTLY_RELEASED(HttpStatus.CONFLICT, "최근 해제된 닉네임은 1주일간 사용할 수 없습니다."),
     NICKNAME_CHANGE_LOCKED(HttpStatus.FORBIDDEN, "닉네임은 30일에 한 번만 변경할 수 있습니다."),
     CATEGORY_INVALID(HttpStatus.BAD_REQUEST, "유효하지 않은 관심 카테고리입니다."),
     CATEGORY_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "관심 카테고리는 최대 6개까지 선택할 수 있습니다."),

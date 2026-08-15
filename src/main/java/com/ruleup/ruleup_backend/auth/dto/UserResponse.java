@@ -4,6 +4,7 @@ import com.ruleup.ruleup_backend.score.domain.Tier;
 import com.ruleup.ruleup_backend.score.domain.UserScoreSummary;
 import com.ruleup.ruleup_backend.user.domain.NicknameStatus;
 import com.ruleup.ruleup_backend.user.domain.User;
+import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.util.List;
 
@@ -14,13 +15,65 @@ import java.util.List;
  * - accountStatus: ACTIVE/LOCKED (BANNED는 403으로 응답 자체가 없음)
  * - lockInfo: LOCKED일 때만 { reason, unlockAt } — 처벌 도메인 확정 전까지 사유·해제일은 미정
  */
+@Schema(name = "UserResponse", description = """
+        사용자 정보 블록. 로그인·가입·내 프로필 응답이 모두 같은 스키마를 쓴다.
+        여기 담긴 nickname 은 '본인 화면용'이라 검수 결과와 무관하게 본인이 인지하는 값이 내려간다.""")
 public record UserResponse(
-        String id, String nickname, String nicknameStatus, String profileImageUrl,
-        String tier, Integer score, String displayTier,
-        List<String> interestCategories, Boolean onboardingCompleted,
-        String accountStatus, LockInfo lockInfo) {
 
-    public record LockInfo(String reason, String unlockAt) {}
+        @Schema(description = "사용자 ID (UUID)", example = "0f7a3c1e-2b9d-4f6a-8c11-5d2e7b4a9c03",
+                requiredMode = Schema.RequiredMode.REQUIRED)
+        String id,
+
+        @Schema(description = """
+                본인 화면에 표시할 닉네임. 검수 중(PENDING)이면 신청한 값,
+                거부(REJECTED)면 직전 승인본(없으면 서버가 배정한 임시 닉네임)이 내려간다.""",
+                example = "규칙왕", requiredMode = Schema.RequiredMode.REQUIRED)
+        String nickname,
+
+        @Schema(description = """
+                닉네임 검수 상태.
+                · PENDING — 검수 대기(기능 제한 없음)
+                · APPROVED — 승인
+                · REJECTED — 거부. 타인에게는 임시 닉네임이 보인다
+                · CONFLICT — 복원 중 다른 사람이 선점. 재설정이 필요하다""",
+                example = "PENDING",
+                allowableValues = {"PENDING", "APPROVED", "REJECTED", "CONFLICT"})
+        String nicknameStatus,
+
+        @Schema(description = "프로필 사진 URL. 등록 전이거나 검수 통과 전이면 null.",
+                example = "https://cdn.ruleup.app/profile/0f7a3c1e.jpg")
+        String profileImageUrl,
+
+        @Schema(description = "실제 티어. 가입 직후에는 BRONZE.", example = "BRONZE")
+        String tier,
+
+        @Schema(description = "현재 티어 구간 내 점수. 가입 직후에는 10.", example = "10")
+        Integer score,
+
+        @Schema(description = "화면 표시용 티어. 승급 연출 등으로 실제 티어와 다를 수 있다.", example = "BRONZE")
+        String displayTier,
+
+        @Schema(description = "선택한 관심 카테고리 코드 목록", example = "[\"EXERCISE\",\"STUDY\"]")
+        List<String> interestCategories,
+
+        @Schema(description = "온보딩 완료 여부. 가입이 원자적이라 조회되는 사용자는 항상 true 다.", example = "true")
+        Boolean onboardingCompleted,
+
+        @Schema(description = """
+                계정 상태. ACTIVE 또는 LOCKED.
+                LOCKED 는 열람 전용이라 조회는 되지만 쓰기 요청이 403 ACCOUNT_LOCKED 로 막힌다(로그아웃·탈퇴는 허용).
+                정지(BANNED)는 로그인·재가입이 모두 403 이라 이 값으로 내려오지 않는다.""",
+                example = "ACTIVE", allowableValues = {"ACTIVE", "LOCKED"})
+        String accountStatus,
+
+        @Schema(description = "잠금 상세. accountStatus=LOCKED 일 때만 채워지고 그 외에는 null.")
+        LockInfo lockInfo) {
+
+    @Schema(name = "LockInfo", description = "계정 잠금 상세 (LOCKED 일 때만)")
+    public record LockInfo(
+            @Schema(description = "잠금 사유", example = "계정 잠금") String reason,
+            @Schema(description = "잠금 해제 예정 시각(ISO-8601). 미정이면 null.", example = "2026-09-01T00:00:00Z")
+            String unlockAt) {}
 
     public static UserResponse from(User user, UserScoreSummary summary) {
         Tier tier = (summary != null) ? summary.getActualTier() : Tier.UNRANKED;

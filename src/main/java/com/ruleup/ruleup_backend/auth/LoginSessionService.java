@@ -41,7 +41,6 @@ public class LoginSessionService {
     private final NotificationService notificationService;
     private final CountryResolver countryResolver;
     private final TokenService tokenService;
-    private final com.ruleup.ruleup_backend.user.domain.TempNicknameAllocator tempNicknameAllocator;
 
     @Transactional
     public OAuthLoginResponse loginExisting(UUID userId, OAuthProvider provider,
@@ -49,28 +48,11 @@ public class LoginSessionService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.LOGIN_FAILED));
 
-        // 영구 정지 계정은 로그인 자체를 차단한다. (재가입 경로도 없음 — subject 가 살아있는 한 이 분기로 온다)
+        // 영구 정지 계정은 로그인 자체를 차단한다.
         if (user.isBanned()) throw new BusinessException(ErrorCode.ACCOUNT_BANNED);
 
-        // ===== 탈퇴 복원 — 동일 소셜 계정 재로그인 시 전부 복원 (DB 정리 §12.2) =====
-        // ⚠️ 정책은 "1년 이내"만 복원이지만 지금은 <b>경과 시간을 보지 않는다</b>(레거시로 유지, 2026-08-04 확정).
-        // 근거: 1년 파기 배치가 아직 없어 데이터가 그대로 남아 있다 → 살아 있는 기록을 두고
-        // 신규 회원으로 취급하면 오히려 계정이 갈라진다. 파기 배치를 넣을 때 함께 조건을 건다
-        // (배치가 oauth_subject 를 익명화하면 이 분기 자체가 자연히 신규 가입으로 빠진다).
-        boolean restored = false;
-        if (user.isWithdrawn()) {
-            // 기존 승인 닉네임(또는 심사 중이던 신청 닉네임)을 타인이 선점했으면 CONFLICT + 임시 닉네임
-            boolean nicknameTaken = userRepository.isNicknameTaken(user.getApprovedNickname(), user.getId())
-                    || (user.isNicknamePending()
-                        && userRepository.isNicknameTaken(user.getNickname(), user.getId()));
-            if (nicknameTaken) {
-                tempNicknameAllocator.assign(user,
-                        candidate -> userRepository.isNicknameTaken(candidate, user.getId()));
-                user.markNicknameConflict();   // 클라는 닉네임 재설정 화면에서 진행을 막는다(계약)
-            }
-            user.restore(req.installationId(), req.deviceId());
-            restored = true;
-        }
+        // 탈퇴 계정은 여기로 오지 않는다 — AuthService 가 신규 분기(signupToken)로 보내고,
+        // 복원은 가입 요청에서 처리한다("탈퇴 후에는 회원가입을 거쳐 로그인", 회원 정책 §6).
 
         // ===== 단일 활성 기기 — 다른 기기 로그인이면 기존 세션 전부 종료 =====
         boolean deviceChanged = user.getDeviceId() != null && req.deviceId() != null
@@ -82,9 +64,10 @@ public class LoginSessionService {
                     "새 기기에서 로그인되어 기존 기기의 세션이 종료됐어요. 본인이 아니라면 계정 보안을 확인해주세요.");
         }
 
-        // ===== 설치 인계 — uq_users_installation_id: 하나의 설치는 한 계정에만 연결 =====
+        // ===== 설치 인계 — uq_users_active_installation_id: 하나의 설치는 한 활성 계정에만 연결 =====
+        // 탈퇴 행도 installation_id 를 들고 있으므로(승계 근거) 활성 계정만 인계 대상으로 본다.
         if (req.installationId() != null && !req.installationId().isBlank()) {
-            userRepository.findByInstallationId(req.installationId())
+            userRepository.findActiveHolderOfInstallation(req.installationId())
                     .filter(holder -> !holder.getId().equals(user.getId()))
                     .ifPresent(holder -> {
                         holder.detachInstallation();
@@ -105,7 +88,7 @@ public class LoginSessionService {
         TokenService.TokenPair pair = tokenService.issueTokenPair(user);
         UserScoreSummary summary = scoreSummaryRepository.findById(user.getId()).orElse(null);
         int flushIntervalSec = FlushIntervalPolicy.forUser(user);
-        return OAuthLoginResponse.existing(pair, user, summary, flushIntervalSec, restored);
+        return OAuthLoginResponse.existing(pair, user, summary, flushIntervalSec);
     }
 
     private void applyDeviceInfo(User user, DeviceInfoRequest device) {
