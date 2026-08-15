@@ -18,8 +18,9 @@ public enum ErrorCode {
     INVALID_REDIRECT_URI(HttpStatus.BAD_REQUEST, "redirectUri가 올바르지 않습니다."),
     ACCOUNT_BANNED(HttpStatus.FORBIDDEN, "영구 정지된 계정입니다."),
     ACCOUNT_LOCKED(HttpStatus.FORBIDDEN, "잠금 상태의 계정은 이 기능을 사용할 수 없습니다."),
+    /** reason 에 그 계정의 소셜 제공자(KAKAO/GOOGLE)를 실어 보낸다 — 클라가 "카카오로 로그인" 까지 안내할 수 있게. */
     INSTALLATION_ALREADY_REGISTERED(HttpStatus.FORBIDDEN,
-            "이 기기에서 이미 가입한 계정이 있어요. 그 계정으로 로그인해주세요."),
+            "이 기기는 다른 계정으로 가입한 이력이 있어요. 처음 가입할 때 쓰신 계정으로 로그인해주세요."),
 
     // ===== 가입 세션 토큰 (signupToken) (4.3) =====
     // 계약: 만료/위조 모두 400 INVALID_SIGNUP_TOKEN 로 단일화.

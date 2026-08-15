@@ -41,17 +41,18 @@ public class AuthController {
                     카카오/구글 인가코드를 서버가 검증하고, 그 소셜 계정이 이미 가입돼 있는지에 따라 응답이 갈린다.
                     **하나의 응답 스키마 안에서 `isNewUser` 로 분기**하므로 클라이언트는 이 필드를 먼저 본다.
 
-                    - `isNewUser=false` (기존 회원) — `accessToken`·`refreshToken`·`user`·`device`·`flushIntervalSec` 가 채워진다.
+                    - `isNewUser=false` (활성 회원) — `accessToken`·`refreshToken`·`user`·`device`·`flushIntervalSec` 가 채워진다.
                       가입 절차 없이 바로 홈으로 진입한다. `signupToken`·`oauthProfile` 은 null 이다.
-                    - `isNewUser=true` (신규) — `signupToken`·`signupTokenExpiresIn`·`oauthProfile` 만 채워진다.
-                      이 시점에는 계정이 만들어지지 않는다. 온보딩을 마치고 `POST /api/v1/auth/signup` 을 호출해야 가입이 끝난다.
+                    - `isNewUser=true` (신규 **또는 탈퇴 후 복귀**) — `signupToken`·`signupTokenExpiresIn`·`oauthProfile` 만 채워진다.
+                      이 시점에는 계정이 만들어지지 않는다. `POST /api/v1/auth/signup` 을 호출해야 끝난다.
 
-                    `restored=true` 는 탈퇴 후 1년 이내에 같은 소셜 계정으로 다시 로그인한 경우다.
-                    신규 가입이 아니라 **기존 계정 복원**이며 이전 데이터가 그대로 살아난다.
-                    이때 닉네임을 그사이 다른 사람이 가져갔다면 `user.nicknameStatus=CONFLICT` 로 내려가므로,
-                    클라이언트는 닉네임 재설정 화면을 띄운다.
-                    복원은 제재도 함께 되돌린다 — 잠금 상태로 탈퇴했으면 잠금인 채로 복원되고,
-                    **정지 상태로 탈퇴했으면 복원 자체가 403** 이다(탈퇴가 제재를 지우는 수단이 되지 않게).
+                    **탈퇴한 계정도 여기서 되살아나지 않는다.** 복귀도 "회원가입을 거쳐 로그인"하는 흐름이라
+                    신규와 같은 분기로 내려보내고, 복원 판정은 가입 요청에서 한다.
+                    대신 `returningUser` 로 미리 알려준다.
+
+                    - `returningUser=true` — 예전에 탈퇴한 계정이 있는 소셜 계정이다.
+                      **온보딩 입력 화면을 띄우지 말고** 곧바로 가입을 요청한다(서버가 이전 정보를 그대로 살린다).
+                    - `returningUser=false` — 처음 보는 소셜 계정이다. 평소대로 입력을 받아 가입을 진행한다.
 
                     `oauthProfile` 은 온보딩 화면 **프리필 힌트**일 뿐이라 그대로 가입되지 않는다.
                     `nicknameHint` 는 중복일 수 있으니 `POST /api/v1/nicknames/check` 로 확인해야 하고,
@@ -61,9 +62,12 @@ public class AuthController {
                     카카오는 null 이어도 된다**(카카오톡 간편 로그인 경로에서는 SDK가 내부 처리한다).
                     `deviceId`·`deviceInfo` 는 두 provider 모두 필수이며, 외부 호출 전에 먼저 검증해서 거절한다.
 
-                    **신규 분기에는 설치 게이트가 걸린다.** `installationId` 에 이미 묶인 계정이 있으면
-                    (탈퇴한 계정도 포함) `isNewUser=true` 를 주지 않고 403 `INSTALLATION_ALREADY_REGISTERED` 로 막는다.
-                    기존 회원 로그인은 이 게이트와 무관하다 — 원래 쓰던 소셜 계정으로는 같은 기기에서 언제든 돌아올 수 있다.
+                    **설치 게이트**: 하나의 설치(`installationId`)는 하나의 소셜 계정에만 묶인다.
+                    그 설치의 주인이 **다른 소셜 계정이면 활성·탈퇴를 가리지 않고** 403 `INSTALLATION_ALREADY_REGISTERED` 다.
+                    온보딩을 다 채운 뒤 거절당하지 않도록 로그인 단계에서 끊는다.
+                    이때 `error.reason` 에 **그 계정의 소셜 제공자**(`KAKAO`/`GOOGLE`)를 실어 보내므로,
+                    클라이언트는 "카카오 계정으로 로그인해주세요"까지 안내할 수 있다.
+                    주인이 본인(같은 provider+subject)이면 통과한다 — 탈퇴 후 돌아오는 경로다.
 
                     로그인은 **단일 활성 기기** 정책이다. 다른 기기에서 로그인하면 기존 기기의 refreshToken 이 전부 무효가 되고
                     이전 기기에는 세션 종료 알림이 나간다. 같은 기기에서 다시 로그인하는 경우에는 세션을 끊지 않는다.
@@ -136,6 +140,24 @@ public class AuthController {
                     소셜 로그인에서 받은 `signupToken` 과 온보딩 입력을 **한 번에** 제출해 가입을 마친다.
                     성공하면 그 자리에서 앱 토큰(accessToken/refreshToken)이 발급되므로 별도 로그인 호출이 필요 없다.
 
+                    **탈퇴했던 사람의 복귀도 이 API 로 들어온다.** 서버가 `signupToken` 의 소셜 계정으로 이전 계정을 찾아
+                    세 갈래로 나눈다.
+
+                    1. **이전 계정 있음(복귀)** — 요청의 온보딩 입력을 **보지 않고** 그 계정을 되살려 로그인시킨다.
+                       응답은 `isNewUser=false`·`restored=true` 이고 점수·매너온도·챌린지 기록이 모두 그대로다.
+                       그래서 클라이언트는 로그인 응답의 `returningUser=true` 를 보면 입력 화면 없이 이 API 만 호출하면 된다
+                       (`signupToken`·`installationId`·`deviceId`·`deviceInfo` 만 보내면 된다).
+                       쓰던 닉네임을 그사이 다른 사람이 가져갔다면 **막지 않고** 임시 닉네임으로 들여보낸 뒤
+                       `user.nicknameStatus=CONFLICT` 와 변경 안내 알림을 준다.
+                    2. **이 설치의 주인이 다른 소셜 계정** (활성·탈퇴 무관) — 403 `INSTALLATION_ALREADY_REGISTERED`.
+                       `error.reason` 에 그 계정의 제공자(`KAKAO`/`GOOGLE`)가 실린다.
+                       소셜만 바꿔 점수·제재를 리셋하는 우회로라 막는다. 돌아오려면 원래 소셜 계정으로 와야 한다.
+                       (앱을 지웠다 깔면 `installationId` 가 바뀌므로 기기 재사용 자체가 막히지는 않는다)
+                    3. **이전 계정 없음** — 아래 규칙대로 신규 가입한다.
+
+                    **정지 상태로 탈퇴했던 사람은 복원까지는 되고 응답만 403** `ACCOUNT_BANNED` 다.
+                    계정은 정지 상태로 되살아나 남고 토큰만 발급되지 않는다 — 회원가입은 되지만 로그인이 막히는 것이다.
+
                     가입은 원자적이다. 닉네임·관심사·생일·성별·약관·기기 정보 중 하나라도 검증에 실패하면
                     계정을 포함해 아무것도 만들어지지 않는다. 부분 가입 상태는 존재하지 않는다.
 
@@ -152,10 +174,7 @@ public class AuthController {
                     - `gender` — 필수 필드. UI 에서 성별 입력을 건너뛰더라도 클라이언트가 `NON_BINARY` 를 보내야 한다.
                     - `agreements` — 6종 전부 보낸다. 필수 3종(이용약관·개인정보·위치기반)이 모두 `agreed=true` 여야 가입되고,
                       선택 3종(마케팅·이벤트·야간알림)은 전부 거부해도 가입된다. `version` 을 생략하면 서버 현행 버전으로 기록한다.
-                    - `installationId` — 필수. **이 설치에 묶인 계정이 하나라도 있으면**(탈퇴한 계정 포함)
-                      403 `INSTALLATION_ALREADY_REGISTERED` 로 막고 기존 계정 로그인을 유도한다.
-                      탈퇴자도 세는 이유는 소셜 계정만 바꿔 같은 기기에서 새로 시작하는 것이 곧 점수·제재 리셋이기 때문이다.
-                      돌아오려면 원래 소셜 계정으로 로그인해야 하고, 그 경로는 복원이라 기록이 그대로 따라온다.
+                    - `installationId` — 필수. 위 2번(설치 게이트) 대상이다.
 
                     가입 직후 상태는 항상 같다 — 티어 BRONZE·점수 10, `nicknameStatus=PENDING`, `accountStatus=ACTIVE`.
                     닉네임은 커밋 후 비동기로 검수되며, **심사 중이라고 기능이 제한되지는 않는다**.

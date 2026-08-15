@@ -146,6 +146,25 @@ class WithdrawRestoreFlowIT {
         return res;
     }
 
+    /**
+     * 탈퇴자의 복귀 플로우 — 소셜 로그인으로 signupToken 을 받고, <b>온보딩 입력 없이</b> 가입을 요청한다.
+     * 이전 정보가 있으면 서버가 그대로 살려 로그인시킨다.
+     */
+    private MvcResult comeBack(String tag, String installationId) throws Exception {
+        MvcResult login = postJson("/api/v1/auth/oauth/kakao",
+                loginBody(tag, installationId, "dev-" + tag));
+        assertThat(login.getResponse().getStatus()).isEqualTo(200);
+        assertThat((Boolean) read(login, "$.data.isNewUser")).isTrue();          // 복귀도 가입 분기를 탄다
+        assertThat((Boolean) read(login, "$.data.returningUser")).isTrue();      // 클라는 입력 화면을 띄우지 않는다
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("signupToken", read(login, "$.data.signupToken"));
+        body.put("installationId", installationId);
+        body.put("deviceId", "dev-" + tag);
+        body.put("deviceInfo", deviceInfo());
+        return postJson("/api/v1/auth/signup", body);   // 닉네임·생일·약관 없음
+    }
+
     private User findUser(String tag) {
         return userRepository.findByOauthProviderAndOauthSubject(OAuthProvider.KAKAO, "mock-kakao-" + tag)
                 .orElseThrow();
@@ -252,8 +271,8 @@ class WithdrawRestoreFlowIT {
         }
 
         @Test
-        @DisplayName("정지 상태로 탈퇴한 계정은 같은 소셜로 재로그인해도 복원되지 않는다 — 403")
-        void banned_withdrawn_account_cannot_be_restored() throws Exception {
+        @DisplayName("정지 상태로 탈퇴해도 회원가입까지는 되고 로그인만 막힌다 — 403 + 계정은 정지로 복원")
+        void banned_can_sign_up_again_but_cannot_log_in() throws Exception {
             String tag = uniq();
             String at = read(signup(tag, "정지복원" + SEQ.get()), "$.data.accessToken");
             User user = findUser(tag);
@@ -261,10 +280,12 @@ class WithdrawRestoreFlowIT {
             userRepository.save(user);
             withdraw(at, "탈퇴할게요");
 
-            MvcResult relogin = postJson("/api/v1/auth/oauth/kakao",
-                    loginBody(tag, "inst-" + tag, "dev-" + tag));
-            expectError(relogin, 403, "ACCOUNT_BANNED");
-            assertThat(findUser(tag).getStatus()).isEqualTo(UserStatus.WITHDRAWN);   // 복원되지 않는다
+            expectError(comeBack(tag, "inst-" + tag), 403, "ACCOUNT_BANNED");   // 토큰을 주지 않는다
+
+            // 가입(복원) 자체는 커밋됐다 — 롤백해버리면 "가입까지는 된다"가 성립하지 않는다
+            User restored = findUser(tag);
+            assertThat(restored.getStatus()).isEqualTo(UserStatus.BANNED);
+            assertThat(restored.getDeletedAt()).isNull();
         }
     }
 
@@ -296,12 +317,14 @@ class WithdrawRestoreFlowIT {
             String at = read(signup(tag, "설치유지" + SEQ.get()), "$.data.accessToken");
             assertThat(withdraw(at, "탈퇴할게요").getResponse().getStatus()).isEqualTo(200);
 
-            // 같은 설치 + 다른 소셜 계정 → 신규 가입 분기 자체를 막는다.
+            // 같은 설치 + 다른 소셜 계정 → 온보딩을 채우기 전에, 로그인 단계에서 끊는다.
             // 열어주면 소셜만 바꿔 점수·제재를 리셋할 수 있다(세탁).
             String tag2 = uniq();
             MvcResult login = postJson("/api/v1/auth/oauth/kakao",
                     loginBody(tag2, "inst-" + tag, "dev-" + tag));
             expectError(login, 403, "INSTALLATION_ALREADY_REGISTERED");
+            // 어느 계정으로 가야 하는지 알려준다 — 없으면 사용자는 무엇을 해야 할지 모른다
+            assertThat((String) read(login, "$.error.reason")).isEqualTo("KAKAO");
         }
 
         @Test
@@ -312,11 +335,9 @@ class WithdrawRestoreFlowIT {
             java.util.UUID before = findUser(tag).getId();
             withdraw(at, "탈퇴할게요");
 
-            MvcResult relogin = postJson("/api/v1/auth/oauth/kakao",
-                    loginBody(tag, "inst-" + tag, "dev-" + tag));
-            assertThat(relogin.getResponse().getStatus()).isEqualTo(200);
-            assertThat((Boolean) read(relogin, "$.data.isNewUser")).isFalse();
-            assertThat((Boolean) read(relogin, "$.data.restored")).isTrue();
+            MvcResult res = comeBack(tag, "inst-" + tag);
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+            assertThat((Boolean) read(res, "$.data.restored")).isTrue();
             assertThat(findUser(tag).getId()).isEqualTo(before);   // 같은 계정 그대로
         }
     }
@@ -406,27 +427,26 @@ class WithdrawRestoreFlowIT {
     class Restoration {
 
         @Test
-        @DisplayName("탈퇴 1년 내 동일 소셜 계정 재로그인은 신규 가입이 아니라 복원이다 — restored=true·데이터 유지")
-        void relogin_restores_account() throws Exception {
+        @DisplayName("탈퇴 후 복귀는 가입 요청에서 복원된다 — 입력 없이 restored=true·데이터 유지")
+        void signup_restores_withdrawn_account() throws Exception {
             String tag = uniq();
             MvcResult signup = signup(tag, "복원유저" + SEQ.get());
             String firstUserId = read(signup, "$.data.user.id");
             String at = read(signup, "$.data.accessToken");
             assertThat(withdraw(at, "탈퇴할게요").getResponse().getStatus()).isEqualTo(200);
 
-            MvcResult relogin = postJson("/api/v1/auth/oauth/kakao",
-                    loginBody(tag, "inst-" + tag + "-new", "dev-" + tag + "-new"));
-            assertThat(relogin.getResponse().getStatus()).isEqualTo(200);
-            assertThat((Boolean) read(relogin, "$.data.isNewUser")).isFalse();   // 신규 가입 아님
-            assertThat((Boolean) read(relogin, "$.data.restored")).isTrue();
-            assertThat((String) read(relogin, "$.data.user.id")).isEqualTo(firstUserId);   // 같은 계정
-            List<String> interests = read(relogin, "$.data.user.interestCategories");
-            assertThat(interests).containsExactlyInAnyOrder("EXERCISE", "READING");   // 데이터 유지
+            MvcResult res = comeBack(tag, "inst-" + tag);
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+            assertThat((Boolean) read(res, "$.data.isNewUser")).isFalse();   // 새 계정이 아니다
+            assertThat((Boolean) read(res, "$.data.restored")).isTrue();
+            assertThat((String) read(res, "$.data.user.id")).isEqualTo(firstUserId);   // 같은 계정
+            assertThat((String) read(res, "$.data.accessToken")).isNotBlank();          // 그대로 로그인된다
+            List<String> interests = read(res, "$.data.user.interestCategories");
+            assertThat(interests).containsExactlyInAnyOrder("EXERCISE", "READING");   // 입력 없이 이전 정보 유지
 
             User user = findUser(tag);
             assertThat(user.getStatus()).isEqualTo(UserStatus.ACTIVE);
-            assertThat(user.getDeletedAt()).isNull();
-            assertThat(user.getInstallationId()).isEqualTo("inst-" + tag + "-new");
+            assertThat(user.getDeletedAt()).isNull();   // 복원되면 다시 비워진다
         }
 
         @Test
@@ -447,12 +467,11 @@ class WithdrawRestoreFlowIT {
             // 타인이 같은 닉네임 선점
             signup(uniq(), nickname);
 
-            // 원래 주인이 재로그인 → 복원되지만 닉네임은 CONFLICT
-            MvcResult relogin = postJson("/api/v1/auth/oauth/kakao",
-                    loginBody(tag, "inst-" + tag + "-r", "dev-" + tag + "-r"));
-            assertThat(relogin.getResponse().getStatus()).isEqualTo(200);
-            assertThat((Boolean) read(relogin, "$.data.restored")).isTrue();
-            assertThat((String) read(relogin, "$.data.user.nicknameStatus")).isEqualTo("CONFLICT");
+            // 원래 주인이 돌아오면 — 막지 않고 임시 닉네임으로 들여보낸 뒤 변경을 요청한다
+            MvcResult res = comeBack(tag, "inst-" + tag);
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+            assertThat((Boolean) read(res, "$.data.restored")).isTrue();
+            assertThat((String) read(res, "$.data.user.nicknameStatus")).isEqualTo("CONFLICT");
 
             User restored = findUser(tag);
             assertThat(restored.getNicknameStatus()).isEqualTo(NicknameStatus.CONFLICT);

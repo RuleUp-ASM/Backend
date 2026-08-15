@@ -52,15 +52,18 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
 
     /**
-     * 이 설치에 묶인 계정이 하나라도 있는지 — 신규 가입 분기 차단(회원 정책 §1).
+     * 이 설치를 쥔 채 탈퇴한 계정 — 다른 소셜 계정의 신규 가입을 막는 근거(회원 정책 §1).
      *
-     * <p><b>탈퇴한 계정도 센다.</b> 탈퇴로 설치가 풀리면 소셜 계정만 바꿔 같은 기기에서
-     * 새 계정을 만들 수 있고, 그게 곧 점수·제재 세탁이 된다. 돌아오려면 원래 소셜 계정으로
-     * 로그인해야 하고(그 경로는 복원이라 기록이 그대로 따라온다), 다른 소셜로는 열어주지 않는다.
+     * <p>탈퇴해도 installation_id 를 비우지 않기 때문에 남아 있다. 소셜만 바꿔 같은 설치에서
+     * 새로 시작하는 것이 곧 점수·제재 리셋이라 막는다. 돌아오려면 원래 소셜 계정으로 와야 하고,
+     * 그 경로는 가입 요청에서 복원으로 처리된다.
      */
     @Query("""
-            select count(u) > 0 from User u
+            select u from User u
             where u.installationId = :installationId
+              and u.status = com.ruleup.ruleup_backend.user.domain.UserStatus.WITHDRAWN
+            order by u.deletedAt desc
+            limit 1
             """)
-    boolean existsByInstallationId(@Param("installationId") String installationId);
+    Optional<User> findWithdrawnHolderOfInstallation(@Param("installationId") String installationId);
 }

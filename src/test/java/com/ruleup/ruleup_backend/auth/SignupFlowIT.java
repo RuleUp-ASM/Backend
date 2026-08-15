@@ -600,6 +600,8 @@ class SignupFlowIT {
             MvcResult res = postJson("/api/v1/auth/oauth/kakao",
                     loginBody(uniq(), "inst-" + tag, "dev-" + tag));
             expectError(res, 403, "INSTALLATION_ALREADY_REGISTERED");
+            // "가입이 안 된다"로 끝내면 사용자가 할 게 없다 — 어느 소셜로 가야 하는지 알려준다
+            assertThat((String) read(res, "$.error.reason")).isEqualTo("KAKAO");
         }
 
         @Test

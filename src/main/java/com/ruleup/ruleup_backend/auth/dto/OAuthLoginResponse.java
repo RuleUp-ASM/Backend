@@ -7,8 +7,8 @@ import com.ruleup.ruleup_backend.user.domain.User;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 /**
- * OAuth 검증 결과. 기존 사용자면 토큰+user, 신규면 signupToken+oauthProfile.
- * restored: 탈퇴 1년 내 동일 소셜 계정 재로그인으로 계정이 복원된 경우 true.
+ * OAuth 검증 결과. 활성 사용자면 토큰+user, 그 외(신규·탈퇴)면 signupToken+oauthProfile.
+ * 탈퇴 계정의 복원은 여기서 하지 않는다 — 가입 요청(POST /auth/signup)에서 처리한다.
  */
 @Schema(name = "OAuthLoginResponse", description = """
         소셜 로그인 결과. isNewUser 로 분기한다.
@@ -19,12 +19,6 @@ public record OAuthLoginResponse(
         @Schema(description = "신규 사용자 여부. true 면 아직 계정이 없고 가입(signup)을 마쳐야 한다.",
                 example = "false", requiredMode = Schema.RequiredMode.REQUIRED)
         boolean isNewUser,
-
-        @Schema(description = """
-                탈퇴 1년 이내 동일 소셜 계정 재로그인으로 계정이 복원된 경우에만 true.
-                신규 가입이 아니라 이전 데이터가 그대로 살아난 것이다. 그 외에는 null.""",
-                example = "false")
-        Boolean restored,
 
         // 기존 사용자
         @Schema(description = "앱 액세스 토큰. 보호 API 에 `Authorization: Bearer {값}` 으로 싣는다. (신규면 null)",
@@ -64,7 +58,15 @@ public record OAuthLoginResponse(
         Long signupTokenExpiresIn,
 
         @Schema(description = "온보딩 화면 프리필 힌트. (기존 회원이면 null)")
-        OAuthProfileResponse oauthProfile) {
+        OAuthProfileResponse oauthProfile,
+
+        @Schema(description = """
+                예전에 탈퇴한 계정이 있는 소셜 계정인지. isNewUser=true 일 때만 의미가 있다.
+                true 면 **온보딩 입력 화면을 띄우지 않고** 곧바로 POST /api/v1/auth/signup 을 호출한다 —
+                서버가 이전 정보를 그대로 살려 로그인시키므로 입력받을 게 없다.
+                false 면 평소대로 닉네임·관심사·약관을 입력받아 가입을 진행한다.""",
+                example = "false")
+        Boolean returningUser) {
 
     /**
      * 온보딩 프리필 힌트 — 닉네임·프로필 사진(·이메일)에만 적용(2026-08-03).
@@ -120,19 +122,20 @@ public record OAuthLoginResponse(
     }
 
     public static OAuthLoginResponse existing(TokenService.TokenPair pair, User user,
-                                              UserScoreSummary summary, int flushIntervalSec,
-                                              boolean restored) {
-        return new OAuthLoginResponse(false, restored,
+                                              UserScoreSummary summary, int flushIntervalSec) {
+        return new OAuthLoginResponse(false,
                 pair.accessToken(), pair.refreshToken(), "Bearer", pair.expiresIn(),
                 flushIntervalSec,
                 UserResponse.from(user, summary),
                 DeviceSpecResponse.from(user),
-                null, null, null);
+                null, null, null, null);
     }
 
-    public static OAuthLoginResponse newUser(String signupToken, long expiresIn, OAuthUserInfo info) {
-        return new OAuthLoginResponse(true, null,
+    /** 신규 분기. returningUser=true 면 예전에 탈퇴한 계정이 있어 입력 없이 복원될 사람이다. */
+    public static OAuthLoginResponse newUser(String signupToken, long expiresIn, OAuthUserInfo info,
+                                             boolean returningUser) {
+        return new OAuthLoginResponse(true,
                 null, null, null, null, null, null, null,
-                signupToken, expiresIn, OAuthProfileResponse.from(info));
+                signupToken, expiresIn, OAuthProfileResponse.from(info), returningUser);
     }
 }

@@ -341,6 +341,11 @@ public class User extends AssignedIdEntity {
         attachInstallation(installationId, deviceId);
     }
 
+    /** 이 계정이 그 소셜 신원(provider + subject)인지 — 설치 점유자가 본인인지 판정용. */
+    public boolean hasIdentity(OAuthProvider provider, String subject) {
+        return this.oauthProvider == provider && subject != null && subject.equals(this.oauthSubject);
+    }
+
     /** 재가입 계정이 물려받을 상태 — 탈퇴 직전 값(기록이 없으면 ACTIVE). */
     public UserStatus carriedOverStatus() {
         return (statusBeforeWithdrawal != null) ? statusBeforeWithdrawal : UserStatus.ACTIVE;

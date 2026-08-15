@@ -19,6 +19,14 @@ public record SignupResponse(
                 example = "true", requiredMode = Schema.RequiredMode.REQUIRED)
         boolean isNewUser,
 
+        @Schema(description = """
+                탈퇴했던 계정이 이 요청으로 되살아난 경우 true (isNewUser=false 와 짝).
+                새 계정을 만든 게 아니라 이전 계정 그대로이므로 점수·매너온도·챌린지 기록이 모두 남아 있다.
+                닉네임을 그사이 다른 사람이 가져갔다면 user.nicknameStatus=CONFLICT 로 내려가고
+                임시 닉네임으로 시작한다(변경 안내 알림이 함께 발송된다).""",
+                example = "false")
+        boolean restored,
+
         @Schema(description = "앱 액세스 토큰. 보호 API 에 `Authorization: Bearer {값}` 으로 싣는다.",
                 example = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI...",
                 requiredMode = Schema.RequiredMode.REQUIRED)
@@ -45,7 +53,14 @@ public record SignupResponse(
 
     public static SignupResponse from(TokenService.TokenPair pair, User user, UserScoreSummary summary,
                                       int flushIntervalSec) {
-        return new SignupResponse(true, pair.accessToken(), pair.refreshToken(), "Bearer",
+        return new SignupResponse(true, false, pair.accessToken(), pair.refreshToken(), "Bearer",
+                pair.expiresIn(), flushIntervalSec, UserResponse.from(user, summary));
+    }
+
+    /** 탈퇴 계정의 복귀 — 새 계정을 만든 게 아니라 이전 계정을 되살려 로그인시킨 경우. */
+    public static SignupResponse restored(TokenService.TokenPair pair, User user, UserScoreSummary summary,
+                                          int flushIntervalSec) {
+        return new SignupResponse(false, true, pair.accessToken(), pair.refreshToken(), "Bearer",
                 pair.expiresIn(), flushIntervalSec, UserResponse.from(user, summary));
     }
 }
