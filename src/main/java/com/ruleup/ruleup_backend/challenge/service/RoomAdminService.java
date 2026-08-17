@@ -3,6 +3,7 @@ package com.ruleup.ruleup_backend.challenge.service;
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeInvitation;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
+import com.ruleup.ruleup_backend.challenge.domain.InvitationTokens;
 import com.ruleup.ruleup_backend.challenge.domain.MemberRole;
 import com.ruleup.ruleup_backend.challenge.domain.RejoinBackoff;
 import com.ruleup.ruleup_backend.challenge.dto.RoomAdminDtos;
@@ -20,12 +21,8 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Base64;
 import java.util.UUID;
 
 @Service
@@ -44,10 +41,10 @@ public class RoomAdminService {
         requireOwner(challenge, ownerId);
         if (!challenge.isGroup() || !"PRIVATE".equals(challenge.getVisibility()))
             throw new BusinessException(ErrorCode.NOT_PRIVATE_CHALLENGE);
-        String token = Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes());
+        String token = InvitationTokens.generate();
         Instant expiresAt = Instant.now().plus(Duration.ofDays(7));
         ChallengeInvitation invitation = invitationRepository.saveAndFlush(
-                ChallengeInvitation.create(challengeId, ownerId, sha256(token), expiresAt));
+                ChallengeInvitation.create(challengeId, ownerId, InvitationTokens.hash(token), expiresAt));
         return new RoomAdminDtos.InvitationResponse(invitation.getId().toString(), token,
                 "/invite/" + token, expiresAt.toString());
     }
@@ -124,16 +121,5 @@ public class RoomAdminService {
 
     private void requireOwner(Challenge challenge, UUID userId) {
         if (!challenge.isOwner(userId)) throw new BusinessException(ErrorCode.NOT_CHALLENGE_OWNER);
-    }
-
-    private byte[] randomBytes() {
-        byte[] bytes = new byte[32];
-        new java.security.SecureRandom().nextBytes(bytes);
-        return bytes;
-    }
-
-    private byte[] sha256(String token) {
-        try { return MessageDigest.getInstance("SHA-256").digest(token.getBytes(StandardCharsets.UTF_8)); }
-        catch (NoSuchAlgorithmException e) { throw new IllegalStateException(e); }
     }
 }

@@ -88,6 +88,16 @@ public class ChallengeMemberService {
      */
     @Transactional
     public JoinResponse join(UUID userId, UUID challengeId) {
+        return join(userId, challengeId, false);
+    }
+
+    /**
+     * 가입 본체. {@code invited=true} 면 ②(비공개 초대 전용)만 건너뛴다 —
+     * 초대장은 "이 방을 볼 자격"을 대신할 뿐, 재입장 대기·동시 3개·정원·티어까지 면제하지는 않는다.
+     * 그래서 초대 수락도 정원이 차 있으면 일반 가입과 똑같이 409 {@code JOIN_BLOCKED + FULL} 이다.
+     */
+    @Transactional
+    public JoinResponse join(UUID userId, UUID challengeId, boolean invited) {
         Instant now = Instant.now();
 
         // 락 순서 고정: 사용자 행을 먼저 잡는다. 챌린지 행만 잠그면 서로 다른 두 방에 동시 가입할 때
@@ -109,7 +119,7 @@ public class ChallengeMemberService {
         if (existing != null && existing.isActive()) throw blocked(JoinBlockReason.ALREADY_JOINED);
 
         // ② 비공개 방은 초대 링크로만 입장 — 직접 가입 불가
-        if (c.isGroup() && "PRIVATE".equals(c.getVisibility()))
+        if (!invited && c.isGroup() && "PRIVATE".equals(c.getVisibility()))
             throw blocked(JoinBlockReason.PRIVATE_INVITE_ONLY);
 
         // ③ 재입장 대기 — 자진 탈퇴 1주 / 강퇴 배수. 사유별 예외(영구 차단)는 없다.
@@ -159,6 +169,35 @@ public class ChallengeMemberService {
         LocalDate countFrom = ChallengeCycle.countFrom(c.getStartDate(), LocalDate.now(KST));
         log.info("challenge_join_result success=true challengeId={} userId={}", challengeId, userId);
         return JoinResponse.of(countFrom.toString(), c.getVerificationConfig());
+    }
+
+    /**
+     * 가입 게이트 사전 판정 — 초대 링크 조회 화면이 "수락 버튼을 눌러도 되는지"를 미리 보여주기 위한 것.
+     * 통과면 null, 막히면 사유를 돌려준다.
+     *
+     * <p>{@link #join} 과 달리 <b>락을 잡지 않는다.</b> 미리보기 하나 때문에 챌린지 행을 잠글 이유가 없고,
+     * 어차피 조회와 수락 사이에 정원이 찰 수 있어 이 결과는 보장이 아니다 — 최종 판정은 수락 시점의 409다.
+     * 판정 순서는 join 과 같게 유지한다(같은 상황에서 다른 사유가 나오면 클라 안내가 어긋난다).
+     */
+    @Transactional(readOnly = true)
+    public JoinBlockReason previewBlockReason(UUID userId, Challenge c, boolean invited) {
+        if (c.getStatus() == ChallengeStatus.COMPLETED) return JoinBlockReason.CHALLENGE_COMPLETED;
+
+        ChallengeMember existing = memberRepository.findByChallengeIdAndUserId(c.getId(), userId).orElse(null);
+        if (existing != null && existing.isActive()) return JoinBlockReason.ALREADY_JOINED;
+        if (!invited && c.isGroup() && "PRIVATE".equals(c.getVisibility()))
+            return JoinBlockReason.PRIVATE_INVITE_ONLY;
+        if (existing != null && existing.getRejoinAvailableAt() != null
+                && Instant.now().isBefore(existing.getRejoinAvailableAt()))
+            return JoinBlockReason.REJOIN_COOLDOWN;
+        if (limitPolicy.exceeded(joinCounterService.countActiveSlots(userId))) return JoinBlockReason.FREE_LIMIT;
+
+        Integer cap = c.getMaxParticipants();
+        if (cap != null && memberRepository.countByChallengeIdAndStatus(c.getId(), MemberStatus.ACTIVE) >= cap)
+            return JoinBlockReason.FULL;
+        if (c.getMinTier() != null && displayTier(userId).ordinal() < c.getMinTier().ordinal())
+            return JoinBlockReason.TIER_GATE;
+        return null;
     }
 
     // ===== 탈퇴 =====

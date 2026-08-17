@@ -64,13 +64,32 @@ public class OpenApiConfig {
             3. `GET /api/v1/categories` · `POST /api/v1/nicknames/check` — 온보딩 화면 입력 보조
             4. `POST /api/v1/auth/signup` — signupToken 과 함께 온보딩 입력을 한 번에 제출 → 앱 토큰 발급
             5. `POST /api/v1/users/me/profile-image` — 프로필 사진(선택, 가입 후 accessToken 으로 별도 호출)
+
+            ### 그룹 챌린지 방 내부 (Phase 1)
+            방 안 API 는 전부 **그 방의 ACTIVE 멤버 전용**이다. 비멤버는 403 `NOT_CHALLENGE_MEMBER` 이며,
+            비멤버 화면은 탐색 모듈의 공개 상세(`GET /api/v1/challenges/{challengeId}`)가 담당한다.
+
+            1. `GET /api/v1/challenges/{challengeId}/room` — 방 진입 시 화면 전체를 한 번에 채우는 일괄 조회
+            2. `GET /api/v1/challenges/{challengeId}/threads` — 인증 이벤트 피드(커서 페이징)
+            3. `GET /api/v1/challenges/{challengeId}/ranking` · `/members` — 랭킹·멤버 목록
+
+            읽음/미읽음 표시는 **정책상 영구 미제공**이다. 공지·댓글은 Phase 2 로 이관돼 이 문서에 없다 —
+            그래서 Phase 1 의 스레드는 인증 성공/실패 이벤트만 흐르는 피드다.
+
+            두 가지는 서버가 절대 어기지 않는 약속이라 클라이언트도 그 전제로 그리면 된다.
+            - **실패 이벤트는 이의 가능 기간(1일)이 지난 뒤에만** 내려간다. 그래서 발생일보다 늦게 도착하며,
+              `failDate`(원래 날짜)로 "○월 ○일 루틴을 실패했습니다"처럼 **과거형**으로 표시해야 한다.
+              이의가 인용된 실패는 영원히 내려가지 않는다.
+            - **내가 차단한 사람**은 임시 닉네임 + 기본 이미지로 가려서 내려간다(`user.blocked=true`).
+              목록에서 빠지지는 않는다 — 빠지면 피드에 구멍이 생겨 맥락이 무너지기 때문이다.
             """;
 
     /**
-     * 화면 맨 위에 오는 태그 — 앱이 실제로 호출하는 순서(인트로 → 로그인/가입 → 온보딩 → 계정 → 프로필)다.
+     * 화면 맨 위에 오는 태그 — 앱이 실제로 호출하는 순서다.
+     * 인트로 → 로그인/가입 → 온보딩 → 계정/프로필 → 방에 들어가서 하는 일(가입 → 초대 → 방 안 → 랭킹 → 운영 → 신고).
      * 여기 없는 태그는 뒤에 이름순으로 붙는다({@link #tagOrderCustomizer()}).
      */
-    private static final List<Tag> ONBOARDING_FLOW_TAGS = List.of(
+    private static final List<Tag> APP_FLOW_TAGS = List.of(
             new Tag().name("Intro")
                     .description("앱 인트로 · 버전 게이트 — 로그인 전 스플래시에서 호출(토큰 불필요)"),
             new Tag().name("Auth")
@@ -82,7 +101,19 @@ public class OpenApiConfig {
             new Tag().name("Account")
                     .description("내 프로필 조회 · 프로필 사진 등록 · 회원 탈퇴"),
             new Tag().name("Profile")
-                    .description("프로필 조회 · 수정 · 사진 — 검수(PENDING/APPROVED/REJECTED)에 따라 타인에게 보이는 값이 달라진다"));
+                    .description("프로필 조회 · 수정 · 사진 — 검수(PENDING/APPROVED/REJECTED)에 따라 타인에게 보이는 값이 달라진다"),
+            new Tag().name("Challenge Member")
+                    .description("챌린지 가입 · 멤버 목록 · 탈퇴 — 방 안 API 를 쓰려면 먼저 여기를 통과해야 한다"),
+            new Tag().name("Challenge Invitation")
+                    .description("초대 링크 발급(방장) · 조회 · 수락 — 비공개 방에 들어오는 유일한 경로"),
+            new Tag().name("Challenge Room")
+                    .description("방 홈 일괄 조회 · 인증 이벤트 스레드 · 방 안 랭킹 — 전부 ACTIVE 멤버 전용"),
+            new Tag().name("Challenge Ranking")
+                    .description("방 밖 랭킹 — 같은 모드(GROUP/SOLO)끼리 챌린지를 비교한다. 하루 1회 03시 갱신"),
+            new Tag().name("Challenge Admin")
+                    .description("방장 전용 운영 — 멤버 강퇴 · 방장 권한 넘기기 · 봇방장 클레임"),
+            new Tag().name("Report")
+                    .description("신고 접수 · 블랙리스트 — 차단 효과는 내 화면에만 적용된다"));
 
     @Bean
     public OpenAPI ruleupOpenAPI() {
@@ -91,7 +122,7 @@ public class OpenApiConfig {
                         .title("RuleUp API")
                         .description(DESCRIPTION)
                         .version("v1"))
-                .tags(new ArrayList<>(ONBOARDING_FLOW_TAGS))
+                .tags(new ArrayList<>(APP_FLOW_TAGS))
                 .components(new Components().addSecuritySchemes("bearerAuth",
                         new SecurityScheme()
                                 .type(SecurityScheme.Type.HTTP)
@@ -113,7 +144,7 @@ public class OpenApiConfig {
      * 그대로 유지되지 않는다(같은 이름이 두 번 실리기도 한다). 문서를 여는 사람이 매번 다른 순서를 보게 되므로
      * 생성이 끝난 뒤 한 번 정리한다.
      *
-     * <p>규칙: 로그인·온보딩 흐름 태그를 호출 순서대로 맨 앞에, 나머지는 이름순으로 뒤에. 같은 이름은 하나로 합치고
+     * <p>규칙: 앱 호출 순서 태그를 순서대로 맨 앞에, 나머지는 이름순으로 뒤에. 같은 이름은 하나로 합치고
      * 설명이 있는 쪽을 남긴다.
      */
     @Bean
@@ -127,7 +158,7 @@ public class OpenApiConfig {
             }
 
             List<Tag> ordered = new ArrayList<>();
-            for (Tag flowTag : ONBOARDING_FLOW_TAGS) {
+            for (Tag flowTag : APP_FLOW_TAGS) {
                 Tag found = byName.remove(flowTag.getName());
                 if (found != null) {
                     // 스캔된 태그에 설명이 없으면 여기 선언한 설명을 입힌다.

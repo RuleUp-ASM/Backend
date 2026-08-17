@@ -79,17 +79,54 @@ class OpenApiDocsIT {
     }
 
     @Test
-    @DisplayName("로그인·온보딩 태그가 앱 호출 순서대로 문서 맨 앞에 온다")
+    @DisplayName("방 내부 Phase 1 경로가 모두 실려 있다")
+    void documentContainsRoomPaths() throws Exception {
+        Map<String, Object> paths = doc().read("$.paths");
+
+        assertThat(paths).containsKeys(
+                "/api/v1/challenges/{challengeId}/members",
+                "/api/v1/challenges/{challengeId}/members/me",
+                "/api/v1/challenges/{challengeId}/room",
+                "/api/v1/challenges/{challengeId}/threads",
+                "/api/v1/challenges/{challengeId}/ranking",
+                "/api/v1/rankings/challenges",
+                "/api/v1/challenges/{challengeId}/invitations",
+                "/api/v1/challenges/invitations/{token}",
+                "/api/v1/challenges/invitations/{token}/accept",
+                "/api/v1/challenges/{challengeId}/members/{targetUserId}",
+                "/api/v1/challenges/{challengeId}/owner",
+                "/api/v1/challenges/{challengeId}/owner/claim",
+                "/api/v1/reports",
+                "/api/v1/users/me/blacklist");
+    }
+
+    @Test
+    @DisplayName("Phase 2로 빠진 공지·댓글 경로는 문서에 없다")
+    void documentHasNoPhase2Paths() throws Exception {
+        Map<String, Object> paths = doc().read("$.paths");
+
+        assertThat(paths).doesNotContainKeys(
+                "/api/v1/challenges/{challengeId}/notices",
+                "/api/v1/challenges/{challengeId}/notices/{noticeId}",
+                "/api/v1/challenges/{challengeId}/notices/{noticeId}/pin",
+                "/api/v1/comments",
+                "/api/v1/comments/{commentId}");
+    }
+
+    @Test
+    @DisplayName("태그가 앱 호출 순서대로 문서 맨 앞에 온다 — 로그인·온보딩 다음이 방 내부다")
     void tagsAreOrderedByCallOrder() throws Exception {
         List<String> names = doc().read("$.tags[*].name");
 
-        assertThat(names.subList(0, 6))
-                .containsExactly("Intro", "Auth", "Category", "Onboarding", "Account", "Profile");
+        assertThat(names.subList(0, 12)).containsExactly(
+                "Intro", "Auth", "Category", "Onboarding", "Account", "Profile",
+                "Challenge Member", "Challenge Invitation", "Challenge Room",
+                "Challenge Ranking", "Challenge Admin", "Report");
         // 같은 태그가 두 번 실리면 Swagger UI 에 그룹이 중복으로 그려진다.
         assertThat(names).doesNotHaveDuplicates();
 
         List<String> descriptions = doc().read("$.tags[*].description");
-        assertThat(descriptions.subList(0, 6)).noneMatch(d -> d == null || d.isBlank());
+        assertThat(descriptions.subList(0, 12)).noneMatch(d -> d == null || d.isBlank());
     }
 
     @Test
@@ -182,6 +219,60 @@ class OpenApiDocsIT {
                             + ".content['application/json'].examples"))
                     .containsKey("USER_NOT_FOUND");
         }
+
+        @Test
+        @DisplayName("방 내부 조회 — 비멤버 403 과 커서 오류 400 이 갈라져 있다")
+        void roomAccessErrors() throws Exception {
+            assertThat(doc().<Map<String, Object>>read(
+                    "$.paths['/api/v1/challenges/{challengeId}/room'].get.responses['403']"
+                            + ".content['application/json'].examples"))
+                    .containsKey("NOT_CHALLENGE_MEMBER");
+
+            assertThat(doc().<Map<String, Object>>read(
+                    "$.paths['/api/v1/challenges/{challengeId}/threads'].get.responses['400']"
+                            + ".content['application/json'].examples"))
+                    .containsKey("CURSOR_INVALID");
+        }
+
+        @Test
+        @DisplayName("초대 — 조회·수락 모두 만료 410, 수락은 가입 게이트 409 도 함께 문서화된다")
+        void invitationErrors() throws Exception {
+            assertThat(doc().<Map<String, Object>>read(
+                    "$.paths['/api/v1/challenges/invitations/{token}'].get.responses['410']"
+                            + ".content['application/json'].examples"))
+                    .containsKey("INVITATION_EXPIRED");
+
+            Map<String, Object> acceptResponses = doc().read(
+                    "$.paths['/api/v1/challenges/invitations/{token}/accept'].post.responses");
+            assertThat(acceptResponses).containsKeys("404", "409", "410");
+            assertThat(doc().<Map<String, Object>>read(
+                    "$.paths['/api/v1/challenges/invitations/{token}/accept'].post.responses['409']"
+                            + ".content['application/json'].examples"))
+                    .containsKey("JOIN_BLOCKED");
+        }
+
+        @Test
+        @DisplayName("방 운영 — 강퇴 사유 400, 클레임 경합 409 가 문서화된다")
+        void adminErrors() throws Exception {
+            assertThat(doc().<Map<String, Object>>read(
+                    "$.paths['/api/v1/challenges/{challengeId}/members/{targetUserId}'].delete.responses['400']"
+                            + ".content['application/json'].examples"))
+                    .containsKey("KICK_REASON_REQUIRED");
+
+            assertThat(doc().<Map<String, Object>>read(
+                    "$.paths['/api/v1/challenges/{challengeId}/owner/claim'].post.responses['409']"
+                            + ".content['application/json'].examples"))
+                    .containsKey("OWNER_ALREADY_EXISTS");
+        }
+
+        @Test
+        @DisplayName("신고 — 남용 제재 403 이 문서화된다")
+        void reportErrors() throws Exception {
+            assertThat(doc().<Map<String, Object>>read(
+                    "$.paths['/api/v1/reports'].post.responses['403']"
+                            + ".content['application/json'].examples"))
+                    .containsKey("REPORT_SUSPENDED");
+        }
     }
 
     @Nested
@@ -199,6 +290,41 @@ class OpenApiDocsIT {
                     "CategoryListResponse", "DemographicsRequest",
                     "UserMeResponse", "WithdrawRequest", "WithdrawResponse",
                     "ProfileResponse", "UpdateProfileRequest", "PublicProfileResponse");
+        }
+
+        @Test
+        @DisplayName("방 내부 스키마는 겹치지 않는 이름으로 등록된다")
+        void roomSchemasAreRegistered() throws Exception {
+            // 중첩 record 의 단순 이름(Item·User·Response)을 그대로 두면 springdoc 이 이름 하나로 합쳐
+            // 스레드 아이템 자리에 랭킹 아이템 스키마가 그려진다. 그래서 전부 고유 이름을 붙인다.
+            Map<String, Object> schemas = doc().read("$.components.schemas");
+            assertThat(schemas).containsKeys(
+                    "RoomResponse", "RoomSummary", "RoomTopRank",
+                    "RoomRankingResponse", "RoomRankingMe", "RoomRankingItem", "RankingUser",
+                    "ThreadFeedResponse", "ThreadItem", "ThreadItemUser",
+                    "CrossRankingResponse", "CrossRankingItem",
+                    "InvitationPreviewResponse", "InvitationChallengeSummary", "InvitationIssueResponse",
+                    "JoinResponse", "LeaveResponse", "MemberListResponse", "ChallengeMemberItem",
+                    "KickRequest", "KickResponse", "OwnerTransferRequest", "OwnerTransferResponse",
+                    "OwnerClaimResponse",
+                    "ReportCreateRequest", "ReportCreateResponse", "BlacklistResponse",
+                    "BlacklistUserItem", "BlacklistChallengeItem", "BlacklistDeleteResponse");
+        }
+
+        @Test
+        @DisplayName("가드레일과 직결되는 필드에는 설명이 붙어 있다")
+        void roomKeyFieldsAreDocumented() throws Exception {
+            // 실패 이벤트가 "언제" 뜨는지를 모르면 클라가 발생일 기준으로 표시해 과거형 표기가 깨진다.
+            String failDate = doc().read("$.components.schemas.ThreadItem.properties.failDate.description");
+            assertThat(failDate).isNotBlank();
+
+            // 차단 마스킹은 화면 문구가 달라지는 분기라 설명이 없으면 클라가 실명으로 오해한다.
+            String blocked = doc().read("$.components.schemas.ThreadItemUser.properties.blocked.description");
+            assertThat(blocked).isNotBlank();
+
+            String blockReason = doc().read(
+                    "$.components.schemas.InvitationPreviewResponse.properties.blockReason.description");
+            assertThat(blockReason).contains("reason");
         }
 
         @Test
@@ -225,6 +351,25 @@ class OpenApiDocsIT {
             assertThat(doc().<List<Object>>read("$.paths['/api/v1/onboarding/me'].put.security")).isNotEmpty();
             // 로그아웃만 auth 그룹에서 예외적으로 인증이 필요하다(다른 auth API 는 공개 경로).
             assertThat(doc().<List<Object>>read("$.paths['/api/v1/auth/logout'].post.security")).isNotEmpty();
+        }
+
+        @Test
+        @DisplayName("방 내부는 전부 로그인 전용이라 bearerAuth 가 빠짐없이 걸려 있다")
+        void roomOperationsRequireBearer() throws Exception {
+            for (String path : List.of(
+                    "$.paths['/api/v1/challenges/{challengeId}/room'].get.security",
+                    "$.paths['/api/v1/challenges/{challengeId}/threads'].get.security",
+                    "$.paths['/api/v1/challenges/{challengeId}/ranking'].get.security",
+                    "$.paths['/api/v1/rankings/challenges'].get.security",
+                    "$.paths['/api/v1/challenges/invitations/{token}'].get.security",
+                    "$.paths['/api/v1/challenges/invitations/{token}/accept'].post.security",
+                    "$.paths['/api/v1/challenges/{challengeId}/invitations'].post.security",
+                    "$.paths['/api/v1/challenges/{challengeId}/owner'].patch.security",
+                    "$.paths['/api/v1/challenges/{challengeId}/owner/claim'].post.security",
+                    "$.paths['/api/v1/reports'].post.security",
+                    "$.paths['/api/v1/users/me/blacklist'].get.security")) {
+                assertThat(doc().<List<Object>>read(path)).as(path).isNotEmpty();
+            }
         }
     }
 }
