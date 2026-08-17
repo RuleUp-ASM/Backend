@@ -6,7 +6,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 public final class InvitationDtos {
     private InvitationDtos() {}
 
-    @Schema(description = "초대 링크로 들어온 사람에게 보여줄 방 정보 + 수락 가능 여부")
+    @Schema(name = "InvitationPreviewResponse", description = "초대 링크로 들어온 사람에게 보여줄 방 정보 + 수락 가능 여부")
     public record PreviewResponse(
 
             @Schema(description = "초대장 식별자", example = "0192aaaa-1111-7000-bbbb-222233334444")
@@ -30,7 +30,7 @@ public final class InvitationDtos {
             @Schema(description = "링크 만료 시각(발급 후 7일)", example = "2026-08-21T10:00:00Z")
             String expiresAt) {
 
-        @Schema(description = "초대받은 방의 요약 — 수락 전 화면에 필요한 만큼만")
+        @Schema(name = "InvitationChallengeSummary", description = "초대받은 방의 요약 — 수락 전 화면에 필요한 만큼만")
         public record Challenge(
                 @Schema(example = "0192f3c1-7a2b-7c9d-8e1f-2a3b4c5d6e7f") String challengeId,
                 @Schema(example = "새벽 러닝 크루") String title,
