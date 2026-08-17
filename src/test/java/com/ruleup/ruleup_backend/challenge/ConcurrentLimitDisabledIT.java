@@ -20,7 +20,7 @@ import static org.springframework.security.test.web.servlet.setup.SecurityMockMv
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 /**
- * <b>테스트 기간 설정</b>(운영 기본값 {@code app.challenge.concurrent-limit.enabled=false})에서
+ * 한도를 명시적으로 비활성화한 특수 환경({@code app.challenge.concurrent-limit.enabled=false})에서
  * 동시 참여 한도가 실제로 걸리지 않는지 고정한다.
  *
  * <p>스위치를 내려둔 채 배포할 것이므로, "꺼진 상태"도 계약이다 — 켜진 상태만 테스트하면

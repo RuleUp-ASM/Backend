@@ -26,12 +26,11 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 
 /**
- * Phase 1 범위 계약 — 공지·댓글이 서버에 남아 있지 않다는 것을 고정한다.
+ * Phase 1 범위 계약 — 공지·댓글 API는 비활성화하되 호환 필드와 저장소는 보존한다.
  *
  * <p>기능 스펙 6-2 #9·#10(2026-08-12 범위 조정)에 따라 공지 일체와 댓글·답글은 이번 범위에서 빠졌다.
- * "빠졌다"를 코드 삭제로만 두면 다음 사람이 참고할 근거가 없고, 스레드·방 홈 응답에 유령 필드
- * (`pinnedNotice`, `commentCount`)가 남았는지도 아무도 눈치채지 못한다. 그래서 엔드포인트 부재와
- * 응답 스키마를 여기서 못 박는다.
+ * API 비활성화와 저장소 삭제는 다른 결정이다. Phase 1에서는 엔드포인트를 열지 않되 재개 가능한 저장소와
+ * `pinnedNotice:null` 응답 호환을 함께 고정한다.
  *
  * <p>재개(Phase 2) 시점에는 이 테스트가 통째로 실패하는 것이 정상이며, 그때 삭제하면 된다.
  */
@@ -96,8 +95,8 @@ class RoomPhase1ScopeIT extends ChallengeApiSupport {
     }
 
     @Test
-    @DisplayName("스레드 응답에 pinnedNotice·title·commentCount 가 남아 있지 않다")
-    void threadResponseCarriesNoNoticeFields() throws Exception {
+    @DisplayName("스레드 응답의 pinnedNotice 는 Phase 1 동안 null 이다")
+    void threadResponseCarriesNullPinnedNotice() throws Exception {
         Member owner = member(uniq("phase1-thread"));
         UUID challengeId = insertChallenge(owner.id(), "EXERCISE", "ACTIVE", "GROUP");
         insertActiveMembership(challengeId, owner.id(), "OWNER");
@@ -107,7 +106,8 @@ class RoomPhase1ScopeIT extends ChallengeApiSupport {
         assertThat(result.getResponse().getStatus()).isEqualTo(200);
         JsonNode data = OM.readTree(result.getResponse().getContentAsString()).path("data");
 
-        assertThat(data.has("pinnedNotice")).isFalse();
+        assertThat(data.has("pinnedNotice")).isTrue();
+        assertThat(data.get("pinnedNotice").isNull()).isTrue();
         assertThat(data.path("items")).hasSize(1);
         JsonNode item = data.path("items").get(0);
         assertThat(item.path("type").asText()).isEqualTo("VERIFY_SUCCESS");
@@ -116,8 +116,8 @@ class RoomPhase1ScopeIT extends ChallengeApiSupport {
     }
 
     @Test
-    @DisplayName("방 홈 응답에 pinnedNotice 가 남아 있지 않다")
-    void roomResponseCarriesNoPinnedNotice() throws Exception {
+    @DisplayName("방 홈 응답의 pinnedNotice 는 Phase 1 동안 null 이다")
+    void roomResponseCarriesNullPinnedNotice() throws Exception {
         Member owner = member(uniq("phase1-room"));
         UUID challengeId = insertChallenge(owner.id(), "EXERCISE", "ACTIVE", "GROUP");
         insertActiveMembership(challengeId, owner.id(), "OWNER");
@@ -126,18 +126,25 @@ class RoomPhase1ScopeIT extends ChallengeApiSupport {
         assertThat(result.getResponse().getStatus()).isEqualTo(200);
         JsonNode data = OM.readTree(result.getResponse().getContentAsString()).path("data");
 
-        assertThat(data.has("pinnedNotice")).isFalse();
+        assertThat(data.has("pinnedNotice")).isTrue();
+        assertThat(data.get("pinnedNotice").isNull()).isTrue();
         assertThat(data.has("unreadNoticeCount")).isFalse();
         assertThat(data.has("myRole")).isTrue();   // 나머지 계약은 그대로여야 한다
     }
 
     @Test
-    @DisplayName("공지·댓글 테이블은 드롭됐고 남은 알림 행도 정리됐다")
-    void phase2TablesAreDropped() {
-        assertThat(tableExists("Notice")).isFalse();
-        assertThat(tableExists("NoticeRead")).isFalse();
-        assertThat(tableExists("room_comments")).isFalse();
-        assertThat(tableExists("RoomActivityLog")).isFalse();
+    @DisplayName("Phase 2 재개를 위한 공지·댓글 테이블과 단일 고정 공지 제약은 보존된다")
+    void phase2TablesArePreserved() {
+        assertThat(tableExists("Notice")).isTrue();
+        assertThat(tableExists("NoticeRead")).isTrue();
+        assertThat(tableExists("room_comments")).isTrue();
+        assertThat(tableExists("RoomActivityLog")).isTrue();
+
+        Integer pinConstraint = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() " +
+                        "AND table_name='Notice' AND index_name='uqNoticeOneActivePin' AND non_unique=0",
+                Integer.class);
+        assertThat(pinConstraint).isEqualTo(1);
 
         Integer leftovers = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM Notification WHERE type IN ('NOTICE_CREATED','COMMENT_CREATED')",

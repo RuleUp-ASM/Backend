@@ -38,7 +38,7 @@ public class RoomService {
                 mine.rank(), mine.ranked(), mine.successRate(), mine.participations(), gap);
         List<RoomDtos.RankingResponse.Item> items = rows.stream()
                 .map(r -> new RoomDtos.RankingResponse.Item(r.rank(),
-                        new RoomDtos.User(r.userId().toString(), r.nickname(), r.profileImageUrl()),
+                        new RoomDtos.User(r.userId().toString(), r.nickname(), r.profileImageUrl(), r.blocked()),
                         r.successRate(), r.successCount(), r.participations())).toList();
         return new RoomDtos.RankingResponse(me, items);
     }
@@ -54,9 +54,9 @@ public class RoomService {
         List<RoomDtos.RoomResponse.TopRank> top = rankingService.rank(challenge, userId).stream()
                 .filter(RankingService.Ranked::ranked).limit(3)
                 .map(r -> new RoomDtos.RoomResponse.TopRank(r.rank(), r.userId().toString(), r.nickname(),
-                        r.profileImageUrl(), r.successRate())).toList();
-        return new RoomDtos.RoomResponse(me.getRole().name(), challenge.getOwnerType().name(), summary,
-                top, me.getTodayStatus() == null ? null : me.getTodayStatus().name());
+                        r.profileImageUrl(), r.successRate(), r.blocked())).toList();
+        return new RoomDtos.RoomResponse(me.isOwner() ? "OWNER" : "MEMBER", challenge.getOwnerType().name(), summary,
+                top, me.getTodayStatus() == null ? null : me.getTodayStatus().name(), null);
     }
 
     /**

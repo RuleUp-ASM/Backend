@@ -12,7 +12,8 @@ public final class RoomDtos {
     public record User(
             @Schema(description = "사용자 id") String userId,
             @Schema(description = "표시 닉네임. 차단한 사람이면 임시 닉네임, 익명 챌린지면 마스킹된 값.") String nickname,
-            @Schema(description = "프로필 이미지. 차단·익명이거나 승인 사진이 없으면 null.") String profileImageUrl) {}
+            @Schema(description = "프로필 이미지. 차단·익명이거나 승인 사진이 없으면 null.") String profileImageUrl,
+            @Schema(description = "조회자가 이 사용자를 차단했는지") boolean blocked) {}
 
     @Schema(name = "RoomRankingResponse", description = "방 안 랭킹 — 참여일 이후 전체 성공률 기준")
     public record RankingResponse(
@@ -55,7 +56,10 @@ public final class RoomDtos {
 
             @Schema(description = "내 오늘 인증 상태. 오늘이 인증 대상일이 아니면 NOT_TARGET.",
                     example = "DONE")
-            String myTodayStatus) {
+            String myTodayStatus,
+
+            @Schema(description = "Phase 1에서는 항상 null. Phase 2 고정 공지 호환 필드.")
+            Object pinnedNotice) {
 
         @Schema(name = "RoomSummary", description = "방 요약")
         public record Summary(
@@ -75,6 +79,7 @@ public final class RoomDtos {
                 String userId,
                 @Schema(description = "표시 닉네임. 차단·익명이면 가려진 값.") String nickname,
                 @Schema(description = "프로필 이미지. 없거나 가려지면 null.") String profileImageUrl,
-                @Schema(example = "0.98") BigDecimal successRate) {}
+                @Schema(example = "0.98") BigDecimal successRate,
+                @Schema(description = "조회자가 이 사용자를 차단했는지") boolean blocked) {}
     }
 }

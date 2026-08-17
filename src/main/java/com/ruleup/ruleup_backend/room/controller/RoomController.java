@@ -50,8 +50,8 @@ public class RoomController {
                     내가 차단한 사람은 목록에서 빠지지 않고 임시 닉네임 + 기본 이미지로 가려진 채 들어온다.
 
                     **읽음/미읽음 필드는 없다.** 정책상 영구 미제공이라 구 명세의 `unreadNoticeCount` ·
-                    `pinnedNotice.isRead` 는 삭제됐다. 고정 공지(`pinnedNotice`) 자체도 공지 기능이 Phase 2 로
-                    이관되면서 응답에서 빠졌다.
+                    `pinnedNotice.isRead` 는 삭제됐다. 고정 공지(`pinnedNotice`)는 클라이언트 호환을 위해
+                    필드만 유지하며 Phase 1 동안 항상 null 이다.
                     """
     )
     @ApiErrorCodes({ErrorCode.NOT_CHALLENGE_MEMBER, ErrorCode.CHALLENGE_NOT_FOUND, ErrorCode.LOGIN_REQUIRED})

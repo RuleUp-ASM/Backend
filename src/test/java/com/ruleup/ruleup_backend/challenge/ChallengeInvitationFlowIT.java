@@ -163,7 +163,10 @@ class ChallengeInvitationFlowIT extends ChallengeApiSupport {
         MvcResult res = mvc.perform(post("/api/v1/challenges/" + challengeId + "/invitations")
                 .header("Authorization", "Bearer " + owner.token())).andReturn();
         assertThat(res.getResponse().getStatus()).isEqualTo(201);
-        return read(res, "$.data.token");
+        String token = read(res, "$.data.token");
+        assertThat((String) read(res, "$.data.inviteUrl"))
+                .isEqualTo("https://android.ruleup.co.kr/c/" + token);
+        return token;
     }
 
     private MvcResult accept(String token, String accessToken) throws Exception {

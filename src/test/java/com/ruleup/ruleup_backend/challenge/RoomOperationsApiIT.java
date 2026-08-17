@@ -91,9 +91,17 @@ class RoomOperationsApiIT extends ChallengeApiSupport {
                 "contextType", "PROFILE", "reason", "ABUSE", "detail", "반복적인 모욕적인 표현입니다."));
         assertThat(report.getResponse().getStatus()).isEqualTo(201);
         assertThat((Boolean) read(report, "$.data.blacklisted")).isTrue();
+        assertThat((String) read(report, "$.data.hiddenEffect")).isEqualTo("USER_CONTENT_MASKED");
 
         MvcResult blacklist = getAuth("/api/v1/users/me/blacklist", reporter.token());
         assertThat((String) read(blacklist, "$.data.users[0].userId")).isEqualTo(target.id().toString());
+
+        MvcResult profile = getAuth("/api/v1/users/" + target.id() + "/profile", reporter.token());
+        String targetHex = target.id().toString().replace("-", "");
+        assertThat((Boolean) read(profile, "$.data.blocked")).isTrue();
+        assertThat((String) read(profile, "$.data.nickname"))
+                .isEqualTo(targetHex.substring(targetHex.length() - 8));
+        assertThat((Object) read(profile, "$.data.profileImageUrl")).isNull();
 
         MvcResult removed = mvc.perform(delete("/api/v1/users/me/blacklist/users/" + target.id())
                 .header("Authorization", "Bearer " + reporter.token())).andReturn();

@@ -6,15 +6,13 @@ import org.springframework.stereotype.Component;
 /**
  * 동시 참여 한도 정책 — "한 사람이 동시에 몇 개의 챌린지를 진행할 수 있는가".
  *
- * <p><b>지금은 꺼져 있다(기본 {@code enabled=false}).</b> 테스트 기간에는 인원이 적어 한도가
- * 검증을 방해하기만 하므로 판정을 통과시킨다. 판정 로직·에러 계약·테스트는 전부 살아 있고
- * 스위치만 내려둔 상태다 — <b>정식 배포 전에 아래 설정을 켜면 그대로 동작한다.</b>
+ * <p>운영 안전 규칙이므로 기본값은 {@code enabled=true}다. 특수한 개발 환경에서만 설정으로 끌 수 있다.
  *
  * <pre>
  * app:
  *   challenge:
  *     concurrent-limit:
- *       enabled: true    # ← 배포 전 이 줄만 바꾼다 (또는 env CHALLENGE_LIMIT_ENABLED=true)
+ *       enabled: true    # 운영 기본값. 특수 환경에서만 명시적으로 false
  *       max: 3
  * </pre>
  *
@@ -33,7 +31,7 @@ public class ConcurrentChallengeLimitPolicy {
     private final int max;
 
     public ConcurrentChallengeLimitPolicy(
-            @Value("${app.challenge.concurrent-limit.enabled:false}") boolean enabled,
+            @Value("${app.challenge.concurrent-limit.enabled:true}") boolean enabled,
             @Value("${app.challenge.concurrent-limit.max:3}") int max) {
         this.enabled = enabled;
         this.max = max;

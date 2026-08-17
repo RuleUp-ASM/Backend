@@ -4,7 +4,6 @@ import com.ruleup.ruleup_backend.challenge.domain.*;
 import com.ruleup.ruleup_backend.challenge.dto.JoinResponse;
 import com.ruleup.ruleup_backend.challenge.dto.LeaveResponse;
 import com.ruleup.ruleup_backend.challenge.dto.MemberListResponse;
-import com.ruleup.ruleup_backend.challenge.dto.RoleChangeResponse;
 import com.ruleup.ruleup_backend.challenge.counter.ConcurrentChallengeLimitPolicy;
 import com.ruleup.ruleup_backend.challenge.counter.UserJoinCounterService;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
@@ -355,53 +354,23 @@ public class ChallengeMemberService {
 
         List<MemberListResponse.Member> dto = members.stream().map(m -> {
             User u = userMap.get(m.getUserId());
+            boolean blocked = blockedUsers.contains(m.getUserId());
             // 익명 챌린지(§11.2)면 닉네임 마스킹 + 프로필 사진 숨김. 그 외엔 본인 가시성 규칙 적용.
             String visibleNick = (u != null) ? u.visibleNicknameTo(viewerId) : null;
-            String nickname = c.getAnonymity().maskNickname(visibleNick);
-            String profile = (u != null && !c.getAnonymity().isAnonymous())
+            String nickname = u == null ? null : blocked
+                    ? u.deriveTempNickname() : c.getAnonymity().maskNickname(visibleNick);
+            String profile = (u != null && !blocked && !c.getAnonymity().isAnonymous())
                     ? u.visibleProfileImageTo(viewerId) : null;
             return new MemberListResponse.Member(
                     m.getUserId().toString(), nickname, profile,
                     m.isOwner() ? "OWNER" : "MEMBER",
                     tierMap.getOrDefault(m.getUserId(), com.ruleup.ruleup_backend.score.domain.Tier.UNRANKED).name(),
                     m.getJoinedAt() != null ? m.getJoinedAt().toString() : null,
-                    blockedUsers.contains(m.getUserId()));
+                    blocked);
         }).toList();
 
-        return new MemberListResponse(c.getOwnerType().name(), dto);
-    }
-
-    // ===== §7-1 공동 관리자 임명/해제 =====
-    /**
-     * 역할 변경(PROMOTE: MEMBER→MANAGER / DEMOTE: MANAGER→MEMBER).
-     *  - 임명·해제는 OWNER만. 단 MANAGER 본인의 DEMOTE(내려놓기)는 허용.
-     *  - OWNER 역할은 이 API로 변경 불가(위임 API 사용).
-     */
-    @Transactional
-    public RoleChangeResponse changeRole(UUID actorId, UUID challengeId, UUID targetUserId, String action) {
-        Challenge c = loadActive(challengeId);
-        ChallengeMember target = memberRepository.findByChallengeIdAndUserId(challengeId, targetUserId)
-                .filter(ChallengeMember::isActive)
-                .orElseThrow(() -> new BusinessException(ErrorCode.MEMBER_NOT_FOUND));
-
-        // OWNER 는 이 API로 못 바꾼다(위임 API 전용).
-        if (target.isOwner()) throw new BusinessException(ErrorCode.CANNOT_CHANGE_OWNER_ROLE);
-
-        MemberRole desired = switch (action == null ? "" : action) {
-            case "PROMOTE" -> MemberRole.MANAGER;
-            case "DEMOTE"  -> MemberRole.MEMBER;
-            default -> throw new BusinessException(ErrorCode.INVALID_MEMBER_ACTION);
-        };
-
-        // 권한: OWNER는 임명·해제 모두 / 그 외엔 "본인 DEMOTE(내려놓기)"만.
-        boolean selfDemote = "DEMOTE".equals(action) && actorId.equals(targetUserId);
-        if (!c.isOwner(actorId) && !selfDemote)
-            throw new BusinessException(ErrorCode.NOT_CHALLENGE_OWNER);
-
-        if (target.getRole() == desired) throw new BusinessException(ErrorCode.ALREADY_IN_ROLE);
-
-        target.changeRole(desired);   // 영속 상태 → dirty checking 으로 flush
-        return new RoleChangeResponse(targetUserId.toString(), desired.name());
+        return new MemberListResponse(c.getId().toString(), members.size(), c.getMaxParticipants(),
+                c.getOwnerType().name(), dto);
     }
 
     // ===== 헬퍼 =====

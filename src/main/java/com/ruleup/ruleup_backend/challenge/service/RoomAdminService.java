@@ -3,6 +3,7 @@ package com.ruleup.ruleup_backend.challenge.service;
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeInvitation;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
+import com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus;
 import com.ruleup.ruleup_backend.challenge.domain.InvitationTokens;
 import com.ruleup.ruleup_backend.challenge.domain.MemberRole;
 import com.ruleup.ruleup_backend.challenge.domain.RejoinBackoff;
@@ -28,6 +29,7 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class RoomAdminService {
+    private static final String CHALLENGE_INVITE_BASE_URL = "https://android.ruleup.co.kr/c/";
     private final ChallengeRepository challengeRepository;
     private final ChallengeMemberRepository memberRepository;
     private final ChallengeInvitationRepository invitationRepository;
@@ -46,7 +48,7 @@ public class RoomAdminService {
         ChallengeInvitation invitation = invitationRepository.saveAndFlush(
                 ChallengeInvitation.create(challengeId, ownerId, InvitationTokens.hash(token), expiresAt));
         return new RoomAdminDtos.InvitationResponse(invitation.getId().toString(), token,
-                "/invite/" + token, expiresAt.toString());
+                CHALLENGE_INVITE_BASE_URL + token, expiresAt.toString());
     }
 
     @Transactional
@@ -115,8 +117,12 @@ public class RoomAdminService {
     }
 
     private Challenge locked(UUID challengeId) {
-        return challengeRepository.findByIdForUpdate(challengeId)
+        Challenge challenge = challengeRepository.findByIdForUpdate(challengeId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
+        if (challenge.getDeletedAt() != null) throw new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND);
+        if (challenge.getStatus() == ChallengeStatus.COMPLETED)
+            throw new BusinessException(ErrorCode.CHALLENGE_COMPLETED);
+        return challenge;
     }
 
     private void requireOwner(Challenge challenge, UUID userId) {

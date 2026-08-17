@@ -10,7 +10,7 @@ public final class RoomAdminDtos {
     public record InvitationResponse(
             @Schema(description = "초대장 id") String invitationId,
             @Schema(description = "초대 토큰 — 다시 조회할 수 없다. 잃어버리면 재발급.") String token,
-            @Schema(description = "토큰이 붙은 초대 경로", example = "/invite/AbC123...") String inviteUrl,
+            @Schema(description = "토큰이 붙은 앱 초대 링크", example = "https://android.ruleup.co.kr/c/AbC123...") String inviteUrl,
             @Schema(description = "만료 시각(발급 후 7일)", example = "2026-08-24T10:00:00Z") String expiresAt) {}
 
     @Schema(name = "KickRequest", description = "강퇴 요청")

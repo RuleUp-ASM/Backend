@@ -8,6 +8,12 @@ import java.util.List;
 @Schema(description = "현재 멤버 목록 — 탈퇴·강퇴된 사람은 들어 있지 않다")
 public record MemberListResponse(
 
+        @Schema(description = "챌린지 id") String challengeId,
+
+        @Schema(description = "현재 참여 인원", example = "14") int participantCount,
+
+        @Schema(description = "정원. 제한이 없으면 null.", example = "50") Integer capacity,
+
         @Schema(description = "방장 유형. BOT 이면 목록에 OWNER 가 없다.",
                 example = "USER", allowableValues = {"USER", "BOT"})
         String ownerType,

@@ -30,13 +30,15 @@ public enum NotificationType {
     OWNER_TRANSFERRED,
     /** 방장이 권한을 넘기지 않고 나가 봇방장 체제로 전환됨 → 잔류 멤버 전체에게 "방장 자리가 비었어요"(선착순 클레임 유도) */
     BOT_OWNER_ACTIVATED,
+    /** 같은 방 사용자에 대한 유효한 행동 신고가 접수됨 → 방장 운영 확인. */
+    REPORT_BEHAVIOR_RECEIVED,
     /** 기타 시스템 알림 */
     SYSTEM;
 
     public NotificationClass notificationClass() {
         return switch (this) {
             case CHALLENGE_MEMBER_KICKED,
-                    OWNER_TRANSFERRED, BOT_OWNER_ACTIVATED -> NotificationClass.ROOM;
+                    OWNER_TRANSFERRED, BOT_OWNER_ACTIVATED, REPORT_BEHAVIOR_RECEIVED -> NotificationClass.ROOM;
             case CHALLENGE_NAME_REJECTED, CHALLENGE_IMAGE_REJECTED, CHALLENGE_CLOSED,
                     CHALLENGE_APPROVED, CHALLENGE_JOIN_REQUESTED, CHALLENGE_MEMBER_APPROVED,
                     CHALLENGE_MEMBER_REJECTED, FALLBACK_APPROVED, FALLBACK_REJECTED,

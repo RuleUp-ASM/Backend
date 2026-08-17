@@ -41,7 +41,7 @@ public class CrossRankingController {
                     (방 **안** 랭킹은 실시간이라 두 화면의 값이 다를 수 있다).
 
                     `challengeId` 를 넘기면 그 방의 순위를 `myChallenge` 로 함께 돌려준다 — 목록을 끝까지 넘기지
-                    않아도 "내 방은 몇 등"을 보여줄 수 있다. 미등재면 null 이다.
+                    않아도 "내 방은 몇 등"을 보여줄 수 있다. 미등재면 `ranked:false`, `rank:null` 이다.
 
                     페이징은 커서 방식이며 `nextCursor` 가 null 이면 마지막 페이지다.
                     """

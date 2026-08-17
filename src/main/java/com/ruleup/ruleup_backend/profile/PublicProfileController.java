@@ -40,7 +40,7 @@ public class PublicProfileController {
                       임시 닉네임과 기본 프로필(`profileImageUrl=null`)이 보인다
                     - 상대가 **탈퇴**했으면 `withdrawn=true` 이고 닉네임·사진은 null 이다.
                       계정이 사라지는 게 아니라 "탈퇴한 사용자"로 표시된다(기록은 남는다)
-                    - 내가 **차단**한 상대면 `blocked=true` 다. 프로필 자체는 내려가므로 어떻게 그릴지는 클라이언트가 정한다
+                    - 내가 **차단**한 상대면 `blocked=true` 이며 임시 닉네임과 기본 프로필로 마스킹된다
 
                     `completedChallengeCount` 는 완료한 챌린지 수다. 정상 완료한 방과,
                     참여 중이던 방이 삭제된 경우를 함께 센다.

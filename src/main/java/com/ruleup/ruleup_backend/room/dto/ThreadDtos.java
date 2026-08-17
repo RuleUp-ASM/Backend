@@ -7,15 +7,17 @@ import java.util.List;
 /**
  * 방 스레드 피드 응답(Phase 1).
  *
- * <p>공지·댓글이 Phase 2로 빠지면서 피드의 원천은 인증 판정 하나뿐이다. 그래서 고정 공지 배너
- * (`pinnedNotice`)와 아이템의 `title`·`commentCount` 는 필드째 없앴다 — 항상 null·0 인 필드는
- * 클라이언트가 "언젠가 값이 온다"고 오해할 여지만 남긴다.
+ * <p>공지·댓글이 Phase 2로 빠지면서 피드의 원천은 인증 판정 하나뿐이다.
+ * 고정 공지는 Phase 1 동안 항상 null 이지만 클라이언트 응답 호환을 위해 필드는 유지한다.
  */
 public final class ThreadDtos {
     private ThreadDtos() {}
 
     @Schema(name = "ThreadFeedResponse", description = "인증 이벤트 피드 한 페이지(최신 먼저)")
     public record Response(
+            @Schema(description = "Phase 1에서는 항상 null. Phase 2 공지 배너 호환 필드.")
+            Object pinnedNotice,
+
             @Schema(description = "피드 아이템. 첫 판정 전에는 빈 배열이다.")
             List<Item> items,
 

@@ -14,7 +14,7 @@ app:
     # 짧은 테스트 동안 추천 재계산 배치가 끼어들지 않도록 첫 실행을 멀리 민다.
     rebuild-initial-delay-ms: 3600000
   challenge:
-    # 운영은 테스트 기간 동안 꺼두지만(application.yaml), 판정 로직이 죽지 않도록 CI 에서는 켜고 검증한다.
+    # 운영 기본값과 동일하게 켜 두고 CI 에서 계속 검증한다.
     # 꺼진 상태의 동작은 ConcurrentLimitDisabledIT 가 프로퍼티를 덮어써서 따로 검증한다.
     concurrent-limit:
       enabled: true

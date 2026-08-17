@@ -192,8 +192,6 @@ public class ChallengeMember extends AssignedIdEntity {
     public boolean isPending() { return status == MemberStatus.PENDING; }
     public boolean isActive()  { return status == MemberStatus.ACTIVE; }
     public boolean isOwner()   { return role == MemberRole.OWNER; }
-    public boolean isManager() { return role == MemberRole.MANAGER; }
-
     /** 역할 변경(임명/해제 §7-1, 위임 role swap §7-2). OWNER 정확히 1명 불변식은 호출부가 보장. */
     public void changeRole(MemberRole role) { this.role = role; }
 

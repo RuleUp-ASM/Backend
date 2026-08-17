@@ -71,13 +71,9 @@ public class ChallengeQueryService {
     }
 
     /**
-     * 방장(OWNER) 또는 공동 관리자(MANAGER)인지 — 이의 제기/폴백 승인 처리 권한(라이프사이클 §7-1).
-     * OWNER는 challenge.creatorId, MANAGER는 ACTIVE 멤버 role 로 판정.
+     * 방장(OWNER)인지 — 공동 관리자 역할은 폐기됐으므로 승인 권한은 방장에게만 있다.
      */
     public boolean isChallengeAdmin(Challenge challenge, UUID userId) {
-        if (challenge.isOwner(userId)) return true;
-        return memberRepository.findByChallengeIdAndUserId(challenge.getId(), userId)
-                .map(m -> m.isActive() && m.isManager())
-                .orElse(false);
+        return challenge.isOwner(userId);
     }
 }

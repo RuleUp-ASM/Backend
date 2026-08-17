@@ -43,6 +43,34 @@ public interface VerificationDailyRepository extends JpaRepository<VerificationD
     List<VerificationDaily> findByChallengeIdAndStatusIn(
             UUID challengeId, Collection<VerificationStatus> statuses);
 
+    /** 방 스레드 첫 페이지. 공유 가능한 종결 이벤트만 DB에서 정렬하고 size+1 건만 읽는다. */
+    @Query(value = "SELECT * FROM VerificationDaily WHERE challengeId=:challengeId AND " +
+            "((status='SUCCESS' AND verifiedAt IS NOT NULL AND verifiedAt<=:now) OR " +
+            " (status='FAILED' AND shareableAt IS NOT NULL AND shareableAt<=:now)) " +
+            "ORDER BY (CASE WHEN status='SUCCESS' THEN verifiedAt ELSE shareableAt END) DESC, id DESC",
+            nativeQuery = true)
+    List<VerificationDaily> findThreadFirstPage(@Param("challengeId") UUID challengeId,
+                                                 @Param("now") Instant now,
+                                                 Pageable pageable);
+
+    /** 방 스레드 다음 페이지. (노출 시각,id) seek 커서로 누락·중복 없는 페이지를 읽는다. */
+    @Query(value = "SELECT * FROM VerificationDaily WHERE challengeId=:challengeId AND " +
+            "((status='SUCCESS' AND verifiedAt IS NOT NULL AND verifiedAt<=:now) OR " +
+            " (status='FAILED' AND shareableAt IS NOT NULL AND shareableAt<=:now)) AND " +
+            "((CASE WHEN status='SUCCESS' THEN verifiedAt ELSE shareableAt END)<:cursorAt OR " +
+            " ((CASE WHEN status='SUCCESS' THEN verifiedAt ELSE shareableAt END)=:cursorAt AND id<:cursorId)) " +
+            "ORDER BY (CASE WHEN status='SUCCESS' THEN verifiedAt ELSE shareableAt END) DESC, id DESC",
+            nativeQuery = true)
+    List<VerificationDaily> findThreadNextPage(@Param("challengeId") UUID challengeId,
+                                                @Param("now") Instant now,
+                                                @Param("cursorAt") Instant cursorAt,
+                                                @Param("cursorId") UUID cursorId,
+                                                Pageable pageable);
+
+    /** 한 페이지 작성자들의 종결 이력. 각 이벤트 시점의 스트릭을 계산할 때 사용한다. */
+    List<VerificationDaily> findByChallengeIdAndUserIdInAndStatusInOrderByUserIdAscTargetDateAsc(
+            UUID challengeId, Collection<UUID> userIds, Collection<VerificationStatus> statuses);
+
     /** 처리 대기함(pending-reviews): 챌린지의 승인 대기 폴백 제출. */
     List<VerificationDaily> findByChallengeIdAndFallbackApprovalStatus(
             UUID challengeId, com.ruleup.ruleup_backend.verification.domain.FallbackApprovalStatus status);

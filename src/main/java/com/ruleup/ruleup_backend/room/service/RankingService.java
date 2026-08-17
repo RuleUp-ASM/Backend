@@ -31,7 +31,7 @@ public class RankingService {
     private final BlacklistService blacklistService;
 
     public record Ranked(Integer rank, boolean ranked, UUID userId, String nickname,
-                         String profileImageUrl, BigDecimal successRate,
+                         String profileImageUrl, boolean blocked, BigDecimal successRate,
                          int successCount, int participations) {}
 
     public List<Ranked> rank(Challenge challenge, UUID viewerId) {
@@ -68,7 +68,7 @@ public class RankingService {
                     : challenge.getAnonymity().maskNickname(user.visibleNicknameTo(viewerId));
             String profileImage = (user == null || masked || challenge.getAnonymity().isAnonymous())
                     ? null : user.visibleProfileImageTo(viewerId);
-            result.add(new Ranked(rank, ranked, member.getUserId(), nickname, profileImage,
+            result.add(new Ranked(rank, ranked, member.getUserId(), nickname, profileImage, masked,
                     rate, member.getSuccessDays(), participations));
             if (ranked) {
                 previousRate = rate;

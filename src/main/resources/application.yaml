@@ -47,11 +47,10 @@ app:
     refresh-token-ttl: 604800    # 7일 (60*60*24*7)
     signup-token-ttl: 300         # 5분
   challenge:
-    # 동시 참여 한도(가입·생성 공통). 판정 로직은 전부 구현돼 있고 스위치만 내려둔 상태다 —
-    # 테스트 기간에는 한도가 검증을 방해하기만 하므로 끄고, 정식 배포 전에 enabled 를 true 로 켠다.
-    # (env 로도 켤 수 있다: CHALLENGE_LIMIT_ENABLED=true)
+    # 동시 참여 한도(가입·생성 공통). 운영 안전 규칙이므로 기본값은 항상 활성화한다.
+    # 특수 환경에서만 명시적으로 CHALLENGE_LIMIT_ENABLED=false 로 끈다.
     concurrent-limit:
-      enabled: ${CHALLENGE_LIMIT_ENABLED:false}   # ⚠️ 배포 전 true
+      enabled: ${CHALLENGE_LIMIT_ENABLED:true}
       max: ${CHALLENGE_LIMIT_MAX:3}
 
   # 추천 세그먼트 점수 윈도우 배치 튜닝(SegmentScoreService, 매일 04:00 KST).

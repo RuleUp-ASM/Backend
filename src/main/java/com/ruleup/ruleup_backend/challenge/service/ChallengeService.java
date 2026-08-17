@@ -66,7 +66,7 @@ public class ChallengeService {
     /**
      * 내가 참여 중인 챌린지 목록. 멤버십 기준이라 페이지네이션 없이 전량 반환한다.
      * 승인제 폐기로 멤버십은 항상 확정(ACTIVE) — scope/memberStatus 개념 없음. 탈퇴(LEFT)는 제외.
-     * 항목마다 내 역할(myRole: OWNER/MANAGER/MEMBER)을 함께 내려준다.
+     * 항목마다 내 역할(myRole: OWNER/MEMBER)을 함께 내려준다.
      */
     @Transactional(readOnly = true)
     public ChallengeListResponse myChallenges(UUID userId) {
@@ -76,7 +76,7 @@ public class ChallengeService {
         for (ChallengeMember m : memberships) {
             Challenge ch = challengeRepository.findByIdAndDeletedAtIsNull(m.getChallengeId()).orElse(null);
             if (ch == null) continue;   // 삭제/정합성 깨진 멤버십은 건너뜀
-            items.add(ChallengeListResponse.Item.of(ch, m.getRole().name()));
+            items.add(ChallengeListResponse.Item.of(ch, m.isOwner() ? "OWNER" : "MEMBER"));
         }
         return new ChallengeListResponse(items);
     }
