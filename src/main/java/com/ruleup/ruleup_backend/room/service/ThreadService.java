@@ -13,6 +13,8 @@ import com.ruleup.ruleup_backend.user.domain.User;
 import com.ruleup.ruleup_backend.verification.domain.VerificationDaily;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,6 +43,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class ThreadService {
+    private static final Logger log = LoggerFactory.getLogger(ThreadService.class);
+
     private final RoomAuthority authority;
     private final VerificationDailyRepository verificationRepository;
     private final ChallengeMemberRepository memberRepository;
@@ -81,14 +85,30 @@ public class ThreadService {
         List<ThreadDtos.Item> items = page.stream().map(row -> {
             User user = users.get(row.userId());
             boolean masked = blocked.contains(row.userId());
-            ThreadDtos.User author = new ThreadDtos.User(row.userId().toString(),
-                    user == null || masked ? null : user.visibleNicknameTo(viewerId),
+            // 마스킹은 "가린 모습으로 남기는 것"이지 지우는 것이 아니다. 닉네임을 비우면 클라가 빈 줄을
+            // 그리므로 임시 닉네임(계정 id 끝 8자)을 준다 — 프로필 이미지만 기본값(null)으로 떨어뜨린다.
+            String nickname = user == null ? null
+                    : masked ? user.deriveTempNickname() : user.visibleNicknameTo(viewerId);
+            ThreadDtos.User author = new ThreadDtos.User(row.userId().toString(), nickname,
                     user == null || masked ? null : user.visibleProfileImageTo(viewerId), masked);
+            if ("VERIFY_FAIL".equals(row.type())) auditFailExposure(challengeId, row);
             return new ThreadDtos.Item(row.type(), row.id().toString(), author, row.at().toString(),
                     row.streak(), row.failDate());
         }).toList();
 
         return new ThreadDtos.Response(items, next);
+    }
+
+    /**
+     * 실패 아이템을 실제로 내보낸 사실을 남긴다(백엔드 테크 스펙 4-3 · 7).
+     *
+     * <p>필터가 맞다는 것과 "한 번도 조기 노출이 없었다"는 것은 다른 주장이다. 후자를 사후에 증명하려면
+     * 노출 시각과 공유 가능 시각을 대조할 기록이 있어야 한다 — 일 1회 감사 리포트가 이 줄을 센다.
+     * 노출 시각이 shareableAt 보다 앞서는 줄이 하나라도 나오면 가드레일 위반이다.
+     */
+    private void auditFailExposure(UUID challengeId, Row row) {
+        log.info("thread_fail_exposed challengeId={} verificationId={} shareableAt={} exposedAt={}",
+                challengeId, row.id(), row.at(), Instant.now());
     }
 
     private int cursorStart(List<Row> rows, String cursor) {

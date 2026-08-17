@@ -59,10 +59,14 @@ public class RoomService {
                 top, me.getTodayStatus() == null ? null : me.getTodayStatus().name());
     }
 
+    /**
+     * 방 전체 성공률. 판정이 한 건도 없으면 <b>0 이 아니라 null</b>이다 — 갓 만들어진 방과
+     * "전원이 실패한 방"은 화면에서 전혀 다르게 읽혀야 하는데 0.0000 으로 내려보내면 구분이 사라진다.
+     */
     private BigDecimal roomRate(List<ChallengeMember> members) {
         int success = members.stream().mapToInt(ChallengeMember::getSuccessDays).sum();
         int total = members.stream().mapToInt(m -> m.getSuccessDays() + m.getFailDays()).sum();
-        return total == 0 ? BigDecimal.ZERO.setScale(4)
+        return total == 0 ? null
                 : BigDecimal.valueOf(success).divide(BigDecimal.valueOf(total), 4, RoundingMode.HALF_UP);
     }
 
