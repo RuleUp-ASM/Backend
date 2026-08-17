@@ -5,9 +5,7 @@ import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.challenge.domain.MemberStatus;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.room.RoomAuthority;
-import com.ruleup.ruleup_backend.room.domain.Notice;
 import com.ruleup.ruleup_backend.room.dto.RoomDtos;
-import com.ruleup.ruleup_backend.room.repository.NoticeRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,7 +26,6 @@ public class RoomService {
     private final RoomAuthority authority;
     private final RankingService rankingService;
     private final ChallengeMemberRepository memberRepository;
-    private final NoticeRepository noticeRepository;
 
     public RoomDtos.RankingResponse ranking(UUID userId, UUID challengeId) {
         Challenge challenge = authority.requireMember(challengeId, userId);
@@ -54,16 +51,12 @@ public class RoomService {
         RoomDtos.RoomResponse.Summary summary = new RoomDtos.RoomResponse.Summary(
                 challenge.getTitle(), roomRate(active), remainingDays(challenge), active.size(),
                 challenge.getMaxParticipants());
-        Notice pinned = noticeRepository.findByChallengeIdAndPinnedTrueAndDeletedAtIsNull(challengeId).orElse(null);
-        RoomDtos.RoomResponse.PinnedNotice pinnedDto = pinned == null ? null
-                : new RoomDtos.RoomResponse.PinnedNotice(pinned.getId().toString(), pinned.getTitle(),
-                pinned.getCreatedAt().toString());
         List<RoomDtos.RoomResponse.TopRank> top = rankingService.rank(challenge, userId).stream()
                 .filter(RankingService.Ranked::ranked).limit(3)
                 .map(r -> new RoomDtos.RoomResponse.TopRank(r.rank(), r.userId().toString(), r.nickname(),
                         r.profileImageUrl(), r.successRate())).toList();
         return new RoomDtos.RoomResponse(me.getRole().name(), challenge.getOwnerType().name(), summary,
-                pinnedDto, top, me.getTodayStatus() == null ? null : me.getTodayStatus().name());
+                top, me.getTodayStatus() == null ? null : me.getTodayStatus().name());
     }
 
     private BigDecimal roomRate(List<ChallengeMember> members) {

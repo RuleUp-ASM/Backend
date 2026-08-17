@@ -26,9 +26,6 @@ public enum NotificationType {
     FALLBACK_REJECTED,
     /** 감시 대상이 루틴을 실패함 → 감시자(유저)에게 인앱 통지 */
     WATCHER_ROUTINE_FAILED,
-    /** 방장이 공지를 등록(또는 재확인 필요 수정)함 → ACTIVE 멤버(작성자 제외)에게 인앱 통지 */
-    NOTICE_CREATED,
-    COMMENT_CREATED,
     CHALLENGE_MEMBER_KICKED,
     OWNER_TRANSFERRED,
     /** 방장이 권한을 넘기지 않고 나가 봇방장 체제로 전환됨 → 잔류 멤버 전체에게 "방장 자리가 비었어요"(선착순 클레임 유도) */
@@ -38,7 +35,7 @@ public enum NotificationType {
 
     public NotificationClass notificationClass() {
         return switch (this) {
-            case NOTICE_CREATED, COMMENT_CREATED, CHALLENGE_MEMBER_KICKED,
+            case CHALLENGE_MEMBER_KICKED,
                     OWNER_TRANSFERRED, BOT_OWNER_ACTIVATED -> NotificationClass.ROOM;
             case CHALLENGE_NAME_REJECTED, CHALLENGE_IMAGE_REJECTED, CHALLENGE_CLOSED,
                     CHALLENGE_APPROVED, CHALLENGE_JOIN_REQUESTED, CHALLENGE_MEMBER_APPROVED,
