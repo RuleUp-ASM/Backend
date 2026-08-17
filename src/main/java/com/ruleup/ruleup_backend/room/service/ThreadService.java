@@ -38,12 +38,31 @@ import java.util.stream.Collectors;
  *
  * <p>차단 유저의 인증 이벤트는 목록에서 빼지 않고 <b>마스킹해서</b> 노출한다 — 빼버리면 스레드에
  * 구멍이 생겨 맥락이 무너진다(테크 스펙 6). 마스킹은 조회자 컨텍스트라 응답을 캐시하지 않는다.
+ *
+ * <h2>⚠️ 페이징은 레거시 구현이다</h2>
+ * <p>백엔드 테크 스펙 4-3 은 {@code (created_at, id)} 복합 커서를 <b>SQL 에서</b> 태워
+ * {@code size+1} 건만 읽으라고 한다. 여기 있는 것은 그게 아니다 — 방의 확정 판정을 <b>전부</b> 읽어
+ * 메모리에서 정렬하고 잘라낸다. 커서도 아이템 id 를 그 목록에서 되찾는 방식이라, 페이지를 넘길 때마다
+ * 같은 전량 스캔이 처음부터 다시 돈다. 즉 비용이 커서 깊이가 아니라 <b>방의 누적 판정 건수</b>에 붙는다.
+ *
+ * <p>지금 갈아엎지 않는 이유는 계약이 아니라 비용이다. 응답 계약은 SQL 커서로 바꿔도 그대로이고
+ * ({@code RoomThreadPagingIT} 가 그 계약을 잠가 뒀다), 초기 방은 판정 건수가 작아 목표 p95 1초에
+ * 한참 못 미친다. 대신 조용히 느려지는 것만은 막는다 — 한 방의 스캔량이 {@link #SCAN_WARN_THRESHOLD}
+ * 를 넘으면 경고를 남기므로, <b>그 로그가 뜨기 시작하면 그때가 SQL 커서로 교체할 시점</b>이다.
+ * 교체 후에도 {@code RoomThreadPagingIT} 는 손대지 않고 그대로 통과해야 한다.
  */
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class ThreadService {
     private static final Logger log = LoggerFactory.getLogger(ThreadService.class);
+
+    /**
+     * 한 번의 피드 조회가 훑는 판정 건수의 경고선. 넘으면 레거시 전량 스캔이 감당 범위를 벗어나기
+     * 시작했다는 신호다 — 이 로그가 뜨면 SQL 커서로 교체한다(클래스 주석 참고).
+     * p95 1초 목표(기능 스펙 3-3) 대비 여유를 두고 잡았다.
+     */
+    static final int SCAN_WARN_THRESHOLD = 2_000;
 
     private final RoomAuthority authority;
     private final VerificationDailyRepository verificationRepository;
@@ -74,6 +93,7 @@ public class ThreadService {
                     success && member != null ? member.getSuccessDays() : null,
                     success ? null : v.getTargetDate().toString()));
         }
+        warnIfScanTooWide(challengeId, rows.size());
         rows.sort(Comparator.comparing(Row::at).reversed().thenComparing(Row::id, Comparator.reverseOrder()));
         int start = cursorStart(rows, cursor);
         List<Row> page = rows.stream().skip(start).limit(size).toList();
@@ -97,6 +117,19 @@ public class ThreadService {
         }).toList();
 
         return new ThreadDtos.Response(items, next);
+    }
+
+    /**
+     * 레거시 전량 스캔이 감당 범위를 넘어섰는지 알린다.
+     *
+     * <p>성능 문제는 장애로 터지지 않고 조용히 느려지기만 해서, 사용자가 떠난 뒤에야 알게 된다.
+     * 페이지를 넘길 때마다 같은 스캔이 반복되므로 한 방의 판정 건수가 곧 비용이다 — 그 수치를 직접 남긴다.
+     */
+    private void warnIfScanTooWide(UUID challengeId, int scanned) {
+        if (scanned < SCAN_WARN_THRESHOLD) return;
+        log.warn("thread_feed_scan_wide challengeId={} scanned={} threshold={} " +
+                        "— 전량 스캔 페이징이 한계에 접근했다. SQL 커서(테크 스펙 4-3)로 교체할 시점이다.",
+                challengeId, scanned, SCAN_WARN_THRESHOLD);
     }
 
     /**
