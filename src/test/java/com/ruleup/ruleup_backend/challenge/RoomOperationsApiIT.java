@@ -57,60 +57,6 @@ class RoomOperationsApiIT extends ChallengeApiSupport {
     }
 
     @Test
-    @DisplayName("공지는 하루 3건까지만 작성하고 상세 조회가 읽음 상태를 만들지 않는다")
-    void noticeQuotaAndPureRead() throws Exception {
-        Member owner = member(uniq("notice-owner"));
-        UUID challengeId = insertChallenge(owner.id(), "EXERCISE", "ACTIVE", "GROUP");
-        insertActiveMembership(challengeId, owner.id(), "OWNER");
-
-        String firstId = null;
-        for (int i = 1; i <= 3; i++) {
-            MvcResult result = postJson("/api/v1/challenges/" + challengeId + "/notices", owner.token(),
-                    Map.of("title", "공지 " + i, "content", "본문", "sendPush", false));
-            assertThat(result.getResponse().getStatus()).isEqualTo(201);
-            if (i == 1) firstId = read(result, "$.data.noticeId");
-        }
-        expectError(postJson("/api/v1/challenges/" + challengeId + "/notices", owner.token(),
-                Map.of("title", "공지 4", "content", "본문", "sendPush", false)),
-                429, "NOTICE_DAILY_QUOTA_EXCEEDED");
-
-        assertThat(getAuth("/api/v1/challenges/" + challengeId + "/notices/" + firstId, owner.token())
-                .getResponse().getStatus()).isEqualTo(200);
-        Integer reads = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM NoticeRead WHERE noticeId = UNHEX(REPLACE(?, '-', ''))",
-                Integer.class, firstId);
-        assertThat(reads).isZero();
-    }
-
-    @Test
-    @DisplayName("댓글은 답글 한 단계까지만 허용하고 작성자는 삭제할 수 있다")
-    void commentDepthAndDelete() throws Exception {
-        Member owner = member(uniq("comment-owner"));
-        UUID challengeId = insertChallenge(owner.id(), "EXERCISE", "ACTIVE", "GROUP");
-        insertActiveMembership(challengeId, owner.id(), "OWNER");
-        MvcResult notice = postJson("/api/v1/challenges/" + challengeId + "/notices", owner.token(),
-                Map.of("title", "공지", "content", "본문", "sendPush", false));
-        String noticeId = read(notice, "$.data.noticeId");
-
-        MvcResult root = postJson("/api/v1/comments", owner.token(),
-                Map.of("targetType", "NOTICE", "targetId", noticeId, "body", "댓글"));
-        assertThat(root.getResponse().getStatus()).isEqualTo(201);
-        String rootId = read(root, "$.data.commentId");
-        MvcResult reply = postJson("/api/v1/comments", owner.token(),
-                Map.of("targetType", "NOTICE", "targetId", noticeId, "body", "답글", "parentCommentId", rootId));
-        String replyId = read(reply, "$.data.commentId");
-
-        expectError(postJson("/api/v1/comments", owner.token(),
-                Map.of("targetType", "NOTICE", "targetId", noticeId, "body", "2단 답글", "parentCommentId", replyId)),
-                400, "REPLY_DEPTH_EXCEEDED");
-
-        MvcResult removed = mvc.perform(delete("/api/v1/comments/" + rootId)
-                .header("Authorization", "Bearer " + owner.token())).andReturn();
-        assertThat(removed.getResponse().getStatus()).isEqualTo(200);
-        assertThat((Boolean) read(removed, "$.data.removed")).isTrue();
-    }
-
-    @Test
     @DisplayName("방장 위임은 수락 절차 없이 OWNER 역할을 원자적으로 교체한다")
     void ownerTransferIsImmediate() throws Exception {
         Member owner = member(uniq("owner-old"));
@@ -167,7 +113,6 @@ class RoomOperationsApiIT extends ChallengeApiSupport {
         MvcResult room = getAuth("/api/v1/challenges/" + challengeId + "/room", owner.token());
         assertThat((String) read(room, "$.data.ownerType")).isEqualTo("USER");
         assertThat((Double) read(room, "$.data.summary.roomSuccessRate")).isEqualTo(0.8d);
-        assertThat(OM.readTree(room.getResponse().getContentAsString()).path("data").has("unreadNoticeCount")).isFalse();
 
         MvcResult ranking = getAuth("/api/v1/challenges/" + challengeId + "/ranking", owner.token());
         assertThat((Boolean) read(ranking, "$.data.me.ranked")).isTrue();

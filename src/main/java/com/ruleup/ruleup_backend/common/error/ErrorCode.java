@@ -147,16 +147,9 @@ public enum ErrorCode {
     INVALID_CALENDAR_DATE(HttpStatus.BAD_REQUEST, "날짜 형식이 올바르지 않습니다. (YYYY-MM-DD)"),
     INVALID_STATS_PERIOD(HttpStatus.BAD_REQUEST, "통계 기간이 올바르지 않습니다. (WEEKLY / MONTHLY / YEARLY)"),
 
-    // ===== 방 내부(공지·랭킹·방 홈) =====
+    // ===== 방 내부(스레드·랭킹·방 홈) =====
+    // 공지·댓글 코드(NOTICE_*/COMMENT_*/REPLY_DEPTH_EXCEEDED)는 Phase 2 이관과 함께 제거했다.
     NOT_A_MEMBER(HttpStatus.FORBIDDEN, "챌린지 멤버만 접근할 수 있습니다."),
-    INVALID_NOTICE_PAYLOAD(HttpStatus.BAD_REQUEST, "공지 제목/본문이 올바르지 않습니다."),
-    NOTICE_NOT_FOUND(HttpStatus.NOT_FOUND, "공지를 찾을 수 없습니다."),
-    NOTICE_DAILY_QUOTA_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "공지는 하루에 3건까지만 작성할 수 있습니다."),
-    INVALID_COMMENT_PAYLOAD(HttpStatus.BAD_REQUEST, "댓글 내용을 확인해주세요."),
-    COMMENT_TARGET_NOT_FOUND(HttpStatus.NOT_FOUND, "댓글 대상을 찾을 수 없습니다."),
-    COMMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "댓글을 찾을 수 없습니다."),
-    REPLY_DEPTH_EXCEEDED(HttpStatus.BAD_REQUEST, "답글에는 다시 답글을 작성할 수 없습니다."),
-    NOT_COMMENT_DELETABLE(HttpStatus.FORBIDDEN, "댓글을 삭제할 권한이 없습니다."),
     INVALID_RANKING_MODE(HttpStatus.BAD_REQUEST, "랭킹 모드가 올바르지 않습니다."),
 
     // ===== 챌린지 방 운영 =====

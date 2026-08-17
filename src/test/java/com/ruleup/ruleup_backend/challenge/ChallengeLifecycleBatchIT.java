@@ -234,20 +234,14 @@ class ChallengeLifecycleBatchIT extends ChallengeApiSupport {
     class RoomDataCascade {
 
         @Test
-        @DisplayName("공지·댓글·초대가 달린 만료 방도 하드 삭제되고 이력 스냅샷은 남는다")
+        @DisplayName("초대가 달린 만료 방도 하드 삭제되고 이력 스냅샷은 남는다")
         void deleteWithRoomData() throws Exception {
             Member owner = member(uniq("lc-roomdata"));
             UUID id = insertChallenge(owner.id(), "EXERCISE", "COMPLETED", "GROUP");
             insertActiveMembership(id, owner.id(), "OWNER");
 
-            // 방 운영 기능이 만든 자식 행 — 전부 challenges 를 FK 로 참조한다
-            UUID noticeId = UUID.randomUUID();
-            jdbcTemplate.update("INSERT INTO Notice (id, challengeId, authorId, title, content, pinned) " +
-                    "VALUES (?, ?, ?, '이번 주 안내', '본문', 1)", bytes(noticeId), bytes(id), bytes(owner.id()));
-            jdbcTemplate.update("INSERT INTO room_comments " +
-                            "(id, challenge_id, target_type, target_id, author_id, body) " +
-                            "VALUES (?, ?, 'NOTICE', ?, ?, '확인했어요')",
-                    bytes(UUID.randomUUID()), bytes(id), bytes(noticeId), bytes(owner.id()));
+            // 방 운영 기능이 만든 자식 행 — challenges 를 FK 로 참조한다.
+            // 공지·댓글은 Phase 2 이관과 함께 테이블째 사라져(V16) 여기 남는 자식은 초대뿐이다.
             jdbcTemplate.update("INSERT INTO challenge_invitations " +
                             "(id, challenge_id, inviter_id, token_hash, expires_at) " +
                             "VALUES (?, ?, ?, ?, DATE_ADD(NOW(6), INTERVAL 7 DAY))",
@@ -257,11 +251,7 @@ class ChallengeLifecycleBatchIT extends ChallengeApiSupport {
 
             assertThat(challengeCount(id)).isZero();
             assertThat(jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM room_comments WHERE challenge_id = ?", Integer.class, bytes(id))).isZero();
-            assertThat(jdbcTemplate.queryForObject(
                     "SELECT COUNT(*) FROM challenge_invitations WHERE challenge_id = ?", Integer.class, bytes(id))).isZero();
-            assertThat(jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM Notice WHERE challengeId = ?", Integer.class, bytes(id))).isZero();
             // 이력 스냅샷은 남아야 완료 목록·최종 랭킹을 계속 볼 수 있다
             assertThat(jdbcTemplate.queryForObject(
                     "SELECT COUNT(*) FROM challenge_history WHERE challenge_id = ?", Integer.class, bytes(id))).isEqualTo(1);

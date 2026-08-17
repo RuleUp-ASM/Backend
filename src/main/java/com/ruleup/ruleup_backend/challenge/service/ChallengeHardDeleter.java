@@ -31,12 +31,8 @@ public class ChallengeHardDeleter {
         exec("DELETE FROM Watcher WHERE challengeId = :cid", challengeId);
         exec("DELETE FROM WatcherInvitation WHERE challengeId = :cid", challengeId);
         exec("DELETE FROM challenge_delegations WHERE challenge_id = :cid", challengeId);
-        // 댓글은 자기 테이블을 부모로 참조(parent_comment_id)하므로 답글 → 원 댓글 순서로 지운다.
-        exec("DELETE FROM room_comments WHERE challenge_id = :cid AND parent_comment_id IS NOT NULL", challengeId);
-        exec("DELETE FROM room_comments WHERE challenge_id = :cid", challengeId);
+        // 공지·댓글은 Phase 2 이관과 함께 테이블째 사라졌다(V16) — 여기서 지울 것이 없다.
         exec("DELETE FROM challenge_invitations WHERE challenge_id = :cid", challengeId);
-        exec("DELETE FROM NoticeRead WHERE noticeId IN (SELECT id FROM Notice WHERE challengeId = :cid)", challengeId);
-        exec("DELETE FROM Notice WHERE challengeId = :cid", challengeId);
         exec("DELETE FROM challenge_members WHERE challenge_id = :cid", challengeId);
         exec("DELETE FROM challenges WHERE id = :cid", challengeId);
         // 네이티브 삭제는 1차 캐시를 갱신하지 않으므로, 삭제된 엔티티가 캐시에서 되살아나지 않도록 detach.

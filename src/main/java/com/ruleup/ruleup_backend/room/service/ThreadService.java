@@ -6,11 +6,7 @@ import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
 import com.ruleup.ruleup_backend.room.RoomAuthority;
-import com.ruleup.ruleup_backend.room.domain.CommentTargetType;
-import com.ruleup.ruleup_backend.room.domain.Notice;
 import com.ruleup.ruleup_backend.room.dto.ThreadDtos;
-import com.ruleup.ruleup_backend.room.repository.NoticeRepository;
-import com.ruleup.ruleup_backend.room.repository.RoomCommentRepository;
 import com.ruleup.ruleup_backend.report.BlacklistService;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import com.ruleup.ruleup_backend.user.domain.User;
@@ -30,47 +26,49 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+/**
+ * 방 스레드 피드(Phase 1 — 인증 이벤트 전용).
+ *
+ * <p>실패 이벤트는 <b>공유 가능 시각(shareableAt)</b>으로만 거른다. 이의 가능 기간(1일) 안이거나
+ * 이의가 인용된 건은 인증 모듈이 shareableAt 을 비워두므로 이 한 줄이 곧 "조기 노출 0건" 가드레일이다
+ * (기능 스펙 3-3 절대 조건). 정렬 시각도 판정 시각이 아니라 공유 가능 시각이라, 하루 늦게 과거형으로
+ * 흐르는 정책 표현과 피드 순서가 어긋나지 않는다.
+ *
+ * <p>차단 유저의 인증 이벤트는 목록에서 빼지 않고 <b>마스킹해서</b> 노출한다 — 빼버리면 스레드에
+ * 구멍이 생겨 맥락이 무너진다(테크 스펙 6). 마스킹은 조회자 컨텍스트라 응답을 캐시하지 않는다.
+ */
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class ThreadService {
     private final RoomAuthority authority;
-    private final NoticeRepository noticeRepository;
     private final VerificationDailyRepository verificationRepository;
     private final ChallengeMemberRepository memberRepository;
-    private final RoomCommentRepository commentRepository;
     private final UserRepository userRepository;
     private final BlacklistService blacklistService;
 
-    private record Row(UUID id, Instant at, String type, UUID userId, Integer streak,
-                       String failDate, String title, long comments) {}
+    private record Row(UUID id, Instant at, String type, UUID userId, Integer streak, String failDate) {}
 
     public ThreadDtos.Response get(UUID viewerId, UUID challengeId, String cursor, Integer requestedSize) {
         authority.requireMember(challengeId, viewerId);
         int size = requestedSize == null ? 20 : Math.max(1, Math.min(requestedSize, 50));
         Instant now = Instant.now();
         Set<UUID> blocked = blacklistService.blockedUsers(viewerId);
-        List<Row> rows = new ArrayList<>();
 
-        for (Notice n : noticeRepository.findByChallengeIdAndDeletedAtIsNullOrderByCreatedAtDesc(challengeId)) {
-            if (blocked.contains(n.getAuthorId())) continue;
-            rows.add(new Row(n.getId(), n.getCreatedAt(), "NOTICE", n.getAuthorId(), null, null, n.getTitle(),
-                    commentRepository.countByTargetTypeAndTargetIdAndDeletedAtIsNull(CommentTargetType.NOTICE, n.getId())));
-        }
         Map<UUID, ChallengeMember> memberships = memberRepository
                 .findByChallengeIdOrderByJoinedAtAsc(challengeId).stream()
                 .collect(Collectors.toMap(ChallengeMember::getUserId, Function.identity(), (a, b) -> a));
+
+        List<Row> rows = new ArrayList<>();
         for (VerificationDaily v : verificationRepository.findByChallengeIdAndStatusIn(
                 challengeId, List.of(VerificationStatus.SUCCESS, VerificationStatus.FAILED))) {
             boolean success = v.getStatus() == VerificationStatus.SUCCESS;
             Instant at = success ? v.getVerifiedAt() : v.getShareableAt();
-            if (at == null || at.isAfter(now)) continue;
+            if (at == null || at.isAfter(now)) continue;   // ← 조기 노출 0건 가드레일
             ChallengeMember member = memberships.get(v.getUserId());
             rows.add(new Row(v.getId(), at, success ? "VERIFY_SUCCESS" : "VERIFY_FAIL", v.getUserId(),
                     success && member != null ? member.getSuccessDays() : null,
-                    success ? null : v.getTargetDate().toString(), null,
-                    commentRepository.countByTargetTypeAndTargetIdAndDeletedAtIsNull(
-                            CommentTargetType.VERIFY_EVENT, v.getId())));
+                    success ? null : v.getTargetDate().toString()));
         }
         rows.sort(Comparator.comparing(Row::at).reversed().thenComparing(Row::id, Comparator.reverseOrder()));
         int start = cursorStart(rows, cursor);
@@ -86,15 +84,11 @@ public class ThreadService {
             ThreadDtos.User author = new ThreadDtos.User(row.userId().toString(),
                     user == null || masked ? null : user.visibleNicknameTo(viewerId),
                     user == null || masked ? null : user.visibleProfileImageTo(viewerId), masked);
-            return new ThreadDtos.Item(row.type(), row.id().toString(), author, row.at().toString(), row.streak(),
-                    row.failDate(), row.title(), row.comments());
+            return new ThreadDtos.Item(row.type(), row.id().toString(), author, row.at().toString(),
+                    row.streak(), row.failDate());
         }).toList();
 
-        Notice pinned = noticeRepository.findByChallengeIdAndPinnedTrueAndDeletedAtIsNull(challengeId).orElse(null);
-        ThreadDtos.PinnedNotice pinnedDto = pinned == null ? null
-                : new ThreadDtos.PinnedNotice(pinned.getId().toString(), pinned.getTitle(),
-                pinned.getContent(), pinned.getCreatedAt().toString());
-        return new ThreadDtos.Response(pinnedDto, items, next);
+        return new ThreadDtos.Response(items, next);
     }
 
     private int cursorStart(List<Row> rows, String cursor) {
