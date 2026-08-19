@@ -54,8 +54,13 @@ public final class RoomDtos {
             @Schema(description = "상위 3위. 10회 이상 참여자만 등재되므로 초반에는 빈 배열이 정상이다.")
             List<TopRank> topRanking,
 
-            @Schema(description = "내 오늘 인증 상태. 오늘이 인증 대상일이 아니면 NOT_TARGET.",
-                    example = "DONE")
+            @Schema(description = "이번 주 사이클의 내 진행도. 클라이언트는 done/summary.weeklyCount 로 "
+                    + "\"이번 주 N/M\" 을 그린다.")
+            MyWeekly myWeekly,
+
+            @Schema(description = "내 오늘 인증 상태. 오늘이 판정 대상이 아니면 NOT_TARGET.",
+                    example = "DONE",
+                    allowableValues = {"IN_PROGRESS", "CHECKING", "DONE", "FAILED", "NOT_TARGET"})
             String myTodayStatus,
 
             @Schema(description = "Phase 1에서는 항상 null. Phase 2 고정 공지 호환 필드.")
@@ -65,6 +70,10 @@ public final class RoomDtos {
         public record Summary(
                 @Schema(description = "방 제목", example = "매일 아침 6시 기상") String title,
 
+                @Schema(description = "주간 수행 횟수(1~7). 판정 주기는 1주 고정이라 특정 요일은 지정하지 않는다 — "
+                        + "그 주 어느 날이든 성공 N회를 채우면 된다.", example = "7")
+                Integer weeklyCount,
+
                 @Schema(description = "방 전체 성공률(0~1). **판정이 한 건도 없으면 null** — 0.0 으로 내리면 "
                         + "갓 만든 방과 전원 실패한 방이 같아 보인다.", example = "0.92")
                 BigDecimal roomSuccessRate,
@@ -72,6 +81,15 @@ public final class RoomDtos {
                 @Schema(description = "종료까지 남은 일수", example = "14") int remainingDays,
                 @Schema(description = "현재 참여 인원", example = "14") int participantCount,
                 @Schema(description = "정원. 제한이 없으면 null.", example = "50") Integer capacity) {}
+
+        @Schema(name = "RoomMyWeekly", description = "이번 주 사이클의 내 진행도")
+        public record MyWeekly(
+                @Schema(description = "이번 주 성공 횟수(0 ~ weeklyCount)", example = "4") int done,
+                @Schema(description = "사이클 시작일(KST)", example = "2026-07-13") String weekStart,
+                @Schema(description = "사이클 종료일(KST)", example = "2026-07-19") String weekEnd,
+                @Schema(description = "이번 주 판정 대상 여부. 사이클 중간 입장이라 다음 주부터 판정되거나 "
+                        + "방이 아직 시작 전이면 false 이고, 이때 done 은 0 이다.", example = "true")
+                boolean judging) {}
 
         @Schema(name = "RoomTopRank", description = "상위 랭킹 한 줄 — 차단한 사람은 가려진 채로 남는다")
         public record TopRank(

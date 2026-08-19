@@ -49,6 +49,17 @@ public class RoomController {
                     `topRanking` 은 **10회 이상 참여자만** 등재되므로 초반에는 빈 배열이 정상이다.
                     내가 차단한 사람은 목록에서 빠지지 않고 임시 닉네임 + 기본 이미지로 가려진 채 들어온다.
 
+                    판정 주기는 **1주 고정**이고 특정 요일은 지정하지 않는다. 방 조건은
+                    `summary.weeklyCount`(주간 수행 횟수 1~7)로 내려가고, 이번 주 내 진행도는 `myWeekly`
+                    (`done` · `weekStart` · `weekEnd` · `judging`)다 — 클라이언트는 이 둘로 "이번 주 2/3"을 그린다.
+                    사이클 중간에 들어와 다음 주부터 판정되는 멤버와 아직 시작 전인 방은
+                    `judging:false` · `done:0` 이다.
+
+                    `myTodayStatus` 는 화면 어휘 5종이다 — `IN_PROGRESS` · `CHECKING`(00~03시 유예 구간) ·
+                    `DONE` · `FAILED` · `NOT_TARGET`. 요일 지정이 없으므로 "요일상 대상이 아닌 날"은 없고,
+                    `NOT_TARGET` 은 이번 주 몫을 이미 채웠거나(`myWeekly.done ≥ weeklyCount`)
+                    아직 판정 대상이 아닌 경우(`judging:false`)에만 내려간다.
+
                     **읽음/미읽음 필드는 없다.** 정책상 영구 미제공이라 구 명세의 `unreadNoticeCount` ·
                     `pinnedNotice.isRead` 는 삭제됐다. 고정 공지(`pinnedNotice`)는 클라이언트 호환을 위해
                     필드만 유지하며 Phase 1 동안 항상 null 이다.

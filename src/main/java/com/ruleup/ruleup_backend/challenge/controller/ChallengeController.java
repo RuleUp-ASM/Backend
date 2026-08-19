@@ -7,8 +7,13 @@ import com.ruleup.ruleup_backend.challenge.draft.ChallengeDraftService;
 import com.ruleup.ruleup_backend.challenge.explore.ChallengeCloneService;
 import com.ruleup.ruleup_backend.challenge.explore.ChallengeDetailQueryService;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeService;
+import com.ruleup.ruleup_backend.challenge.service.MyChallengeQueryService;
+import com.ruleup.ruleup_backend.common.docs.ApiErrorCodes;
+import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -33,6 +38,7 @@ public class ChallengeController {
     private final ChallengeCreationService challengeCreationService;
     private final ChallengeSettingsService challengeSettingsService;
     private final ChallengeService challengeService;
+    private final MyChallengeQueryService myChallengeQueryService;
     private final ChallengeDetailQueryService detailQueryService;
     private final ChallengeCloneService cloneService;
     private final ChallengeImageService challengeImageService;
@@ -82,11 +88,55 @@ public class ChallengeController {
                 challengeImageService.upload(UUID.fromString(userId), image)));
     }
 
-    @Operation(summary = "내 챌린지 목록", description = "내가 참여 중인 챌린지 목록(멤버십 기준, 페이지네이션 없음). "
-            + "승인제 폐기로 항상 확정 멤버십만. 항목마다 myRole 포함.")
+    @Operation(
+            summary = "내 챌린지 목록",
+            description = """
+                    홈의 참여 중 목록과 마이페이지의 진행 중 / 완료 / 이탈 탭이 **전부 이 API 하나**를 쓴다 —
+                    `filter` 로 탭을 가른다. 승인제가 없으므로 대기 상태는 존재하지 않는다.
+
+                    - `IN_PROGRESS`(기본) — 시작 전(UPCOMING) + 진행 중(ACTIVE)
+                    - `COMPLETED` — 완주·기간 만료
+                    - `LEFT` — 중도 탈퇴·강퇴·자동 탈퇴. 이 탭에서만 `leftType` · `leftAt` 이 채워진다.
+
+                    무료 동시 참여가 3개라 진행 중 탭은 사실상 한 페이지지만 완료·이탈은 계속 쌓이므로
+                    커서 페이지네이션을 지원한다. 정렬은 세 탭 공통으로 종료일 내림차순이다.
+
+                    완료된 방은 배치가 하드 삭제한 뒤에도 이 목록에 계속 나온다 — 삭제 직전에 적재한 이력
+                    스냅샷에서 읽기 때문이다.
+
+                    제목·설명·이미지는 심사 상태별 대체 규칙이 적용된 값으로 온다 — 심사 중·거부면
+                    제목은 AI 임시 제목, 설명은 null, 이미지는 null(기본 이미지)이다.
+
+                    ### ⚠️ 알려진 제약 (레거시 — 지금 고치지 않는다)
+
+                    **① 완료 탭은 필드 절반이 null 이라고 보고 그려야 한다.**
+                    완료된 방은 매일 04:10 배치가 삭제하므로 길어야 하루만 살아 있고, 그 뒤로는
+                    제목·이미지·카테고리·기간만 담긴 이력 스냅샷에서 읽힌다. 따라서 `description` ·
+                    `mode` · `visibility` · `participantCount` · `capacity` · `minTier` ·
+                    `weeklyCount` · `ownerType` 은 **사실상 항상 null** 이다. 값을 지어내면 사용자가
+                    자기 기록을 오독하므로 비워 두는 쪽을 택했다 — 완료 카드는 제목·이미지·기간과
+                    최종 랭킹만으로 그릴 것. 해소하려면 `challenge_history` 컬럼 추가(마이그레이션)가
+                    선행돼야 하고, 적재가 삭제 직전 1회뿐이라 그 이전 삭제분은 소급 복구되지 않는다.
+
+                    **② `leftType` 은 지금 `SELF` · `KICK_BY_OWNER` 두 값만 내려온다.**
+                    저장 컬럼이 `enum('LEAVE','KICK')` 이라 그 이상을 구분할 수 없다. 나머지 5종은
+                    자동 강퇴 배치를 위한 예약 값이며 **그 배치가 아직 없어 실제 발생 자체가 없다** —
+                    값이 뭉개진 이력이 쌓이는 상황은 아니다. 배치를 붙일 때 저장 값부터 갈라야 한다.
+                    """
+    )
+    @ApiErrorCodes({ErrorCode.INVALID_FILTER_VALUE, ErrorCode.CURSOR_INVALID, ErrorCode.LOGIN_REQUIRED})
     @GetMapping
-    public ApiResponse<ChallengeListResponse> myChallenges(@AuthenticationPrincipal String userId) {
-        return ApiResponse.ok(challengeService.myChallenges(UUID.fromString(userId)));
+    public ApiResponse<ChallengeListResponse> myChallenges(
+            @AuthenticationPrincipal String userId,
+            @Parameter(description = "탭 필터. 기본 IN_PROGRESS.",
+                    schema = @Schema(allowableValues = {"IN_PROGRESS", "COMPLETED", "LEFT"}))
+            @RequestParam(required = false) String filter,
+            @Parameter(description = "이전 응답의 nextCursor. 미지정이면 첫 페이지.")
+            @RequestParam(required = false) String cursor,
+            @Parameter(description = "페이지 크기. 기본 20, 최대 50.")
+            @RequestParam(required = false) Integer size) {
+        return ApiResponse.ok(myChallengeQueryService.myChallenges(
+                UUID.fromString(userId), filter, cursor, size));
     }
 
     @Operation(summary = "챌린지 공개 상세",
