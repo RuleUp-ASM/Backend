@@ -23,6 +23,10 @@ public interface VerificationDailyRepository extends JpaRepository<VerificationD
     /** 진행률 재계산용 상태별 카운트. */
     long countByChallengeMemberIdAndStatus(UUID challengeMemberId, VerificationStatus status);
 
+    /** 사이클 한 구간의 상태별 카운트 — 방 홈의 "이번 주 N/M"(myWeekly.done). */
+    long countByChallengeMemberIdAndStatusAndTargetDateBetween(
+            UUID challengeMemberId, VerificationStatus status, LocalDate from, LocalDate to);
+
     /** 챌린지 내 특정 상태(예: SUCCESS) 인증 이력 존재 여부 — 진행 중 삭제 패널티 트리거 판정(§8). */
     boolean existsByChallengeIdAndStatus(UUID challengeId, VerificationStatus status);
 

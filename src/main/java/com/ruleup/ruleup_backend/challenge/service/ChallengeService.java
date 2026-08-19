@@ -61,26 +61,6 @@ public class ChallengeService {
     /** 하루 경계 계산의 사용자 로컬 = MVP는 KST 고정. */
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
-    // ===== 내 챌린지 목록(내가 참여 중인 챌린지) =====
-
-    /**
-     * 내가 참여 중인 챌린지 목록. 멤버십 기준이라 페이지네이션 없이 전량 반환한다.
-     * 승인제 폐기로 멤버십은 항상 확정(ACTIVE) — scope/memberStatus 개념 없음. 탈퇴(LEFT)는 제외.
-     * 항목마다 내 역할(myRole: OWNER/MEMBER)을 함께 내려준다.
-     */
-    @Transactional(readOnly = true)
-    public ChallengeListResponse myChallenges(UUID userId) {
-        List<ChallengeMember> memberships = memberRepository.findByUserIdAndStatus(userId, MemberStatus.ACTIVE);
-
-        List<ChallengeListResponse.Item> items = new ArrayList<>();
-        for (ChallengeMember m : memberships) {
-            Challenge ch = challengeRepository.findByIdAndDeletedAtIsNull(m.getChallengeId()).orElse(null);
-            if (ch == null) continue;   // 삭제/정합성 깨진 멤버십은 건너뜀
-            items.add(ChallengeListResponse.Item.of(ch, m.isOwner() ? "OWNER" : "MEMBER"));
-        }
-        return new ChallengeListResponse(items);
-    }
-
     /** 그룹 기준 매너 온도가 생성자 본인 온도보다 높으면 거부 (생성/수정 공용, §3). */
     private void checkMinMannerNotAboveOwner(UUID ownerId, BigDecimal minManner) {
         if (minManner == null) return;
