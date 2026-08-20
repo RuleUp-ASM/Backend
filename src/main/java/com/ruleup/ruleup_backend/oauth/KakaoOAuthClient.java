@@ -51,7 +51,9 @@ public class KakaoOAuthClient implements OAuthClient {
             log.warn("Kakao OAuth failed: status={}, body={}", e.getStatusCode(), e.getResponseBodyAsString());
             throw new BusinessException(e.getStatusCode().is4xxClientError()
                     ? ErrorCode.LOGIN_FAILED : ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
-        } catch (RestClientException e) {                    // 연결 실패 등
+        } catch (RestClientException e) {                    // 연결 실패·타임아웃 등
+            log.warn("Kakao OAuth transport failed: type={}, message={}",
+                    e.getClass().getSimpleName(), e.getMessage());
             throw new BusinessException(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
         }
     }

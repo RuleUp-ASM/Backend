@@ -1,9 +1,12 @@
 package com.ruleup.ruleup_backend.auth;
 
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
+import com.ruleup.ruleup_backend.config.AppProperties;
 import com.ruleup.ruleup_backend.oauth.MockOAuthClient;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import com.ruleup.ruleup_backend.user.domain.OAuthProvider;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -16,12 +19,17 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 /**
  * OAuth 로그인 계약 테스트 — 그동안 카카오 성공 경로만 검증돼 비어 있던 구간을 채운다.
@@ -43,6 +51,7 @@ class OAuthLoginContractIT extends AuthApiSupport {
 
     @Autowired WebApplicationContext wac;
     @Autowired UserRepository userRepository;
+    @Autowired AppProperties appProperties;
 
     private MockMvc mvc;
 
@@ -83,6 +92,44 @@ class OAuthLoginContractIT extends AuthApiSupport {
                 .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
                 .content(OM.writeValueAsString(m))).andReturn();
         assertThat(res.getResponse().getStatus()).isEqualTo(200);
+    }
+
+    /** JwtAuthenticationFilter의 실제 만료 예외 경로를 타기 위한 테스트용 ACCESS 토큰. */
+    private String expiredAccessToken() {
+        Instant now = Instant.now();
+        var key = Keys.hmacShaKeyFor(appProperties.jwt().secret().getBytes(StandardCharsets.UTF_8));
+        return Jwts.builder()
+                .id(UUID.randomUUID().toString())
+                .subject(UUID.randomUUID().toString())
+                .claim("type", "ACCESS")
+                .issuedAt(Date.from(now.minusSeconds(3600)))
+                .expiration(Date.from(now.minusSeconds(1)))
+                .signWith(key, Jwts.SIG.HS256)
+                .compact();
+    }
+
+    @Nested
+    @DisplayName("만료 세션 재로그인")
+    class ExpiredSessionRelogin {
+
+        @Test
+        @DisplayName("만료된 ACCESS 토큰이 Authorization에 남아 있어도 기존 소셜 계정은 즉시 재로그인된다")
+        void expired_authorization_does_not_block_oauth_login() throws Exception {
+            String tag = uniq("expired");
+            MvcResult signedUp = signup(tag, "만료복귀" + seq());
+            String userId = read(signedUp, "$.data.user.id");
+
+            MvcResult relogin = mvc.perform(post("/api/v1/auth/oauth/kakao")
+                    .header("Authorization", "Bearer " + expiredAccessToken())
+                    .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                    .content(OM.writeValueAsString(
+                            loginBody(tag, "inst-" + tag, "dev-" + tag))))
+                    .andReturn();
+
+            assertThat(relogin.getResponse().getStatus()).isEqualTo(200);
+            assertThat((Boolean) read(relogin, "$.data.isNewUser")).isFalse();
+            assertThat((String) read(relogin, "$.data.user.id")).isEqualTo(userId);
+        }
     }
 
     // ==================================================================

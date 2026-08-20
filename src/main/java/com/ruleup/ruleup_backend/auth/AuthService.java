@@ -488,18 +488,23 @@ public class AuthService {
     }
 
     // ===== 토큰 재발급 (회전) =====
-    @Transactional
+    // BusinessException(401)으로 끝나는 재사용 감지 경로도 reuse_detected_at/family revoke를
+    // 반드시 커밋해야 한다. noRollbackFor가 없으면 예외와 함께 보안 기록까지 롤백된다.
+    @Transactional(noRollbackFor = BusinessException.class)
     public TokenResponse refresh(String refreshTokenValue) {
         Claims claims = parseRefreshToken(refreshTokenValue);
         UUID userId = UUID.fromString(claims.getSubject());
 
-        RefreshToken stored = refreshTokenRepository.findByTokenHash(TokenService.sha256(refreshTokenValue))
+        // 같은 RT의 동시 회전을 직렬화한다. 선발 요청이 revoke+새 RT 발급을 커밋한 뒤
+        // 후발 요청은 revoked=true를 읽어 재사용으로 처리한다.
+        RefreshToken stored = refreshTokenRepository.findByTokenHashForUpdate(TokenService.sha256(refreshTokenValue))
                 .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_EXPIRED));
 
         // 재사용 감지 — 이미 폐기된 토큰이 다시 제출되면 탈취 의심 → family 전체 revoke (DB 정리 §11.3)
-        // 401 예외로 이 트랜잭션이 롤백돼도 흔적·revoke 는 남아야 하므로 REQUIRES_NEW 로 커밋한다.
+        // 이 메서드는 BusinessException에 대해 롤백하지 않으므로 흔적과 revoke가 401 응답 전에 커밋된다.
         if (stored.isRevoked()) {
-            tokenService.recordReuseAndRevokeFamily(stored.getId(), stored.getFamilyId());
+            stored.markReuseDetected();
+            refreshTokenRepository.revokeFamily(stored.getFamilyId(), Instant.now());
             throw new BusinessException(ErrorCode.SESSION_EXPIRED);
         }
         if (stored.isExpired()) throw new BusinessException(ErrorCode.SESSION_EXPIRED);

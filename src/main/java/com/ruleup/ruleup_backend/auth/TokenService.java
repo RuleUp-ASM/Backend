@@ -47,16 +47,6 @@ public class TokenService {
         return new TokenPair(access, refresh, props.jwt().accessTokenTtl());
     }
 
-    /**
-     * RT 재사용 감지 처리 — 탈취 의심 시 흔적(reuse_detected_at)과 family 전체 revoke 를
-     * 호출측 예외(401)와 무관하게 남겨야 하므로 별도 트랜잭션(REQUIRES_NEW)으로 커밋한다.
-     */
-    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
-    public void recordReuseAndRevokeFamily(java.util.UUID tokenId, java.util.UUID familyId) {
-        refreshTokenRepository.findById(tokenId).ifPresent(RefreshToken::markReuseDetected);
-        refreshTokenRepository.revokeFamily(familyId, Instant.now());
-    }
-
     /** Refresh 토큰 원문 → SHA-256 32바이트. DB엔 이 hash만 BINARY(32)로 저장. */
     public static byte[] sha256(String value) {
         try {

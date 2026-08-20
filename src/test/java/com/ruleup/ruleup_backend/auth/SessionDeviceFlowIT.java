@@ -18,15 +18,26 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.ByteBuffer;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -59,6 +70,8 @@ class SessionDeviceFlowIT {
     @Autowired UserRepository userRepository;
     @Autowired NotificationRepository notificationRepository;
     @Autowired SocialTokenRepository socialTokenRepository;
+    @Autowired RefreshTokenCleanupService refreshTokenCleanupService;
+    @Autowired JdbcTemplate jdbcTemplate;
 
     private MockMvc mvc;
 
@@ -163,6 +176,33 @@ class SessionDeviceFlowIT {
                 .header("Authorization", "Bearer " + accessToken)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(om.writeValueAsString(m))).andReturn();
+    }
+
+    private UUID insertRefreshToken(UUID userId, Instant expiresAt,
+                                    Instant revokedAt, Instant reuseDetectedAt) {
+        UUID id = UUID.randomUUID();
+        jdbcTemplate.update("""
+                        INSERT INTO refresh_tokens
+                            (id, user_id, family_id, token_hash, expires_at, revoked_at, reuse_detected_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                bytes(id), bytes(userId), bytes(UUID.randomUUID()),
+                TokenService.sha256(UUID.randomUUID().toString()), Timestamp.from(expiresAt),
+                revokedAt != null ? Timestamp.from(revokedAt) : null,
+                reuseDetectedAt != null ? Timestamp.from(reuseDetectedAt) : null);
+        return id;
+    }
+
+    private int refreshTokenCount(UUID tokenId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM refresh_tokens WHERE id = ?", Integer.class, bytes(tokenId));
+    }
+
+    private static byte[] bytes(UUID id) {
+        return ByteBuffer.allocate(16)
+                .putLong(id.getMostSignificantBits())
+                .putLong(id.getLeastSignificantBits())
+                .array();
     }
 
     private void expectError(MvcResult res, int status, String code) throws Exception {
@@ -388,6 +428,47 @@ class SessionDeviceFlowIT {
         }
 
         @Test
+        @DisplayName("같은 RT 동시 제출은 하나만 회전 성공하고 후발 요청은 재사용으로 감지한다")
+        void concurrent_refresh_has_single_winner() throws Exception {
+            String tag = uniq();
+            String rt1 = read(signup(tag), "$.data.refreshToken");
+
+            ExecutorService executor = Executors.newFixedThreadPool(2);
+            CountDownLatch ready = new CountDownLatch(2);
+            CountDownLatch start = new CountDownLatch(1);
+            try {
+                java.util.concurrent.Callable<MvcResult> call = () -> {
+                    ready.countDown();
+                    if (!start.await(5, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("동시 refresh 시작 대기 시간 초과");
+                    }
+                    return refresh(rt1);
+                };
+
+                Future<MvcResult> first = executor.submit(call);
+                Future<MvcResult> second = executor.submit(call);
+                assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+                start.countDown();
+
+                MvcResult r1 = first.get(10, TimeUnit.SECONDS);
+                MvcResult r2 = second.get(10, TimeUnit.SECONDS);
+                assertThat(List.of(r1.getResponse().getStatus(), r2.getResponse().getStatus()))
+                        .containsExactlyInAnyOrder(200, 401);
+
+                MvcResult winner = r1.getResponse().getStatus() == 200 ? r1 : r2;
+                MvcResult rejected = r1.getResponse().getStatus() == 401 ? r1 : r2;
+                expectError(rejected, 401, "SESSION_EXPIRED");
+
+                // 후발 제출은 기존 정책대로 탈취 의심 재사용이다. 따라서 선발 요청이 만든
+                // 자식 RT까지 같은 family 전체가 폐기되어 다시 로그인해야 한다.
+                String rotated = read(winner, "$.data.refreshToken");
+                expectError(refresh(rotated), 401, "SESSION_EXPIRED");
+            } finally {
+                executor.shutdownNow();
+            }
+        }
+
+        @Test
         @DisplayName("revoke 된 RT 재제출(재사용 감지) 시 family 전체를 무효화한다 — 탈취 대응")
         void reuse_detection_revokes_whole_family() throws Exception {
             String tag = uniq();
@@ -417,7 +498,41 @@ class SessionDeviceFlowIT {
     }
 
     // ==================================================================
-    // 4) social_tokens 저장
+    // 4) RT 보관기간 정리
+    // ==================================================================
+
+    @Nested
+    @DisplayName("토큰 보관기간 정리")
+    class TokenRetentionCleanup {
+
+        @Test
+        @DisplayName("일반 만료·폐기는 30일, 재사용 탐지 기록은 180일 보관한다")
+        void cleanup_respects_ordinary_and_reuse_retention() throws Exception {
+            String tag = uniq();
+            UUID userId = UUID.fromString(read(signup(tag), "$.data.user.id"));
+            Instant now = Instant.now();
+
+            UUID expired31d = insertRefreshToken(userId, now.minus(31, ChronoUnit.DAYS), null, null);
+            UUID revoked31d = insertRefreshToken(userId, now.plus(7, ChronoUnit.DAYS),
+                    now.minus(31, ChronoUnit.DAYS), null);
+            UUID expired29d = insertRefreshToken(userId, now.minus(29, ChronoUnit.DAYS), null, null);
+            UUID reused31d = insertRefreshToken(userId, now.minus(200, ChronoUnit.DAYS),
+                    now.minus(31, ChronoUnit.DAYS), now.minus(31, ChronoUnit.DAYS));
+            UUID reused181d = insertRefreshToken(userId, now.minus(200, ChronoUnit.DAYS),
+                    now.minus(181, ChronoUnit.DAYS), now.minus(181, ChronoUnit.DAYS));
+
+            refreshTokenCleanupService.cleanupOldTokens();
+
+            assertThat(refreshTokenCount(expired31d)).isZero();
+            assertThat(refreshTokenCount(revoked31d)).isZero();
+            assertThat(refreshTokenCount(reused181d)).isZero();
+            assertThat(refreshTokenCount(expired29d)).isEqualTo(1);
+            assertThat(refreshTokenCount(reused31d)).isEqualTo(1);
+        }
+    }
+
+    // ==================================================================
+    // 5) social_tokens 저장
     // ==================================================================
 
     @Nested

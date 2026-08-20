@@ -56,6 +56,8 @@ public class GoogleOAuthClient implements OAuthClient {
             throw new BusinessException(e.getStatusCode().is4xxClientError()
                     ? ErrorCode.LOGIN_FAILED : ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
         } catch (RestClientException e) {
+            log.warn("Google OAuth transport failed: type={}, message={}",
+                    e.getClass().getSimpleName(), e.getMessage());
             throw new BusinessException(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
         }
     }

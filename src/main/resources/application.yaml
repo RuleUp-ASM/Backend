@@ -41,6 +41,15 @@ spring:
 
 # 우리 앱 전용 설정 (외부에서 받는 값은 전부 .env에서 주입)
 app:
+  auth:
+    refresh-token-cleanup:
+      # 일반 만료·폐기 RT는 운영·장애 확인용으로 30일, reuse_detected 보안 흔적은 180일 보관한다.
+      ordinary-retention-days: ${REFRESH_TOKEN_ORDINARY_RETENTION_DAYS:30}
+      reuse-detected-retention-days: ${REFRESH_TOKEN_REUSE_RETENTION_DAYS:180}
+      # 대량 DELETE 락을 짧게 유지하기 위한 청크와 일일 상한(유형별 최대 10만 건).
+      batch-size: ${REFRESH_TOKEN_CLEANUP_BATCH_SIZE:1000}
+      max-batches-per-type: ${REFRESH_TOKEN_CLEANUP_MAX_BATCHES:100}
+      cron: "${REFRESH_TOKEN_CLEANUP_CRON:0 30 4 * * *}"
   jwt:
     secret: ${JWT_SECRET}
     access-token-ttl: 1800        # 30분 (초)
@@ -76,6 +85,12 @@ app:
       sample-interval-ms: ${SYS_METRICS_INTERVAL_MS:60000}     # 수집 주기(기본 60초)
       retention-days: ${SYS_METRICS_RETENTION_DAYS:14}         # 스냅샷 보관 일수(초과분 정리)
   oauth:
+    http:
+      # OAuth 로그인은 토큰 교환 + 사용자 조회 2회 직렬 호출이다. 풀 고갈/IdP 지연에 무한정 매달리지 않도록
+      # 각 단계 제한 시간을 분리한다. Duration 형식(예: 500ms, 3s)으로 운영 환경에서 조정 가능하다.
+      connection-request-timeout: ${OAUTH_CONNECTION_REQUEST_TIMEOUT:1s}
+      connect-timeout: ${OAUTH_CONNECT_TIMEOUT:3s}
+      response-timeout: ${OAUTH_RESPONSE_TIMEOUT:5s}
     kakao:
       client-id: ${KAKAO_REST_API_KEY}
       client-secret: ${KAKAO_CLIENT_SECRET}
