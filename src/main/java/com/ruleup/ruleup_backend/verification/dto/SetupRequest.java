@@ -3,16 +3,21 @@ package com.ruleup.ruleup_backend.verification.dto;
 import java.util.List;
 
 /**
- * §11.4 최초 진입 셋업. config.method가 요구하는 바인딩만 전송(§5.6: 권한은 받지 않는다).
- *  - location: GPS일 때 {fillMode, anchors[]}.
- *  - screenApps: SCREEN_TIME일 때 사용자가 고른 대상 앱 {packageName, appName}(권장).
- *  - targetPackages: (레거시) 패키지명 문자열 목록. screenApps 미전송 시 폴백(appName 스냅샷 없음).
+ * POST /api/v1/challenges/{challengeId}/setup 요청 — 앵커·대상 앱 <b>바인딩 제출</b>.
+ *
+ * <p>인증 방식에 따라 둘 중 하나만 채워 보낸다(GPS 방이면 location, 스크린타임 방이면 targetPackages).
+ * OS 권한은 생성/가입 단계에서 이미 받았으므로 여기서 받지 않는다 — 서버는 권한 보유 여부를 저장하지 않는다.
+ *
+ * <p>첫 설정은 월 1회 변경 횟수를 소진하지 않는다. 소진은 이후 <i>변경</i>(PUT my-location / my-screen-apps)부터.
+ *
+ * @param location       GPS 방일 때의 앵커 바인딩. GPS 방이 아니면 null
+ * @param targetPackages 스크린타임 방일 때의 측정 대상 앱(1~10개, packageName 중복 불가). 아니면 null
  */
-public record SetupRequest(
-        LocationBinding location,
-        List<ScreenAppsUpdateRequest.AppDto> screenApps,
-        List<String> targetPackages
-) {
-    public record LocationBinding(String fillMode, List<AnchorDto> anchors) {}
-    public record AnchorDto(double lat, double lng, int radiusM, String label) {}
+public record SetupRequest(LocationBinding location, List<AppDto> targetPackages) {
+
+    /**
+     * 앵커 바인딩. 최대 3개(구 스펙 10개에서 축소) — 4개 이상이면 ANCHOR_LIMIT_EXCEEDED.
+     * 반경은 요청에 없다(서버 설정 단일값).
+     */
+    public record LocationBinding(List<AnchorDto> anchors) {}
 }

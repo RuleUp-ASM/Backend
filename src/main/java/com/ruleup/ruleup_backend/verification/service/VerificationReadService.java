@@ -1,45 +1,54 @@
 package com.ruleup.ruleup_backend.verification.service;
-import com.ruleup.ruleup_backend.common.verification.*;
 
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
-import com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
-import com.ruleup.ruleup_backend.verification.domain.*;
+import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
+import com.ruleup.ruleup_backend.verification.domain.VerificationConfig;
+import com.ruleup.ruleup_backend.verification.domain.VerificationDaily;
 import com.ruleup.ruleup_backend.verification.dto.ChallengeProgress;
-import com.ruleup.ruleup_backend.verification.dto.VerificationDetailResponse;
-import com.ruleup.ruleup_backend.verification.dto.VerificationDetailResponse.*;
+import com.ruleup.ruleup_backend.verification.dto.TodayVerificationResponse;
 import com.ruleup.ruleup_backend.verification.repository.ObjectionRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
-import com.ruleup.ruleup_backend.verification.repository.VerificationMethodResultRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-/** 인증 읽기 API (§3.2 진행률 일괄 / §3.3 상세 검증결과). 비정규화 카운터 + config 파생으로 조립. */
+/**
+ * 인증 읽기 API — 진행률 일괄 조회와 "오늘 인증 결과" 조회.
+ *
+ * <p>오늘 인증 결과는 챌린지 상세의 "오늘 인증" 카드 + 판정 결과 모달을 함께 채운다.
+ * 미확인 판정({@code unacknowledgedResult})이 실려 있으면 클라가 모달을 띄우고 ack 를 호출한다.
+ */
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class VerificationReadService {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    private static final DateTimeFormatter ISO_OFFSET = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
+
+    /** CHECKING 인 이유 — 창은 닫혔는데 판정에 쓸 신호가 아직 다 도착하지 않았다. */
+    private static final String WAITING_SIGNAL = "WAITING_SIGNAL";
 
     private final ChallengeQueryService challengeQuery;
     private final VerificationDailyRepository dailyRepo;
-    private final VerificationMethodResultRepository methodResultRepo;
     private final ObjectionRepository objectionRepo;
     private final VerificationConfigFactory configFactory;
+    private final StreakService streakService;
 
-    // ===== §3.2 진행률 일괄 =====
+    // ===== GET /api/v1/verifications/progress — 진행률 일괄 =====
     public List<ChallengeProgress> progress(UUID userId, String statusFilter) {
         List<ChallengeMember> members = "ALL".equalsIgnoreCase(statusFilter)
                 ? challengeQuery.findAllMemberships(userId)
@@ -54,50 +63,87 @@ public class VerificationReadService {
         return out;
     }
 
-    // ===== §3.3 상세 검증 결과 =====
-    public VerificationDetailResponse detail(UUID userId, UUID challengeId, int logDays) {
+    // ===== GET /api/v1/challenges/{challengeId}/verifications/today =====
+    public TodayVerificationResponse today(UUID userId, UUID challengeId) {
         Challenge ch = challengeQuery.findActiveChallenge(challengeId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
         ChallengeMember member = challengeQuery.findMembership(challengeId, userId).orElse(null);
         if (member == null || !member.isActive()) {
             throw new BusinessException(ErrorCode.NOT_CHALLENGE_MEMBER);
         }
+
         VerificationConfig config = configFactory.build(ch);
         LocalDate today = LocalDate.now(KST);
+        Instant now = Instant.now();
+        VerificationDaily daily = dailyRepo
+                .findByChallengeMemberIdAndTargetDate(member.getId(), today).orElse(null);
 
-        VerificationDaily todayDaily = dailyRepo.findByChallengeMemberIdAndTargetDate(member.getId(), today).orElse(null);
-        List<VerificationMethodResult> todayResults = (todayDaily != null)
-                ? methodResultRepo.findByVerificationDailyId(todayDaily.getId()) : List.of();
+        boolean isTarget = isTodayTarget(config, ch, member, today);
+        String status = todayStatus(isTarget, daily, now);
+        boolean failed = TodayStatusView.FAILED.equals(status);
 
-        Today todayDto = buildToday(member, ch, config, today, todayDaily, todayResults);
-        List<MethodEval> methods = todayResults.stream()
-                .map(mr -> new MethodEval(mr.getMethod(),
-                        str(mr.getLastEvaluatedAt()), mr.isSupported(),
-                        mr.getPolarity() != null ? mr.getPolarity().name() : null, mr.getEvidence()))
-                .toList();
-
-        List<DailyLog> logs = dailyRepo.findByChallengeMemberIdOrderByTargetDateDesc(member.getId()).stream()
-                .limit(Math.max(logDays, 1))
-                .map(d -> new DailyLog(d.getTargetDate().toString(), d.getStatus().name(),
-                        d.getMethod(),
-                        d.getVerifiedVia() != null ? d.getVerifiedVia().name() : null,
-                        str(d.getVerifiedAt())))
-                .toList();
-
-        boolean freq = config.isFrequency();
-        int remaining = freq
-                ? Math.max(member.getTargetDays() - member.getSuccessDays(), 0)
-                : Math.max(member.getTargetDays() - member.getSuccessDays() - member.getFailDays(), 0);
-
-        Verification v = new Verification(
-                overallStatus(member, ch), member.getScheduleType().name(),
-                member.getProgressRate(), member.getSuccessDays(), member.getTargetDays(), remaining,
-                freq ? toPeriod(member) : null, todayDto, methods, logs);
-
-        return new VerificationDetailResponse(ch.getId().toString(), ch.getTitle(), ch.getStatus().name(), v);
+        return new TodayVerificationResponse(
+                today.toString(),
+                status,
+                TodayStatusView.NOT_TARGET.equals(status) ? null : windowLabel(config),
+                TodayStatusView.CHECKING.equals(status) ? WAITING_SIGNAL : null,
+                (daily != null) ? formatKst(daily.getVerifiedAt()) : null,
+                failed && daily != null ? daily.getFailureReason() : null,
+                streakService.around(member.getId(), today),
+                unacknowledged(daily),
+                failed ? appeal(ch, member, daily, now) : null);
     }
 
     // ===== 조립 헬퍼 =====
+
+    /** 오늘이 대상 날짜가 아니면 판정 행과 무관하게 NOT_TARGET. 나머지는 공용 매핑(TodayStatusView). */
+    private String todayStatus(boolean isTarget, VerificationDaily daily, Instant now) {
+        if (!isTarget) return TodayStatusView.NOT_TARGET;
+        if (daily == null) return TodayStatusView.IN_PROGRESS;
+        return TodayStatusView.of(daily.getStatus(), daily.getWindowClosesAt(), now);
+    }
+
+    /** 인증 창 표시 문구 — 자동은 시간대, 수동은 "자정 마감". 시간 제약이 없으면 null. */
+    private String windowLabel(VerificationConfig config) {
+        if (config.isManual()) return "자정 마감";
+        if (config.primaryMethod() == null) return null;
+        return switch (config.primaryMethod()) {
+            case GPS_PRESENCE -> (config.gps() != null) ? config.gps().timeWindow() : null;
+            case SCREEN_TIME -> (config.screenTime() != null) ? config.screenTime().timeWindow() : null;
+            case WAKE -> (config.wake() != null && config.wake().beforeTime() != null)
+                    ? "~" + config.wake().beforeTime() : null;
+            case SLEEP -> (config.sleep() != null && config.sleep().bedtimeBefore() != null)
+                    ? "~" + config.sleep().bedtimeBefore() : null;
+            default -> null;
+        };
+    }
+
+    /** 아직 확인하지 않은 종결 판정 — 클라는 이게 있으면 결과 모달을 띄우고 ack 를 호출한다. */
+    private TodayVerificationResponse.UnacknowledgedResult unacknowledged(VerificationDaily daily) {
+        if (daily == null || !daily.hasUnacknowledgedResult()) return null;
+        return new TodayVerificationResponse.UnacknowledgedResult(
+                daily.getId().toString(),
+                daily.getStatus() == VerificationStatus.SUCCESS ? "DONE" : "FAILED");
+    }
+
+    /**
+     * 이의제기 가능 여부와 기한. 기한은 확정 시각 +24시간이 아니라
+     * <b>실패 확정일의 다음 날 00:00 KST</b>로 고정된 자정 경계다. 횟수 한도는 없다.
+     * 솔로 챌린지는 이의 제기 대상이 아니다.
+     */
+    private TodayVerificationResponse.Appeal appeal(Challenge ch, ChallengeMember member,
+                                                    VerificationDaily daily, Instant now) {
+        if (daily == null || !ch.isGroup()) return null;
+        Instant confirmedAt = (daily.getVerifiedAt() != null) ? daily.getVerifiedAt() : now;
+        ZonedDateTime until = ZonedDateTime.ofInstant(confirmedAt, KST)
+                .toLocalDate().plusDays(1).atStartOfDay(KST);
+        boolean alreadyFiled = objectionRepo
+                .findByChallengeMemberIdAndTargetDate(member.getId(), daily.getTargetDate()).isPresent();
+        return new TodayVerificationResponse.Appeal(
+                until.format(ISO_OFFSET),
+                !alreadyFiled && now.isBefore(until.toInstant()));
+    }
+
     private ChallengeProgress toProgress(ChallengeMember m, Challenge ch, VerificationConfig config, LocalDate today) {
         boolean freq = config.isFrequency();
         int remaining = freq
@@ -111,35 +157,7 @@ public class VerificationReadService {
                 m.getTodayStatus() != null ? m.getTodayStatus().name() : null,
                 m.getSetupStatus() != null ? m.getSetupStatus().name() : null,
                 freq ? toPeriod(m) : null,
-                str(m.getLastSyncedAt()));
-    }
-
-    private Today buildToday(ChallengeMember m, Challenge ch, VerificationConfig config, LocalDate today,
-                             VerificationDaily daily, List<VerificationMethodResult> results) {
-        boolean isTarget = isTodayTarget(config, ch, m, today);
-        if (daily == null) {
-            return new Today(isTarget, isTarget ? "PENDING" : "NOT_TARGET", null, null, null, null, null, null, null);
-        }
-        var evidence = results.isEmpty() ? null : results.get(0).getEvidence();
-        return new Today(isTarget, daily.getStatus().name(),
-                str(daily.getWindowClosesAt()), str(daily.getVerifiedAt()),
-                daily.getVerifiedVia() != null ? daily.getVerifiedVia().name() : null,
-                str(daily.getDisputeClosesAt()),
-                daily.getFailureReason(), evidence,
-                buildObjection(ch, m, daily));
-    }
-
-    /** 잠정 실패(그룹)일 때만 이의 제기 객체를 구성. 솔로는 잠정 단계가 없어 null. */
-    private VerificationDetailResponse.Objection buildObjection(Challenge ch, ChallengeMember m, VerificationDaily daily) {
-        if (!ch.isGroup() || !daily.isProvisionalFailure()) return null;
-        var existing = objectionRepo.findByChallengeMemberIdAndTargetDate(m.getId(), daily.getTargetDate())
-                .orElse(null);
-        boolean windowOpen = daily.getDisputeClosesAt() != null
-                && java.time.Instant.now().isBefore(daily.getDisputeClosesAt());
-        boolean available = windowOpen && existing == null;   // 창 열림 + 미제출이면 제기 가능
-        return new VerificationDetailResponse.Objection(
-                available, str(daily.getDisputeClosesAt()),
-                existing != null ? existing.getId().toString() : null);
+                (m.getLastSyncedAt() != null) ? m.getLastSyncedAt().toString() : null);
     }
 
     private boolean isTodayTarget(VerificationConfig config, Challenge ch, ChallengeMember m, LocalDate today) {
@@ -160,14 +178,7 @@ public class VerificationReadService {
                 m.getCurPeriodEnd() != null ? m.getCurPeriodEnd().toString() : null);
     }
 
-    private String overallStatus(ChallengeMember m, Challenge ch) {
-        BigDecimal rate = m.getProgressRate();
-        if (ch.getStatus() == ChallengeStatus.COMPLETED) {
-            return (rate != null && rate.compareTo(BigDecimal.valueOf(100)) >= 0) ? "COMPLETED" : "FAILED";
-        }
-        if (m.getFailDays() > 0 || m.getTodayStatus() == VerificationStatus.FAILED) return "AT_RISK";
-        return "ON_TRACK";
+    private String formatKst(Instant instant) {
+        return (instant != null) ? ZonedDateTime.ofInstant(instant, KST).format(ISO_OFFSET) : null;
     }
-
-    private String str(java.time.Instant t) { return (t != null) ? t.toString() : null; }
 }

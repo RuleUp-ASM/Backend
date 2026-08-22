@@ -9,7 +9,12 @@ import java.util.Map;
 /**
  * POST /sync 요청(전송 스펙 §0.1 공통 envelope). Android SyncEnvelopeRequest 에 맞춘다.
  *  - deviceTimeMillis / elapsedRealtimeMillis / bootSessionId : 시각 조작·미래 ts·부트 이전 ts 검증 입력.
- *  - timeZone     : IANA — target_date 귀속.
+ *  - timeZone     : IANA — 참고용(판정은 KST 고정).
+ *  - coveredFrom/coveredUntil : "이 구간의 신호를 빠짐없이 담았다"는 선언(epoch millis).
+ *    서버는 이걸 누적해 날짜별 커버리지를 계산하고, 귀속일 전 구간이 채워지면 그 시점에 판정을 확정한다.
+ *    이 선언이 없으면 "신호가 없다"와 "아직 안 왔다"를 구분할 수 없다.
+ *  - backlog      : 장기 오프라인 복귀분(기록용 과거 구간). true면 레이트리밋에 별도 허용치를 적용해
+ *    복구가 막히지 않게 한다.
  *  - permissions  : 신호별 권한 현황(GRANTED/DENIED). network.vpnActive : VPN 게이트 입력(§9.1).
  *  - gaps         : 신호 공백 사유(§0.5) — 서버가 NO_SIGNAL/PERMISSION_MISSING 구분에 사용(§8.5).
  *  - diagnostics/integrity : worker heartbeat·Play Integrity verdict(주기적, 매 flush 아님).
@@ -24,6 +29,9 @@ public record SyncRequest(
         Long elapsedRealtimeMillis,
         String bootSessionId,
         String timeZone,
+        Long coveredFrom,
+        Long coveredUntil,
+        Boolean backlog,
         List<String> activeChallengeIds,
         Map<String, Object> permissions,
         Map<String, Object> diagnostics,

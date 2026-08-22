@@ -108,6 +108,10 @@ public class OpenApiConfig {
                     .description("초대 링크 발급(방장) · 조회 · 수락 — 비공개 방에 들어오는 유일한 경로"),
             new Tag().name("Challenge Room")
                     .description("방 홈 일괄 조회 · 인증 이벤트 스레드 · 방 안 랭킹 — 전부 ACTIVE 멤버 전용"),
+            new Tag().name("인증 구현 - 챌린지")
+                    .description("셋업(인증 장소·측정 대상 앱) · 오늘 인증 결과 · 수동 인증 제출 — 방 안 인증 화면이 쓰는 API"),
+            new Tag().name("인증 구현")
+                    .description("인증 신호 전송(sync) · 판정 결과 확인(ack) · 수동 인증 취소 · 진행률 일괄 조회"),
             new Tag().name("Challenge Ranking")
                     .description("방 밖 랭킹 — 같은 모드(GROUP/SOLO)끼리 챌린지를 비교한다. 하루 1회 03시 갱신"),
             new Tag().name("Challenge Admin")

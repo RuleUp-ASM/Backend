@@ -6,12 +6,15 @@ import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
 import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
+import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
 import com.ruleup.ruleup_backend.verification.domain.VerificationConfig;
 import com.ruleup.ruleup_backend.verification.domain.VerificationDaily;
+import com.ruleup.ruleup_backend.verification.domain.VerificationMethod;
 import com.ruleup.ruleup_backend.verification.domain.VerificationMethodResult;
-import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
 import com.ruleup.ruleup_backend.verification.dto.ManualVerificationRequest;
 import com.ruleup.ruleup_backend.verification.dto.ManualVerificationResponse;
+import com.ruleup.ruleup_backend.verification.dto.StreakChange;
+import com.ruleup.ruleup_backend.verification.dto.VerificationCancelResponse;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationMethodResultRepository;
 import lombok.RequiredArgsConstructor;
@@ -27,17 +30,21 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * 수동 인증 제출(테크스펙 v2 §9, §11.6). 두 갈래:
- *  1) 정규 수동(PHOTO/SELF_CHECK): 자기증명 = 제출 즉시 SUCCESS(verifiedVia=MANUAL). 봉투·대상일·중복만 검증.
- *  2) 예비 폴백(asFallback=true): 자동인데 오늘 자동 불가일 때. 주1회(롤링7일)·잠정 SUCCESS·이의윈도우 확정(§9.2).
- *  - 사진 내용은 판단하지 않음(VLM 없음).
+ * 수동 인증(자체 체크) 제출·취소.
+ *
+ * <p><b>수동 방에서만</b> 쓴다 — 자동 방의 수동 폴백은 폐기됐고, 자동 방의 실패 구제는 이의 제기가 담당한다.
+ * 자동 방에서 부르면 NOT_MANUAL_CHALLENGE.
+ *
+ * <p>별도 부정 방지 장치는 두지 않는다 — 제출 즉시 인정(치팅 가능성은 정책적으로 수용, AI 호출 비용도 안 쓴다).
+ * 대신 <b>당일(KST) 마감</b>이라 날짜가 지나면 체크도 취소도 불가하다.
+ * 점수 패널티는 수동 방 고정 OFF라 점수 변동이 없지만(scoreNote=MANUAL_NO_SCORE),
+ * 성공률·랭킹·통계에는 포함된다.
  */
 @Service
 @RequiredArgsConstructor
 public class VerificationManualService {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
-    private static final int FALLBACK_MONTHLY_LIMIT = 3;       // 월 3회/챌린지(§10.2)
 
     private final ChallengeQueryService challengeQuery;
     private final VerificationDailyRepository dailyRepo;
@@ -45,106 +52,101 @@ public class VerificationManualService {
     private final VerificationConfigFactory configFactory;
     private final VerificationMemberSetup memberSetup;
     private final VerificationProgressService progressService;
+    private final StreakService streakService;
     private final ApplicationEventPublisher eventPublisher;
 
+    // ===== POST /api/v1/challenges/{challengeId}/verifications =====
     @Transactional
     public ManualVerificationResponse submit(UUID userId, UUID challengeId, ManualVerificationRequest req) {
         Challenge ch = challengeQuery.findActiveChallenge(challengeId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
-        ChallengeMember member = challengeQuery.findMembership(challengeId, userId).orElse(null);
-        if (member == null || !member.isActive()) {
-            throw new BusinessException(ErrorCode.NOT_CHALLENGE_MEMBER);
+        ChallengeMember member = activeMember(challengeId, userId);
+
+        VerificationConfig config = configFactory.build(ch);
+        if (!config.isManual()) {
+            throw new BusinessException(ErrorCode.NOT_MANUAL_CHALLENGE);
         }
 
-        boolean isPhoto = "PHOTO".equalsIgnoreCase(req.method());
-        String method = isPhoto ? "PHOTO" : "SELF_CHECK";
-        if (isPhoto && (req.imageUrl() == null || req.imageUrl().isBlank())) {
-            throw new BusinessException(ErrorCode.IMAGE_REQUIRED);
-        }
-
+        // 당일 마감 — targetDate 는 오늘만 허용한다(생략하면 오늘).
         LocalDate today = LocalDate.now(KST);
-        LocalDate targetDate = parseTargetDate(req.targetDate(), today);
-        if (targetDate.isBefore(ch.getStartDate()) || targetDate.isAfter(ch.getEndDate())) {
+        LocalDate targetDate = parseTargetDate(req != null ? req.targetDate() : null, today);
+        if (!targetDate.equals(today)
+                || targetDate.isBefore(ch.getStartDate()) || targetDate.isAfter(ch.getEndDate())) {
             throw new BusinessException(ErrorCode.INVALID_TARGET_DATE);
         }
 
-        if (member.getTargetDays() == 0) {
-            VerificationConfig config = configFactory.build(ch);
-            memberSetup.apply(member, ch, config);
-        }
+        if (member.getTargetDays() == 0) memberSetup.apply(member, ch, config);
 
         VerificationDaily daily = dailyRepo.findByChallengeMemberIdAndTargetDate(member.getId(), targetDate)
                 .orElseGet(() -> dailyRepo.save(
                         VerificationDaily.open(member.getId(), ch.getId(), member.getUserId(), targetDate)));
         if (daily.getStatus() == VerificationStatus.SUCCESS) {
-            throw new BusinessException(ErrorCode.ALREADY_VERIFIED);
-        }
-        // 이미 확정(FAILED lock)된 일자는 제출 기한 경과(솔로: 창닫힘+lag / 그룹: 이의 제기 창 마감, §10.2).
-        if (daily.getStatus() == VerificationStatus.FAILED) {
-            throw new BusinessException(ErrorCode.VERIFICATION_WINDOW_CLOSED);
+            throw new BusinessException(ErrorCode.ALREADY_VERIFIED);       // 하루 1회
         }
 
+        int streakBefore = streakService.around(member.getId(), targetDate).before();
+
+        String method = VerificationMethod.SELF_CHECK.name();
         Instant now = Instant.now();
-        boolean fallback = req.fallback();
-
-        if (fallback) {
-            // 폴백 제출은 사진 포함 글 혹은 글 — content 필수(§10.2).
-            if (req.content() == null || req.content().isBlank()) {
-                throw new BusinessException(ErrorCode.CONTENT_REQUIRED);
-            }
-            // 월 3회/챌린지 한도 — 초과면 제출 거부(실패 확정 아님, 자동 판정 경로 유지, §10.2).
-            if (!member.tryUseFallback(today, FALLBACK_MONTHLY_LIMIT)) {
-                throw new BusinessException(ErrorCode.FALLBACK_LIMIT_EXCEEDED);
-            }
-        }
-
         VerificationMethodResult mr = methodResultRepo
-                .findByVerificationDailyIdAndMethod(daily.getId(), method).orElse(null);
-        if (mr == null) {
-            mr = VerificationMethodResult.create(daily.getId(), method, null, true);
-        }
+                .findByVerificationDailyIdAndMethod(daily.getId(), method)
+                .orElseGet(() -> VerificationMethodResult.create(daily.getId(), method, null, true));
         Map<String, Object> evidence = new HashMap<>();
-        if (isPhoto) evidence.put("imageUrl", req.imageUrl()); else evidence.put("selfCheck", true);
-        if (fallback) {
-            evidence.put("fallback", true);
-            evidence.put("content", req.content());                 // 처리 대기함(pending-reviews)에서 증빙 표시
-            if (req.imageUrl() != null) evidence.put("imageUrl", req.imageUrl());
-        }
-
-        if (fallback && ch.isGroup()) {
-            // 그룹 폴백: 방장/공동 관리자 승인 대기(§10.2). 방식 결과도 PENDING, 진행률 유지.
-            mr.evaluate(VerificationStatus.PENDING, evidence, now);
-            methodResultRepo.save(mr);
-            daily.recordFallbackPending(method);
-            progressService.recount(member);
-            return new ManualVerificationResponse(
-                    daily.getId().toString(), targetDate.toString(), "PENDING_APPROVAL",
-                    method, "PENDING", null, null, member.getProgressRate());
-        }
-
-        if (fallback) {
-            // 솔로 폴백: 승인 주체가 본인뿐 → 제출 즉시 SUCCESS(verifiedVia=MANUAL_FALLBACK, §10.2).
-            mr.evaluate(VerificationStatus.SUCCESS, evidence, now);
-            methodResultRepo.save(mr);
-            daily.approveFallback(now);
-            if (targetDate.equals(today)) progressService.recountAndSetToday(member, VerificationStatus.SUCCESS);
-            else progressService.recount(member);
-            eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "MANUAL_FALLBACK_SUCCESS"));
-            return new ManualVerificationResponse(
-                    daily.getId().toString(), targetDate.toString(), "SUCCESS",
-                    method, null, "MANUAL_FALLBACK", null, member.getProgressRate());
-        }
-
-        // 정규 수동 = 즉시 확정 SUCCESS.
+        evidence.put("selfCheck", true);
+        if (req != null && req.note() != null && !req.note().isBlank()) evidence.put("note", req.note());
         mr.evaluate(VerificationStatus.SUCCESS, evidence, now);
         methodResultRepo.save(mr);
+
         daily.recordManual(method, now);
-        if (targetDate.equals(today)) progressService.updateAfterSync(member, VerificationStatus.SUCCESS, now);
-        else progressService.recount(member);
+        daily.acknowledge(now);   // 본인이 직접 체크한 결과라 확인할 모달이 없다
+        progressService.updateAfterSync(member, VerificationStatus.SUCCESS, now);
         eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "MANUAL_SUCCESS"));
+
         return new ManualVerificationResponse(
-                daily.getId().toString(), targetDate.toString(), "SUCCESS",
-                method, null, "MANUAL", null, member.getProgressRate());
+                daily.getId().toString(), targetDate.toString(), "DONE",
+                new StreakChange(streakBefore, streakBefore + 1),
+                ManualVerificationResponse.MANUAL_NO_SCORE);
+    }
+
+    // ===== DELETE /api/v1/verifications/{verificationId} =====
+    /**
+     * 수동 체크 취소 — "당일 마감" 정책의 취소 경로. 해당 날짜(KST)가 지나면 불가하고,
+     * 자동 판정 건은 대상이 아니다. 취소하면 그 날짜는 다시 IN_PROGRESS 로 돌아간다.
+     */
+    @Transactional
+    public VerificationCancelResponse cancel(UUID userId, UUID verificationId) {
+        VerificationDaily daily = dailyRepo.findById(verificationId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.VERIFICATION_NOT_FOUND));
+        if (!daily.getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.VERIFICATION_NOT_FOUND);   // 본인 건이 아님 — 존재를 알리지 않는다
+        }
+        if (!daily.isManualVerification()) {
+            throw new BusinessException(ErrorCode.NOT_MANUAL_VERIFICATION);
+        }
+        if (!daily.getTargetDate().equals(LocalDate.now(KST))) {
+            throw new BusinessException(ErrorCode.CANCEL_WINDOW_CLOSED);
+        }
+
+        methodResultRepo.findByVerificationDailyIdAndMethod(
+                        daily.getId(), VerificationMethod.SELF_CHECK.name())
+                .ifPresent(methodResultRepo::delete);
+        daily.cancelManual();
+
+        ChallengeMember member = challengeQuery.findMembership(daily.getChallengeId(), userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_CHALLENGE_MEMBER));
+        progressService.recountAndSetToday(member, VerificationStatus.PENDING);
+        eventPublisher.publishEvent(
+                ChallengeStatsRefreshRequested.of(daily.getChallengeId(), "MANUAL_CANCELED"));
+
+        return new VerificationCancelResponse(true);
+    }
+
+    private ChallengeMember activeMember(UUID challengeId, UUID userId) {
+        ChallengeMember member = challengeQuery.findMembership(challengeId, userId).orElse(null);
+        if (member == null || !member.isActive()) {
+            throw new BusinessException(ErrorCode.NOT_CHALLENGE_MEMBER);
+        }
+        return member;
     }
 
     private LocalDate parseTargetDate(String raw, LocalDate today) {

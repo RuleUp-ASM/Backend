@@ -181,16 +181,18 @@ public enum ErrorCode {
     NOT_CHALLENGE_MEMBER(HttpStatus.FORBIDDEN, "챌린지 참여자만 접근할 수 있습니다."),
     ALREADY_VERIFIED(HttpStatus.CONFLICT, "이미 인증된 날짜입니다."),
 
-    // ===== 폴백 승인 / 이의 제기 처리 (§8.7 / §10.2 — OWNER/MANAGER) =====
+    // ===== 수동 인증 제출 / 취소 =====
+    NOT_MANUAL_CHALLENGE(HttpStatus.CONFLICT, "직접 체크로 인증하는 챌린지가 아니에요."),
+    NOT_MANUAL_VERIFICATION(HttpStatus.CONFLICT, "자동으로 판정된 인증은 취소할 수 없어요."),
+    CANCEL_WINDOW_CLOSED(HttpStatus.CONFLICT, "오늘이 지나서 취소할 수 없어요."),
+
+    // ===== 이의 제기 처리 (OWNER/MANAGER) =====
     VERIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "인증 제출을 찾을 수 없습니다."),
     ALREADY_DECIDED(HttpStatus.CONFLICT, "이미 승인/거절된 제출입니다."),
-    NOT_PENDING_APPROVAL(HttpStatus.CONFLICT, "승인 대상(예비 폴백)이 아닙니다."),
     INVALID_TARGET_DATE(HttpStatus.BAD_REQUEST, "유효하지 않은 대상 날짜입니다."),
-    IMAGE_REQUIRED(HttpStatus.BAD_REQUEST, "사진 인증은 이미지가 필요합니다."),
     CONTENT_REQUIRED(HttpStatus.BAD_REQUEST, "글 내용을 입력해주세요."),
     NOT_CHALLENGE_ADMIN(HttpStatus.FORBIDDEN, "방장 또는 공동 관리자만 처리할 수 있습니다."),
     INVALID_DECISION(HttpStatus.BAD_REQUEST, "유효하지 않은 처리 동작입니다. (APPROVE / REJECT)"),
-    VERIFICATION_WINDOW_CLOSED(HttpStatus.CONFLICT, "제출 기한이 지났습니다."),
     // 이의 제기(§8.7)
     OBJECTION_NOT_FOUND(HttpStatus.NOT_FOUND, "이의 제기를 찾을 수 없습니다."),
     OBJECTION_WINDOW_CLOSED(HttpStatus.CONFLICT, "이의 제기 창(3일)이 지났습니다."),
@@ -198,15 +200,15 @@ public enum ErrorCode {
     ALREADY_OBJECTED(HttpStatus.CONFLICT, "이미 이의 제기한 날짜입니다."),
     UNSUPPORTED_OBJECTION_TYPE(HttpStatus.BAD_REQUEST, "지원하지 않는 이의 제기 유형입니다. (FAILURE만 지원)"),
 
-    // ===== 인증 v2 — 예비 폴백 / 셋업 / 내 위치 / 장소 검색 (§9·§11) =====
-    FALLBACK_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "예비 수동 인증은 주 1회만 사용할 수 있습니다."),
-    GEOFENCE_NOT_CONFIGURED(HttpStatus.BAD_REQUEST, "인증 장소(앵커)가 설정되지 않았습니다."),
-    LOCATION_LOCKED_IN_WINDOW(HttpStatus.CONFLICT, "인증 윈도우 중에는 위치를 변경할 수 없습니다. 변경은 익일부터 적용됩니다."),
-    LOCATION_CHANGE_COOLDOWN(HttpStatus.TOO_MANY_REQUESTS, "위치 변경은 일정 기간(쿨다운) 후에 가능합니다."),
-    INVALID_ANCHOR(HttpStatus.BAD_REQUEST, "앵커 설정이 올바르지 않습니다.(반경 0.5~5km, 최대 10개)"),
-    SCREENTIME_NOT_CONFIGURED(HttpStatus.BAD_REQUEST, "측정 대상 앱이 설정되지 않았습니다."),
-    INVALID_APP(HttpStatus.BAD_REQUEST, "대상 앱이 올바르지 않습니다.(패키지명 형식·중복·1~10개)"),
-    SCREENTIME_CHANGE_COOLDOWN(HttpStatus.TOO_MANY_REQUESTS, "대상 앱 변경은 일정 기간(쿨다운) 후에 가능합니다."),
+    // ===== 인증 셋업 — 내 인증 장소 / 측정 대상 앱 =====
+    GEOFENCE_NOT_CONFIGURED(HttpStatus.BAD_REQUEST, "인증 장소가 아직 설정되지 않았어요."),
+    LOCATION_LOCKED_IN_WINDOW(HttpStatus.CONFLICT, "인증 시간 중에는 장소를 바꿀 수 없어요. 내일 다시 시도해 주세요."),
+    INVALID_ANCHOR(HttpStatus.BAD_REQUEST, "인증 장소가 올바르지 않아요. 지도에서 다시 선택해 주세요."),
+    ANCHOR_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "인증 장소는 최대 3개까지 등록할 수 있어요."),
+    SCREENTIME_NOT_CONFIGURED(HttpStatus.BAD_REQUEST, "측정할 앱이 아직 설정되지 않았어요."),
+    INVALID_APP(HttpStatus.BAD_REQUEST, "선택한 앱이 올바르지 않아요. 최대 10개까지, 같은 앱은 한 번만 고를 수 있어요."),
+    /** 앵커·대상 앱 변경은 월 1회(매월 1일 00:00 KST 리셋). 응답에 nextChangeAvailableAt 을 함께 내려준다. */
+    SETTING_CHANGE_LIMIT(HttpStatus.TOO_MANY_REQUESTS, "이 설정은 한 달에 한 번만 바꿀 수 있어요."),
 
     // ===== 챌린지 탐색 (search 스펙) =====
     INVALID_SORT_TYPE(HttpStatus.BAD_REQUEST, "지원하지 않는 정렬이에요."),

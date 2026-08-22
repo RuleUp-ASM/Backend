@@ -1,14 +1,21 @@
 package com.ruleup.ruleup_backend.verification.dto;
 
-import java.math.BigDecimal;
-
+/**
+ * POST /api/v1/challenges/{challengeId}/verifications 응답.
+ *
+ * @param verificationId 인증 건 ID — 취소(DELETE /verifications/{id})에 쓴다
+ * @param targetDate     귀속일(YYYY-MM-DD, KST)
+ * @param status         "DONE" 고정 — 제출 즉시 확정된다
+ * @param streak         연속 기록 변화
+ * @param scoreNote      "MANUAL_NO_SCORE" 고정. 수동 방은 점수 미반영이지만 성공률·랭킹·통계에는 포함된다
+ */
 public record ManualVerificationResponse(
         String verificationId,
         String targetDate,
-        String status,            // SUCCESS / PENDING_APPROVAL
-        String method,            // 제출 방식 에코(PHOTO / SELF_CHECK) — 클라 표시용
-        String approvalStatus,    // 폴백이면 PENDING, 정규 수동이면 null
-        String verifiedVia,       // MANUAL(정규) / null(폴백, 승인 전)
-        String disputeClosesAt,   // 승인 모델에선 항상 null(레거시 이의창 미사용)
-        BigDecimal progressRate
-) {}
+        String status,
+        StreakChange streak,
+        String scoreNote
+) {
+    /** 수동 방 점수 미반영 표식. */
+    public static final String MANUAL_NO_SCORE = "MANUAL_NO_SCORE";
+}

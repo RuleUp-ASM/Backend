@@ -68,7 +68,7 @@ public class VerificationConfigFactory {
                     timeParamOrNull(params, "bedtime_before"),
                     decimalParamOrNull(params, "sleep_hours"),
                     Polarity.ACHIEVEMENT, 12);
-            default -> { /* PHOTO / SELF_CHECK: 수동 */ }
+            default -> { /* SELF_CHECK: 수동 — 자동 신호 설정 없음 */ }
         }
 
         return new VerificationConfig(
@@ -148,26 +148,26 @@ public class VerificationConfigFactory {
             // v2: 움직임은 전부 HEALTH로. 커스텀 세션(GPS_DISTANCE 평가기)은 보존하되 라우팅 제외.
             case "HEALTH", "GPS_DISTANCE", "ACTIVITY" -> VerificationMethod.HEALTH;
             case "SLEEP" -> VerificationMethod.SLEEP;
-            case "SELF_CHECK" -> VerificationMethod.SELF_CHECK;
-            default -> VerificationMethod.PHOTO;
+            // 수동은 SELF_CHECK 하나로 모은다 — 사진 판단(PHOTO)은 폐기됐고 인증 방식은 6종이다.
+            default -> VerificationMethod.SELF_CHECK;
         };
     }
 
     /** 명시 컬럼이 없을 때만 쓰는 안전망(템플릿 매칭 실패·직접 입력). */
     private String heuristicTag(Object snapObj, Map<String, Object> params) {
-        if (snapObj == null) return "PHOTO";
+        if (snapObj == null) return "SELF_CHECK";
         var snap = (com.ruleup.ruleup_backend.routine.domain.VerificationConfig) snapObj;
         if (snap.selectedMethod() == SelectedMethod.MANUAL) {
-            return snap.signalSource() == SignalSource.PHOTO ? "PHOTO" : "SELF_CHECK";
+            return "SELF_CHECK";   // 사진이든 체크든 서버 판정은 동일 — 제출 즉시 인정
         }
         SignalSource src = snap.signalSource();
-        if (src == null) return "PHOTO";
+        if (src == null) return "SELF_CHECK";
         return switch (src) {
             case GEOFENCE -> "GPS_PRESENCE";
             case GPS, ACTIVITY, HC_RECORD -> "HEALTH";   // v2: 움직임은 Health Connect
             case SLEEP -> "SLEEP";
             case USAGE -> (params != null && params.containsKey("target_time")) ? "WAKE" : "SCREEN_TIME_MIN";
-            default -> "PHOTO";
+            default -> "SELF_CHECK";
         };
     }
 

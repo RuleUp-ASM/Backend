@@ -9,6 +9,7 @@ import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.verification.domain.*;
+import com.ruleup.ruleup_backend.verification.config.VerificationProperties;
 import com.ruleup.ruleup_backend.verification.dto.SyncRequest;
 import com.ruleup.ruleup_backend.verification.dto.SyncResponse;
 import com.ruleup.ruleup_backend.verification.evaluator.DayContext;
@@ -31,6 +32,8 @@ import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -66,6 +69,7 @@ public class VerificationSyncService {
     private final VerificationProgressService progressService;
     private final ApplicationEventPublisher eventPublisher;
     private final com.ruleup.ruleup_backend.user.UserRepository userRepository;
+    private final VerificationProperties properties;
     private final Map<VerificationMethod, MethodEvaluator> evaluators;
 
     public VerificationSyncService(ChallengeQueryService challengeQuery,
@@ -77,6 +81,7 @@ public class VerificationSyncService {
                                    VerificationProgressService progressService,
                                    ApplicationEventPublisher eventPublisher,
                                    com.ruleup.ruleup_backend.user.UserRepository userRepository,
+                                   VerificationProperties properties,
                                    List<MethodEvaluator> evaluatorList) {
         this.challengeQuery = challengeQuery;
         this.dailyRepo = dailyRepo;
@@ -87,6 +92,7 @@ public class VerificationSyncService {
         this.progressService = progressService;
         this.eventPublisher = eventPublisher;
         this.userRepository = userRepository;
+        this.properties = properties;
         this.evaluators = evaluatorList.stream()
                 .collect(Collectors.toMap(MethodEvaluator::method, e -> e, (a, b) -> a));
     }
@@ -135,15 +141,20 @@ public class VerificationSyncService {
                         challenge.getId(), "AUTO_VERIFICATION_FINALIZED"));
             }
             updated.add(new SyncResponse.UpdatedChallenge(
-                    member.getChallengeId().toString(), todayStatus.name(), member.getProgressRate()));
+                    member.getChallengeId().toString(),
+                    TodayStatusView.of(todayStatus, daily.getWindowClosesAt(), now),
+                    member.getProgressRate()));
         }
         if (log.isDebugEnabled()) {
             log.debug("sync userId={} signals={} ignored={} activeMembers={} updated={}",
                     userId, signals.size(), ignored, members.size(), updated.size());
         }
         // flushIntervalSec: 기기 스펙 기반 산정값을 매 ACK마다 전체값으로 회신(§6 제어 모델).
+        // maxPayloadBytes: 클라가 이 값을 보고 전송 구간을 쪼갠다(설정값, 실측 후 조정).
         int flushIntervalSec = FlushIntervalPolicy.forUser(userRepository.findById(userId).orElse(null));
-        return new SyncResponse(now.toString(), flushIntervalSec, updated, ignored);
+        return new SyncResponse(
+                ZonedDateTime.ofInstant(now, KST).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
+                flushIntervalSec, updated, ignored, properties.maxPayloadBytes());
     }
 
     private boolean becameFinal(VerificationStatus before, VerificationStatus after) {

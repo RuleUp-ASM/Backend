@@ -116,7 +116,10 @@ public class ChallengeMember extends AssignedIdEntity {
     private List<GeoAnchor> anchors;          // 멤버 GeoAnchor[] (없으면 null). config가 아니라 멤버에 저장.
 
     @Column(name = "anchor_updated_at")
-    private Instant anchorUpdatedAt;          // 수정 쿨다운 기준
+    private Instant anchorUpdatedAt;          // 마지막 저장 시각(최초 셋업 포함)
+
+    @Column(name = "anchor_changed_at")
+    private Instant anchorChangedAt;          // 마지막 "변경"(PUT) 시각 — 월 1회 한도 기준. 최초 셋업은 기록 안 함
 
     // ===== SCREEN_TIME 측정 대상 앱(PER_MEMBER 바인딩, my-screen-apps API) =====
     // 현재 적용 세트 + 익일 적용 대기 세트(pending). 변경은 항상 익일 00:00부터 적용(당일 조작 방지).
@@ -135,7 +138,10 @@ public class ChallengeMember extends AssignedIdEntity {
     private LocalDate pendingScreenAppsEffectiveDate; // 대기 세트 적용 시작 날짜(익일)
 
     @Column(name = "screen_apps_updated_at")
-    private Instant screenAppsUpdatedAt;             // 변경 쿨다운 기준(마지막 stage 시각)
+    private Instant screenAppsUpdatedAt;             // 마지막 stage 시각(최초 셋업 포함)
+
+    @Column(name = "screen_apps_changed_at")
+    private Instant screenAppsChangedAt;             // 마지막 "변경"(PUT) 시각 — 월 1회 한도 기준
 
     @Column(name = "fallback_used_period_start")
     private LocalDate fallbackUsedPeriodStart;// 예비 폴백 주1회(롤링 7일) 윈도우 시작
@@ -283,10 +289,16 @@ public class ChallengeMember extends AssignedIdEntity {
 
     public boolean isSetupReady() { return setupStatus == SetupStatus.READY; }
 
-    /** 멤버 앵커 교체(셋업/내 위치 수정). 본인 것만 바뀐다(§5.1). */
+    /** 최초 셋업의 앵커 바인딩. 변경 한도를 소진하지 않는다(월 1회는 이후 changeAnchors부터). */
     public void replaceAnchors(List<GeoAnchor> newAnchors, Instant at) {
         this.anchors = (newAnchors != null) ? new ArrayList<>(newAnchors) : null;
         this.anchorUpdatedAt = at;
+    }
+
+    /** 내 인증 장소 <b>변경</b>(PUT my-location). 이 저장이 그 달의 변경 1회를 소진한다. */
+    public void changeAnchors(List<GeoAnchor> newAnchors, Instant at) {
+        replaceAnchors(newAnchors, at);
+        this.anchorChangedAt = at;
     }
 
     // ===== SCREEN_TIME 측정 대상 앱 =====
@@ -300,11 +312,12 @@ public class ChallengeMember extends AssignedIdEntity {
         this.screenAppsUpdatedAt = at;
     }
 
-    /** 변경 접수: 익일 00:00부터 적용될 대기 세트로 stage. 같은 날 재요청은 대기 세트를 덮어쓴다(마지막 승리). */
+    /** 변경 접수: 익일 00:00부터 적용될 대기 세트로 stage. 이 저장이 그 달의 변경 1회를 소진한다. */
     public void stagePendingScreenApps(List<ScreenApp> apps, LocalDate effectiveDate, Instant at) {
         this.pendingScreenApps = (apps != null) ? new ArrayList<>(apps) : null;
         this.pendingScreenAppsEffectiveDate = effectiveDate;
         this.screenAppsUpdatedAt = at;
+        this.screenAppsChangedAt = at;
     }
 
     /**
