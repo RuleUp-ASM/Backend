@@ -99,10 +99,10 @@ public class VerificationSyncService {
 
     @Transactional
     public SyncResponse sync(UUID userId, SyncRequest req) {
-        rateLimiter.check(userId.toString());
-        if (req == null || req.deviceTimeMillis() == null) {
-            throw new BusinessException(ErrorCode.INVALID_SIGNAL_PAYLOAD);
-        }
+        if (req == null) throw new BusinessException(ErrorCode.INVALID_SIGNAL_PAYLOAD);
+        // 복구 전송(backlog)은 별도 허용치 — 평상시 간격을 그대로 적용하면 밀린 구간을 올릴 수가 없다.
+        rateLimiter.check(userId.toString(), Boolean.TRUE.equals(req.backlog()));
+        validateEnvelope(req);
         List<SyncSignal> signals = (req.signals() != null) ? req.signals() : List.of();
         if (signals.size() > MAX_SIGNALS_PER_SYNC) {
             throw new BusinessException(ErrorCode.SYNC_PAYLOAD_TOO_LARGE);   // 413 — 클라는 분할 재전송
@@ -155,6 +155,20 @@ public class VerificationSyncService {
         return new SyncResponse(
                 ZonedDateTime.ofInstant(now, KST).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
                 flushIntervalSec, updated, ignored, properties.maxPayloadBytes());
+    }
+
+    /**
+     * 봉투 필수값 검증.
+     *
+     * <p>{@code coveredFrom}/{@code coveredUntil}은 "이 구간의 신호를 빠짐없이 담았다"는 <b>선언</b>이라 필수다.
+     * 이게 없으면 서버는 "신호가 없다"와 "아직 안 왔다"를 구분할 수 없어 판정을 확정할 시점을 잡지 못한다.
+     */
+    private void validateEnvelope(SyncRequest req) {
+        if (req.deviceTimeMillis() == null
+                || req.coveredFrom() == null || req.coveredUntil() == null
+                || req.coveredUntil() < req.coveredFrom()) {
+            throw new BusinessException(ErrorCode.INVALID_SIGNAL_PAYLOAD);
+        }
     }
 
     private boolean becameFinal(VerificationStatus before, VerificationStatus after) {

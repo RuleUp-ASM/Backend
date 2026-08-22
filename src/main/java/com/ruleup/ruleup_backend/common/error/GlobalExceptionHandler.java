@@ -18,10 +18,9 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ApiResponse<Void>> handleBusiness(BusinessException e) {
         ErrorCode code = e.getErrorCode();
-        ErrorResponse body = (e.getDetail() != null)
-                ? ErrorResponse.of(code, e.getDetail(), e.getRejoinAvailableAt())
-                : ErrorResponse.of(code);
-        return ResponseEntity.status(code.getStatus()).body(ApiResponse.fail(body));
+        // 부가 필드(reason·rejoinAvailableAt·nextChangeAvailableAt)는 각각 독립이다 —
+        // detail 유무로 분기하면 detail 없이 실린 값이 조용히 사라진다.
+        return ResponseEntity.status(code.getStatus()).body(ApiResponse.fail(ErrorResponse.of(e)));
     }
 
     // 본문 JSON이 깨졌거나 형식이 안 맞을 때 → 400

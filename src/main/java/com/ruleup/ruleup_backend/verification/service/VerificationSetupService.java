@@ -183,7 +183,7 @@ public class VerificationSetupService {
         });
 
         if (!MonthlyChangeLimit.available(member.getAnchorChangedAt(), now)) {
-            throw new BusinessException(ErrorCode.SETTING_CHANGE_LIMIT);
+            throw BusinessException.settingChangeLimit(MonthlyChangeLimit.nextChangeAvailableAt(now));
         }
 
         List<GeoAnchor> anchors = toAnchors(req.anchors());
@@ -253,7 +253,7 @@ public class VerificationSetupService {
 
         Instant now = Instant.now();
         if (!MonthlyChangeLimit.available(member.getScreenAppsChangedAt(), now)) {
-            throw new BusinessException(ErrorCode.SETTING_CHANGE_LIMIT);
+            throw BusinessException.settingChangeLimit(MonthlyChangeLimit.nextChangeAvailableAt(now));
         }
 
         LocalDate today = LocalDate.now(KST);
