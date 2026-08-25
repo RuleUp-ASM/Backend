@@ -24,11 +24,13 @@ import java.util.UUID;
  * 진행중·실패 예정·검사중은 저장하지 않고 조회 시 계산한다 —
  * 실패 예정은 PENDING 행에 {@code failureReason} 만 달린 상태로 나타난다.
  *
- * <p>시간 규칙
+ * <p>시간 규칙 (인증 정책 §2, {@link VerificationDeadlines})
  * <ul>
  *   <li>성공은 조건 충족 <b>즉시</b> 확정한다.</li>
- *   <li>실패는 {@code finalizeAfter}(= 귀속일 다음 날 00:00 KST)에 확정 배치가 만든다. 그 전에는 만들지 않는다.</li>
- *   <li>확정된 실패는 {@code appealClosesAt} 까지 이의를 받을 수 있고, 그때까지 피드에 공유되지 않는다.</li>
+ *   <li>귀속일이 끝나도 하루(D+1)는 더 기다린다. 그 사이 도착한 신호도 발생 시각이 맞으면 그대로 인정한다.</li>
+ *   <li>실패는 {@code finalizeAfter}(= 귀속일 이틀 뒤 00:00 KST)에 확정 배치가 만든다. 그 전에는 만들지 않는다.</li>
+ *   <li>이의는 확정 <b>전에</b> 받는다 — {@code appealClosesAt} 이 확정 시각과 같아서,
+ *       유저는 유예 하루 동안 "이대로면 실패"를 보고 신청한다.</li>
  * </ul>
  *
  * <p>uq(challengeMemberId, targetDate)로 멤버×날짜 하루 1줄 — 동시 sync 가 같은 성공을 발견해도 한 건만 확정된다.
@@ -74,7 +76,7 @@ public class VerificationDaily extends AssignedIdEntity {
     @Column(name = "windowClosesAt")
     private Instant windowClosesAt;      // 인증 창 닫힘 시각(시간창이 있는 유형)
 
-    /** 최종 확정 시각 = 귀속일 다음 날 00:00 KST. 확정 배치가 이 시각이 지난 PENDING 행만 처리한다. */
+    /** 최종 확정 시각 = 귀속일 이틀 뒤 00:00 KST. 확정 배치가 이 시각이 지난 PENDING 행만 처리한다. */
     @Column(name = "finalizeAfter")
     private Instant finalizeAfter;
 
@@ -89,11 +91,11 @@ public class VerificationDaily extends AssignedIdEntity {
     @Column(name = "verifiedVia")
     private VerifiedVia verifiedVia;     // AUTO / MANUAL / APPEAL (없으면 미확정)
 
-    /** 이의 신청 기한 — 실패 확정일의 다음 날 00:00 KST. 실패 확정 시에만 열린다. */
+    /** 이의 신청 기한 = 확정 시각(D+2 00:00 KST). 행을 여는 시점에 함께 세워 확정 전에도 신청받는다. */
     @Column(name = "appealClosesAt")
     private Instant appealClosesAt;
 
-    /** 방 피드에 실패 이벤트를 공유해도 되는 시각. 이의 기간 중에는 반드시 null 이 아니라 기한 이후여야 한다. */
+    /** 방 피드에 실패 이벤트를 공유해도 되는 시각. 실패는 확정(= 이의 마감) 이후에만 실린다. */
     @Column(name = "shareableAt")
     private Instant shareableAt;
 
@@ -117,10 +119,16 @@ public class VerificationDaily extends AssignedIdEntity {
         return v;
     }
 
-    /** 인증 창/확정 시각 설정. finalizeAfter 는 판정 유형과 무관하게 귀속일 다음 날 00:00 KST 다. */
-    public void applyWindow(Instant windowClosesAt, Instant finalizeAfter) {
+    /**
+     * 인증 창 표시 시각 설정. 확정·이의 마감은 귀속일만으로 정해지므로 함께 세운다 —
+     * 판정 결과나 평가기 사정에 따라 흔들리면 안 된다.
+     */
+    public void applyWindow(Instant windowClosesAt) {
         this.windowClosesAt = windowClosesAt;
-        this.finalizeAfter = finalizeAfter;
+        this.finalizeAfter = VerificationDeadlines.finalizeAfter(targetDate);
+        if (!status.isTerminal()) {
+            this.appealClosesAt = VerificationDeadlines.appealClosesAt(targetDate);
+        }
     }
 
     /**
@@ -154,14 +162,18 @@ public class VerificationDaily extends AssignedIdEntity {
         this.failureReason = failureReason;
         this.verifiedAt = null;
         this.verifiedVia = null;
-        this.appealClosesAt = null;
         this.shareableAt = null;
+        // appealClosesAt 은 건드리지 않는다 — 귀속일만으로 정해지고, 이의는 이 상태에서 받는다.
+        if (this.appealClosesAt == null) {
+            this.appealClosesAt = VerificationDeadlines.appealClosesAt(targetDate);
+        }
     }
 
     /**
-     * 실패 확정 — 귀속일 다음 날 00:00 KST 확정 배치에서만 호출한다.
-     * 이의 기한을 열고, 그 기한 전까지는 방 피드에 공유하지 않는다
-     * (인용될 수도 있는 실패로 망신을 주지 않기 위한 절대 조건).
+     * 실패 확정 — 귀속일 이틀 뒤 00:00 KST 확정 배치에서만 호출한다.
+     *
+     * <p>이 시점에 이의 기한은 이미 닫혀 있다(같은 시각). 확정 전 유예 하루 동안 이의를 받았으므로,
+     * 여기까지 온 실패는 인용될 여지가 없어 바로 피드에 공유해도 된다.
      */
     public void confirmFailure(Instant confirmedAt, String method, String failureReason) {
         this.status = VerificationStatus.FAILED;
@@ -169,8 +181,7 @@ public class VerificationDaily extends AssignedIdEntity {
         this.failureReason = failureReason;
         this.verifiedAt = confirmedAt;
         this.verifiedVia = null;
-        this.appealClosesAt = VerificationDeadlines.appealClosesAt(confirmedAt);
-        this.shareableAt = this.appealClosesAt;
+        this.shareableAt = confirmedAt;
     }
 
     /** 수동 인증 챌린지의 당일 체크 — 즉시 SUCCESS. */
@@ -202,15 +213,21 @@ public class VerificationDaily extends AssignedIdEntity {
     /** 더 이상 자동으로 바뀌지 않는 확정 결과인지 — 확정 이후 도착한 신호는 이걸 건드리지 않는다. */
     public boolean isTerminal() { return status.isTerminal(); }
 
-    /** 위반·미달이 이미 확인됐지만 아직 확정되지 않은 상태(= 실패 예정). */
-    public boolean isFailExpected() {
-        return status == VerificationStatus.PENDING && failureReason != null;
+    /**
+     * "이대로 가면 실패"인지 — 계산 상태다.
+     * 판정 방향(도달형/제약형)에 따라 갈리므로 {@link FailExpectation} 에 위임한다.
+     */
+    public boolean isFailExpected(Polarity polarity, Instant now) {
+        return FailExpectation.isExpected(status, targetDate, failureReason, polarity, now);
     }
 
-    /** 지금 이의를 받을 수 있는 상태인지 — 실패 확정 + 기한 안. 횟수 한도는 여기서 보지 않는다(없다). */
-    public boolean isAppealable(Instant now) {
-        return status == VerificationStatus.FAILED
-                && appealClosesAt != null && now.isBefore(appealClosesAt);
+    /**
+     * 지금 이의를 받을 수 있는지 — 실패 예정이거나 이미 실패 확정이고, 기한(= 확정 시각) 안일 때.
+     * 횟수 한도는 여기서 보지 않는다(없다).
+     */
+    public boolean isAppealable(Polarity polarity, Instant now) {
+        if (appealClosesAt == null || !now.isBefore(appealClosesAt)) return false;
+        return status == VerificationStatus.FAILED || isFailExpected(polarity, now);
     }
 
     // ===== 판정 결과 확인(ack) / 수동 인증 취소 =====

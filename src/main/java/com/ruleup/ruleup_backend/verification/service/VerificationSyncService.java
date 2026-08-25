@@ -18,6 +18,7 @@ import com.ruleup.ruleup_backend.verification.evaluator.MethodEvaluator;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationMethodResultRepository;
 import com.ruleup.ruleup_backend.verification.signal.SignalType;
+import com.ruleup.ruleup_backend.verification.signal.DaySignals;
 import com.ruleup.ruleup_backend.verification.signal.SyncSignal;
 import com.ruleup.ruleup_backend.common.event.PermissionGapDetected;
 import org.slf4j.Logger;
@@ -132,18 +133,23 @@ public class VerificationSyncService {
             // v2: 셋업 전(PENDING_SETUP)이면 신호는 수용하되 평가 skip("권한 없는데 FAILED" 원천 차단, §4·§11.1)
             if (!member.isSetupReady()) continue;
 
+            // 유예 구간(어제 귀속·미확정)에 늦게 도착한 신호를 먼저 반영한다.
+            // 귀속일이 끝났어도 확정 전이면 발생 시각이 맞는 신호는 그대로 인정한다(인증 정책 §2 지연 데이터).
+            boolean graceChanged = evaluateGraceDay(member, challenge, config, signals, gaps, today, now);
+
             VerificationDaily daily = loadOrCreateDaily(member, challenge, today);
             VerificationStatus before = daily.getStatus();
             VerificationStatus todayStatus = processMember(member, challenge, config, daily, signals, gaps, today, now);
 
             progressService.updateAfterSync(member, todayStatus, now);
-            if (becameFinal(before, todayStatus)) {
+            if (becameFinal(before, todayStatus) || graceChanged) {
                 eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(
                         challenge.getId(), "AUTO_VERIFICATION_FINALIZED"));
             }
             updated.add(new SyncResponse.UpdatedChallenge(
                     member.getChallengeId().toString(),
-                    TodayStatusView.of(todayStatus, today, daily.getFailureReason(), now),
+                    TodayStatusView.of(todayStatus, today, daily.getFailureReason(),
+                            VerificationPolarity.of(config), now),
                     member.getProgressRate()));
         }
         if (log.isDebugEnabled()) {
@@ -188,6 +194,31 @@ public class VerificationSyncService {
     }
 
     /**
+     * 유예 구간에 남아 있는 어제 귀속 건을 다시 평가한다.
+     *
+     * <p>귀속일이 끝나도 확정까지 하루가 더 있고, 그 사이 절전·오프라인으로 밀렸던 신호가 올라온다.
+     * 그 신호를 반영하지 않으면 유예 구간이 이름뿐이다. 새 행을 열지는 않는다 —
+     * 어제 인증 대상이 아니었던 멤버에게 뒤늦게 판정을 만들면 안 되기 때문이다.
+     *
+     * @return 이 재평가로 어제 건이 확정됐으면 true
+     */
+    private boolean evaluateGraceDay(ChallengeMember member, Challenge challenge, VerificationConfig config,
+                                     List<SyncSignal> signals, List<SyncRequest.Gap> gaps,
+                                     LocalDate today, Instant now) {
+        LocalDate yesterday = today.minusDays(1);
+        VerificationDaily daily = dailyRepo
+                .findByChallengeMemberIdAndTargetDate(member.getId(), yesterday).orElse(null);
+        if (daily == null || daily.isTerminal()) return false;
+        if (VerificationDeadlines.finalizeDue(yesterday, now)) return false;   // 확정 배치 몫
+
+        VerificationStatus before = daily.getStatus();
+        VerificationStatus after = processMember(member, challenge, config, daily, signals, gaps, yesterday, now);
+        if (!becameFinal(before, after)) return false;
+        progressService.recount(member);
+        return true;
+    }
+
+    /**
      * 그날 판정 행을 잡는다(없으면 개시). 확정 시각은 여는 즉시 세운다 —
      * 판정 유형과 무관하게 <b>귀속일 다음 날 00:00 KST</b>이고, 평가 결과에 따라 흔들리지 않아야 하기 때문이다.
      */
@@ -195,9 +226,7 @@ public class VerificationSyncService {
         VerificationDaily daily = dailyRepo.findByChallengeMemberIdAndTargetDate(member.getId(), today)
                 .orElseGet(() -> dailyRepo.save(
                         VerificationDaily.open(member.getId(), challenge.getId(), member.getUserId(), today)));
-        if (daily.getFinalizeAfter() == null) {
-            daily.applyWindow(daily.getWindowClosesAt(), VerificationDeadlines.finalizeAfter(today));
-        }
+        if (daily.getFinalizeAfter() == null) daily.applyWindow(daily.getWindowClosesAt());
         return daily;
     }
 
@@ -235,7 +264,9 @@ public class VerificationSyncService {
         List<String> memberScreenApps = member.effectiveScreenApps(today).stream()
                 .map(com.ruleup.ruleup_backend.common.verification.ScreenApp::packageName)
                 .toList();
-        DayContext ctx = new DayContext(today, KST, now, config, signals, prior,
+        // 신호는 도착 시각이 아니라 발생 시각으로 귀속한다 — 한 배치에 어제치와 오늘치가 섞여 온다.
+        List<SyncSignal> ofDay = DaySignals.forDate(signals, today, KST);
+        DayContext ctx = new DayContext(today, KST, now, config, ofDay, prior,
                 member.getAnchors(), memberScreenApps, member.getId().toString());
         EvaluationOutcome outcome = evaluator.evaluate(ctx);
 
@@ -251,14 +282,14 @@ public class VerificationSyncService {
         }
 
         if (mr == null) {
-            mr = VerificationMethodResult.create(daily.getId(), method.name(), polarityOf(config), true);
+            mr = VerificationMethodResult.create(daily.getId(), method.name(), VerificationPolarity.of(config), true);
         }
         mr.evaluate(outcome.status(), evidence, now);
         methodResultRepo.save(mr);
 
         // 이 지점 도달 시 daily 는 아직 확정되지 않았다(확정된 경우 processMember 초입에서 early-return).
-        // 확정 시각은 평가 결과와 무관하게 귀속일 다음 날 00:00 KST 고정이다 — 창 닫힘 시각은 표시용으로만 갱신한다.
-        daily.applyWindow(outcome.windowClosesAt(), VerificationDeadlines.finalizeAfter(today));
+        // 확정·이의 마감은 귀속일만으로 정해진다 — 창 닫힘 시각은 표시용으로만 갱신한다.
+        daily.applyWindow(outcome.windowClosesAt());
 
         if (outcome.isFailExpected()) {
             // 위반·미달이 확인됐어도 귀속일 중에는 실패로 저장하지 않는다(인증 정책 §2).
@@ -320,14 +351,4 @@ public class VerificationSyncService {
         };
     }
 
-    private Polarity polarityOf(VerificationConfig config) {
-        return switch (config.primaryMethod()) {
-            case WAKE -> (config.wake() != null && config.wake().polarity() != null) ? config.wake().polarity() : Polarity.ACHIEVEMENT;
-            case SCREEN_TIME -> (config.screenTime() != null && config.screenTime().polarity() != null) ? config.screenTime().polarity() : Polarity.ACHIEVEMENT;
-            case GPS_PRESENCE, GPS_DISTANCE -> (config.gps() != null && config.gps().polarity() != null) ? config.gps().polarity() : Polarity.ACHIEVEMENT;
-            case HEALTH -> (config.health() != null && config.health().polarity() != null) ? config.health().polarity() : Polarity.ACHIEVEMENT;
-            case SLEEP -> (config.sleep() != null && config.sleep().polarity() != null) ? config.sleep().polarity() : Polarity.ACHIEVEMENT;
-            default -> Polarity.ACHIEVEMENT;
-        };
-    }
 }

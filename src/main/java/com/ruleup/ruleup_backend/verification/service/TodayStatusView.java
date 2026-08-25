@@ -1,6 +1,8 @@
 package com.ruleup.ruleup_backend.verification.service;
 
 import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
+import com.ruleup.ruleup_backend.verification.domain.FailExpectation;
+import com.ruleup.ruleup_backend.verification.domain.Polarity;
 import com.ruleup.ruleup_backend.verification.domain.VerificationDeadlines;
 
 import java.time.Instant;
@@ -13,11 +15,12 @@ import java.time.LocalDate;
  *
  * <p>진행중·실패 예정·검사중은 저장하지 않고 여기서 계산한다(인증 정책 §2.1).
  * <ul>
- *   <li>{@code IN_PROGRESS}  — 귀속일이 아직 안 끝났고 위반도 확인되지 않음</li>
- *   <li>{@code FAIL_EXPECTED}— 귀속일 중인데 위반·미달이 이미 확인됨. <b>최종 실패가 아니다</b></li>
- *   <li>{@code CHECKING}     — 귀속일이 끝났고 최종 재평가를 처리 중인 짧은 구간</li>
- *   <li>{@code DONE/FAILED}  — 확정된 결과</li>
- *   <li>{@code NOT_TARGET}   — 그 날 인증 대상이 아님</li>
+ *   <li>{@code IN_PROGRESS}   — 아직 채울 기회가 있고 위반도 확인되지 않음</li>
+ *   <li>{@code FAIL_EXPECTED} — 이대로 가면 실패. <b>최종 실패가 아니다</b> — 늦게 도착한 신호로 뒤집힐 수 있고,
+ *       유저는 이 상태에서 이의를 신청한다</li>
+ *   <li>{@code CHECKING}      — 확정 시각이 지나 최종 재평가를 처리 중인 짧은 구간</li>
+ *   <li>{@code DONE/FAILED}   — 확정된 결과</li>
+ *   <li>{@code NOT_TARGET}    — 그 날 인증 대상이 아님</li>
  * </ul>
  */
 public final class TodayStatusView {
@@ -33,20 +36,23 @@ public final class TodayStatusView {
 
     /**
      * @param status        저장된 판정 상태(행이 없으면 null → 진행중)
-     * @param targetDate    귀속일(KST) — 귀속일이 끝났는지로 검사중을 가른다
-     * @param failureReason 위반·미달 사유(확정 전이면 "실패 예정"의 근거)
+     * @param targetDate    귀속일(KST)
+     * @param failureReason 확인된 위반·미달 사유(없으면 null)
+     * @param polarity      목표 달성형 / 규칙 지키기형 — 귀속일이 끝난 뒤 실패 예정 여부가 갈린다
      * @param now           판정 시점
      */
-    public static String of(VerificationStatus status, LocalDate targetDate, String failureReason, Instant now) {
+    public static String of(VerificationStatus status, LocalDate targetDate, String failureReason,
+                            Polarity polarity, Instant now) {
         if (status == null) return IN_PROGRESS;
         return switch (status) {
             case SUCCESS -> DONE;
             case FAILED -> FAILED;
             case NOT_TARGET, NOT_REQUIRED -> NOT_TARGET;
-            // 미확정: 귀속일이 끝났으면 최종 재평가 중(검사중)이 우선한다. 아직 귀속일이면 위반 여부로 갈린다.
             case PENDING -> {
-                if (targetDate != null && VerificationDeadlines.targetDateEnded(targetDate, now)) yield CHECKING;
-                yield (failureReason != null) ? FAIL_EXPECTED : IN_PROGRESS;
+                // 확정 시각이 지났으면 최종 재평가 중 — 이 표시가 가장 앞선다.
+                if (targetDate != null && VerificationDeadlines.finalizeDue(targetDate, now)) yield CHECKING;
+                yield FailExpectation.isExpected(status, targetDate, failureReason, polarity, now)
+                        ? FAIL_EXPECTED : IN_PROGRESS;
             }
         };
     }

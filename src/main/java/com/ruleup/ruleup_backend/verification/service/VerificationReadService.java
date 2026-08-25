@@ -6,7 +6,9 @@ import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
+import com.ruleup.ruleup_backend.verification.domain.Polarity;
 import com.ruleup.ruleup_backend.verification.domain.VerificationConfig;
+import com.ruleup.ruleup_backend.verification.domain.VerificationPolarity;
 import com.ruleup.ruleup_backend.verification.domain.VerificationDaily;
 import com.ruleup.ruleup_backend.verification.dto.ChallengeProgress;
 import com.ruleup.ruleup_backend.verification.dto.TodayVerificationResponse;
@@ -78,9 +80,13 @@ public class VerificationReadService {
         VerificationDaily daily = dailyRepo
                 .findByChallengeMemberIdAndTargetDate(member.getId(), today).orElse(null);
 
+        Polarity polarity = VerificationPolarity.of(config);
         boolean isTarget = isTodayTarget(config, ch, member, today);
-        String status = todayStatus(isTarget, daily, today, now);
-        boolean failed = TodayStatusView.FAILED.equals(status);
+        String status = todayStatus(isTarget, daily, today, polarity, now);
+        // 실패 확정과 실패 예정 모두 실패 사유·이의 안내를 실어 준다 —
+        // 이의는 확정 전에 받으므로 실패 예정 구간이 실제 신청 창이다.
+        boolean failing = TodayStatusView.FAILED.equals(status)
+                || TodayStatusView.FAIL_EXPECTED.equals(status);
 
         return new TodayVerificationResponse(
                 today.toString(),
@@ -88,19 +94,20 @@ public class VerificationReadService {
                 TodayStatusView.NOT_TARGET.equals(status) ? null : windowLabel(config),
                 TodayStatusView.CHECKING.equals(status) ? WAITING_SIGNAL : null,
                 (daily != null) ? formatKst(daily.getVerifiedAt()) : null,
-                failed && daily != null ? daily.getFailureReason() : null,
+                failing && daily != null ? daily.getFailureReason() : null,
                 streakService.around(member.getId(), today),
                 unacknowledged(daily),
-                failed ? appeal(member, daily, now) : null);
+                failing ? appeal(member, daily, polarity, now) : null);
     }
 
     // ===== 조립 헬퍼 =====
 
     /** 오늘이 대상 날짜가 아니면 판정 행과 무관하게 NOT_TARGET. 나머지는 공용 매핑(TodayStatusView). */
-    private String todayStatus(boolean isTarget, VerificationDaily daily, LocalDate today, Instant now) {
+    private String todayStatus(boolean isTarget, VerificationDaily daily, LocalDate today,
+                               Polarity polarity, Instant now) {
         if (!isTarget) return TodayStatusView.NOT_TARGET;
         if (daily == null) return TodayStatusView.IN_PROGRESS;
-        return TodayStatusView.of(daily.getStatus(), today, daily.getFailureReason(), now);
+        return TodayStatusView.of(daily.getStatus(), today, daily.getFailureReason(), polarity, now);
     }
 
     /** 인증 창 표시 문구 — 자동은 시간대, 수동은 "자정 마감". 시간 제약이 없으면 null. */
@@ -127,17 +134,19 @@ public class VerificationReadService {
     }
 
     /**
-     * 이의 신청 가능 여부와 기한. 기한은 확정 시각 +24시간이 아니라
-     * <b>실패 확정일의 다음 날 00:00 KST</b>로 고정된 자정 경계다(인증 정책 §5.2).
+     * 이의 신청 가능 여부와 기한. 기한은 확정 시각과 같은 <b>귀속일 이틀 뒤 00:00 KST</b>로 고정된
+     * 자정 경계다(인증 정책 §5.2) — 확정 시각 기준 상대 24시간이 아니다.
+     * 이의는 확정 <b>전에</b> 받으므로, 유예 하루 동안의 "실패 예정" 구간이 실제 신청 창이다.
      * 횟수 한도는 없고, 솔로·그룹을 가리지 않는다 — 자동 판정이 틀리는 건 어느 쪽에서나 같다.
      */
-    private TodayVerificationResponse.Appeal appeal(ChallengeMember member, VerificationDaily daily, Instant now) {
+    private TodayVerificationResponse.Appeal appeal(ChallengeMember member, VerificationDaily daily,
+                                                    Polarity polarity, Instant now) {
         if (daily == null || daily.getAppealClosesAt() == null) return null;
         boolean alreadyFiled = objectionRepo
                 .findByChallengeMemberIdAndTargetDate(member.getId(), daily.getTargetDate()).isPresent();
         return new TodayVerificationResponse.Appeal(
                 ZonedDateTime.ofInstant(daily.getAppealClosesAt(), KST).format(ISO_OFFSET),
-                !alreadyFiled && daily.isAppealable(now));
+                !alreadyFiled && daily.isAppealable(polarity, now));
     }
 
     private ChallengeProgress toProgress(ChallengeMember m, Challenge ch, VerificationConfig config, LocalDate today) {

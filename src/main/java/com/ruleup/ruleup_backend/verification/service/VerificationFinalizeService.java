@@ -27,14 +27,15 @@ import java.util.UUID;
 
 /**
  * 인증 확정 배치 (인증 정책 §2 · 테크스펙 §4-3 "일일 확정 배치"). 두 작업:
- *  1) finalizeDue : <b>귀속일 다음 날 00:00 KST</b>가 지난 미확정 행을 최종 재평가해 완료·실패로 확정한다.
+ *  1) finalizeDue : <b>귀속일 이틀 뒤 00:00 KST</b>가 지난 미확정 행을 최종 재평가해 완료·실패로 확정한다.
  *     - 목표 달성형: 성공은 이미 즉시 확정됐으므로 여기 남은 건 미달 → 실패.
  *     - 규칙 지키기형: 위반이 남아 있으면 실패, 없으면 완료.
  *     이 시각 전에는 어떤 실패도 확정되지 않는다 — 늦게 도착하는 신호로 뒤집힐 수 있기 때문이다.
  *  2) rolloverFrequencyPeriods : 빈도형 주기 종료분을 미달 정산 + 다음 주기로 롤오버.
  *
  * <p>1분 주기로 도는 폴러지만 대상 조건이 {@code finalizeAfter <= now} 라, 실제 확정은 각 귀속일의
- * 다음 날 00:00 KST 에만 일어난다. 폴러라서 배포·장애로 배치가 밀려도 스스로 따라잡고(catch-up),
+ * 이틀 뒤 00:00 KST 에만 일어난다. 귀속일 종료 후 하루는 늦게 도착하는 신호를 받는 유예 구간이고,
+ * 유저는 그 사이 "이대로면 실패"를 보고 이의를 낸다. 폴러라서 배포·장애로 배치가 밀려도 스스로 따라잡고(catch-up),
  * 이미 확정된 건은 건너뛰므로 재실행이 안전하다.
  * FOR UPDATE SKIP LOCKED 선점이라 다중 인스턴스에서도 같은 대상을 중복 처리하지 않는다.
  */
@@ -88,7 +89,7 @@ public class VerificationFinalizeService {
         }
         VerificationConfig config = configFactory.build(challenge);
         VerificationMethod method = config.primaryMethod();
-        Polarity polarity = polarityOf(config, method);
+        Polarity polarity = VerificationPolarity.of(config);
 
         boolean confirmedFail;
         if (polarity == Polarity.CONSTRAINT && daily.getFailureReason() == null) {
@@ -183,15 +184,6 @@ public class VerificationFinalizeService {
         return changed;
     }
 
-    private Polarity polarityOf(VerificationConfig c, VerificationMethod method) {
-        return switch (method) {
-            case SCREEN_TIME -> (c.screenTime() != null && c.screenTime().polarity() != null) ? c.screenTime().polarity() : Polarity.ACHIEVEMENT;
-            case GPS_PRESENCE, GPS_DISTANCE -> (c.gps() != null && c.gps().polarity() != null) ? c.gps().polarity() : Polarity.ACHIEVEMENT;
-            case HEALTH -> (c.health() != null && c.health().polarity() != null) ? c.health().polarity() : Polarity.ACHIEVEMENT;
-            case SLEEP -> (c.sleep() != null && c.sleep().polarity() != null) ? c.sleep().polarity() : Polarity.ACHIEVEMENT;
-            default -> Polarity.ACHIEVEMENT;   // WAKE 등
-        };
-    }
 
     private String failureReasonFor(VerificationMethod method, VerificationConfig config) {
         return switch (method) {

@@ -27,9 +27,10 @@ import static org.springframework.security.test.web.servlet.setup.SecurityMockMv
 /**
  * 판정 시간 규칙 (인증 정책 §2 · 테크스펙 §5-1).
  *
- * <p>규칙은 한 줄이다 — <b>성공은 조건 충족 즉시, 실패는 귀속일 다음 날 00:00 KST 에만 확정한다.</b>
- * 그 전에 위반이 발견돼도 "실패 예정"으로만 보여주고 저장하지 않는다. 신호가 늦게 도착하는 기기가 흔해서,
- * 먼저 본 위반을 그대로 실패로 굳히면 실제로 지킨 사람이 억울하게 실패한다.
+ * <p>규칙은 한 줄이다 — <b>성공은 조건 충족 즉시, 실패는 귀속일 이틀 뒤 00:00 KST 에만 확정한다.</b>
+ * 귀속일이 끝나도 하루는 더 기다리며, 그 사이 도착한 신호도 발생 시각이 맞으면 그대로 인정한다.
+ * 신호가 늦게 도착하는 기기가 흔해서, 귀속일 종료 즉시 확정하면 실제로 수행한 사람이 억울하게 실패한다.
+ * 그 유예 하루가 유저가 "이대로면 실패"를 보고 이의를 내는 창이기도 하다.
  *
  * <p>확정 이후 도착한 신호는 저장만 하고 판정을 바꾸지 않는다 — 구제는 이의제기 한 경로뿐이다.
  */
@@ -123,7 +124,9 @@ class VerificationDecisionTimingIT extends VerificationApiSupport {
                     .as("귀속일 중에는 최종 실패로 저장하지 않는다")
                     .isEqualTo("PENDING");
             assertThat(failureReasonOf(memberId)).isEqualTo("USAGE_EXCEEDED");
-            assertThat(appealClosesAtOf(memberId)).as("확정 전에는 이의 기한이 열리지 않는다").isNull();
+            assertThat(appealClosesAtOf(memberId))
+                    .as("이의는 확정 전에 받는다 — 행을 여는 시점에 기한이 서 있다")
+                    .isEqualTo(LocalDate.now(KST).plusDays(2).atStartOfDay(KST).toInstant());
             assertThat(shareableAtOf(memberId)).as("확정 전에는 피드에 실리지 않는다").isNull();
             assertThat(todayApiStatus(me.token(), challenge)).isEqualTo("FAIL_EXPECTED");
         }
@@ -142,7 +145,9 @@ class VerificationDecisionTimingIT extends VerificationApiSupport {
 
             assertThat(todayStatusOf(memberId)).isEqualTo("PENDING");
             assertThat(failureReasonOf(memberId)).isNull();
-            assertThat(todayApiStatus(me.token(), challenge)).isEqualTo("IN_PROGRESS");
+            assertThat(todayApiStatus(me.token(), challenge))
+                    .as("귀속일이 아직 안 끝났으니 채울 기회가 남아 있다")
+                    .isEqualTo("IN_PROGRESS");
         }
 
         @Test
@@ -182,7 +187,34 @@ class VerificationDecisionTimingIT extends VerificationApiSupport {
         }
 
         @Test
-        @DisplayName("확정 시각은 판정 유형과 무관하게 귀속일 다음 날 00:00 KST 다")
+        @DisplayName("귀속일이 끝난 뒤에도 늦게 도착한 신호로 성공을 되찾을 수 있다 — 유예 하루")
+        void lateSignalDuringGraceStillCounts() throws Exception {
+            Member me = member(uniq("timing-grace"));
+            UUID challenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
+            UUID memberId = insertReadyMember(challenge, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+
+            // 어제 귀속 건이 목표 미달로 남아 있다(귀속일은 끝났고 확정은 아직).
+            UUID verificationId = UUID.randomUUID();
+            jdbc().update("INSERT INTO VerificationDaily " +
+                            "(id, challengeMemberId, challengeId, userId, targetDate, status, finalizeAfter, appealClosesAt) " +
+                            "VALUES (?, ?, ?, ?, DATE_SUB(CURDATE(), INTERVAL 1 DAY), 'PENDING', " +
+                            " UTC_TIMESTAMP(6) + INTERVAL 1 DAY, UTC_TIMESTAMP(6) + INTERVAL 1 DAY)",
+                    bytes(verificationId), bytes(memberId), bytes(challenge), bytes(me.id()));
+
+            // 절전 때문에 하루 늦게 올라온 어제 기록.
+            sync(me.token(), List.of(
+                    geofenceSignal(memberId, "ENTER", todayAt(9, 0).minusSeconds(86_400)),
+                    geofenceSignal(memberId, "EXIT", todayAt(10, 0).minusSeconds(86_400))));
+
+            String status = jdbc().queryForObject(
+                    "SELECT status FROM VerificationDaily WHERE id = ?", String.class, bytes(verificationId));
+            assertThat(status)
+                    .as("확정 전에 도착했고 발생 시각이 귀속일 조건에 맞으면 인정한다")
+                    .isEqualTo("SUCCESS");
+        }
+
+        @Test
+        @DisplayName("확정 시각은 판정 유형과 무관하게 귀속일 이틀 뒤 00:00 KST 다")
         void finalizeBoundaryIsIdenticalAcrossMethods() throws Exception {
             Member me = member(uniq("timing-boundary"));
 
@@ -195,7 +227,7 @@ class VerificationDecisionTimingIT extends VerificationApiSupport {
 
             sync(me.token(), List.of(geofenceSignal(gpsMember, "ENTER", todayAt(9, 0))));
 
-            Instant expected = LocalDate.now(KST).plusDays(1).atStartOfDay(KST).toInstant();
+            Instant expected = LocalDate.now(KST).plusDays(2).atStartOfDay(KST).toInstant();
             assertThat(finalizeAfterOf(gpsMember)).isEqualTo(expected);
             assertThat(finalizeAfterOf(sleepMember))
                     .as("수면도 별도 cutoff 없이 같은 경계를 쓴다")
@@ -209,7 +241,7 @@ class VerificationDecisionTimingIT extends VerificationApiSupport {
     class Finalization {
 
         @Test
-        @DisplayName("귀속일이 끝나면 위반이 남아 있는 건만 실패로 확정된다")
+        @DisplayName("확정 시각이 지나면 위반이 남아 있는 건만 실패로 확정된다")
         void breachBecomesFailureAfterMidnight() throws Exception {
             Member me = member(uniq("final-breach"));
             UUID challenge = insertAutoChallenge(me.id(), "SCREEN_TIME_MAX", "USAGE", "{\"duration_min\":10}");
@@ -221,10 +253,9 @@ class VerificationDecisionTimingIT extends VerificationApiSupport {
 
             assertThat(todayStatusOf(memberId)).isEqualTo("FAILED");
             assertThat(failureReasonOf(memberId)).isEqualTo("USAGE_EXCEEDED");
-            assertThat(appealClosesAtOf(memberId)).as("이의 기한이 열린다").isNotNull();
             assertThat(shareableAtOf(memberId))
-                    .as("실패는 이의 기간이 끝난 뒤에야 공유된다")
-                    .isEqualTo(appealClosesAtOf(memberId));
+                    .as("이의는 확정 전에 이미 마감됐다 — 확정된 실패는 바로 공유된다")
+                    .isNotNull();
         }
 
         @Test

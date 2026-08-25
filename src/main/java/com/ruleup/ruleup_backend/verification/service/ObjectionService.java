@@ -9,6 +9,8 @@ import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.event.RoutineFailureConfirmed;
 import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
 import com.ruleup.ruleup_backend.verification.domain.Objection;
+import com.ruleup.ruleup_backend.verification.domain.Polarity;
+import com.ruleup.ruleup_backend.verification.domain.VerificationPolarity;
 import com.ruleup.ruleup_backend.verification.domain.ObjectionType;
 import com.ruleup.ruleup_backend.verification.domain.VerificationDaily;
 import com.ruleup.ruleup_backend.verification.dto.ObjectionDecisionRequest;
@@ -39,6 +41,7 @@ public class ObjectionService {
     private final VerificationDailyRepository dailyRepo;
     private final ChallengeQueryService challengeQuery;
     private final VerificationProgressService progressService;
+    private final VerificationConfigFactory configFactory;
     private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
@@ -58,14 +61,14 @@ public class ObjectionService {
             throw new BusinessException(ErrorCode.CONTENT_REQUIRED);
         LocalDate date = parseDate(req.targetDate());
 
-        // 실패가 확정된 일자에만. 솔로·그룹을 가리지 않는다 — 자동 판정이 틀리는 건 어느 쪽에서나 같다.
+        // 실패로 확정됐거나 이대로면 실패인 일자에만. 솔로·그룹을 가리지 않는다.
         VerificationDaily daily = dailyRepo.findByChallengeMemberIdAndTargetDate(member.getId(), date)
-                .filter(d -> d.getStatus() == VerificationStatus.FAILED)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_OBJECTIONABLE));
+        Polarity polarity = VerificationPolarity.of(configFactory.build(c));
 
-        // 신청 기한: 실패 확정일의 다음 날 00:00 KST(자정 경계). 확정 시각 +24시간이 아니다.
+        // 신청 기한: 확정 시각과 같은 귀속일 이틀 뒤 00:00 KST(자정 경계).
         Instant now = Instant.now();
-        if (!daily.isAppealable(now)) throw new BusinessException(ErrorCode.OBJECTION_WINDOW_CLOSED);
+        if (!daily.isAppealable(polarity, now)) throw new BusinessException(ErrorCode.OBJECTION_WINDOW_CLOSED);
 
         // 일자당 1회.
         if (objectionRepo.existsByChallengeMemberIdAndTargetDate(member.getId(), date))
