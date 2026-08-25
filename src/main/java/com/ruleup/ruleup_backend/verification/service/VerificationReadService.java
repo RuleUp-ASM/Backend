@@ -12,7 +12,7 @@ import com.ruleup.ruleup_backend.verification.domain.VerificationPolarity;
 import com.ruleup.ruleup_backend.verification.domain.VerificationDaily;
 import com.ruleup.ruleup_backend.verification.dto.ChallengeProgress;
 import com.ruleup.ruleup_backend.verification.dto.TodayVerificationResponse;
-import com.ruleup.ruleup_backend.verification.repository.ObjectionRepository;
+import com.ruleup.ruleup_backend.verification.repository.AppealRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -46,7 +46,7 @@ public class VerificationReadService {
 
     private final ChallengeQueryService challengeQuery;
     private final VerificationDailyRepository dailyRepo;
-    private final ObjectionRepository objectionRepo;
+    private final AppealRepository appealRepo;
     private final VerificationConfigFactory configFactory;
     private final StreakService streakService;
 
@@ -142,8 +142,7 @@ public class VerificationReadService {
     private TodayVerificationResponse.Appeal appeal(ChallengeMember member, VerificationDaily daily,
                                                     Polarity polarity, Instant now) {
         if (daily == null || daily.getAppealClosesAt() == null) return null;
-        boolean alreadyFiled = objectionRepo
-                .findByChallengeMemberIdAndTargetDate(member.getId(), daily.getTargetDate()).isPresent();
+        boolean alreadyFiled = appealRepo.existsByVerificationDailyId(daily.getId());
         return new TodayVerificationResponse.Appeal(
                 ZonedDateTime.ofInstant(daily.getAppealClosesAt(), KST).format(ISO_OFFSET),
                 !alreadyFiled && daily.isAppealable(polarity, now));

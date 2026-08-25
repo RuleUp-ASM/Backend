@@ -3,6 +3,9 @@ package com.ruleup.ruleup_backend.verification.controller;
 import com.ruleup.ruleup_backend.common.docs.ApiErrorCodes;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.response.ApiResponse;
+import com.ruleup.ruleup_backend.verification.dto.AppealImageResponse;
+import com.ruleup.ruleup_backend.verification.dto.AppealResponse;
+import com.ruleup.ruleup_backend.verification.dto.AppealSubmitRequest;
 import com.ruleup.ruleup_backend.verification.dto.ChallengeProgress;
 import com.ruleup.ruleup_backend.verification.dto.ProgressListResponse;
 import com.ruleup.ruleup_backend.verification.dto.SyncRequest;
@@ -11,6 +14,7 @@ import com.ruleup.ruleup_backend.verification.dto.VerificationAckResponse;
 import com.ruleup.ruleup_backend.verification.dto.VerificationCancelResponse;
 import com.ruleup.ruleup_backend.verification.dto.VerificationIntroRequest;
 import com.ruleup.ruleup_backend.verification.dto.VerificationIntroResponse;
+import com.ruleup.ruleup_backend.verification.service.AppealService;
 import com.ruleup.ruleup_backend.verification.service.VerificationAckService;
 import com.ruleup.ruleup_backend.verification.service.VerificationIntroService;
 import com.ruleup.ruleup_backend.verification.service.VerificationManualService;
@@ -39,7 +43,7 @@ import java.util.List;
 import java.util.UUID;
 
 /** 챌린지에 매이지 않는 인증 API. base = /api/v1/verifications. */
-@Tag(name = "인증 구현", description = "인증 신호 전송 · 판정 결과 확인 · 수동 인증 취소 · 진행률")
+@Tag(name = "인증 구현", description = "인증 신호 전송 · 판정 결과 확인 · 수동 인증 취소 · 진행률 · 이의 신청")
 @SecurityRequirement(name = "bearerAuth")
 @RestController
 @RequestMapping("/api/v1/verifications")
@@ -53,6 +57,7 @@ public class VerificationController {
     private final VerificationIntroService introService;
     private final VerificationAckService ackService;
     private final VerificationManualService manualService;
+    private final AppealService appealService;
 
     @Operation(summary = "인증 신호 전송",
             description = """
@@ -109,6 +114,34 @@ public class VerificationController {
             @Parameter(description = "인증 건 ID — 수동 인증 제출 응답의 verificationId")
             @PathVariable UUID verificationId) {
         return ApiResponse.ok(manualService.cancel(UUID.fromString(userId), verificationId));
+    }
+
+    @Operation(summary = "인증 이의제기 제출",
+            description = """
+                    **이의는 판정하지 않는다.** 신청자 본인 여부, 실패 확정 상태, 신청 기한, 사유 10자 이상 등
+                    결정적인 형식 요건만 검사하고 통과하면 **즉시 자동 인용**한다.
+                    사진은 선택이며 진위 확인에 사용하지 않는다.
+
+                    - LLM·방장·관리자는 인용 여부를 판단하지 않는다.
+                    - **횟수 한도는 없다.**
+                    - 신청 기한은 **실패 확정일의 다음 날 00:00 KST** 다 — 확정 시각 기준 상대 24시간이 아니라
+                      자정 경계로 고정된다(귀속일 기준으로는 D+2 00:00 KST).
+                    - 인용하면 실패를 `DONE` 으로 정정하고 **정상 성공과 동일한 점수**를 지급한다.
+                      스트릭·랭킹·통계·사이클 결과도 정상 성공과 같은 기준으로 소급 정정된다.
+                    - 같은 인증에 두 번 신청하면 이미 완료로 정정돼 있으므로 `NOT_FAILED` 다
+                      (실패 결과 기준 멱등 — 정정과 점수가 중복 적용되지 않는다).
+                    - 이의 빈도·반복 사유·동일 이미지 등은 이상탐지 입력으로 비동기 기록되며,
+                      이상탐지가 개별 인용을 지연하거나 뒤집지 않는다.
+                    """)
+    @ApiErrorCodes({ErrorCode.INVALID_REASON, ErrorCode.NOT_FAILED, ErrorCode.APPEAL_WINDOW_CLOSED,
+            ErrorCode.VERIFICATION_NOT_FOUND, ErrorCode.LOGIN_REQUIRED})
+    @PostMapping("/{verificationId}/appeals")
+    public ApiResponse<AppealResponse> appeal(
+            @AuthenticationPrincipal String userId,
+            @Parameter(description = "이의 대상 인증 ID — today 응답의 unacknowledgedResult.verificationId")
+            @PathVariable UUID verificationId,
+            @RequestBody AppealSubmitRequest request) {
+        return ApiResponse.ok(appealService.submit(UUID.fromString(userId), verificationId, request));
     }
 
     @Operation(summary = "Phase 0 인트로",

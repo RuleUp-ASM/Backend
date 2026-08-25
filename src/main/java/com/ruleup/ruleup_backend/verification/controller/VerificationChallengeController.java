@@ -8,11 +8,6 @@ import com.ruleup.ruleup_backend.verification.dto.ManualVerificationResponse;
 import com.ruleup.ruleup_backend.verification.dto.MemberLocationRequest;
 import com.ruleup.ruleup_backend.verification.dto.MemberLocationResponse;
 import com.ruleup.ruleup_backend.verification.dto.MemberLocationUpdateResponse;
-import com.ruleup.ruleup_backend.verification.dto.ObjectionDecisionRequest;
-import com.ruleup.ruleup_backend.verification.dto.ObjectionDecisionResponse;
-import com.ruleup.ruleup_backend.verification.dto.ObjectionResponse;
-import com.ruleup.ruleup_backend.verification.dto.ObjectionSubmitRequest;
-import com.ruleup.ruleup_backend.verification.dto.PendingReviewsResponse;
 import com.ruleup.ruleup_backend.verification.dto.ScreenAppsResponse;
 import com.ruleup.ruleup_backend.verification.dto.ScreenAppsUpdateRequest;
 import com.ruleup.ruleup_backend.verification.dto.ScreenAppsUpdateResponse;
@@ -20,8 +15,6 @@ import com.ruleup.ruleup_backend.verification.dto.SetupRequest;
 import com.ruleup.ruleup_backend.verification.dto.SetupRequirementResponse;
 import com.ruleup.ruleup_backend.verification.dto.SetupResponse;
 import com.ruleup.ruleup_backend.verification.dto.TodayVerificationResponse;
-import com.ruleup.ruleup_backend.verification.service.ObjectionService;
-import com.ruleup.ruleup_backend.verification.service.PendingReviewsService;
 import com.ruleup.ruleup_backend.verification.service.VerificationManualService;
 import com.ruleup.ruleup_backend.verification.service.VerificationReadService;
 import com.ruleup.ruleup_backend.verification.service.VerificationSetupService;
@@ -49,8 +42,6 @@ public class VerificationChallengeController {
     private final VerificationReadService readService;
     private final VerificationManualService manualService;
     private final VerificationSetupService setupService;
-    private final ObjectionService objectionService;
-    private final PendingReviewsService pendingReviewsService;
 
     // ===== 최초 진입 셋업 =====
 
@@ -201,35 +192,4 @@ public class VerificationChallengeController {
         return ApiResponse.ok(manualService.submit(UUID.fromString(userId), challengeId, request));
     }
 
-    // ===== 이의 제기(§8.7) — 자동 방 실패 구제 경로 =====
-
-    @Operation(summary = "이의 제기 제출",
-            description = "실패가 확정된 일자에 대해 본인이 제출(일자당 1회). 기한은 실패 확정일의 다음 날 00:00 KST 다. "
-                    + "사진 포함 글 또는 글. 솔로는 대상 아님.")
-    @PostMapping("/{challengeId}/objections")
-    public ApiResponse<ObjectionResponse> submitObjection(@AuthenticationPrincipal String userId,
-                                                          @PathVariable UUID challengeId,
-                                                          @RequestBody ObjectionSubmitRequest request) {
-        return ApiResponse.ok(objectionService.submit(UUID.fromString(userId), challengeId, request));
-    }
-
-    @Operation(summary = "이의 제기 처리",
-            description = "방장/공동 관리자. APPROVE→SUCCESS(verifiedVia=OBJECTION), "
-                    + "REJECT→FAILED(OBJECTION_REJECTED, 온도 반영).")
-    @PostMapping("/{challengeId}/objections/{objectionId}/decision")
-    public ApiResponse<ObjectionDecisionResponse> decideObjection(@AuthenticationPrincipal String userId,
-                                                                  @PathVariable UUID challengeId,
-                                                                  @PathVariable UUID objectionId,
-                                                                  @RequestBody ObjectionDecisionRequest request) {
-        return ApiResponse.ok(objectionService.decide(
-                UUID.fromString(userId), challengeId, objectionId, request));
-    }
-
-    @Operation(summary = "처리 대기함 조회",
-            description = "방장/공동 관리자용. 처리 대기 중인 이의 제기(PENDING) 목록.")
-    @GetMapping("/{challengeId}/pending-reviews")
-    public ApiResponse<PendingReviewsResponse> pendingReviews(@AuthenticationPrincipal String userId,
-                                                              @PathVariable UUID challengeId) {
-        return ApiResponse.ok(pendingReviewsService.list(UUID.fromString(userId), challengeId));
-    }
 }
