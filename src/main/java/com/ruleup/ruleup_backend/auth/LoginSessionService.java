@@ -78,7 +78,7 @@ public class LoginSessionService {
 
         applyDeviceInfo(user, req.deviceInfo());
         user.attachInstallation(req.installationId(), req.deviceId());
-        user.updateCountryCode(countryResolver.resolve(deviceCountry(req.deviceInfo())));
+        applyCountry(user, req.deviceInfo());
         user.touchLastLogin();
         user.touchLastActive();
         userRepository.save(user);
@@ -91,6 +91,16 @@ public class LoginSessionService {
         return OAuthLoginResponse.existing(pair, user, summary, flushIntervalSec);
     }
 
+    /**
+     * 국가 코드 최신화(로그인마다). 해석 실패 시 기존 값 유지, 신규면 서비스 기본 국가 —
+     * users.country_code 가 NULL 로 남던 문제의 마감선이다.
+     */
+    private void applyCountry(User user, DeviceInfoRequest device) {
+        String country = (device != null) ? device.country() : null;
+        String timeZone = (device != null) ? device.timeZone() : null;
+        user.updateCountryCode(countryResolver.resolveFor(user.getCountryCode(), country, timeZone));
+    }
+
     private void applyDeviceInfo(User user, DeviceInfoRequest device) {
         if (device == null) return;
         user.updateDeviceInfo(device.toPlatform(), device.versionCode(), device.versionName(),
@@ -98,7 +108,4 @@ public class LoginSessionService {
                 device.manufacturer(), device.lowRam());
     }
 
-    private String deviceCountry(DeviceInfoRequest device) {
-        return (device != null) ? device.country() : null;
-    }
 }

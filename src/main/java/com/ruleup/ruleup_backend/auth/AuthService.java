@@ -268,7 +268,7 @@ public class AuthService {
         user.registerDemographics(birthDate, gender);
         applyDeviceInfo(user, req.deviceInfo());              // 가입 시 기기 정보 최초 저장
         user.attachInstallation(req.installationId(), req.deviceId());
-        user.updateCountryCode(countryResolver.resolve(deviceCountry(req.deviceInfo())));   // 지오 헤더 → 기기 지역 → Accept-Language
+        applyCountry(user, req.deviceInfo());   // 지오 헤더 → 기기 지역 → Accept-Language → 기기 타임존 → 기본값
         userRepository.save(user);
 
         reputationScoreRepository.save(ReputationScore.createDefault(user));   // 매너온도 병존(전환 전)
@@ -344,7 +344,7 @@ public class AuthService {
 
         user.restore(req.installationId(), req.deviceId());   // 탈퇴 직전 상태(정지·잠금 포함)로 되돌린다
         applyDeviceInfo(user, req.deviceInfo());
-        user.updateCountryCode(countryResolver.resolve(deviceCountry(req.deviceInfo())));
+        applyCountry(user, req.deviceInfo());
         socialTokenService.flushPending(claims.getId(), user.getId(), user.getOauthProvider());
 
         TokenService.TokenPair pair = tokenService.issueTokenPair(user);
@@ -453,8 +453,14 @@ public class AuthService {
     }
 
     /** deviceInfo 의 기기 지역(국가 코드 폴백 소스). null 안전. */
-    private String deviceCountry(DeviceInfoRequest device) {
-        return (device != null) ? device.country() : null;
+    /**
+     * 국가 코드 최신화. 지오 헤더 → 기기 지역 → Accept-Language → 기기 타임존 순으로 해석하고,
+     * 그래도 못 정했으면 기존 값을 지키거나(있으면) 서비스 기본 국가로 채운다 — 컬럼이 NULL 로 남지 않게.
+     */
+    private void applyCountry(User user, DeviceInfoRequest device) {
+        String country = (device != null) ? device.country() : null;
+        String timeZone = (device != null) ? device.timeZone() : null;
+        user.updateCountryCode(countryResolver.resolveFor(user.getCountryCode(), country, timeZone));
     }
 
     /** 약관 6종 append-only 저장 — 미동의(false)·항목 누락(선택 약관)도 false 행으로 남긴다. */

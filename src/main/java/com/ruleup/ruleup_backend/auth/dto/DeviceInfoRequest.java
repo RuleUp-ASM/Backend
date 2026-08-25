@@ -51,7 +51,14 @@ public record DeviceInfoRequest(
                 기기 지역(선택). ISO alpha-2 또는 "ko-KR" 형태를 허용한다.
                 CDN 지오 헤더가 없을 때 국가 코드 판정의 폴백 소스로 쓴다.""",
                 example = "KR")
-        String country) {   // 기기 지역(ISO alpha-2 또는 "ko-KR" 허용, 선택). CDN 지오 헤더가 없을 때 국가 코드 소스로 사용.
+        String country,   // 기기 지역(ISO alpha-2 또는 "ko-KR" 허용, 선택). CDN 지오 헤더가 없을 때 국가 코드 소스로 사용.
+
+        @Schema(description = """
+                기기 타임존(선택, IANA ID). `TimeZone.getDefault().getID()` 를 그대로 보내면 된다.
+                지오 헤더도 기기 지역도 없을 때 국가 코드를 정하는 마지막 근거다 —
+                이게 비면 국가는 서비스 기본값으로 채워진다.""",
+                example = "Asia/Seoul")
+        String timeZone) {
 
     /** 문자열 platform 을 enum 으로(대소문자 무시, 알 수 없거나 비면 null). */
     public Platform toPlatform() {
