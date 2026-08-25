@@ -55,7 +55,7 @@ public class SleepEvaluator implements MethodEvaluator {
             Instant threshold = bedtimeThreshold(cfg.bedtimeBefore(), ctx.targetDate(), zone);
             ev.put("bedtimeBefore", cfg.bedtimeBefore());
             return bedtime.isAfter(threshold)
-                    ? EvaluationOutcome.failed("SLEPT_LATE", ev, windowClose)
+                    ? EvaluationOutcome.violated("SLEPT_LATE", ev, windowClose)
                     : EvaluationOutcome.success(ev, windowClose);
         }
         // minSleepHours 판정 → INSUFFICIENT_SLEEP
@@ -64,7 +64,7 @@ public class SleepEvaluator implements MethodEvaluator {
             ev.put("minSleepHours", goal);
             return (sleepHours >= goal)
                     ? EvaluationOutcome.success(ev, windowClose)
-                    : EvaluationOutcome.failed("INSUFFICIENT_SLEEP", ev, windowClose);
+                    : EvaluationOutcome.violated("INSUFFICIENT_SLEEP", ev, windowClose);
         }
         return EvaluationOutcome.pending(ev, windowClose);
     }

@@ -19,7 +19,6 @@ import com.ruleup.ruleup_backend.verification.repository.VerificationDailyReposi
 import com.ruleup.ruleup_backend.verification.repository.VerificationMethodResultRepository;
 import com.ruleup.ruleup_backend.verification.signal.SignalType;
 import com.ruleup.ruleup_backend.verification.signal.SyncSignal;
-import com.ruleup.ruleup_backend.common.event.RoutineFailureConfirmed;
 import com.ruleup.ruleup_backend.common.event.PermissionGapDetected;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,7 +33,6 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
-import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -145,7 +143,7 @@ public class VerificationSyncService {
             }
             updated.add(new SyncResponse.UpdatedChallenge(
                     member.getChallengeId().toString(),
-                    TodayStatusView.of(todayStatus, daily.getWindowClosesAt(), now),
+                    TodayStatusView.of(todayStatus, today, daily.getFailureReason(), now),
                     member.getProgressRate()));
         }
         if (log.isDebugEnabled()) {
@@ -186,23 +184,28 @@ public class VerificationSyncService {
     }
 
     private boolean becameFinal(VerificationStatus before, VerificationStatus after) {
-        boolean finalNow = after == VerificationStatus.SUCCESS || after == VerificationStatus.FAILED;
-        return finalNow && before != after;
+        return after.isTerminal() && before != after;
     }
 
+    /**
+     * 그날 판정 행을 잡는다(없으면 개시). 확정 시각은 여는 즉시 세운다 —
+     * 판정 유형과 무관하게 <b>귀속일 다음 날 00:00 KST</b>이고, 평가 결과에 따라 흔들리지 않아야 하기 때문이다.
+     */
     private VerificationDaily loadOrCreateDaily(ChallengeMember member, Challenge challenge, LocalDate today) {
-        return dailyRepo.findByChallengeMemberIdAndTargetDate(member.getId(), today)
+        VerificationDaily daily = dailyRepo.findByChallengeMemberIdAndTargetDate(member.getId(), today)
                 .orElseGet(() -> dailyRepo.save(
                         VerificationDaily.open(member.getId(), challenge.getId(), member.getUserId(), today)));
+        if (daily.getFinalizeAfter() == null) {
+            daily.applyWindow(daily.getWindowClosesAt(), VerificationDeadlines.finalizeAfter(today));
+        }
+        return daily;
     }
 
     private VerificationStatus processMember(ChallengeMember member, Challenge challenge, VerificationConfig config,
                                              VerificationDaily daily, List<SyncSignal> signals,
                                              List<SyncRequest.Gap> gaps, LocalDate today, Instant now) {
-        // 이미 잠김 → 멱등, 재평가 안 함(FAILED→SUCCESS 역전 금지 포함)
-        if (daily.getStatus() == VerificationStatus.SUCCESS || daily.getStatus() == VerificationStatus.FAILED) {
-            return daily.getStatus();
-        }
+        // 확정 이후 도착분은 저장만 하고 판정에 쓰지 않는다(인증 정책 §2 지연 데이터). 구제는 이의제기로만.
+        if (daily.isTerminal()) return daily.getStatus();
         Disposition disp = disposition(config, challenge, member, today);
         if (disp == Disposition.NOT_TARGET) {
             daily.recordResult(VerificationStatus.NOT_TARGET, null, null, null);
@@ -253,32 +256,22 @@ public class VerificationSyncService {
         mr.evaluate(outcome.status(), evidence, now);
         methodResultRepo.save(mr);
 
-        // 이 지점 도달 시 daily 는 아직 SUCCESS/FAILED 로 잠기지 않음(잠긴 경우 processMember 초입에서 early-return).
-        Instant windowCloses = outcome.windowClosesAt();
-        Instant finalizeAfter = (windowCloses != null)
-                ? windowCloses.plus(maxLagHours(config), ChronoUnit.HOURS) : null;
-        daily.applyWindow(windowCloses, finalizeAfter);
+        // 이 지점 도달 시 daily 는 아직 확정되지 않았다(확정된 경우 processMember 초입에서 early-return).
+        // 확정 시각은 평가 결과와 무관하게 귀속일 다음 날 00:00 KST 고정이다 — 창 닫힘 시각은 표시용으로만 갱신한다.
+        daily.applyWindow(outcome.windowClosesAt(), VerificationDeadlines.finalizeAfter(today));
 
-        if (outcome.status() == VerificationStatus.FAILED) {
-            // 제약형 위반 등 sync 시점 실패(§8.7). 그룹은 잠정 실패(1일 이의 제기 창), 솔로는 즉시 확정.
-            if (challenge != null && challenge.isGroup()) {
-                daily.recordProvisionalFailure(method.name(), outcome.failureReason(),
-                        now.plus(VerificationDaily.OBJECTION_WINDOW_DAYS, ChronoUnit.DAYS));   // 온도 미반영, 이벤트 없음(확정 아님)
-            } else {
-                daily.recordResult(VerificationStatus.FAILED, null, outcome.failureReason(), now);
-                // 솔로 즉시 확정 → 감시자 통지 적재(§9). 다음 sync는 line 126에서 스킵되어 중복 없음.
-                eventPublisher.publishEvent(new RoutineFailureConfirmed(
-                        member.getChallengeId(), member.getUserId(), today, now));
-            }
+        if (outcome.isFailExpected()) {
+            // 위반·미달이 확인됐어도 귀속일 중에는 실패로 저장하지 않는다(인증 정책 §2).
+            // 늦게 도착하는 이탈·해제 신호로 확정 전까지 뒤집힐 수 있어서다. 최종 실패는 확정 배치가 만든다.
+            daily.recordFailExpected(method.name(), outcome.failureReason());
         } else {
             String contributing = (outcome.status() == VerificationStatus.SUCCESS) ? method.name() : null;
             Instant verifiedAt = (outcome.status() == VerificationStatus.SUCCESS) ? now : null;
-            daily.recordResult(outcome.status(), contributing, outcome.failureReason(), verifiedAt);
+            daily.recordResult(outcome.status(), contributing, null, verifiedAt);
             if (config.isFrequency() && outcome.status() == VerificationStatus.SUCCESS) {
-                member.incrementPeriodCompleted();   // 빈도형: 주기 완료 +1 (미잠금 상태에서 첫 SUCCESS 전이 1회)
+                member.incrementPeriodCompleted();   // 빈도형: 주기 완료 +1 (미확정 상태에서 첫 SUCCESS 전이 1회)
             }
         }
-        // 캐시(todayStatus)에는 실제 저장 상태를 반영(그룹 잠정 실패는 FAILED_PROVISIONAL).
         return daily.getStatus();
     }
 
@@ -297,16 +290,6 @@ public class VerificationSyncService {
     }
 
 
-    private int maxLagHours(VerificationConfig config) {
-        return switch (config.primaryMethod()) {
-            case WAKE -> (config.wake() != null) ? config.wake().maxSignalLagHours() : 2;
-            case SCREEN_TIME -> (config.screenTime() != null) ? config.screenTime().maxSignalLagHours() : 1;
-            case GPS_PRESENCE, GPS_DISTANCE -> (config.gps() != null) ? config.gps().maxSignalLagHours() : 1;
-            case HEALTH -> (config.health() != null) ? config.health().maxSignalLagHours() : 2;
-            case SLEEP -> (config.sleep() != null) ? config.sleep().maxSignalLagHours() : 12;
-            default -> 1;
-        };
-    }
 
     /** 해당 method의 신호타입에 대해, 당일과 겹치는 비회복(recoverable=false) 권한 공백이 있는지(§8.5). */
     private boolean permissionGap(List<SyncRequest.Gap> gaps, VerificationMethod method, LocalDate day) {

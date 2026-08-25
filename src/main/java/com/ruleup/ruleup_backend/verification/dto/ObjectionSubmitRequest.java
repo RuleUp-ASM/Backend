@@ -1,6 +1,6 @@
 package com.ruleup.ruleup_backend.verification.dto;
 
 /**
- * 이의 제기 제출(§8.7). type=FAILURE(MVP), targetDate(잠정 실패 일자), content 필수, imageUrl 선택.
+ * 이의 신청 제출. type=FAILURE(MVP), targetDate(실패가 확정된 일자), content 필수, imageUrl 선택.
  */
 public record ObjectionSubmitRequest(String type, String targetDate, String content, String imageUrl) {}

@@ -42,7 +42,7 @@ public class StreakService {
             VerificationStatus s = d.getStatus();
             if (s == VerificationStatus.SUCCESS) streak++;
             else if (s == VerificationStatus.FAILED) break;
-            // PENDING/FAILED_PROVISIONAL/NOT_TARGET/NOT_REQUIRED — 아직 종결 아님, 건너뛴다
+            // PENDING/NOT_TARGET/NOT_REQUIRED — 아직 종결 아님, 건너뛴다
         }
         return streak;
     }

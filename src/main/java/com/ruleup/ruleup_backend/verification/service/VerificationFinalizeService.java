@@ -6,7 +6,6 @@ import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
 import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.verification.domain.*;
-import com.ruleup.ruleup_backend.verification.repository.ObjectionRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationMethodResultRepository;
 import com.ruleup.ruleup_backend.common.event.RoutineFailureConfirmed;
@@ -21,18 +20,23 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
 
 /**
- * 인증 확정 배치(§2.11~2.14). 두 작업:
- *  1) finalizeDue   : 유예 끝난 PENDING 행을 polarity대로 잠금(도달형→FAILED / 제약형→SUCCESS).
- *                     FOR UPDATE SKIP LOCKED 선점이라 다중 인스턴스에서도 중복 확정 없음
- *                     (스케일 시 ShedLock을 위에 얹어도 공존 — DB 멱등은 그대로 유효).
- *  2) rolloverFrequencyPeriods : 빈도형 주기 종료분을 미달 정산 + 다음 주기로 롤오버(§2.12).
+ * 인증 확정 배치 (인증 정책 §2 · 테크스펙 §4-3 "일일 확정 배치"). 두 작업:
+ *  1) finalizeDue : <b>귀속일 다음 날 00:00 KST</b>가 지난 미확정 행을 최종 재평가해 완료·실패로 확정한다.
+ *     - 목표 달성형: 성공은 이미 즉시 확정됐으므로 여기 남은 건 미달 → 실패.
+ *     - 규칙 지키기형: 위반이 남아 있으면 실패, 없으면 완료.
+ *     이 시각 전에는 어떤 실패도 확정되지 않는다 — 늦게 도착하는 신호로 뒤집힐 수 있기 때문이다.
+ *  2) rolloverFrequencyPeriods : 빈도형 주기 종료분을 미달 정산 + 다음 주기로 롤오버.
+ *
+ * <p>1분 주기로 도는 폴러지만 대상 조건이 {@code finalizeAfter <= now} 라, 실제 확정은 각 귀속일의
+ * 다음 날 00:00 KST 에만 일어난다. 폴러라서 배포·장애로 배치가 밀려도 스스로 따라잡고(catch-up),
+ * 이미 확정된 건은 건너뛰므로 재실행이 안전하다.
+ * FOR UPDATE SKIP LOCKED 선점이라 다중 인스턴스에서도 같은 대상을 중복 처리하지 않는다.
  */
 @Service
 @RequiredArgsConstructor
@@ -45,13 +49,12 @@ public class VerificationFinalizeService {
 
     private final VerificationDailyRepository dailyRepo;
     private final VerificationMethodResultRepository methodResultRepo;
-    private final ObjectionRepository objectionRepo;
     private final ChallengeQueryService challengeQuery;
     private final VerificationConfigFactory configFactory;
     private final VerificationProgressService progressService;
     private final ApplicationEventPublisher eventPublisher;
 
-    /** 1분마다: 유예 끝난 PENDING 확정. */
+    /** 1분마다 폴링하되, 실제 확정은 귀속일 다음 날 00:00 KST 가 지난 건에서만 일어난다. */
     @Scheduled(fixedDelay = 60_000)
     @Transactional
     public void finalizeDue() {
@@ -64,93 +67,63 @@ public class VerificationFinalizeService {
         changedChallenges.forEach(challengeId -> eventPublisher.publishEvent(
                 ChallengeStatsRefreshRequested.of(challengeId, "VERIFICATION_FINALIZED")));
         if (!due.isEmpty()) {
-            log.info("인증 확정 배치: 유예 끝난 PENDING {}건 확정 처리", due.size());
+            log.info("인증 확정 배치: 귀속일이 끝난 미확정 {}건 확정 처리", due.size());
         }
     }
 
+    /**
+     * 한 건 최종 재평가·확정. 확정 결과가 이미 있으면 건너뛴다(재실행 멱등).
+     *
+     * <p>재평가 입력은 그 날 누적된 방식 평가 결과다. 규칙 지키기형(장소 피하기·앱 최대 사용)의 위반과
+     * 목표 달성형의 미달 사유는 sync 가 "실패 예정"으로 {@code failureReason} 에 눌러 담아 두므로,
+     * 여기서는 그 사유가 확정 시각까지 살아남았는지만 보면 된다 — 성공은 이미 즉시 확정돼 여기 오지 않는다.
+     */
     private boolean finalizeOne(VerificationDaily daily, Instant now) {
+        if (daily.isTerminal()) return false;   // 다른 인스턴스가 먼저 확정 — 중복 확정 금지
+
         Challenge challenge = challengeQuery.findChallenge(daily.getChallengeId()).orElse(null);
         if (challenge == null) {
-            daily.recordResult(VerificationStatus.FAILED, null, "NO_SIGNAL_RECEIVED", now);
+            daily.confirmFailure(now, daily.getMethod(), "NO_SIGNAL_RECEIVED");
             return false;
         }
         VerificationConfig config = configFactory.build(challenge);
         VerificationMethod method = config.primaryMethod();
         Polarity polarity = polarityOf(config, method);
 
-        boolean finalDecision = false;
-        boolean confirmedFail = false;
-        if (polarity == Polarity.CONSTRAINT) {
-            // 제약형(MAX·AVOID): 위반이면 sync에서 이미 잠정/확정 잠김 → 여기 온 건 무위반 → SUCCESS
+        boolean confirmedFail;
+        if (polarity == Polarity.CONSTRAINT && daily.getFailureReason() == null) {
+            // 정해진 기간 동안 유효한 위반이 없었다 → 완료 확정.
             daily.recordResult(VerificationStatus.SUCCESS, method.name(), null, now);
-            finalDecision = true;
+            confirmedFail = false;
         } else {
-            // 도달형: 창 닫힘·미충족. 신호 자체가 없었으면 NO_SIGNAL_RECEIVED.
-            var mr = methodResultRepo.findByVerificationDailyIdAndMethod(daily.getId(), method.name()).orElse(null);
-            Object pendingReason = (mr != null && mr.getEvidence() != null) ? mr.getEvidence().get("pendingReason") : null;
-            String reason;
-            if (mr == null) {
-                reason = "NO_SIGNAL_RECEIVED";
-            } else if ("UNTRUSTED_HEALTH_SOURCE".equals(pendingReason)) {
-                reason = "UNTRUSTED_HEALTH_SOURCE";   // HEALTH: 신뢰 게이트로만 막혀 통과분 0(§8.2)
-            } else if ("PERMISSION_MISSING".equals(pendingReason)) {
-                reason = "PERMISSION_MISSING";        // ③ 권한 공백(gaps)으로 신호 수집 불가(§8.5) — NO_SIGNAL과 구분
-            } else {
-                reason = failureReasonFor(method, config);
-            }
-            // 실패 2단계(§8.7): 그룹은 잠정 실패(1일 이의 제기 창) → 온도/통지는 최종 lock에서.
-            //                 솔로는 이의 제기가 무의미 → 즉시 FAILED 확정.
-            if (challenge.isGroup()) {
-                daily.recordProvisionalFailure(method.name(), reason,
-                        now.plus(VerificationDaily.OBJECTION_WINDOW_DAYS, ChronoUnit.DAYS));
-            } else {
-                daily.recordResult(VerificationStatus.FAILED, null, reason, now);
-                confirmedFail = true;
-                finalDecision = true;
-            }
+            daily.confirmFailure(now, method.name(), finalFailureReason(daily, method, config));
+            confirmedFail = true;
         }
 
         ChallengeMember member = challengeQuery.findMember(daily.getChallengeMemberId()).orElse(null);
         refreshProgress(member, daily);
 
-        // 확정된 실패만 감시자 통지 적재(§9). 잠정 실패는 확정 아님 → lock 시점에 통지.
+        // 확정된 실패만 감시자 통지 적재. 실패 예정 단계에서는 통지하지 않는다(확정이 아니므로).
         if (confirmedFail && member != null) {
             eventPublisher.publishEvent(new RoutineFailureConfirmed(
                     daily.getChallengeId(), member.getUserId(), daily.getTargetDate(), now));
         }
-        return finalDecision && member != null;
+        return member != null;
     }
 
     /**
-     * 잠정 실패 확정 배치(§8.7): 이의 제기 창이 끝난 FAILED_PROVISIONAL 을 FAILED 로 잠근다(온도 반영).
-     * 단, 미처리(PENDING) 이의 제기가 있으면 처리될 때까지 확정을 보류한다(자동 기각 아님).
+     * 최종 실패 사유. sync 가 남긴 "실패 예정" 사유가 있으면 그대로 쓰고,
+     * 없으면 신호 자체가 없었던 경우(권한 공백 / 신뢰 게이트 탈락 / 무신호)를 구분해 붙인다.
      */
-    @Scheduled(fixedDelay = 60_000)
-    @Transactional
-    public void lockExpiredProvisionalFailures() {
-        Instant now = Instant.now();
-        List<VerificationDaily> due = dailyRepo.findProvisionalDueForLockForUpdate(now, CLAIM_LIMIT);
-        int locked = 0;
-        Set<UUID> changedChallenges = new HashSet<>();
-        for (VerificationDaily daily : due) {
-            // 처리 대기 중인 이의 제기가 있으면 보류(결정 시점에 처리).
-            if (objectionRepo.existsByChallengeMemberIdAndTargetDateAndStatus(
-                    daily.getChallengeMemberId(), daily.getTargetDate(), ObjectionStatus.PENDING)) {
-                continue;
-            }
-            daily.lockFailed(now);   // FAILED 확정(온도 반영 트리거)
-            ChallengeMember member = challengeQuery.findMember(daily.getChallengeMemberId()).orElse(null);
-            refreshProgress(member, daily);
-            if (member != null) {
-                changedChallenges.add(daily.getChallengeId());
-                eventPublisher.publishEvent(new RoutineFailureConfirmed(
-                        daily.getChallengeId(), member.getUserId(), daily.getTargetDate(), now));
-            }
-            locked++;
-        }
-        changedChallenges.forEach(challengeId -> eventPublisher.publishEvent(
-                ChallengeStatsRefreshRequested.of(challengeId, "PROVISIONAL_FAILURE_LOCKED")));
-        if (locked > 0) log.info("잠정 실패 확정 배치: {}건 FAILED lock", locked);
+    private String finalFailureReason(VerificationDaily daily, VerificationMethod method, VerificationConfig config) {
+        if (daily.getFailureReason() != null) return daily.getFailureReason();
+
+        var mr = methodResultRepo.findByVerificationDailyIdAndMethod(daily.getId(), method.name()).orElse(null);
+        if (mr == null) return "NO_SIGNAL_RECEIVED";
+        Object pendingReason = (mr.getEvidence() != null) ? mr.getEvidence().get("pendingReason") : null;
+        if ("UNTRUSTED_HEALTH_SOURCE".equals(pendingReason)) return "UNTRUSTED_HEALTH_SOURCE";
+        if ("PERMISSION_MISSING".equals(pendingReason)) return "PERMISSION_MISSING";   // 무신호와 구분
+        return failureReasonFor(method, config);
     }
 
     /** 진행률 재계산 + (그날이 오늘이면) todayStatus 뱃지 캐시 갱신. */
@@ -162,9 +135,6 @@ public class VerificationFinalizeService {
             progressService.recount(member);
         }
     }
-
-    // (제거) 예비 폴백 "침묵=동의" 자동확정 sweeper — 방장 승인 모델(§9.2)로 전환되어 더는 필요 없다.
-    // 폴백 확정은 VerificationApprovalService(.../approval) 에서 방장 승인/거절로만 일어난다.
 
     /** 매일 00:05 KST: 종료된 빈도형 주기 정산 + 롤오버. */
     @Scheduled(cron = "0 5 0 * * *", zone = "Asia/Seoul")

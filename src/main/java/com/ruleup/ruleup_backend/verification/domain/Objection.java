@@ -17,7 +17,7 @@ import java.util.UUID;
 
 /**
  * 이의 제기 (Objection 테이블, 인증구현 §8.7).
- *  - 잠정 실패(FAILED_PROVISIONAL) 일자에 대해 멤버 본인이 제출(1일 창, 일자당 1회).
+ *  - 실패가 확정된 일자에 대해 멤버 본인이 제출(확정일 다음 날 00:00 KST 까지, 일자당 1회).
  *  - 방장(OWNER)/공동 관리자(MANAGER)가 승인/기각. 승인→SUCCESS(OBJECTION), 기각→FAILED(OBJECTION_REJECTED).
  *  - 제출 형식: 사진을 포함한 글 혹은 글만(content 필수, imageUrl 선택).
  */
@@ -62,7 +62,7 @@ public class Objection extends AssignedIdEntity {
     private ObjectionStatus status;
 
     @Column(name = "deadline", nullable = false, updatable = false)
-    private Instant deadline;            // 이의 제기 창 마감(잠정 실패 +1일 = daily.disputeClosesAt)
+    private Instant deadline;            // 이의 신청 기한(= daily.appealClosesAt)
 
     @JdbcTypeCode(SqlTypes.BINARY)
     @Column(name = "decidedBy")

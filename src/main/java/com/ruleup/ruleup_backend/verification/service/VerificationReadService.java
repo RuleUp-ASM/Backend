@@ -79,7 +79,7 @@ public class VerificationReadService {
                 .findByChallengeMemberIdAndTargetDate(member.getId(), today).orElse(null);
 
         boolean isTarget = isTodayTarget(config, ch, member, today);
-        String status = todayStatus(isTarget, daily, now);
+        String status = todayStatus(isTarget, daily, today, now);
         boolean failed = TodayStatusView.FAILED.equals(status);
 
         return new TodayVerificationResponse(
@@ -91,16 +91,16 @@ public class VerificationReadService {
                 failed && daily != null ? daily.getFailureReason() : null,
                 streakService.around(member.getId(), today),
                 unacknowledged(daily),
-                failed ? appeal(ch, member, daily, now) : null);
+                failed ? appeal(member, daily, now) : null);
     }
 
     // ===== 조립 헬퍼 =====
 
     /** 오늘이 대상 날짜가 아니면 판정 행과 무관하게 NOT_TARGET. 나머지는 공용 매핑(TodayStatusView). */
-    private String todayStatus(boolean isTarget, VerificationDaily daily, Instant now) {
+    private String todayStatus(boolean isTarget, VerificationDaily daily, LocalDate today, Instant now) {
         if (!isTarget) return TodayStatusView.NOT_TARGET;
         if (daily == null) return TodayStatusView.IN_PROGRESS;
-        return TodayStatusView.of(daily.getStatus(), daily.getWindowClosesAt(), now);
+        return TodayStatusView.of(daily.getStatus(), today, daily.getFailureReason(), now);
     }
 
     /** 인증 창 표시 문구 — 자동은 시간대, 수동은 "자정 마감". 시간 제약이 없으면 null. */
@@ -127,21 +127,17 @@ public class VerificationReadService {
     }
 
     /**
-     * 이의제기 가능 여부와 기한. 기한은 확정 시각 +24시간이 아니라
-     * <b>실패 확정일의 다음 날 00:00 KST</b>로 고정된 자정 경계다. 횟수 한도는 없다.
-     * 솔로 챌린지는 이의 제기 대상이 아니다.
+     * 이의 신청 가능 여부와 기한. 기한은 확정 시각 +24시간이 아니라
+     * <b>실패 확정일의 다음 날 00:00 KST</b>로 고정된 자정 경계다(인증 정책 §5.2).
+     * 횟수 한도는 없고, 솔로·그룹을 가리지 않는다 — 자동 판정이 틀리는 건 어느 쪽에서나 같다.
      */
-    private TodayVerificationResponse.Appeal appeal(Challenge ch, ChallengeMember member,
-                                                    VerificationDaily daily, Instant now) {
-        if (daily == null || !ch.isGroup()) return null;
-        Instant confirmedAt = (daily.getVerifiedAt() != null) ? daily.getVerifiedAt() : now;
-        ZonedDateTime until = ZonedDateTime.ofInstant(confirmedAt, KST)
-                .toLocalDate().plusDays(1).atStartOfDay(KST);
+    private TodayVerificationResponse.Appeal appeal(ChallengeMember member, VerificationDaily daily, Instant now) {
+        if (daily == null || daily.getAppealClosesAt() == null) return null;
         boolean alreadyFiled = objectionRepo
                 .findByChallengeMemberIdAndTargetDate(member.getId(), daily.getTargetDate()).isPresent();
         return new TodayVerificationResponse.Appeal(
-                until.format(ISO_OFFSET),
-                !alreadyFiled && now.isBefore(until.toInstant()));
+                ZonedDateTime.ofInstant(daily.getAppealClosesAt(), KST).format(ISO_OFFSET),
+                !alreadyFiled && daily.isAppealable(now));
     }
 
     private ChallengeProgress toProgress(ChallengeMember m, Challenge ch, VerificationConfig config, LocalDate today) {

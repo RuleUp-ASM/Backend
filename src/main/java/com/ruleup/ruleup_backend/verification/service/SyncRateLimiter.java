@@ -2,6 +2,7 @@ package com.ruleup.ruleup_backend.verification.service;
 
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
+import com.ruleup.ruleup_backend.verification.config.VerificationProperties;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -20,14 +21,18 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class SyncRateLimiter {
 
-    private static final long MIN_INTERVAL_MILLIS = 5 * 60_000L;           // 평상시 5분
-    private static final long BACKLOG_MIN_INTERVAL_MILLIS = 10_000L;       // 복구 전송 10초
-
     private final Map<String, Long> lastSyncAt = new ConcurrentHashMap<>();
+    private final VerificationProperties properties;
+
+    public SyncRateLimiter(VerificationProperties properties) {
+        this.properties = properties;
+    }
 
     public void check(String userId, boolean backlog) {
+        long minInterval = 1000L * (backlog
+                ? properties.syncBacklogMinIntervalSec() : properties.syncMinIntervalSec());
+        if (minInterval <= 0) return;   // 제한 없음(설정으로 끈 경우)
         long now = Instant.now().toEpochMilli();
-        long minInterval = backlog ? BACKLOG_MIN_INTERVAL_MILLIS : MIN_INTERVAL_MILLIS;
         Long prev = lastSyncAt.put(userId, now);
         if (prev != null && now - prev < minInterval) {
             lastSyncAt.put(userId, prev);   // 거부된 호출은 마지막 시각 갱신 안 함

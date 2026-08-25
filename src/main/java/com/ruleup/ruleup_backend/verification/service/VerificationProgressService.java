@@ -38,7 +38,7 @@ public class VerificationProgressService {
     }
 
     /**
-     * 확정/잠정 배치가 "오늘" 날짜를 처리했을 때 — 진행률 재계산 + todayStatus 캐시 갱신(뱃지용).
+     * 확정 배치가 "오늘" 날짜를 처리했을 때 — 진행률 재계산 + todayStatus 캐시 갱신(뱃지용).
      * lastSyncedAt 은 기존값 유지(배치가 sync 시각을 바꾸지 않도록).
      */
     public void recountAndSetToday(ChallengeMember member, VerificationStatus todayStatus) {

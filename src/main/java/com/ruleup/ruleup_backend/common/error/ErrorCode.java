@@ -195,8 +195,8 @@ public enum ErrorCode {
     INVALID_DECISION(HttpStatus.BAD_REQUEST, "유효하지 않은 처리 동작입니다. (APPROVE / REJECT)"),
     // 이의 제기(§8.7)
     OBJECTION_NOT_FOUND(HttpStatus.NOT_FOUND, "이의 제기를 찾을 수 없습니다."),
-    OBJECTION_WINDOW_CLOSED(HttpStatus.CONFLICT, "이의 제기 창(3일)이 지났습니다."),
-    NOT_OBJECTIONABLE(HttpStatus.CONFLICT, "이의 제기할 수 없는 상태입니다(잠정 실패가 아니거나 솔로 챌린지)."),
+    OBJECTION_WINDOW_CLOSED(HttpStatus.CONFLICT, "이의를 신청할 수 있는 기간이 지났어요."),
+    NOT_OBJECTIONABLE(HttpStatus.CONFLICT, "실패로 확정된 인증에만 이의를 신청할 수 있어요."),
     ALREADY_OBJECTED(HttpStatus.CONFLICT, "이미 이의 제기한 날짜입니다."),
     UNSUPPORTED_OBJECTION_TYPE(HttpStatus.BAD_REQUEST, "지원하지 않는 이의 제기 유형입니다. (FAILURE만 지원)"),
 

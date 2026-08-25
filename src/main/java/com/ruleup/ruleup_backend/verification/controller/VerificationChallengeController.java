@@ -204,7 +204,7 @@ public class VerificationChallengeController {
     // ===== 이의 제기(§8.7) — 자동 방 실패 구제 경로 =====
 
     @Operation(summary = "이의 제기 제출",
-            description = "잠정 실패(FAILED_PROVISIONAL) 일자에 대해 1일 창 안에 본인이 제출(일자당 1회). "
+            description = "실패가 확정된 일자에 대해 본인이 제출(일자당 1회). 기한은 실패 확정일의 다음 날 00:00 KST 다. "
                     + "사진 포함 글 또는 글. 솔로는 대상 아님.")
     @PostMapping("/{challengeId}/objections")
     public ApiResponse<ObjectionResponse> submitObjection(@AuthenticationPrincipal String userId,
