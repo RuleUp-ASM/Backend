@@ -13,11 +13,11 @@ package com.ruleup.ruleup_backend.verification.dto;
  * @param window               인증 창 표시 문구(자동=시간대, 수동="자정 마감"). 없으면 null
  * @param pendingReason        CHECKING인 이유(예: WAITING_SIGNAL). 그 외에는 null
  * @param confirmedAt          확정 시각(ISO-8601, KST). 성공은 조건 충족 즉시,
- *                             실패는 귀속일 다음 날 00:00 KST. 미확정이면 null
- * @param failureReason        실패 사유. FAILED일 때만 채워진다
+ *                             실패는 귀속일 이틀 뒤 00:00 KST. 미확정이면 null
+ * @param failureReason        실패 사유. FAILED · FAIL_EXPECTED 일 때 채워진다
  * @param streak               연속 기록 변화
  * @param unacknowledgedResult 미확인 판정. 존재 시 클라는 모달을 띄우고 ack를 호출한다
- * @param appeal               이의제기 가능 여부와 기한. FAILED일 때만
+ * @param appeal               이의 신청 가능 여부와 기한. FAILED · FAIL_EXPECTED 일 때
  */
 public record TodayVerificationResponse(
         String date,
@@ -37,8 +37,8 @@ public record TodayVerificationResponse(
     public record UnacknowledgedResult(String verificationId, String result) {}
 
     /**
-     * @param eligibleUntil 이의제기 기한 — 실패 확정일의 다음 날 00:00 KST(ISO-8601).
-     *                      확정 시각 +24시간이 아니라 자정 경계로 고정된다
+     * @param eligibleUntil 이의 신청 기한 — 확정 시각과 같은 귀속일 이틀 뒤 00:00 KST(ISO-8601).
+     *                      확정 시각 +24시간이 아니라 자정 경계로 고정되며, 확정 전에 신청한다
      * @param eligible      지금 신청 가능한지. 기한 경과·이미 신청함 등이면 false. 횟수 한도는 없다
      */
     public record Appeal(String eligibleUntil, boolean eligible) {}

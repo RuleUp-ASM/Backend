@@ -188,6 +188,11 @@ public enum ErrorCode {
 
     // ===== 이의 제기 처리 (OWNER/MANAGER) =====
     VERIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "인증 제출을 찾을 수 없습니다."),
+
+    // ===== 인증 이의(자동 인용) =====
+    INVALID_REASON(HttpStatus.BAD_REQUEST, "이의 사유를 10자 이상 적어주세요."),
+    NOT_FAILED(HttpStatus.CONFLICT, "실패했거나 실패가 예상되는 인증에만 이의를 신청할 수 있어요."),
+    APPEAL_WINDOW_CLOSED(HttpStatus.CONFLICT, "이의를 신청할 수 있는 기간이 지났어요."),
     ALREADY_DECIDED(HttpStatus.CONFLICT, "이미 승인/거절된 제출입니다."),
     INVALID_TARGET_DATE(HttpStatus.BAD_REQUEST, "유효하지 않은 대상 날짜입니다."),
     CONTENT_REQUIRED(HttpStatus.BAD_REQUEST, "글 내용을 입력해주세요."),
