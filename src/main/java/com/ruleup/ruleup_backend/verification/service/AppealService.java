@@ -7,6 +7,8 @@ import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
 import com.ruleup.ruleup_backend.verification.domain.Appeal;
+import com.ruleup.ruleup_backend.verification.domain.Polarity;
+import com.ruleup.ruleup_backend.verification.domain.VerificationPolarity;
 import com.ruleup.ruleup_backend.verification.domain.VerificationDaily;
 import com.ruleup.ruleup_backend.verification.dto.AppealResponse;
 import com.ruleup.ruleup_backend.verification.dto.AppealSubmitRequest;
@@ -30,10 +32,14 @@ import java.util.UUID;
  * 그래서 결정적인 형식 요건만 검사하고 통과하면 즉시 인용한다.
  * <ol>
  *   <li>본인의 인증인가</li>
- *   <li>실패로 <b>확정</b>됐는가 (이미 인용된 건 포함해 그 외는 전부 거절)</li>
- *   <li>기한 안인가 — 실패 확정일의 다음 날 00:00 KST</li>
+ *   <li><b>실패로 확정됐거나 이대로면 실패인가</b> (완료된 건과 아직 채울 기회가 남은 건은 거절)</li>
+ *   <li>기한 안인가 — 확정 시각과 같은 귀속일 이틀 뒤 00:00 KST</li>
  *   <li>사유가 10자 이상인가 (사진은 선택)</li>
  * </ol>
+ *
+ * <p>이의는 확정 <b>전에</b> 받는다. 확정이 귀속일 이틀 뒤이고 기한도 같은 시각이라, 실제 신청 창은
+ * 귀속일이 끝난 뒤의 유예 하루다 — 유저는 "이대로면 실패"를 보고 신청한다.
+ * 확정을 기다렸다가 받으면 기한이 이미 지나 구제 경로가 없어진다.
  * 이 네 가지 말고는 아무것도 보지 않는다 — LLM·방장·MANAGER 는 인용 여부를 판단하지 않고,
  * 횟수 한도도 없다. 남용은 인용과 분리된 이상탐지·운영 제재가 맡는다.
  *
@@ -48,6 +54,7 @@ public class AppealService {
     private final VerificationDailyRepository dailyRepo;
     private final AppealRepository appealRepo;
     private final ChallengeQueryService challengeQuery;
+    private final VerificationConfigFactory configFactory;
     private final VerificationProgressService progressService;
     private final StreakService streakService;
     private final ApplicationEventPublisher eventPublisher;
@@ -63,10 +70,13 @@ public class AppealService {
 
         // 형식 요건 — 사유부터 본다. 미달이면 접수하지 않으므로 이력도 남지 않는다.
         if (!Appeal.isValidReason(reason)) throw new BusinessException(ErrorCode.INVALID_REASON);
-        // 실패 확정 건에만. 이미 인용돼 완료로 바뀐 건도 여기서 걸린다(실패 결과 기준 멱등).
-        if (daily.getStatus() != VerificationStatus.FAILED) throw new BusinessException(ErrorCode.NOT_FAILED);
+
         Instant now = Instant.now();
-        if (!daily.isAppealable(now)) throw new BusinessException(ErrorCode.APPEAL_WINDOW_CLOSED);
+        Polarity polarity = polarityOf(daily.getChallengeId());
+        // 실패로 확정됐거나 이대로면 실패인 건에만. 이미 인용돼 완료로 바뀐 건도 여기서 걸린다
+        // (실패 결과 기준 멱등 — 두 번째 요청은 완료 상태라 대상이 아니다).
+        if (!failing(daily, polarity, now)) throw new BusinessException(ErrorCode.NOT_FAILED);
+        if (!daily.isAppealable(polarity, now)) throw new BusinessException(ErrorCode.APPEAL_WINDOW_CLOSED);
 
         Appeal appeal = saveAppeal(daily, userId, reason.trim(),
                 (request != null) ? request.imageUrl() : null, now);
@@ -88,6 +98,19 @@ public class AppealService {
                         TodayStatusView.DONE,
                         streakService.around(daily.getChallengeMemberId(), daily.getTargetDate()).after(),
                         scoreDeltaOf(daily)));
+    }
+
+    /** 실패로 확정됐거나 이대로면 실패인지 — 기한과 무관하게 "이의 대상인 판정"인지만 본다. */
+    private boolean failing(VerificationDaily daily, Polarity polarity, Instant now) {
+        return daily.getStatus() == VerificationStatus.FAILED || daily.isFailExpected(polarity, now);
+    }
+
+    /** 판정 방향은 챌린지 설정에서 온다 — 목표 달성형인지 규칙 지키기형인지로 실패 예정 여부가 갈린다. */
+    private Polarity polarityOf(UUID challengeId) {
+        return challengeQuery.findChallenge(challengeId)
+                .map(configFactory::build)
+                .map(VerificationPolarity::of)
+                .orElse(Polarity.ACHIEVEMENT);
     }
 
     /**

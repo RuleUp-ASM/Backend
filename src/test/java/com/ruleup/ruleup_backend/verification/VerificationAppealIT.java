@@ -32,11 +32,14 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  * <p>이의의 대다수인 "실제로 했는데 측정이 틀렸다"는 증빙의 진위를 봇도 사람도 검증할 수 없다.
  * 그래서 <b>결정적인 형식 요건만</b> 검사하고 통과하면 즉시 자동 인용한다.
  * <ul>
- *   <li>본인 · 실패 확정 상태 · 기한(확정일 다음 날 00:00 KST) · 사유 10자 이상</li>
+ *   <li>본인 · 실패로 확정됐거나 이대로면 실패 · 기한(확정 시각과 같은 귀속일+2일 00:00 KST) · 사유 10자 이상</li>
  *   <li>사진은 선택이며 진위 확인에 쓰지 않는다</li>
  *   <li>횟수 한도 없음 — 남용은 인용과 분리된 이상탐지가 본다</li>
  *   <li>LLM·방장·MANAGER 는 인용 여부를 판단하지 않는다</li>
  * </ul>
+ *
+ * <p>이의는 확정 <b>전에</b> 받는다. 확정이 귀속일 이틀 뒤이고 기한도 같은 시각이라, 실제 신청 창은
+ * 귀속일이 끝난 뒤의 유예 하루다 — 유저는 "이대로면 실패"를 보고 신청한다.
  */
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
@@ -198,6 +201,58 @@ class VerificationAppealIT extends VerificationApiSupport {
     }
 
     @Nested
+    @DisplayName("실패 예정 구간 — 확정 전 신청")
+    class BeforeConfirmation {
+
+        /** 어제 귀속으로 목표 미달인 채 남은 건. 귀속일은 끝났고 확정은 아직 — 실제 이의 신청 창이다. */
+        private UUID failExpectedYesterday(Member me, UUID challengeId, UUID memberId) {
+            UUID verificationId = UUID.randomUUID();
+            jdbc().update("INSERT INTO VerificationDaily " +
+                            "(id, challengeMemberId, challengeId, userId, targetDate, status, method, " +
+                            " finalizeAfter, appealClosesAt) " +
+                            "VALUES (?, ?, ?, ?, DATE_SUB(CURDATE(), INTERVAL 1 DAY), 'PENDING', 'GPS_PRESENCE', " +
+                            " UTC_TIMESTAMP(6) + INTERVAL 1 DAY, UTC_TIMESTAMP(6) + INTERVAL 1 DAY)",
+                    bytes(verificationId), bytes(memberId), bytes(challengeId), bytes(me.id()));
+            return verificationId;
+        }
+
+        @Test
+        @DisplayName("확정 전 '실패 예정' 상태에서 이의를 낼 수 있다 — 이게 실제 신청 창이다")
+        void appealDuringGraceWindow() throws Exception {
+            Member me = member(uniq("appeal-grace"));
+            UUID challengeId = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE",
+                    "{\"duration_min\":30,\"radius_m\":100}");
+            UUID memberId = insertReadyMember(challengeId, me.id(),
+                    anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+            UUID verificationId = failExpectedYesterday(me, challengeId, memberId);
+
+            MvcResult res = appeal(me.token(), verificationId, REASON, null);
+
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+            assertThat((String) read(res, "$.data.result")).isEqualTo("ACCEPTED");
+            assertThat(jdbc().queryForObject(
+                    "SELECT status FROM VerificationDaily WHERE id = ?", String.class, bytes(verificationId)))
+                    .as("확정을 기다리지 않고 즉시 완료로 정정된다")
+                    .isEqualTo("SUCCESS");
+        }
+
+        @Test
+        @DisplayName("아직 채울 기회가 남은 오늘 건에는 신청할 수 없다")
+        void todayStillInProgressIsNotAppealable() throws Exception {
+            Member me = member(uniq("appeal-today"));
+            UUID challengeId = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE",
+                    "{\"duration_min\":30,\"radius_m\":100}");
+            UUID memberId = insertReadyMember(challengeId, me.id(),
+                    anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+            postJsonAuth("/api/v1/verifications/sync", me.token(), syncBody(List.of(
+                    geofenceSignal(memberId, "ENTER", todayAt(9, 0)),
+                    geofenceSignal(memberId, "EXIT", todayAt(9, 10)))));
+
+            expectError(appeal(me.token(), verificationIdOf(memberId), REASON, null), 409, "NOT_FAILED");
+        }
+    }
+
+    @Nested
     @DisplayName("형식 요건")
     class FormatRequirements {
 
@@ -237,7 +292,7 @@ class VerificationAppealIT extends VerificationApiSupport {
         }
 
         @Test
-        @DisplayName("기한이 지나면 신청할 수 없다 — 확정일의 다음 날 00:00 KST 로 끊는다")
+        @DisplayName("기한이 지나면 신청할 수 없다 — 확정 시각과 같은 자정 경계로 끊는다")
         void windowClosesAtMidnightAfterConfirmation() throws Exception {
             FailedVerification f = failedVerification("appeal-late");
             jdbc().update("UPDATE VerificationDaily SET appealClosesAt = UTC_TIMESTAMP(6) - INTERVAL 1 MINUTE WHERE id = ?",
