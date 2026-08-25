@@ -67,6 +67,9 @@ public class WakeEvaluator implements MethodEvaluator {
         for (SyncSignal s : signals) {
             if (!SignalType.SCREEN_TIME.name().equals(s.type()) || s.screenEvents() == null) continue;
             for (ScreenEvent e : s.screenEvents()) {
+                // 기상 판정은 "당일 첫 잠금 해제"다(인증 정책 §1.1). 화면만 켜지는 일은 알림 확인으로도
+                // 흔해서, SCREEN_ON 을 기상으로 세면 자는 사람이 깬 것으로 잡힌다.
+                if (!"UNLOCK".equalsIgnoreCase(e.event())) continue;
                 Instant at = TimeWindows.parseInstant(e.at());
                 if (at == null || !window.contains(at)) continue;
                 if (earliest == null || at.isBefore(earliest)) earliest = at;

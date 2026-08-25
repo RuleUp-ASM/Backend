@@ -66,6 +66,7 @@ public class VerificationSyncService {
     private final SyncRateLimiter rateLimiter;
     private final VerificationSignalIngestService signalIngest;
     private final MemberSettingsResolver settingsResolver;
+    private final SignalTrustGate trustGate;
     private final VerificationMemberSetup memberSetup;
     private final VerificationConfigFactory configFactory;
     private final VerificationProgressService progressService;
@@ -81,6 +82,7 @@ public class VerificationSyncService {
                                    SyncRateLimiter rateLimiter,
                                    VerificationSignalIngestService signalIngest,
                                    MemberSettingsResolver settingsResolver,
+                                   SignalTrustGate trustGate,
                                    VerificationMemberSetup memberSetup,
                                    VerificationConfigFactory configFactory,
                                    VerificationProgressService progressService,
@@ -95,6 +97,7 @@ public class VerificationSyncService {
         this.rateLimiter = rateLimiter;
         this.signalIngest = signalIngest;
         this.settingsResolver = settingsResolver;
+        this.trustGate = trustGate;
         this.memberSetup = memberSetup;
         this.configFactory = configFactory;
         this.progressService = progressService;
@@ -128,7 +131,8 @@ public class VerificationSyncService {
         // 원본 저장 + 영속 멱등. 평가에는 이번에 처음 받은 신호만 넘긴다 —
         // 재전송된 구간이 체류·사용 시간에 다시 더해지지 않게 하는 경계다.
         VerificationSignalIngestService.Ingested ingested = signalIngest.ingest(userId, signals, now);
-        List<SyncSignal> fresh = ingested.accepted();
+        // 원본은 위에서 이미 저장했다. 판정 입력에서만 못 믿을 신호를 뺀다 — 제외와 제재는 분리한다.
+        List<SyncSignal> fresh = trustGate.apply(userId, req, ingested.accepted());
 
         List<ChallengeMember> members = challengeQuery.findActiveMemberships(userId);
         List<SyncResponse.UpdatedChallenge> updated = new ArrayList<>();
