@@ -8,6 +8,7 @@ import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.verification.GeoAnchor;
 import com.ruleup.ruleup_backend.common.verification.ScreenApp;
 import com.ruleup.ruleup_backend.verification.config.VerificationProperties;
+import com.ruleup.ruleup_backend.verification.domain.SettingKind;
 import com.ruleup.ruleup_backend.verification.domain.VerificationConfig;
 import com.ruleup.ruleup_backend.verification.domain.VerificationMethod;
 import com.ruleup.ruleup_backend.verification.dto.AnchorDto;
@@ -70,6 +71,7 @@ public class VerificationSetupService {
     private final VerificationConfigFactory configFactory;
     private final VerificationDailyRepository dailyRepo;
     private final VerificationProperties properties;
+    private final SettingHistoryRecorder settingHistory;
 
     // ===== GET /setup — 최초 진입 시 설정이 필요한 정보 조회 =====
     @Transactional(readOnly = true)
@@ -124,8 +126,15 @@ public class VerificationSetupService {
 
         // 유효한 바인딩이 들어왔으면 모자란 항목과 무관하게 저장(부분 진행 보존).
         Instant now = Instant.now();
-        if (anchors != null) member.replaceAnchors(anchors, now);      // 첫 설정 — 월 1회를 소진하지 않는다
-        if (screenApps != null) member.setScreenAppsInitial(screenApps, now);
+        LocalDate effectiveToday = LocalDate.now(KST);
+        if (anchors != null) {
+            member.replaceAnchors(anchors, now);      // 첫 설정 — 월 1회를 소진하지 않는다
+            settingHistory.record(member.getId(), SettingKind.ANCHORS, effectiveToday, anchors);
+        }
+        if (screenApps != null) {
+            member.setScreenAppsInitial(screenApps, now);
+            settingHistory.record(member.getId(), SettingKind.SCREEN_APPS, effectiveToday, screenApps);
+        }
         if (missing.isEmpty()) member.markSetupReady();
         challengeQuery.saveMember(member);
 
@@ -188,6 +197,8 @@ public class VerificationSetupService {
 
         List<GeoAnchor> anchors = toAnchors(req.anchors());
         member.changeAnchors(anchors, now);
+        // 변경 즉시 적용이라 오늘부터다. 어제 이전 판정은 이전 스냅샷을 계속 쓴다.
+        settingHistory.record(member.getId(), SettingKind.ANCHORS, LocalDate.now(KST), anchors);
         if (!member.isSetupReady()) member.markSetupReady();
         challengeQuery.saveMember(member);
 
@@ -260,6 +271,7 @@ public class VerificationSetupService {
         member.promoteScreenAppsIfDue(today, KST);     // 도래한 대기 세트를 먼저 승격(pending 판정 정확도)
         LocalDate effectiveDate = today.plusDays(1);   // 익일 00:00부터 적용
         member.stagePendingScreenApps(apps, effectiveDate, now);
+        settingHistory.record(member.getId(), SettingKind.SCREEN_APPS, effectiveDate, apps);
         challengeQuery.saveMember(member);
 
         return new ScreenAppsUpdateResponse(

@@ -18,6 +18,7 @@ import com.ruleup.ruleup_backend.verification.evaluator.MethodEvaluator;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationMethodResultRepository;
 import com.ruleup.ruleup_backend.verification.signal.SignalType;
+import com.ruleup.ruleup_backend.common.verification.GeoAnchor;
 import com.ruleup.ruleup_backend.verification.signal.DaySignals;
 import com.ruleup.ruleup_backend.verification.signal.SyncSignal;
 import com.ruleup.ruleup_backend.common.event.PermissionGapDetected;
@@ -64,6 +65,8 @@ public class VerificationSyncService {
     private final VerificationMethodResultRepository methodResultRepo;
     private final SyncRateLimiter rateLimiter;
     private final VerificationSignalIngestService signalIngest;
+    private final MemberSettingsResolver settingsResolver;
+    private final SignalTrustGate trustGate;
     private final VerificationMemberSetup memberSetup;
     private final VerificationConfigFactory configFactory;
     private final VerificationProgressService progressService;
@@ -78,6 +81,8 @@ public class VerificationSyncService {
                                    VerificationMethodResultRepository methodResultRepo,
                                    SyncRateLimiter rateLimiter,
                                    VerificationSignalIngestService signalIngest,
+                                   MemberSettingsResolver settingsResolver,
+                                   SignalTrustGate trustGate,
                                    VerificationMemberSetup memberSetup,
                                    VerificationConfigFactory configFactory,
                                    VerificationProgressService progressService,
@@ -91,6 +96,8 @@ public class VerificationSyncService {
         this.methodResultRepo = methodResultRepo;
         this.rateLimiter = rateLimiter;
         this.signalIngest = signalIngest;
+        this.settingsResolver = settingsResolver;
+        this.trustGate = trustGate;
         this.memberSetup = memberSetup;
         this.configFactory = configFactory;
         this.progressService = progressService;
@@ -124,7 +131,8 @@ public class VerificationSyncService {
         // 원본 저장 + 영속 멱등. 평가에는 이번에 처음 받은 신호만 넘긴다 —
         // 재전송된 구간이 체류·사용 시간에 다시 더해지지 않게 하는 경계다.
         VerificationSignalIngestService.Ingested ingested = signalIngest.ingest(userId, signals, now);
-        List<SyncSignal> fresh = ingested.accepted();
+        // 원본은 위에서 이미 저장했다. 판정 입력에서만 못 믿을 신호를 뺀다 — 제외와 제재는 분리한다.
+        List<SyncSignal> fresh = trustGate.apply(userId, req, ingested.accepted());
 
         List<ChallengeMember> members = challengeQuery.findActiveMemberships(userId);
         List<SyncResponse.UpdatedChallenge> updated = new ArrayList<>();
@@ -279,13 +287,13 @@ public class VerificationSyncService {
                 .findByVerificationDailyIdAndMethod(daily.getId(), method.name()).orElse(null);
         Map<String, Object> prior = (mr != null) ? mr.getEvidence() : null;
 
-        List<String> memberScreenApps = member.effectiveScreenApps(today).stream()
-                .map(com.ruleup.ruleup_backend.common.verification.ScreenApp::packageName)
-                .toList();
+        // 과거 날짜는 그 날 적용되던 설정으로 평가한다 — 유예 구간에 장소를 바꿔도 어제 판정이 흔들리지 않게.
+        List<String> memberScreenApps = settingsResolver.screenAppPackagesOn(member, today);
+        List<GeoAnchor> memberAnchors = settingsResolver.anchorsOn(member, today);
         // 신호는 도착 시각이 아니라 발생 시각으로 귀속한다 — 한 배치에 어제치와 오늘치가 섞여 온다.
         List<SyncSignal> ofDay = DaySignals.forDate(signals, today, KST);
         DayContext ctx = new DayContext(today, KST, now, config, ofDay, prior,
-                member.getAnchors(), memberScreenApps, member.getId().toString());
+                memberAnchors, memberScreenApps, member.getId().toString());
         EvaluationOutcome outcome = evaluator.evaluate(ctx);
 
         // ③ 권한 공백(gaps) 반영: 신호 없이 PENDING이고 해당 신호타입에 비회복 권한 공백이 있으면

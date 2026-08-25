@@ -11,6 +11,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -29,12 +31,15 @@ import java.nio.charset.StandardCharsets;
  * <p>두 겹으로 막는다.
  * <ol>
  *   <li>{@code Content-Length} 가 상한을 넘으면 <b>읽기 전에</b> 반려한다.</li>
- *   <li>길이를 모르는 요청(chunked)은 읽어 나가면서 누적 바이트를 세고 상한을 넘는 순간 끊는다 —
- *       압축을 앞단에서 풀어 주는 경우에도 압축 해제 후 바이트가 이 카운터를 지난다.</li>
+ *   <li>길이를 모르는 요청(chunked·gzip 해제분)은 읽어 나가면서 누적 바이트를 세고 상한을 넘는 순간 끊는다.</li>
  * </ol>
+ * gzip 요청은 {@link SyncRequestDecompressFilter} 가 먼저 풀어 주므로 여기서 세는 바이트가 곧
+ * <b>압축 해제 후 누적 바이트</b>다 — 스펙이 요구하는 이중 상한(본문·해제 후)이 이 배치로 성립한다.
+ * 압축률이 높은 요청 하나로 힙을 고갈시키는 것을 막기 위함이다.
  * 어느 쪽이든 본문 전체가 힙에 올라오지 않는다. 클라는 413 을 받으면 구간을 반으로 쪼개 재전송한다.
  */
 @Component
+@Order(Ordered.HIGHEST_PRECEDENCE + 20)   // gzip 해제(HIGHEST+10) 다음 — 해제 후 바이트를 센다
 @RequiredArgsConstructor
 public class SyncPayloadSizeFilter extends OncePerRequestFilter {
 
@@ -58,7 +63,10 @@ public class SyncPayloadSizeFilter extends OncePerRequestFilter {
         }
         try {
             chain.doFilter(new LimitedBodyRequest(request, limit), response);
-        } catch (PayloadTooLargeException e) {
+        } catch (RuntimeException | ServletException | IOException e) {
+            // 스트림에서 던진 신호는 파서(Jackson·메시지 컨버터)가 자기 예외로 감싸 올려보낸다.
+            // 원인 사슬을 따라가 우리가 끊은 것인지 확인하고, 아니면 그대로 올린다.
+            if (!causedByPayloadTooLarge(e)) throw e;
             response.reset();
             writeTooLarge(response);
         }
@@ -72,9 +80,11 @@ public class SyncPayloadSizeFilter extends OncePerRequestFilter {
         response.getWriter().write(JSON.writeValueAsString(ApiResponse.fail(ErrorResponse.of(code))));
     }
 
-    /** 상한을 넘긴 순간 읽기를 중단시키는 신호. 필터가 잡아 413 으로 바꾼다. */
-    private static class PayloadTooLargeException extends RuntimeException {
-        PayloadTooLargeException() { super(null, null, false, false); }
+    private boolean causedByPayloadTooLarge(Throwable e) {
+        for (Throwable t = e; t != null && t != t.getCause(); t = t.getCause()) {
+            if (t instanceof SyncPayloadTooLargeException) return true;
+        }
+        return false;
     }
 
     /** 본문을 읽어 나가며 누적 바이트를 세는 래퍼. 상한을 넘으면 즉시 끊는다. */
@@ -93,7 +103,7 @@ public class SyncPayloadSizeFilter extends OncePerRequestFilter {
                 private long read;
 
                 private int count(int n) {
-                    if (n > 0 && (read += n) > limit) throw new PayloadTooLargeException();
+                    if (n > 0 && (read += n) > limit) throw new SyncPayloadTooLargeException();
                     return n;
                 }
 
