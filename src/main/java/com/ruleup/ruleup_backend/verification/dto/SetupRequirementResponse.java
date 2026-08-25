@@ -3,18 +3,19 @@ package com.ruleup.ruleup_backend.verification.dto;
 import java.util.List;
 
 /**
- * 최초 진입 셋업 "요구사항 조회"(§11.4 GET). POST /setup 으로 제출하기 전에
- * "이 챌린지를 인증하려면 무엇을 받아/골라야 하는지"를 클라가 미리 알 수 있게 한다.
+ * GET /api/v1/challenges/{challengeId}/setup 응답 — 챌린지 첫 진입 때 "인증을 시작하려면 뭘 묶어야 하는지"를
+ * 알려주는 읽기 전용 조회.
  *
- *  - setupStatus           : 내 현재 셋업 상태(PENDING_SETUP / READY).
- *  - manual                : 수동 인증(PHOTO/SELF_CHECK)이면 true — 자동 신호 권한이 거의 필요 없음.
- *  - verificationMethod     : GPS_PRESENCE / HEALTH / SCREEN_TIME / WAKE / SLEEP / PHOTO / SELF_CHECK.
- *  - requiredPermissions    : 받아야 할 디바이스 권한 목록(없으면 빈 배열).
- *  - requiresAnchors        : 인증 장소(앵커) 바인딩 필요(GPS_PRESENCE)인지.
- *  - anchorsConfigured      : 이미 내 앵커가 바인딩돼 있는지.
- *  - requiresTargetPackages : 대상 앱 선택 필요(SCREEN_TIME)인지.
+ * <p>OS 권한은 생성/가입 단계에서 클라가 이미 받았으므로 여기서 받지 않는다.
+ * {@code requiredPermissions}는 클라가 스스로 재확인하는 참고 목록이고, 서버는 보유 여부를 저장하지 않는다.
  *
- * 실제 grant·바인딩 제출과 missing[] 판정은 POST /setup(SetupResponse)이 담당한다.
+ * @param setupStatus            PENDING_SETUP / READY. READY가 아니면 sync 신호를 받아두되 판정은 건너뛴다
+ * @param manual                 수동 인증(SELF_CHECK) 방이면 true. true면 앵커·대상 앱 바인딩이 모두 불필요
+ * @param verificationMethod     GPS_PRESENCE / SCREEN_TIME / HEALTH / WAKE / SLEEP / SELF_CHECK
+ * @param requiredPermissions    클라 재확인용 OS 권한 목록(없으면 빈 배열)
+ * @param requiresAnchors        장소(앵커) 바인딩이 필요한지 — GPS_PRESENCE이면 true
+ * @param anchorsConfigured      이미 바인딩됐는지. 재진입·재참여 시 true일 수 있다
+ * @param requiresTargetPackages 측정 대상 앱 선택이 필요한지 — SCREEN_TIME이면 true
  */
 public record SetupRequirementResponse(
         String setupStatus,

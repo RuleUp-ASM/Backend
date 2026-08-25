@@ -75,6 +75,10 @@ public class VerificationDaily extends AssignedIdEntity {
     @Column(name = "verifiedAt")
     private Instant verifiedAt;          // 확정 시각
 
+    /** 판정 결과 모달을 봤다는 확인(ack) 시각. null이면 today 응답에 unacknowledgedResult로 실린다. */
+    @Column(name = "acknowledgedAt")
+    private Instant acknowledgedAt;
+
     // ===== v2: 확정 경로 + 예비 폴백 이의 윈도우 (테크스펙 v2 §9) =====
     @Enumerated(EnumType.STRING)
     @Column(name = "verifiedVia")
@@ -224,4 +228,34 @@ public class VerificationDaily extends AssignedIdEntity {
     }
 
     public boolean isProvisionalFailure() { return status == VerificationStatus.FAILED_PROVISIONAL; }
+
+    // ===== 판정 결과 확인(ack) / 수동 인증 취소 =====
+
+    /** 판정 결과 모달을 봤다는 확인. 멱등 — 중복 호출은 첫 확인 시각을 유지한다. */
+    public void acknowledge(Instant at) {
+        if (this.acknowledgedAt == null) this.acknowledgedAt = at;
+    }
+
+    /** 종결(SUCCESS/FAILED)됐지만 아직 확인하지 않은 판정인지 — 모달을 띄울 대상. */
+    public boolean hasUnacknowledgedResult() {
+        return acknowledgedAt == null
+                && (status == VerificationStatus.SUCCESS || status == VerificationStatus.FAILED);
+    }
+
+    /** 수동 체크로 확정된 건인지(자동 판정 건은 취소 대상이 아니다). */
+    public boolean isManualVerification() { return verifiedVia == VerifiedVia.MANUAL; }
+
+    /**
+     * 수동 체크 취소 — 그날을 다시 미확정(PENDING)으로 되돌린다.
+     * 성공으로 방 피드에 실린 이벤트도 함께 거둬들인다(shareableAt=null).
+     */
+    public void cancelManual() {
+        this.status = VerificationStatus.PENDING;
+        this.method = null;
+        this.failureReason = null;
+        this.verifiedAt = null;
+        this.verifiedVia = null;
+        this.shareableAt = null;
+        this.acknowledgedAt = null;
+    }
 }

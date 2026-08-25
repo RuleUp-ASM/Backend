@@ -9,6 +9,7 @@ import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.verification.domain.*;
+import com.ruleup.ruleup_backend.verification.config.VerificationProperties;
 import com.ruleup.ruleup_backend.verification.dto.SyncRequest;
 import com.ruleup.ruleup_backend.verification.dto.SyncResponse;
 import com.ruleup.ruleup_backend.verification.evaluator.DayContext;
@@ -31,6 +32,8 @@ import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -66,6 +69,7 @@ public class VerificationSyncService {
     private final VerificationProgressService progressService;
     private final ApplicationEventPublisher eventPublisher;
     private final com.ruleup.ruleup_backend.user.UserRepository userRepository;
+    private final VerificationProperties properties;
     private final Map<VerificationMethod, MethodEvaluator> evaluators;
 
     public VerificationSyncService(ChallengeQueryService challengeQuery,
@@ -77,6 +81,7 @@ public class VerificationSyncService {
                                    VerificationProgressService progressService,
                                    ApplicationEventPublisher eventPublisher,
                                    com.ruleup.ruleup_backend.user.UserRepository userRepository,
+                                   VerificationProperties properties,
                                    List<MethodEvaluator> evaluatorList) {
         this.challengeQuery = challengeQuery;
         this.dailyRepo = dailyRepo;
@@ -87,16 +92,17 @@ public class VerificationSyncService {
         this.progressService = progressService;
         this.eventPublisher = eventPublisher;
         this.userRepository = userRepository;
+        this.properties = properties;
         this.evaluators = evaluatorList.stream()
                 .collect(Collectors.toMap(MethodEvaluator::method, e -> e, (a, b) -> a));
     }
 
     @Transactional
     public SyncResponse sync(UUID userId, SyncRequest req) {
-        rateLimiter.check(userId.toString());
-        if (req == null || req.deviceTimeMillis() == null) {
-            throw new BusinessException(ErrorCode.INVALID_SIGNAL_PAYLOAD);
-        }
+        if (req == null) throw new BusinessException(ErrorCode.INVALID_SIGNAL_PAYLOAD);
+        // 복구 전송(backlog)은 별도 허용치 — 평상시 간격을 그대로 적용하면 밀린 구간을 올릴 수가 없다.
+        rateLimiter.check(userId.toString(), Boolean.TRUE.equals(req.backlog()));
+        validateEnvelope(req);
         List<SyncSignal> signals = (req.signals() != null) ? req.signals() : List.of();
         if (signals.size() > MAX_SIGNALS_PER_SYNC) {
             throw new BusinessException(ErrorCode.SYNC_PAYLOAD_TOO_LARGE);   // 413 — 클라는 분할 재전송
@@ -135,15 +141,34 @@ public class VerificationSyncService {
                         challenge.getId(), "AUTO_VERIFICATION_FINALIZED"));
             }
             updated.add(new SyncResponse.UpdatedChallenge(
-                    member.getChallengeId().toString(), todayStatus.name(), member.getProgressRate()));
+                    member.getChallengeId().toString(),
+                    TodayStatusView.of(todayStatus, daily.getWindowClosesAt(), now),
+                    member.getProgressRate()));
         }
         if (log.isDebugEnabled()) {
             log.debug("sync userId={} signals={} ignored={} activeMembers={} updated={}",
                     userId, signals.size(), ignored, members.size(), updated.size());
         }
         // flushIntervalSec: 기기 스펙 기반 산정값을 매 ACK마다 전체값으로 회신(§6 제어 모델).
+        // maxPayloadBytes: 클라가 이 값을 보고 전송 구간을 쪼갠다(설정값, 실측 후 조정).
         int flushIntervalSec = FlushIntervalPolicy.forUser(userRepository.findById(userId).orElse(null));
-        return new SyncResponse(now.toString(), flushIntervalSec, updated, ignored);
+        return new SyncResponse(
+                ZonedDateTime.ofInstant(now, KST).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
+                flushIntervalSec, updated, ignored, properties.maxPayloadBytes());
+    }
+
+    /**
+     * 봉투 필수값 검증.
+     *
+     * <p>{@code coveredFrom}/{@code coveredUntil}은 "이 구간의 신호를 빠짐없이 담았다"는 <b>선언</b>이라 필수다.
+     * 이게 없으면 서버는 "신호가 없다"와 "아직 안 왔다"를 구분할 수 없어 판정을 확정할 시점을 잡지 못한다.
+     */
+    private void validateEnvelope(SyncRequest req) {
+        if (req.deviceTimeMillis() == null
+                || req.coveredFrom() == null || req.coveredUntil() == null
+                || req.coveredUntil() < req.coveredFrom()) {
+            throw new BusinessException(ErrorCode.INVALID_SIGNAL_PAYLOAD);
+        }
     }
 
     private boolean becameFinal(VerificationStatus before, VerificationStatus after) {

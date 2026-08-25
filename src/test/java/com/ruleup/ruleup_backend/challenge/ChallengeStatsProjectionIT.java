@@ -227,7 +227,7 @@ class ChallengeStatsProjectionIT extends ChallengeApiSupport {
                     "end_date = DATE_ADD(CURDATE(), INTERVAL 14 DAY) WHERE id = ?", (Object) bytes(challengeId));
 
             manualVerificationService.submit(member.id(), challengeId,
-                    new ManualVerificationRequest("SELF_CHECK", null, null, null, false));
+                    new ManualVerificationRequest(null, null));
 
             assertThat(applicationEvents.stream(ChallengeStatsRefreshRequested.class)
                     .map(ChallengeStatsRefreshRequested::challengeId))

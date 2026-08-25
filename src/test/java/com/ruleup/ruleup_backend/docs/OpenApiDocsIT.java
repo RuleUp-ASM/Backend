@@ -118,15 +118,16 @@ class OpenApiDocsIT {
     void tagsAreOrderedByCallOrder() throws Exception {
         List<String> names = doc().read("$.tags[*].name");
 
-        assertThat(names.subList(0, 12)).containsExactly(
+        assertThat(names.subList(0, 14)).containsExactly(
                 "Intro", "Auth", "Category", "Onboarding", "Account", "Profile",
                 "Challenge Member", "Challenge Invitation", "Challenge Room",
+                "인증 구현 - 챌린지", "인증 구현",
                 "Challenge Ranking", "Challenge Admin", "Report");
         // 같은 태그가 두 번 실리면 Swagger UI 에 그룹이 중복으로 그려진다.
         assertThat(names).doesNotHaveDuplicates();
 
         List<String> descriptions = doc().read("$.tags[*].description");
-        assertThat(descriptions.subList(0, 12)).noneMatch(d -> d == null || d.isBlank());
+        assertThat(descriptions.subList(0, 14)).noneMatch(d -> d == null || d.isBlank());
     }
 
     @Test

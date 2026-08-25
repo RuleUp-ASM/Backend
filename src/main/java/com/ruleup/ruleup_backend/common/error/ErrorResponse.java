@@ -6,7 +6,11 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * 모든 에러 응답의 공통 본문 (테크 스펙 3.5).
  * 예: { "code": "NICKNAME_DUPLICATED", "message": "이미 사용 중인 닉네임입니다." }
  * reason: 클라이언트 분기용 선택 필드(예: JOIN_BLOCKED → PRIVATE_INVITE_ONLY/FULL/TIER_GATE). 없으면 직렬화 생략.
- * rejoinAvailableAt: REJOIN_COOLDOWN 일 때만 함께 실린다. 그 외엔 생략.
+ *
+ * <p>아래 둘은 "그 코드를 받은 클라가 곧바로 다음 행동을 정할 수 있어야 하는" 값이라 본문에 함께 싣는다.
+ * 해당 코드가 아니면 필드 자체가 직렬화되지 않는다.
+ *  - rejoinAvailableAt      : JOIN_BLOCKED + REJOIN_COOLDOWN — 재입장 가능 시각
+ *  - nextChangeAvailableAt  : SETTING_CHANGE_LIMIT — 다음 변경 가능 시각(다음 달 1일 00:00 KST)
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @io.swagger.v3.oas.annotations.media.Schema(description = "에러 상세. 분기는 code 로 하고, message 는 사용자에게 그대로 보여줄 수 있다.")
@@ -22,18 +26,25 @@ public record ErrorResponse(
         String reason,
 
         @io.swagger.v3.oas.annotations.media.Schema(description = "재참여 가능 시각 — JOIN_BLOCKED + REJOIN_COOLDOWN 일 때만 실린다.")
-        String rejoinAvailableAt) {
+        String rejoinAvailableAt,
+
+        @io.swagger.v3.oas.annotations.media.Schema(
+                description = "다음 변경 가능 시각(ISO-8601, KST) — SETTING_CHANGE_LIMIT 일 때만 실린다.",
+                example = "2026-09-01T00:00:00+09:00")
+        String nextChangeAvailableAt) {
 
     public static ErrorResponse of(ErrorCode errorCode) {
-        return new ErrorResponse(errorCode.name(), errorCode.getMessage(), null, null);
+        return new ErrorResponse(errorCode.name(), errorCode.getMessage(), null, null, null);
     }
 
     public static ErrorResponse of(ErrorCode errorCode, String reason) {
-        return new ErrorResponse(errorCode.name(), errorCode.getMessage(), reason, null);
+        return new ErrorResponse(errorCode.name(), errorCode.getMessage(), reason, null, null);
     }
 
-    /** JOIN_BLOCKED + REJOIN_COOLDOWN 전용 — 재입장 가능 시각을 함께 내려준다(가입 API 명세). */
-    public static ErrorResponse of(ErrorCode errorCode, String reason, String rejoinAvailableAt) {
-        return new ErrorResponse(errorCode.name(), errorCode.getMessage(), reason, rejoinAvailableAt);
+    /** 예외가 실어 보낸 부가 필드까지 그대로 옮긴다. 없는 값은 null 이라 직렬화에서 빠진다. */
+    public static ErrorResponse of(BusinessException e) {
+        ErrorCode code = e.getErrorCode();
+        return new ErrorResponse(code.name(), code.getMessage(),
+                e.getDetail(), e.getRejoinAvailableAt(), e.getNextChangeAvailableAt());
     }
 }

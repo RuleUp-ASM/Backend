@@ -15,6 +15,8 @@ public class BusinessException extends RuntimeException {
     private final String detail;
     /** 선택: JOIN_BLOCKED + REJOIN_COOLDOWN 일 때의 재입장 가능 시각(ISO). 없으면 null. */
     private final String rejoinAvailableAt;
+    /** 선택: SETTING_CHANGE_LIMIT 일 때의 다음 변경 가능 시각(ISO). 없으면 null. */
+    private final String nextChangeAvailableAt;
 
     public BusinessException(ErrorCode errorCode) {
         this(errorCode, null);
@@ -25,9 +27,23 @@ public class BusinessException extends RuntimeException {
     }
 
     public BusinessException(ErrorCode errorCode, String detail, String rejoinAvailableAt) {
+        this(errorCode, detail, rejoinAvailableAt, null);
+    }
+
+    private BusinessException(ErrorCode errorCode, String detail,
+                              String rejoinAvailableAt, String nextChangeAvailableAt) {
         super(errorCode.getMessage());
         this.errorCode = errorCode;
         this.detail = detail;
         this.rejoinAvailableAt = rejoinAvailableAt;
+        this.nextChangeAvailableAt = nextChangeAvailableAt;
+    }
+
+    /**
+     * 월 1회 변경 한도 소진 — 다음 변경 가능 시각을 응답 본문에 함께 실어 보낸다.
+     * 클라는 이 값으로 "다음 달 1일부터 바꿀 수 있어요" 안내를 바로 띄운다(인증 구현 API 명세).
+     */
+    public static BusinessException settingChangeLimit(String nextChangeAvailableAt) {
+        return new BusinessException(ErrorCode.SETTING_CHANGE_LIMIT, null, null, nextChangeAvailableAt);
     }
 }
