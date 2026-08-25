@@ -31,6 +31,7 @@ public class VerificationConfigFactory {
             List.of("com.sec.android.app.shealth", "com.google.android.apps.fitness");
 
     private final RoutineCatalog catalog;
+    private final com.ruleup.ruleup_backend.verification.config.VerificationProperties properties;
 
     public VerificationConfig build(Challenge challenge) {
         var snap = challenge.getVerificationConfig();
@@ -89,11 +90,14 @@ public class VerificationConfigFactory {
         AnchorFillMode fillMode = "NEARBY_BRAND".equalsIgnoreCase(strParam(params, "anchor_fill_mode"))
                 ? AnchorFillMode.NEARBY_BRAND : AnchorFillMode.MANUAL;
         int dwell = intParam(params, "duration_min", 60);
+        // 방문형의 loiteringDelay 는 "이만큼 머물러야 인정"(=dwell)이지만,
+        // 회피형에서는 "이만큼 안에 나오면 스침"이라 의미가 정반대다. 회피는 서버 설정값을 쓴다.
+        int loitering = avoid ? properties.avoidGraceMinutes() : dwell;
         return new GpsConfig(
                 GpsMode.PRESENCE, presence, fillMode,
                 strParam(params, "brand_keyword"), intParam(params, "nearby_radius_m", 1500),
                 dbl(params, "lat"), dbl(params, "lng"),       // 레거시 단일앵커(보통 null) — 평가는 멤버 anchors[] 우선
-                intParam(params, "radius_m", 80), dwell, dwell,
+                intParam(params, "radius_m", 80), dwell, loitering,
                 null, timeWindow(params),
                 polarity, 1, 100, 50, List.of());
     }

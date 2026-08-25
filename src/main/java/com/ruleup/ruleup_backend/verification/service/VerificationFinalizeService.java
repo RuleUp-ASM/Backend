@@ -47,6 +47,8 @@ public class VerificationFinalizeService {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final int CLAIM_LIMIT = 200;
+    /** 한 번에 채울 무신호 대상 상한. 유저 2만 × 동시 3개 기준 일 6만 건이라 여유를 둔다. */
+    private static final int MATERIALIZE_LIMIT = 100_000;
 
     private final VerificationDailyRepository dailyRepo;
     private final VerificationMethodResultRepository methodResultRepo;
@@ -55,7 +57,41 @@ public class VerificationFinalizeService {
     private final VerificationProgressService progressService;
     private final ApplicationEventPublisher eventPublisher;
 
-    /** 1분마다 폴링하되, 실제 확정은 귀속일 다음 날 00:00 KST 가 지난 건에서만 일어난다. */
+    /**
+     * 매일 00:00:30 KST: 확정 시각이 막 지난 귀속일(D-2)에 대해 <b>행이 없는 대상</b>을 채운다.
+     *
+     * <p>판정 행은 sync 가 만든다. 그래서 그날 앱을 한 번도 켜지 않은 사용자는 행이 아예 없고,
+     * 확정 배치가 "PENDING 행"만 훑으면 그 날짜는 실패로도 확정되지 않아 통계에서 통째로 사라진다.
+     * 여기서 빈 자리를 채워 두면 아래 {@link #finalizeDue()} 가 NO_SIGNAL_RECEIVED 로 확정한다.
+     *
+     * <p>대상 아닌 날(요일 밖·기간 밖·빈도 몫 충족)은 열지 않는다 — 확정되지 않을 행을 만들 이유가 없다.
+     * 재실행해도 이미 있는 행은 건너뛰므로 안전하다.
+     */
+    @Scheduled(cron = "30 0 0 * * *", zone = "Asia/Seoul")
+    @Transactional
+    public void materializeDueTargets() {
+        LocalDate targetDate = LocalDate.now(KST).minusDays(2);   // 확정 시각이 방금 지난 귀속일
+        List<ChallengeMember> members = challengeQuery.findActiveOnDate(targetDate, MATERIALIZE_LIMIT);
+        int opened = 0;
+        for (ChallengeMember member : members) {
+            if (dailyRepo.findByChallengeMemberIdAndTargetDate(member.getId(), targetDate).isPresent()) continue;
+            Challenge challenge = challengeQuery.findChallenge(member.getChallengeId()).orElse(null);
+            if (challenge == null) continue;
+            VerificationConfig config = configFactory.build(challenge);
+            if (config.isManual()) continue;   // 수동 인증은 미체크가 곧 미수행 — 자동 확정 대상이 아니다
+            if (VerificationTargetDays.of(config, challenge, member, targetDate)
+                    != VerificationTargetDays.Disposition.EVALUATE) {
+                continue;
+            }
+            VerificationDaily daily = dailyRepo.save(VerificationDaily.open(
+                    member.getId(), challenge.getId(), member.getUserId(), targetDate));
+            daily.applyWindow(null);
+            opened++;
+        }
+        if (opened > 0) log.info("무신호 귀속일 채우기: {} 대상 {}건 개시", targetDate, opened);
+    }
+
+    /** 1분마다 폴링하되, 실제 확정은 귀속일 이틀 뒤 00:00 KST 가 지난 건에서만 일어난다. */
     @Scheduled(fixedDelay = 60_000)
     @Transactional
     public void finalizeDue() {

@@ -2,6 +2,7 @@ package com.ruleup.ruleup_backend.challenge.repository;
 
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.challenge.domain.MemberStatus;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -73,6 +74,16 @@ public interface ChallengeMemberRepository extends JpaRepository<ChallengeMember
 
     /** 최근 24h 참여(인기 스코어 §2.1): joinedAt 이 since 이후인 멤버(상태 무관 join 이벤트 근사). */
     List<ChallengeMember> findByJoinedAtAfter(Instant since);
+
+    /**
+     * 확정 배치의 무신호 날짜 채우기 대상: 그 날짜에 인증 대상일 수 있는 ACTIVE·READY 멤버.
+     * 챌린지 기간으로 1차 좁히고, 요일·빈도 판정은 호출부가 한다(설정을 봐야 알 수 있어서).
+     */
+    @Query("SELECT m FROM ChallengeMember m, Challenge c " +
+            "WHERE c.id = m.challengeId AND c.status = 'ACTIVE' " +
+            "AND m.status = 'ACTIVE' AND m.setupStatus = 'READY' " +
+            "AND c.startDate <= :date AND c.endDate >= :date")
+    List<ChallengeMember> findActiveOnDate(@Param("date") LocalDate date, Pageable pageable);
 
     /**
      * 방별 확정 실패 인원(§3.2.4): 남은 날을 다 성공해도 90% 날 달성이 불가능해진 ACTIVE 멤버 수.

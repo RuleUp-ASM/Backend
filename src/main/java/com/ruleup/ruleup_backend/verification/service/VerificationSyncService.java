@@ -18,6 +18,7 @@ import com.ruleup.ruleup_backend.verification.evaluator.MethodEvaluator;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationMethodResultRepository;
 import com.ruleup.ruleup_backend.verification.signal.SignalType;
+import com.ruleup.ruleup_backend.common.verification.GeoAnchor;
 import com.ruleup.ruleup_backend.verification.signal.DaySignals;
 import com.ruleup.ruleup_backend.verification.signal.SyncSignal;
 import com.ruleup.ruleup_backend.common.event.PermissionGapDetected;
@@ -63,6 +64,9 @@ public class VerificationSyncService {
     private final VerificationDailyRepository dailyRepo;
     private final VerificationMethodResultRepository methodResultRepo;
     private final SyncRateLimiter rateLimiter;
+    private final VerificationSignalIngestService signalIngest;
+    private final MemberSettingsResolver settingsResolver;
+    private final SignalTrustGate trustGate;
     private final VerificationMemberSetup memberSetup;
     private final VerificationConfigFactory configFactory;
     private final VerificationProgressService progressService;
@@ -76,6 +80,9 @@ public class VerificationSyncService {
                                    VerificationDailyRepository dailyRepo,
                                    VerificationMethodResultRepository methodResultRepo,
                                    SyncRateLimiter rateLimiter,
+                                   VerificationSignalIngestService signalIngest,
+                                   MemberSettingsResolver settingsResolver,
+                                   SignalTrustGate trustGate,
                                    VerificationMemberSetup memberSetup,
                                    VerificationConfigFactory configFactory,
                                    VerificationProgressService progressService,
@@ -88,6 +95,9 @@ public class VerificationSyncService {
         this.dailyRepo = dailyRepo;
         this.methodResultRepo = methodResultRepo;
         this.rateLimiter = rateLimiter;
+        this.signalIngest = signalIngest;
+        this.settingsResolver = settingsResolver;
+        this.trustGate = trustGate;
         this.memberSetup = memberSetup;
         this.configFactory = configFactory;
         this.progressService = progressService;
@@ -118,6 +128,12 @@ public class VerificationSyncService {
         LocalDate today = LocalDate.now(KST);
         Instant now = Instant.now();
 
+        // 원본 저장 + 영속 멱등. 평가에는 이번에 처음 받은 신호만 넘긴다 —
+        // 재전송된 구간이 체류·사용 시간에 다시 더해지지 않게 하는 경계다.
+        VerificationSignalIngestService.Ingested ingested = signalIngest.ingest(userId, signals, now);
+        // 원본은 위에서 이미 저장했다. 판정 입력에서만 못 믿을 신호를 뺀다 — 제외와 제재는 분리한다.
+        List<SyncSignal> fresh = trustGate.apply(userId, req, ingested.accepted());
+
         List<ChallengeMember> members = challengeQuery.findActiveMemberships(userId);
         List<SyncResponse.UpdatedChallenge> updated = new ArrayList<>();
 
@@ -135,11 +151,11 @@ public class VerificationSyncService {
 
             // 유예 구간(어제 귀속·미확정)에 늦게 도착한 신호를 먼저 반영한다.
             // 귀속일이 끝났어도 확정 전이면 발생 시각이 맞는 신호는 그대로 인정한다(인증 정책 §2 지연 데이터).
-            boolean graceChanged = evaluateGraceDay(member, challenge, config, signals, gaps, today, now);
+            boolean graceChanged = evaluateGraceDay(member, challenge, config, fresh, gaps, today, now);
 
             VerificationDaily daily = loadOrCreateDaily(member, challenge, today);
             VerificationStatus before = daily.getStatus();
-            VerificationStatus todayStatus = processMember(member, challenge, config, daily, signals, gaps, today, now);
+            VerificationStatus todayStatus = processMember(member, challenge, config, daily, fresh, gaps, today, now);
 
             progressService.updateAfterSync(member, todayStatus, now);
             if (becameFinal(before, todayStatus) || graceChanged) {
@@ -152,10 +168,12 @@ public class VerificationSyncService {
                             VerificationPolarity.of(config), now),
                     member.getProgressRate()));
         }
-        if (log.isDebugEnabled()) {
-            log.debug("sync userId={} signals={} ignored={} activeMembers={} updated={}",
-                    userId, signals.size(), ignored, members.size(), updated.size());
-        }
+        // sync_result — 자동 판정 커버리지·중복 비율·압축 도입 판단의 1차 근거(로깅 스펙 §9).
+        log.info("sync_result userId={} signalCount={} dedupDropped={} ignoredTypes={} gapReasons={} " +
+                        "activeMembers={} updated={} backlog={}",
+                userId, signals.size(), ingested.droppedCount(), ignored,
+                gaps.stream().map(SyncRequest.Gap::reason).filter(java.util.Objects::nonNull).distinct().toList(),
+                members.size(), updated.size(), Boolean.TRUE.equals(req.backlog()));
         // flushIntervalSec: 기기 스펙 기반 산정값을 매 ACK마다 전체값으로 회신(§6 제어 모델).
         // maxPayloadBytes: 클라가 이 값을 보고 전송 구간을 쪼갠다(설정값, 실측 후 조정).
         com.ruleup.ruleup_backend.user.domain.User user = userRepository.findById(userId).orElse(null);
@@ -163,7 +181,7 @@ public class VerificationSyncService {
         int flushIntervalSec = FlushIntervalPolicy.forUser(user);
         return new SyncResponse(
                 ZonedDateTime.ofInstant(now, KST).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
-                flushIntervalSec, updated, ignored, properties.maxPayloadBytes());
+                flushIntervalSec, updated, ignored, properties.maxPayloadBytes(), ingested.droppedCount());
     }
 
     /**
@@ -197,35 +215,42 @@ public class VerificationSyncService {
      * 유예 구간에 남아 있는 어제 귀속 건을 다시 평가한다.
      *
      * <p>귀속일이 끝나도 확정까지 하루가 더 있고, 그 사이 절전·오프라인으로 밀렸던 신호가 올라온다.
-     * 그 신호를 반영하지 않으면 유예 구간이 이름뿐이다. 새 행을 열지는 않는다 —
-     * 어제 인증 대상이 아니었던 멤버에게 뒤늦게 판정을 만들면 안 되기 때문이다.
+     * 그 신호를 반영하지 않으면 유예 구간이 이름뿐이다.
+     *
+     * <p>어제 판정 행이 <b>없어도</b> 연다. 행은 sync 가 만들기 때문에, 어제 앱을 한 번도 켜지 않은
+     * 사용자는 행이 없다 — 여기서 열지 않으면 "그날 다녀왔는데 다음 날 올렸다"가 통째로 버려진다.
+     * 대상 날짜가 아니었다면 {@link VerificationTargetDays} 가 걸러 NOT_TARGET 으로 남는다.
      *
      * @return 이 재평가로 어제 건이 확정됐으면 true
      */
     private boolean evaluateGraceDay(ChallengeMember member, Challenge challenge, VerificationConfig config,
-                                     List<SyncSignal> signals, List<SyncRequest.Gap> gaps,
+                                     List<SyncSignal> fresh, List<SyncRequest.Gap> gaps,
                                      LocalDate today, Instant now) {
         LocalDate yesterday = today.minusDays(1);
-        VerificationDaily daily = dailyRepo
-                .findByChallengeMemberIdAndTargetDate(member.getId(), yesterday).orElse(null);
-        if (daily == null || daily.isTerminal()) return false;
         if (VerificationDeadlines.finalizeDue(yesterday, now)) return false;   // 확정 배치 몫
+        if (VerificationTargetDays.of(config, challenge, member, yesterday)
+                != VerificationTargetDays.Disposition.EVALUATE) {
+            return false;   // 대상 아닌 날에 행을 만들지 않는다
+        }
+
+        VerificationDaily daily = loadOrCreateDaily(member, challenge, yesterday);
+        if (daily.isTerminal()) return false;
 
         VerificationStatus before = daily.getStatus();
-        VerificationStatus after = processMember(member, challenge, config, daily, signals, gaps, yesterday, now);
+        VerificationStatus after = processMember(member, challenge, config, daily, fresh, gaps, yesterday, now);
         if (!becameFinal(before, after)) return false;
         progressService.recount(member);
         return true;
     }
 
     /**
-     * 그날 판정 행을 잡는다(없으면 개시). 확정 시각은 여는 즉시 세운다 —
-     * 판정 유형과 무관하게 <b>귀속일 다음 날 00:00 KST</b>이고, 평가 결과에 따라 흔들리지 않아야 하기 때문이다.
+     * 그 날짜의 판정 행을 잡는다(없으면 개시). 확정·이의 마감은 여는 즉시 세운다 —
+     * 귀속일만으로 정해지고 평가 결과에 따라 흔들리지 않아야 하기 때문이다.
      */
-    private VerificationDaily loadOrCreateDaily(ChallengeMember member, Challenge challenge, LocalDate today) {
-        VerificationDaily daily = dailyRepo.findByChallengeMemberIdAndTargetDate(member.getId(), today)
+    private VerificationDaily loadOrCreateDaily(ChallengeMember member, Challenge challenge, LocalDate targetDate) {
+        VerificationDaily daily = dailyRepo.findByChallengeMemberIdAndTargetDate(member.getId(), targetDate)
                 .orElseGet(() -> dailyRepo.save(
-                        VerificationDaily.open(member.getId(), challenge.getId(), member.getUserId(), today)));
+                        VerificationDaily.open(member.getId(), challenge.getId(), member.getUserId(), targetDate)));
         if (daily.getFinalizeAfter() == null) daily.applyWindow(daily.getWindowClosesAt());
         return daily;
     }
@@ -235,12 +260,13 @@ public class VerificationSyncService {
                                              List<SyncRequest.Gap> gaps, LocalDate today, Instant now) {
         // 확정 이후 도착분은 저장만 하고 판정에 쓰지 않는다(인증 정책 §2 지연 데이터). 구제는 이의제기로만.
         if (daily.isTerminal()) return daily.getStatus();
-        Disposition disp = disposition(config, challenge, member, today);
-        if (disp == Disposition.NOT_TARGET) {
+        VerificationTargetDays.Disposition disp =
+                VerificationTargetDays.of(config, challenge, member, today);
+        if (disp == VerificationTargetDays.Disposition.NOT_TARGET) {
             daily.recordResult(VerificationStatus.NOT_TARGET, null, null, null);
             return VerificationStatus.NOT_TARGET;
         }
-        if (disp == Disposition.NOT_REQUIRED) {
+        if (disp == VerificationTargetDays.Disposition.NOT_REQUIRED) {
             daily.recordResult(VerificationStatus.NOT_REQUIRED, null, null, null);
             return VerificationStatus.NOT_REQUIRED;
         }
@@ -261,13 +287,13 @@ public class VerificationSyncService {
                 .findByVerificationDailyIdAndMethod(daily.getId(), method.name()).orElse(null);
         Map<String, Object> prior = (mr != null) ? mr.getEvidence() : null;
 
-        List<String> memberScreenApps = member.effectiveScreenApps(today).stream()
-                .map(com.ruleup.ruleup_backend.common.verification.ScreenApp::packageName)
-                .toList();
+        // 과거 날짜는 그 날 적용되던 설정으로 평가한다 — 유예 구간에 장소를 바꿔도 어제 판정이 흔들리지 않게.
+        List<String> memberScreenApps = settingsResolver.screenAppPackagesOn(member, today);
+        List<GeoAnchor> memberAnchors = settingsResolver.anchorsOn(member, today);
         // 신호는 도착 시각이 아니라 발생 시각으로 귀속한다 — 한 배치에 어제치와 오늘치가 섞여 온다.
         List<SyncSignal> ofDay = DaySignals.forDate(signals, today, KST);
         DayContext ctx = new DayContext(today, KST, now, config, ofDay, prior,
-                member.getAnchors(), memberScreenApps, member.getId().toString());
+                memberAnchors, memberScreenApps, member.getId().toString());
         EvaluationOutcome outcome = evaluator.evaluate(ctx);
 
         // ③ 권한 공백(gaps) 반영: 신호 없이 PENDING이고 해당 신호타입에 비회복 권한 공백이 있으면
@@ -305,22 +331,6 @@ public class VerificationSyncService {
         }
         return daily.getStatus();
     }
-
-    private enum Disposition { NOT_TARGET, NOT_REQUIRED, EVALUATE }
-
-    private Disposition disposition(VerificationConfig config, Challenge challenge, ChallengeMember member, LocalDate today) {
-        if (config.isFrequency()) {
-            Integer done = member.getCurPeriodCompleted();
-            Integer need = member.getPeriodTarget();
-            if (done != null && need != null && done >= need) return Disposition.NOT_REQUIRED;
-            return Disposition.EVALUATE;   // 빈도형은 모든 날 eligible
-        }
-        List<String> repeat = challenge.getRepeatDays();
-        boolean target = repeat != null && repeat.contains(WeekdayCodes.code(today.getDayOfWeek()));
-        return target ? Disposition.EVALUATE : Disposition.NOT_TARGET;
-    }
-
-
 
     /** 해당 method의 신호타입에 대해, 당일과 겹치는 비회복(recoverable=false) 권한 공백이 있는지(§8.5). */
     private boolean permissionGap(List<SyncRequest.Gap> gaps, VerificationMethod method, LocalDate day) {
