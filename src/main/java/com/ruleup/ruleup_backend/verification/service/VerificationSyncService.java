@@ -69,6 +69,7 @@ public class VerificationSyncService {
     private final VerificationProgressService progressService;
     private final ApplicationEventPublisher eventPublisher;
     private final com.ruleup.ruleup_backend.user.UserRepository userRepository;
+    private final com.ruleup.ruleup_backend.common.web.CountryResolver countryResolver;
     private final VerificationProperties properties;
     private final Map<VerificationMethod, MethodEvaluator> evaluators;
 
@@ -81,6 +82,7 @@ public class VerificationSyncService {
                                    VerificationProgressService progressService,
                                    ApplicationEventPublisher eventPublisher,
                                    com.ruleup.ruleup_backend.user.UserRepository userRepository,
+                                   com.ruleup.ruleup_backend.common.web.CountryResolver countryResolver,
                                    VerificationProperties properties,
                                    List<MethodEvaluator> evaluatorList) {
         this.challengeQuery = challengeQuery;
@@ -92,6 +94,7 @@ public class VerificationSyncService {
         this.progressService = progressService;
         this.eventPublisher = eventPublisher;
         this.userRepository = userRepository;
+        this.countryResolver = countryResolver;
         this.properties = properties;
         this.evaluators = evaluatorList.stream()
                 .collect(Collectors.toMap(MethodEvaluator::method, e -> e, (a, b) -> a));
@@ -151,10 +154,21 @@ public class VerificationSyncService {
         }
         // flushIntervalSec: 기기 스펙 기반 산정값을 매 ACK마다 전체값으로 회신(§6 제어 모델).
         // maxPayloadBytes: 클라가 이 값을 보고 전송 구간을 쪼갠다(설정값, 실측 후 조정).
-        int flushIntervalSec = FlushIntervalPolicy.forUser(userRepository.findById(userId).orElse(null));
+        com.ruleup.ruleup_backend.user.domain.User user = userRepository.findById(userId).orElse(null);
+        backfillCountry(user, req.timeZone());
+        int flushIntervalSec = FlushIntervalPolicy.forUser(user);
         return new SyncResponse(
                 ZonedDateTime.ofInstant(now, KST).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
                 flushIntervalSec, updated, ignored, properties.maxPayloadBytes());
+    }
+
+    /**
+     * 국가 코드 백필. 가입·로그인 때 해석에 실패해 비어 있는 유저를, sync가 들고 오는 기기 타임존으로 채운다.
+     * 이미 값이 있으면 건드리지 않으므로 주기 sync가 매번 쓰기를 만들지 않는다.
+     */
+    private void backfillCountry(com.ruleup.ruleup_backend.user.domain.User user, String timeZone) {
+        if (user == null || user.getCountryCode() != null) return;
+        user.updateCountryCode(countryResolver.resolveFor(null, null, timeZone));
     }
 
     /**
