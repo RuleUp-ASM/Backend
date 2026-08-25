@@ -60,6 +60,14 @@ public class ChallengeQueryService {
     }
 
     /** 빈도형 주기 롤오버 대상: 현재 주기가 끝난 ACTIVE 멤버. */
+    /**
+     * 그 날짜에 인증 대상일 수 있는 ACTIVE·READY 멤버(챌린지 기간 기준 1차 필터).
+     * 확정 배치가 "신호가 한 번도 없어 행조차 없는 날"을 채울 때 쓴다.
+     */
+    public List<ChallengeMember> findActiveOnDate(LocalDate date, int limit) {
+        return memberRepository.findActiveOnDate(date, org.springframework.data.domain.PageRequest.of(0, limit));
+    }
+
     public List<ChallengeMember> findFrequencyRolloverTargets(LocalDate date) {
         return memberRepository.findByScheduleTypeAndStatusAndCurPeriodEndLessThan(
                 ScheduleType.FREQUENCY, MemberStatus.ACTIVE, date);

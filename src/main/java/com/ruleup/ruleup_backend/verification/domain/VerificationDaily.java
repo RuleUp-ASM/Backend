@@ -99,6 +99,15 @@ public class VerificationDaily extends AssignedIdEntity {
     @Column(name = "shareableAt")
     private Instant shareableAt;
 
+    /**
+     * 낙관적 락. 확정 배치는 FOR UPDATE 로 행을 선점하지만 일반 sync 는 잠금 없이 같은 행을 갱신한다 —
+     * 배치가 실패를 확정하는 사이 흘러들어온 sync 가 그 확정을 덮어써 되돌리는 일(lost update)을 막는다.
+     * "확정 결과가 자동으로 뒤집히지 않는다"는 절대 조건을 애플리케이션 로직이 아니라 DB 가 지키게 한다.
+     */
+    @Version
+    @Column(name = "version", nullable = false)
+    private long version;
+
     @Generated(event = EventType.INSERT)
     @Column(name = "createdAt", nullable = false, updatable = false)
     private Instant createdAt;
