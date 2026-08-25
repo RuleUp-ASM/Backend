@@ -26,6 +26,23 @@ public class GlobalExceptionHandler {
     // 본문 JSON이 깨졌거나 형식이 안 맞을 때 → 400
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiResponse<Void>> handleNotReadable(HttpMessageNotReadableException e) {
+        // sync 본문 상한에 걸려 읽기를 끊은 경우는 "형식 오류"가 아니라 413 이다.
+        // 파서가 우리 신호를 자기 예외로 감싸 올리므로 원인 사슬을 따라가 구분한다.
+        if (causedBySyncPayloadTooLarge(e)) {
+            ErrorCode tooLarge = ErrorCode.SYNC_PAYLOAD_TOO_LARGE;
+            return ResponseEntity.status(tooLarge.getStatus()).body(ApiResponse.fail(ErrorResponse.of(tooLarge)));
+        }
+        return handleNotReadableBody(e);
+    }
+
+    private boolean causedBySyncPayloadTooLarge(Throwable e) {
+        for (Throwable t = e; t != null && t != t.getCause(); t = t.getCause()) {
+            if (t instanceof com.ruleup.ruleup_backend.verification.config.SyncPayloadTooLargeException) return true;
+        }
+        return false;
+    }
+
+    private ResponseEntity<ApiResponse<Void>> handleNotReadableBody(HttpMessageNotReadableException e) {
         ErrorCode code = ErrorCode.INVALID_REQUEST;
         return ResponseEntity.status(code.getStatus()).body(ApiResponse.fail(ErrorResponse.of(code)));
     }
@@ -44,6 +61,16 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleUnexpected(Exception e) {
+        // sync 본문 상한에 걸려 읽기를 끊은 신호는 어떤 파서를 거쳐 오든 413 이다.
+        // 만능 핸들러가 500 으로 삼키면 클라가 "분할 재전송"을 판단할 근거를 잃는다.
+        if (causedBySyncPayloadTooLarge(e)) {
+            ErrorCode tooLarge = ErrorCode.SYNC_PAYLOAD_TOO_LARGE;
+            return ResponseEntity.status(tooLarge.getStatus()).body(ApiResponse.fail(ErrorResponse.of(tooLarge)));
+        }
+        return handleTrulyUnexpected(e);
+    }
+
+    private ResponseEntity<ApiResponse<Void>> handleTrulyUnexpected(Exception e) {
         log.error("Unexpected error", e);
         ErrorCode code = ErrorCode.INTERNAL_SERVER_ERROR;
         return ResponseEntity.status(code.getStatus())
