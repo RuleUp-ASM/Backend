@@ -69,7 +69,7 @@ public class ScreenTimeEvaluator implements MethodEvaluator {
                     : EvaluationOutcome.pending(evidence, window.end());
         } else { // MAX
             return (usageMin > goal)
-                    ? EvaluationOutcome.failed("USAGE_EXCEEDED", evidence, window.end())
+                    ? EvaluationOutcome.violated("USAGE_EXCEEDED", evidence, window.end())
                     : EvaluationOutcome.pending(evidence, window.end());
         }
     }

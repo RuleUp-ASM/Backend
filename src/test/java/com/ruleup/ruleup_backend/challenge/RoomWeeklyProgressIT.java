@@ -104,8 +104,8 @@ class RoomWeeklyProgressIT extends ChallengeApiSupport {
         setTodayStatus(challengeId, me, "SUCCESS");
         assertThat(todayStatus(challengeId, me)).isEqualTo("DONE");
 
-        // 잠정 실패는 아직 뒤집힐 수 있지만 화면에는 실패로 보여야 한다 — 별도 상태를 클라가 알 이유가 없다
-        setTodayStatus(challengeId, me, "FAILED_PROVISIONAL");
+        // 확정된 실패만 실패로 보인다 — 잠정 실패 단계는 폐기됐고, 확정 전 위반은 FAIL_EXPECTED 다.
+        setTodayStatus(challengeId, me, "FAILED");
         assertThat(todayStatus(challengeId, me)).isEqualTo("FAILED");
     }
 

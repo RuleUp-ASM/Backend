@@ -45,7 +45,7 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
             ev.put("avoid", true);
             ev.put("entered", entered);
             return entered
-                    ? EvaluationOutcome.failed("ENTERED_AVOID_ZONE", ev, windowClose)
+                    ? EvaluationOutcome.violated("ENTERED_AVOID_ZONE", ev, windowClose)
                     : EvaluationOutcome.pending(ev, windowClose);   // 무위반은 마감 배치가 SUCCESS 확정
         }
 

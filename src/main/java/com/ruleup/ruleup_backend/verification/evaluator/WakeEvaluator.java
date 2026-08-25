@@ -48,7 +48,7 @@ public class WakeEvaluator implements MethodEvaluator {
         if (firstUnlock != null) {
             outcome = EvaluationOutcome.success(evidence, windowCloses);        // 창 내 기상 → 즉시 성공
         } else if (window.isClosed(ctx.now())) {
-            outcome = EvaluationOutcome.failed("WOKE_UP_LATE", evidence, windowCloses);  // 창 닫힘·미발생
+            outcome = EvaluationOutcome.violated("WOKE_UP_LATE", evidence, windowCloses);  // 창 닫힘·미발생
         } else {
             outcome = EvaluationOutcome.pending(evidence, windowCloses);        // 아직 대기
         }

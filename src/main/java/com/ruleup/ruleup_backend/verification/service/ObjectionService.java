@@ -9,6 +9,8 @@ import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.event.RoutineFailureConfirmed;
 import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
 import com.ruleup.ruleup_backend.verification.domain.Objection;
+import com.ruleup.ruleup_backend.verification.domain.Polarity;
+import com.ruleup.ruleup_backend.verification.domain.VerificationPolarity;
 import com.ruleup.ruleup_backend.verification.domain.ObjectionType;
 import com.ruleup.ruleup_backend.verification.domain.VerificationDaily;
 import com.ruleup.ruleup_backend.verification.dto.ObjectionDecisionRequest;
@@ -27,8 +29,8 @@ import java.time.LocalDate;
 import java.util.UUID;
 
 /**
- * 이의 제기(§8.7): 잠정 실패(FAILED_PROVISIONAL) 일자에 대한 제출 / 방장·공동 관리자 처리.
- *  - 제출: 멤버 본인, 잠정 실패 상태 + 1일 창 안, 일자당 1회. 솔로 챌린지는 대상 아님.
+ * 이의 신청: 실패가 확정된 일자에 대한 제출 / 처리.
+ *  - 제출: 멤버 본인, 실패 확정 상태 + 기한(확정일 다음 날 00:00 KST) 안, 일자당 1회. 솔로·그룹 모두 대상.
  *  - 처리: OWNER/MANAGER. 승인→SUCCESS(OBJECTION), 기각→FAILED(OBJECTION_REJECTED, 온도 반영).
  */
 @Service
@@ -39,6 +41,7 @@ public class ObjectionService {
     private final VerificationDailyRepository dailyRepo;
     private final ChallengeQueryService challengeQuery;
     private final VerificationProgressService progressService;
+    private final VerificationConfigFactory configFactory;
     private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
@@ -58,18 +61,14 @@ public class ObjectionService {
             throw new BusinessException(ErrorCode.CONTENT_REQUIRED);
         LocalDate date = parseDate(req.targetDate());
 
-        // 솔로는 이의 제기 없음.
-        if (!c.isGroup()) throw new BusinessException(ErrorCode.NOT_OBJECTIONABLE);
-
-        // 잠정 실패 상태의 일자에만.
+        // 실패로 확정됐거나 이대로면 실패인 일자에만. 솔로·그룹을 가리지 않는다.
         VerificationDaily daily = dailyRepo.findByChallengeMemberIdAndTargetDate(member.getId(), date)
-                .filter(VerificationDaily::isProvisionalFailure)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_OBJECTIONABLE));
+        Polarity polarity = VerificationPolarity.of(configFactory.build(c));
 
-        // 이의 제기 창(1일) 안.
+        // 신청 기한: 확정 시각과 같은 귀속일 이틀 뒤 00:00 KST(자정 경계).
         Instant now = Instant.now();
-        if (daily.getDisputeClosesAt() == null || now.isAfter(daily.getDisputeClosesAt()))
-            throw new BusinessException(ErrorCode.OBJECTION_WINDOW_CLOSED);
+        if (!daily.isAppealable(polarity, now)) throw new BusinessException(ErrorCode.OBJECTION_WINDOW_CLOSED);
 
         // 일자당 1회.
         if (objectionRepo.existsByChallengeMemberIdAndTargetDate(member.getId(), date))
@@ -77,7 +76,7 @@ public class ObjectionService {
 
         Objection o = objectionRepo.save(Objection.submit(
                 challengeId, member.getId(), userId, date, ObjectionType.FAILURE,
-                req.content(), req.imageUrl(), daily.getDisputeClosesAt()));
+                req.content(), req.imageUrl(), daily.getAppealClosesAt()));
         return new ObjectionResponse(o.getId().toString(), o.getType().name(),
                 o.getStatus().name(), o.getDeadline().toString());
     }
@@ -102,15 +101,15 @@ public class ObjectionService {
         switch (decision) {
             case "APPROVE" -> {
                 o.approve(adminId, now, req.reason());
-                daily.approveObjection(now);   // SUCCESS(OBJECTION) — 잠정 실패는 온도 미반영이라 복원 불필요
+                daily.correctByAppeal(now);   // 완료로 정정(verifiedVia=APPEAL)
                 refreshProgress(member, daily);
                 eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "OBJECTION_APPROVED"));
                 return new ObjectionDecisionResponse(o.getId().toString(), o.getStatus().name(),
-                        o.getTargetDate().toString(), VerificationStatus.SUCCESS.name(), "OBJECTION");
+                        o.getTargetDate().toString(), VerificationStatus.SUCCESS.name(), "APPEAL");
             }
             case "REJECT" -> {
                 o.reject(adminId, now, req.reason());
-                daily.rejectObjection(now);    // FAILED(OBJECTION_REJECTED) — 확정, 온도 반영
+                // 실패는 이미 확정돼 있다 — 기각은 그 상태를 그대로 둔다.
                 refreshProgress(member, daily);
                 eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "OBJECTION_REJECTED"));
                 if (member != null) {

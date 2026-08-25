@@ -102,7 +102,7 @@ public class RoomService {
 
     /**
      * 화면 뱃지용 오늘 상태. 저장 값({@link VerificationStatus})은 판정 파이프라인의 어휘라 그대로 내리면
-     * 클라이언트가 잠정 실패·인증 불필요까지 알아야 한다 — 여기서 화면 어휘 5종으로 좁힌다.
+     * 클라이언트가 판정 파이프라인 어휘까지 알 이유는 없다 — 여기서 화면 어휘로 좁힌다.
      * 확정된 값이 없을 때만 사이클 정보로 대상 여부를 가른다.
      */
     private String todayStatus(Challenge challenge, ChallengeMember me,
@@ -111,8 +111,8 @@ public class RoomService {
         if (cached != null) {
             switch (cached) {
                 case SUCCESS -> { return "DONE"; }
-                // 잠정 실패도 화면에는 실패다 — 뒤집히면 이의 결과 알림으로 따로 안내한다.
-                case FAILED, FAILED_PROVISIONAL -> { return "FAILED"; }
+                // 확정된 실패만 실패로 보인다 — 이의로 뒤집히면 결과 알림으로 따로 안내한다.
+                case FAILED -> { return "FAILED"; }
                 case NOT_TARGET, NOT_REQUIRED -> { return "NOT_TARGET"; }
                 case PENDING -> { /* 아래 사이클 판정으로 넘어간다 */ }
             }

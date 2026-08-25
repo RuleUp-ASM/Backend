@@ -20,6 +20,12 @@ app:
       enabled: true
       max: 3
 
+  verification:
+    # 통합 테스트는 한 유저가 시나리오 안에서 sync 를 연속으로 친다 → 최소 간격을 끈다.
+    # 간격 자체의 동작(429 SYNC_TOO_FREQUENT)은 프로퍼티를 덮어쓰는 테스트가 따로 검증한다.
+    sync-min-interval-sec: 0
+    sync-backlog-min-interval-sec: 0
+
   join-counter:
     # 동시 참여 카운터 보정 배치는 무차별이라, 멤버십 없이 카운터만 심어 FREE_LIMIT 을 검증하는
     # 테스트(ChallengeJoinGateIT 등)의 픽스처를 되돌려 놓는다 → 첫 실행을 멀리 밀어 사실상 끈다.

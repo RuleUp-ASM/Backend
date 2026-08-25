@@ -70,7 +70,7 @@ public class MeCalendarService {
                 int[] a = agg.computeIfAbsent(today, k -> new int[2]);
                 a[1]++;
                 if (s == VerificationStatus.SUCCESS) a[0]++;
-                else if (s == VerificationStatus.PENDING || s == VerificationStatus.FAILED_PROVISIONAL)
+                else if (s == VerificationStatus.PENDING)
                     pendingDays.add(today);   // 미확정 → 그날은 진행 중
             }
         }
@@ -131,7 +131,7 @@ public class MeCalendarService {
 
     /** 캘린더 아이템 상태: 잠정 실패는 미확정이라 PENDING 으로 표기. */
     private String itemStatus(VerificationStatus s) {
-        return (s == VerificationStatus.FAILED_PROVISIONAL) ? "PENDING" : s.name();
+        return s.name();
     }
 
     private Map<UUID, Challenge> titles(List<UUID> challengeIds) {
