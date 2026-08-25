@@ -38,16 +38,8 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
         List<GeofenceTransition> trans = collectTransitions(ctx.signals(), ctx.memberId());
         trans.sort(Comparator.comparing(t -> nz(safe(t.at()))));
 
-        // ===== AVOID(제약형): 창 내 ENTER 1건이라도 → 즉시 FAILED =====
-        if (cfg.isAvoid()) {
-            boolean entered = trans.stream().anyMatch(t -> "ENTER".equals(t.transition()) || "DWELL".equals(t.transition()));
-            Map<String, Object> ev = new HashMap<>();
-            ev.put("avoid", true);
-            ev.put("entered", entered);
-            return entered
-                    ? EvaluationOutcome.violated("ENTERED_AVOID_ZONE", ev, windowClose)
-                    : EvaluationOutcome.pending(ev, windowClose);   // 무위반은 마감 배치가 SUCCESS 확정
-        }
+        // ===== AVOID(제약형): 유효한 진입만 위반. 허용 시간 안에 나왔으면 "스침"이다 =====
+        if (cfg.isAvoid()) return evaluateAvoid(ctx, cfg, trans, windowClose);
 
         // ===== VISIT(도달형): dwell 누적 =====
         int goalMin = (cfg.dwellMinutes() != null) ? cfg.dwellMinutes() : 0;
@@ -103,6 +95,62 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
     }
 
     /**
+     * AVOID(장소 피하기) 판정 — 진입했다고 바로 위반이 아니다.
+     *
+     * <p>정책은 "허용 시간 안에 이탈한 것이 확인되면 스침으로 처리"다. 금지 장소 앞을 지나가기만 해도
+     * 지오펜스는 ENTER 를 쏘기 때문에, 그대로 위반 처리하면 편의점 앞을 지난 사람이 실패한다.
+     *
+     * <ul>
+     *   <li>ENTER→EXIT 쌍의 체류가 허용 시간 이하 → 스침(위반 아님)</li>
+     *   <li>체류가 허용 시간 초과 → 위반</li>
+     *   <li>아직 EXIT 이 안 왔고 허용 시간도 안 지났으면 판단 보류 — 이탈 신호가 늦게 올 수 있다</li>
+     *   <li>OS 가 체류를 확정한 DWELL 은 유예 없이 위반 — 이미 "머물렀다"는 판정이다</li>
+     * </ul>
+     * 허용 시간은 서버 설정({@code loiteringDelayMin})이라 실기기 테스트로 조절할 수 있다.
+     */
+    private EvaluationOutcome evaluateAvoid(DayContext ctx, GpsConfig cfg,
+                                            List<GeofenceTransition> trans, Instant windowClose) {
+        long graceSec = 60L * ((cfg.loiteringDelayMin() != null) ? cfg.loiteringDelayMin() : 0);
+        boolean violated = false;
+        Instant openEnter = priorEnter(ctx.priorEvidence());
+        long longestStaySec = priorSeconds(ctx.priorEvidence());
+
+        for (GeofenceTransition t : trans) {
+            Instant at = safe(t.at());
+            if (at == null) continue;
+            switch (nzStr(t.transition())) {
+                case "DWELL" -> violated = true;
+                case "ENTER" -> { if (openEnter == null) openEnter = at; }
+                case "EXIT" -> {
+                    if (openEnter != null) {
+                        long staySec = Math.max(at.getEpochSecond() - openEnter.getEpochSecond(), 0);
+                        longestStaySec = Math.max(longestStaySec, staySec);
+                        if (staySec > graceSec) violated = true;
+                        openEnter = null;
+                    }
+                }
+                default -> { }
+            }
+        }
+        // 아직 안 나온 진입: 허용 시간을 이미 넘겼으면 이탈 신호를 기다릴 것 없이 위반이다.
+        if (!violated && openEnter != null) {
+            long stayedSec = Math.max(ctx.now().getEpochSecond() - openEnter.getEpochSecond(), 0);
+            longestStaySec = Math.max(longestStaySec, stayedSec);
+            if (stayedSec > graceSec) violated = true;
+        }
+
+        Map<String, Object> ev = new HashMap<>();
+        ev.put("avoid", true);
+        ev.put("entered", violated);
+        ev.put("graceMinutes", graceSec / 60);
+        ev.put("dwellSeconds", longestStaySec);          // 가장 오래 머문 시간(이월)
+        if (openEnter != null) ev.put("enterAt", openEnter.toString());
+        return violated
+                ? EvaluationOutcome.violated("ENTERED_AVOID_ZONE", ev, windowClose)
+                : EvaluationOutcome.pending(ev, windowClose);   // 무위반은 확정 배치가 SUCCESS 로 잠근다
+    }
+
+    /**
      * 이 멤버(=memberId)의 지오펜스 전환만 수집한다.
      * geofenceId=challengeMemberId 계약(§6.2)상 sync에 여러 챌린지 전환이 섞여 오므로, 여기서 memberId로
      * 필터하지 않으면 다른 챌린지 지오펜스의 ENTER/DWELL이 이 챌린지를 인증(또는 AVOID 위반)시킨다(교차 인증 버그).
@@ -116,6 +164,7 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
                 continue;
             }
             for (GeofenceTransition t : s.transitions()) {
+                if (Boolean.TRUE.equals(t.isMock())) continue;   // 조작된 위치는 판정 근거가 아니다(§9.1)
                 if (memberId == null || memberId.equals(t.geofenceId())) out.add(t);
             }
         }
@@ -150,6 +199,7 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
         for (GeoPoint p : pts) {
             Instant at = safe(p.at());
             if (lastInside != null && !at.isAfter(lastInside)) continue;   // 멱등 워터마크(이미 반영된 시각)
+            if (!usableForDwell(p, cfg)) continue;                         // 조작·저정확도는 판정 근거가 아니다
             if (!insideAny(p, use)) continue;                              // 반경 밖은 체류 아님
             if (lastInside != null) {
                 long delta = at.getEpochSecond() - lastInside.getEpochSecond();
@@ -167,6 +217,18 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
             return List.of(new GeoAnchor(cfg.lat(), cfg.lng(), r, "legacy"));
         }
         return List.of();
+    }
+
+    /**
+     * 체류 근거로 쓸 수 있는 측위인지 (테크 스펙 §5-1 "GPS 정확도가 허용 기준보다 나쁜 정보는 판정 근거에서 제외").
+     *
+     * <p>정확도가 반경만큼 나쁘면 그 좌표가 정말 안에 있었는지 알 수 없다 — 반경 판정이 동전 던지기가 된다.
+     * 조작된 위치(mock)는 애초에 근거가 아니다. 둘 다 "제외"일 뿐 부정행위 확정과는 분리한다(§9.1).
+     */
+    private boolean usableForDwell(GeoPoint p, GpsConfig cfg) {
+        if (Boolean.TRUE.equals(p.isMock())) return false;
+        Integer maxAccuracy = cfg.accuracyMaxM();
+        return maxAccuracy == null || p.accuracy() == null || p.accuracy() <= maxAccuracy;
     }
 
     private boolean insideAny(GeoPoint p, List<GeoAnchor> anchors) {
