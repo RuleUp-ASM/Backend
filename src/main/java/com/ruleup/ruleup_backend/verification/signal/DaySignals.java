@@ -59,7 +59,7 @@ public final class DaySignals {
             boolean keepsAny = notEmpty(transitions) || notEmpty(points)
                     || notEmpty(usageEvents) || notEmpty(screenEvents);
             if (!keepsAny) return null;
-            return new SyncSignal(s.type(), s.observedAt(), transitions, points, s.isMock(),
+            return new SyncSignal(s.type(), s.recordId(), s.observedAt(), transitions, points, s.isMock(),
                     s.readings(), s.sessionStart(), s.sessionEnd(), s.detectedActivity(), s.date(),
                     usageEvents, screenEvents, s.segments());
         }
