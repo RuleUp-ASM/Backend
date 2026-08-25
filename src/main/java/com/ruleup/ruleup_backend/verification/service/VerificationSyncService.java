@@ -63,6 +63,7 @@ public class VerificationSyncService {
     private final VerificationDailyRepository dailyRepo;
     private final VerificationMethodResultRepository methodResultRepo;
     private final SyncRateLimiter rateLimiter;
+    private final VerificationSignalIngestService signalIngest;
     private final VerificationMemberSetup memberSetup;
     private final VerificationConfigFactory configFactory;
     private final VerificationProgressService progressService;
@@ -76,6 +77,7 @@ public class VerificationSyncService {
                                    VerificationDailyRepository dailyRepo,
                                    VerificationMethodResultRepository methodResultRepo,
                                    SyncRateLimiter rateLimiter,
+                                   VerificationSignalIngestService signalIngest,
                                    VerificationMemberSetup memberSetup,
                                    VerificationConfigFactory configFactory,
                                    VerificationProgressService progressService,
@@ -88,6 +90,7 @@ public class VerificationSyncService {
         this.dailyRepo = dailyRepo;
         this.methodResultRepo = methodResultRepo;
         this.rateLimiter = rateLimiter;
+        this.signalIngest = signalIngest;
         this.memberSetup = memberSetup;
         this.configFactory = configFactory;
         this.progressService = progressService;
@@ -118,6 +121,11 @@ public class VerificationSyncService {
         LocalDate today = LocalDate.now(KST);
         Instant now = Instant.now();
 
+        // 원본 저장 + 영속 멱등. 평가에는 이번에 처음 받은 신호만 넘긴다 —
+        // 재전송된 구간이 체류·사용 시간에 다시 더해지지 않게 하는 경계다.
+        VerificationSignalIngestService.Ingested ingested = signalIngest.ingest(userId, signals, now);
+        List<SyncSignal> fresh = ingested.accepted();
+
         List<ChallengeMember> members = challengeQuery.findActiveMemberships(userId);
         List<SyncResponse.UpdatedChallenge> updated = new ArrayList<>();
 
@@ -139,7 +147,7 @@ public class VerificationSyncService {
 
             VerificationDaily daily = loadOrCreateDaily(member, challenge, today);
             VerificationStatus before = daily.getStatus();
-            VerificationStatus todayStatus = processMember(member, challenge, config, daily, signals, gaps, today, now);
+            VerificationStatus todayStatus = processMember(member, challenge, config, daily, fresh, gaps, today, now);
 
             progressService.updateAfterSync(member, todayStatus, now);
             if (becameFinal(before, todayStatus) || graceChanged) {
@@ -152,10 +160,12 @@ public class VerificationSyncService {
                             VerificationPolarity.of(config), now),
                     member.getProgressRate()));
         }
-        if (log.isDebugEnabled()) {
-            log.debug("sync userId={} signals={} ignored={} activeMembers={} updated={}",
-                    userId, signals.size(), ignored, members.size(), updated.size());
-        }
+        // sync_result — 자동 판정 커버리지·중복 비율·압축 도입 판단의 1차 근거(로깅 스펙 §9).
+        log.info("sync_result userId={} signalCount={} dedupDropped={} ignoredTypes={} gapReasons={} " +
+                        "activeMembers={} updated={} backlog={}",
+                userId, signals.size(), ingested.droppedCount(), ignored,
+                gaps.stream().map(SyncRequest.Gap::reason).filter(java.util.Objects::nonNull).distinct().toList(),
+                members.size(), updated.size(), Boolean.TRUE.equals(req.backlog()));
         // flushIntervalSec: 기기 스펙 기반 산정값을 매 ACK마다 전체값으로 회신(§6 제어 모델).
         // maxPayloadBytes: 클라가 이 값을 보고 전송 구간을 쪼갠다(설정값, 실측 후 조정).
         com.ruleup.ruleup_backend.user.domain.User user = userRepository.findById(userId).orElse(null);
@@ -163,7 +173,7 @@ public class VerificationSyncService {
         int flushIntervalSec = FlushIntervalPolicy.forUser(user);
         return new SyncResponse(
                 ZonedDateTime.ofInstant(now, KST).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
-                flushIntervalSec, updated, ignored, properties.maxPayloadBytes());
+                flushIntervalSec, updated, ignored, properties.maxPayloadBytes(), ingested.droppedCount());
     }
 
     /**
