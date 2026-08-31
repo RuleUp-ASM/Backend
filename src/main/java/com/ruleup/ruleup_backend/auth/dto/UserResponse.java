@@ -47,8 +47,10 @@ public record UserResponse(
         @Schema(description = "실제 티어. 가입 직후에는 BRONZE.", example = "BRONZE")
         String tier,
 
-        @Schema(description = "현재 티어 구간 내 점수. 가입 직후에는 10.", example = "10")
-        Integer score,
+        @Schema(description = """
+                누적 점수 0~2,000. 티어마다 0~99 로 끊지 않는 계정당 단일 축이라
+                승급해도 초과 점수가 사라지지 않는다. 가입 직후에는 10.""", example = "10")
+        long score,
 
         @Schema(description = "화면 표시용 티어. 승급 연출 등으로 실제 티어와 다를 수 있다.", example = "BRONZE")
         String displayTier,
@@ -78,7 +80,8 @@ public record UserResponse(
     public static UserResponse from(User user, UserScoreSummary summary) {
         Tier tier = (summary != null) ? summary.getActualTier() : Tier.UNRANKED;
         Tier displayTier = (summary != null) ? summary.getDisplayTier() : Tier.UNRANKED;
-        int score = (summary != null) ? summary.scoreInTier() : 0;
+        // 티어 안에서 0~99 로 끊지 않는다 — 계정당 하나의 단일 축 0~2,000 이다(정책 §1.1, 2026-08-26).
+        long score = (summary != null) ? summary.getTotalScore() : 0L;
         return new UserResponse(
                 user.getId().toString(),
                 selfDisplayNickname(user),
