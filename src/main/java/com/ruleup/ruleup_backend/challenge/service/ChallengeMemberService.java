@@ -15,7 +15,8 @@ import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.room.RoomAuthority;
-import com.ruleup.ruleup_backend.report.BlacklistService;
+import com.ruleup.ruleup_backend.report.BlockService;
+import com.ruleup.ruleup_backend.score.domain.IncidentType;
 import com.ruleup.ruleup_backend.score.UserScoreSummaryRepository;
 import com.ruleup.ruleup_backend.score.domain.Tier;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
@@ -61,8 +62,6 @@ public class ChallengeMemberService {
     /** "1년 이상 성공을 이어왔다" 면제 기준(정책 §10.1). */
     private static final Duration LONG_SUCCESS_THRESHOLD = Duration.ofDays(365);
     /** 중도 탈퇴 감점 — ⚠️ 수치 미확정. 실제 반영은 티어 모듈 소관이고 여기서는 계약값·트리거만. */
-    private static final int LEAVE_SCORE_PENALTY = -15;
-
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     private final ChallengeRepository challengeRepository;
@@ -75,7 +74,8 @@ public class ChallengeMemberService {
     private final VerificationDailyRepository verificationDailyRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final RoomAuthority roomAuthority;
-    private final BlacklistService blacklistService;
+    private final BlockService blockService;
+    private final com.ruleup.ruleup_backend.score.ScoreService scoreService;
 
     // ===== 가입 =====
     /**
@@ -242,9 +242,16 @@ public class ChallengeMemberService {
         counterRepository.decrement(userId);
         eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "LEAVE"));
 
-        int scoreDelta = (exemptReason != null) ? 0 : LEAVE_SCORE_PENALTY;
-        log.info("challenge_leave challengeId={} userId={} penalty_applied={} exempt={} botOwner={}",
-                challengeId, userId, scoreDelta != 0, exemptReason, botOwnerActivated);
+        // 중도 탈퇴 감점은 정액이 아니라 진행 기간에 반비례한다 — −⌈15 × (1 − 진행주간/52)⌉.
+        // 오래 해온 방일수록 가볍고, 1년을 채웠으면 면제다(점수 및 티어 정책 §4.8).
+        int scoreDelta = 0;
+        if (exemptReason == null) {
+            scoreDelta = IncidentType.VOLUNTARY_LEAVE.deduction(progressWeeks(me));
+            scoreService.applyIncident(userId, challengeId, IncidentType.VOLUNTARY_LEAVE,
+                    "leave:" + me.getId(), progressWeeks(me));
+        }
+        log.info("challenge_leave challengeId={} userId={} penalty={} exempt={} botOwner={}",
+                challengeId, userId, scoreDelta, exemptReason, botOwnerActivated);
         return new LeaveResponse(true, scoreDelta, exemptReason, rejoinAt.toString(), botOwnerActivated);
     }
 
@@ -307,6 +314,18 @@ public class ChallengeMemberService {
      * 승계 면책은 <b>모든 멤버 기준</b>이다 — 봇방장 전환·선착순 클레임 시점부터 3일간은 잔류 멤버 누구나 면책이고,
      * 전 방장이 직접 넘겨준 경우(GRANT_TRANSFER)만 대상이 아니다(정책 §11.3).
      */
+    /**
+     * 감점 계산에 쓰는 진행 주간 수 — <b>판정이 완료된</b> 주만 센다(정책 §4.8). 첫 성공부터 세는 이유는
+     * 면제 기준이 "해당 챌린지 성공 기간 1년 이상"이라 참여만 걸어 둔 기간은 근거가 되지 않기 때문이다.
+     */
+    private int progressWeeks(ChallengeMember me) {
+        LocalDate firstSuccess = verificationDailyRepository
+                .findEarliestDate(me.getId(), VerificationStatus.SUCCESS);
+        if (firstSuccess == null) return 0;
+        long days = java.time.temporal.ChronoUnit.DAYS.between(firstSuccess, LocalDate.now(KST));
+        return (int) Math.max(0, days / 7);   // 진행 중인 주는 인정하지 않는다
+    }
+
     private String resolveExemptReason(Challenge c, ChallengeMember me, Instant now) {
         LocalDate firstSuccess = verificationDailyRepository
                 .findEarliestDate(me.getId(), VerificationStatus.SUCCESS);
@@ -344,7 +363,7 @@ public class ChallengeMemberService {
                 .collect(Collectors.toMap(User::getId, Function.identity()));
         Map<UUID, com.ruleup.ruleup_backend.score.domain.Tier> tierMap = scoreSummaryRepository.findAllById(userIds)
                 .stream().collect(Collectors.toMap(s -> s.getUserId(), s -> s.getDisplayTier()));
-        Set<UUID> blockedUsers = blacklistService.blockedUsers(viewerId);
+        Set<UUID> blockedUsers = blockService.blockedUsers(viewerId);
 
         List<MemberListResponse.Member> dto = members.stream().map(m -> {
             User u = userMap.get(m.getUserId());

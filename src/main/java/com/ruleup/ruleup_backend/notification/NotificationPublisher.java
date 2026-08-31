@@ -1,7 +1,7 @@
 package com.ruleup.ruleup_backend.notification;
 
 import com.ruleup.ruleup_backend.notification.domain.*;
-import com.ruleup.ruleup_backend.report.BlacklistService;
+import com.ruleup.ruleup_backend.report.BlockService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -34,7 +34,7 @@ public class NotificationPublisher {
     private final NotificationSettingRepository settingRepository;
     private final NotificationMuteRepository muteRepository;
     private final NotificationDedupRepository dedupRepository;
-    private final BlacklistService blacklistService;
+    private final BlockService blockService;
     private final NotificationPushSender pushSender;
 
     /**
@@ -63,7 +63,7 @@ public class NotificationPublisher {
 
     private boolean isBlocked(NotificationEvent event) {
         return event.actorId() != null
-                && blacklistService.isUserBlocked(event.userId(), event.actorId());
+                && blockService.isUserBlocked(event.userId(), event.actorId());
     }
 
     /**

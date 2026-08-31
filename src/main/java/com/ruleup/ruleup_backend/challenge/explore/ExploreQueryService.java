@@ -93,9 +93,11 @@ public class ExploreQueryService {
                         // ① 노출 제외 — 후보 조건을 맨 앞에 고정
                         "WHERE c.mode = 'GROUP' AND c.visibility = 'PUBLIC' " +
                         "  AND c.status IN ('UPCOMING', 'ACTIVE') AND c.deleted_at IS NULL " +
-                        "  AND NOT EXISTS (SELECT 1 FROM reports r " +
-                        "                  WHERE r.reporter_id = ? AND r.target_type = 'CHALLENGE' " +
-                        "                    AND r.target_challenge_id = c.id) ");
+                        // 숨기는 근거는 신고가 아니라 **차단**이다. 신고 이력으로 걸면 차단을 해제해도
+                        // 방이 다시 나타나지 않는다 — 해제의 의미가 "이제 보여도 괜찮다"이므로 어긋난다.
+                        "  AND NOT EXISTS (SELECT 1 FROM user_blocks b " +
+                        "                  WHERE b.blocker_id = ? AND b.target_type = 'CHALLENGE' " +
+                        "                    AND b.target_id = c.id) ");
         args.add(toBytes(userId));
 
         // ② 필터 — 서로 AND, 카테고리끼리만 OR
