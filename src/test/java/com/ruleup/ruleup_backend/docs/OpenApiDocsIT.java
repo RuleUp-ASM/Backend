@@ -75,7 +75,12 @@ class OpenApiDocsIT {
                 "/api/v1/users/me/profile-image",
                 "/api/v1/profile",
                 "/api/v1/profile/image",
-                "/api/v1/users/{targetUserId}/profile");
+                "/api/v1/users/me/profile",
+                "/api/v1/me/tier",
+                "/api/v1/me/tier/history",
+                "/api/v1/users/me/appeals",
+                "/api/v1/users/{targetUserId}/profile",
+                "/api/v1/app-links/check");
     }
 
     @Test
@@ -97,7 +102,7 @@ class OpenApiDocsIT {
                 "/api/v1/challenges/{challengeId}/owner",
                 "/api/v1/challenges/{challengeId}/owner/claim",
                 "/api/v1/reports",
-                "/api/v1/users/me/blacklist");
+                "/api/v1/users/me/blocks");
     }
 
     @Test
@@ -199,17 +204,14 @@ class OpenApiDocsIT {
         }
 
         @Test
-        @DisplayName("프로필 수정 — 닉네임 30일 변경 제한(403)과 중복(409)이 갈라져 있다")
+        @DisplayName("프로필 편집 — 통합 잠금과 닉네임 중복이 같은 409 안에서 갈라져 있다")
         void profileUpdateNicknameErrors() throws Exception {
+            // 잠금은 재시도로 풀리는 게 아니라 상태 충돌이라 429·403 이 아니라 409 다(마이페이지 오픈 이슈 #9).
+            // 중복도 409 라 둘이 같은 상태 코드 아래 예시로 나란히 서야 클라가 code 로 분기할 수 있다.
             assertThat(doc().<Map<String, Object>>read(
-                    "$.paths['/api/v1/profile'].patch.responses['403']"
+                    "$.paths['/api/v1/users/me/profile'].patch.responses['409']"
                             + ".content['application/json'].examples"))
-                    .containsKey("NICKNAME_CHANGE_LOCKED");
-
-            assertThat(doc().<Map<String, Object>>read(
-                    "$.paths['/api/v1/profile'].patch.responses['409']"
-                            + ".content['application/json'].examples"))
-                    .containsKey("NICKNAME_DUPLICATED");
+                    .containsKeys("PROFILE_CHANGE_LOCKED", "NICKNAME_DUPLICATED");
         }
 
         @Test
@@ -308,8 +310,8 @@ class OpenApiDocsIT {
                     "JoinResponse", "LeaveResponse", "MemberListResponse", "ChallengeMemberItem",
                     "KickRequest", "KickResponse", "OwnerTransferRequest", "OwnerTransferResponse",
                     "OwnerClaimResponse",
-                    "ReportCreateRequest", "ReportCreateResponse", "BlacklistResponse",
-                    "BlacklistUserItem", "BlacklistChallengeItem", "BlacklistDeleteResponse");
+                    "ReportCreateRequest", "ReportCreateResponse", "BlockListResponse",
+                    "BlockedUserItem", "BlockedChallengeItem", "BlockDeleteResponse");
         }
 
         @Test
@@ -368,7 +370,7 @@ class OpenApiDocsIT {
                     "$.paths['/api/v1/challenges/{challengeId}/owner'].patch.security",
                     "$.paths['/api/v1/challenges/{challengeId}/owner/claim'].post.security",
                     "$.paths['/api/v1/reports'].post.security",
-                    "$.paths['/api/v1/users/me/blacklist'].get.security")) {
+                    "$.paths['/api/v1/users/me/blocks'].get.security")) {
                 assertThat(doc().<List<Object>>read(path)).as(path).isNotEmpty();
             }
         }

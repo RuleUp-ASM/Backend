@@ -38,23 +38,25 @@ public class AdminReviewService {
     public AdminDtos.ReportQueueResponse queue(UUID operatorId) {
         auditService.allowed(operatorId, AdminAction.REPORT_QUEUE_VIEW, null, null, null);
 
+        // 대상이 한 컬럼이라 그룹핑이 그대로 (종류, 대상) 두 값으로 끝난다.
+        // 라벨은 종류에 따라 유저 닉네임 또는 방 제목을 쓰므로 양쪽을 LEFT JOIN 해 둔다.
         List<Map<String, Object>> rows = jdbc.queryForList("""
-                SELECT r.target_type, r.target_user_id, r.target_challenge_id,
+                SELECT r.target_type, r.target_id,
                        COUNT(*) AS cnt, MIN(r.created_at) AS first_at,
                        GROUP_CONCAT(HEX(r.id)) AS ids,
                        MAX(u.approved_nickname) AS nickname, MAX(c.title) AS title
                   FROM reports r
-                  LEFT JOIN users u ON u.id = r.target_user_id
-                  LEFT JOIN challenges c ON c.id = r.target_challenge_id
+                  LEFT JOIN users u ON u.id = r.target_id AND r.target_type = 'USER'
+                  LEFT JOIN challenges c ON c.id = r.target_id AND r.target_type = 'CHALLENGE'
                  WHERE r.status = 'PENDING'
-                 GROUP BY r.target_type, r.target_user_id, r.target_challenge_id
+                 GROUP BY r.target_type, r.target_id
                  ORDER BY first_at ASC
                 """);
 
         List<AdminDtos.Group> items = new ArrayList<>();
         for (Map<String, Object> row : rows) {
             boolean user = "USER".equals(row.get("target_type"));
-            byte[] targetId = (byte[]) (user ? row.get("target_user_id") : row.get("target_challenge_id"));
+            byte[] targetId = (byte[]) row.get("target_id");
             if (targetId == null) continue;
             items.add(new AdminDtos.Group(
                     (String) row.get("target_type"),
@@ -78,8 +80,7 @@ public class AdminReviewService {
 
         // reporter_id 를 뽑지 않는다 — 신원은 어떤 경로로도 나가면 안 되는 값이다.
         List<Map<String, Object>> rows = jdbc.queryForList("""
-                SELECT r.target_type, r.target_user_id, r.target_challenge_id, r.reason,
-                       r.status, r.created_at, s.payload
+                SELECT r.target_type, r.target_id, r.reason, r.status, r.created_at, s.payload
                   FROM reports r
                   LEFT JOIN report_snapshots s ON s.report_id = r.id
                  WHERE r.id = ?
@@ -87,8 +88,7 @@ public class AdminReviewService {
         if (rows.isEmpty()) throw new BusinessException(ErrorCode.REPORT_NOT_FOUND);
 
         Map<String, Object> row = rows.getFirst();
-        boolean user = "USER".equals(row.get("target_type"));
-        byte[] targetId = (byte[]) (user ? row.get("target_user_id") : row.get("target_challenge_id"));
+        byte[] targetId = (byte[]) row.get("target_id");
         return new AdminDtos.ReportDetail(
                 reportId.toString(),
                 (String) row.get("target_type"),

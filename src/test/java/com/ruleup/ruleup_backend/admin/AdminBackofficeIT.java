@@ -118,9 +118,8 @@ class AdminBackofficeIT extends ChallengeApiSupport {
     /** 신고 1건 적재 — 접수는 방 내부 모듈이 하고 백오피스는 읽기만 한다. */
     private UUID insertReport(UUID reporterId, UUID targetUserId) {
         UUID id = UUID.randomUUID();
-        jdbcTemplate.update("INSERT INTO reports " +
-                        "(id, reporter_id, target_type, target_user_id, context_type, reason, detail) " +
-                        "VALUES (?, ?, 'USER', ?, 'PROFILE', 'ABUSE', '테스트 신고')",
+        jdbcTemplate.update("INSERT INTO reports (id, reporter_id, target_type, target_id, reason) " +
+                        "VALUES (?, ?, 'USER', ?, 'INAPPROPRIATE')",
                 bytes(id), bytes(reporterId), bytes(targetUserId));
         jdbcTemplate.update("INSERT INTO report_snapshots (report_id, payload) VALUES (?, ?)",
                 bytes(id), "{\"nickname\":\"피신고자\",\"content\":\"신고 시점 스냅샷\"}");
@@ -294,8 +293,12 @@ class AdminBackofficeIT extends ChallengeApiSupport {
                             .as("null 이면 가드레일 위반이다").isNotNull());
             assertThat(notificationRepository.findInbox(target.id(), null, null, Limit.unlimited()))
                     .anyMatch(n -> NotificationType.ACCOUNT_SANCTION.name().equals(n.getType()));
-            assertThat(sanctionRepository.countByNotifiedAtIsNullAndTrack(SanctionTrack.DISCRETIONARY))
-                    .isZero();
+            // 감사 쿼리 자체(notified_at IS NULL 인 직권 제재)는 운영에서 전역으로 도는 것이지만,
+            // 여기서는 대상 유저로 좁힌다 — 공유 DB 라 다른 테스트가 게이트 검증용으로 만든
+            // 제재(고지 경로를 타지 않는다)까지 전역 카운트에 섞인다.
+            assertThat(sanctionRepository.findByUserIdAndTrackOrderByStartsAtDesc(
+                    target.id(), SanctionTrack.DISCRETIONARY))
+                    .allMatch(sanction -> sanction.getNotifiedAt() != null);
         }
 
         @Test
@@ -440,14 +443,16 @@ class AdminBackofficeIT extends ChallengeApiSupport {
             Member reporter = member(uniq("r"));
             Member target = member(uniq("t"));
             UUID reportId = insertReport(reporter.id(), target.id());
-            jdbcTemplate.update("INSERT INTO blacklist_users (owner_id, blocked_user_id) VALUES (?, ?)",
+            jdbcTemplate.update(
+                    "INSERT INTO user_blocks (blocker_id, target_type, target_id) VALUES (?, 'USER', ?)",
                     bytes(reporter.id()), bytes(target.id()));
 
             postAuth("/api/v1/admin/reports/" + reportId + "/resolve",
                     op.token(), Map.of("resolution", "NO_ACTION"));
 
             assertThat(jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM blacklist_users WHERE owner_id=? AND blocked_user_id=?",
+                    "SELECT COUNT(*) FROM user_blocks WHERE blocker_id=? AND target_type='USER' "
+                            + "AND target_id=?",
                     Integer.class, bytes(reporter.id()), bytes(target.id()))).isEqualTo(1);
         }
     }

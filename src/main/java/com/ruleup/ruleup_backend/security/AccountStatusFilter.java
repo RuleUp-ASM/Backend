@@ -4,6 +4,7 @@ import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.error.ErrorResponse;
 import com.ruleup.ruleup_backend.common.response.ApiResponse;
 import com.ruleup.ruleup_backend.sanction.SanctionService;
+import com.ruleup.ruleup_backend.sanction.domain.FeatureCode;
 import com.ruleup.ruleup_backend.sanction.domain.Sanction;
 import com.ruleup.ruleup_backend.sanction.domain.SanctionType;
 import com.ruleup.ruleup_backend.user.UserRepository;
@@ -76,7 +77,7 @@ public class AccountStatusFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
-        ErrorCode blocked = blockedReason(request);
+        Blocked blocked = blockedReason(request);
         if (blocked != null) {
             writeError(response, blocked);
             return;
@@ -84,8 +85,8 @@ public class AccountStatusFilter extends OncePerRequestFilter {
         chain.doFilter(request, response);
     }
 
-    /** 막아야 하면 그 사유 코드를, 통과시켜야 하면 null 을 준다. */
-    private ErrorCode blockedReason(HttpServletRequest request) {
+    /** 막아야 하면 사유를, 통과시켜야 하면 null 을 준다. */
+    private Blocked blockedReason(HttpServletRequest request) {
         UUID userId = currentUserId();
         if (userId == null) return null;                 // 미인증(공개 경로) — 그대로 통과
         if (isAlwaysAllowed(request)) return null;
@@ -103,16 +104,24 @@ public class AccountStatusFilter extends OncePerRequestFilter {
         return blockedBy(active.get(), request);
     }
 
-    private ErrorCode blockedBy(Sanction sanction, HttpServletRequest request) {
+    /** 막아야 하면 (코드, 해제 예정 시각)을, 통과시켜야 하면 null 을 준다. */
+    private Blocked blockedBy(Sanction sanction, HttpServletRequest request) {
         SanctionType type = sanction.getType();
-        if (type == SanctionType.BAN) return ErrorCode.ACCOUNT_BANNED;       // 조회 포함 전면 차단
+        String until = (sanction.getEndsAt() == null) ? null : sanction.getEndsAt().toString();
+
+        if (type == SanctionType.BAN) return new Blocked(ErrorCode.ACCOUNT_BANNED, null);
         if (type == SanctionType.LOCK)
-            return isReadOnly(request) ? null : ErrorCode.ACCOUNT_LOCKED;    // 열람 전용
+            return isReadOnly(request) ? null : new Blocked(ErrorCode.ACCOUNT_LOCKED, until);
+
         // FEATURE_SUSPENSION — 지정한 기능만 막는다. 나머지는 정상 동작해야 한다.
-        return (sanction.getFeatureCode() != null
-                && sanction.getFeatureCode().blocks(request.getMethod(), request.getRequestURI()))
-                ? ErrorCode.ACCOUNT_SUSPENDED : null;
+        FeatureCode feature = sanction.getFeatureCode();
+        if (feature == null || !feature.blocks(request.getMethod(), request.getRequestURI())) return null;
+        // 해당 API 명세가 고유 코드를 정해 둔 기능은 그 코드를 내린다 — 클라가 화면별로 분기한다.
+        return new Blocked(feature.errorCode(), until);
     }
+
+    /** 차단 사유와, 클라가 곧바로 안내할 수 있는 해제 예정 시각. */
+    private record Blocked(ErrorCode code, String suspendedUntil) {}
 
     private boolean isReadOnly(HttpServletRequest request) {
         return READ_ONLY_METHODS.contains(request.getMethod());
@@ -134,10 +143,11 @@ public class AccountStatusFilter extends OncePerRequestFilter {
         }
     }
 
-    private void writeError(HttpServletResponse response, ErrorCode code) throws IOException {
-        response.setStatus(code.getStatus().value());
+    private void writeError(HttpServletResponse response, Blocked blocked) throws IOException {
+        response.setStatus(blocked.code().getStatus().value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
-        response.getWriter().write(JSON.writeValueAsString(ApiResponse.fail(ErrorResponse.of(code))));
+        response.getWriter().write(JSON.writeValueAsString(ApiResponse.fail(
+                ErrorResponse.of(blocked.code(), blocked.suspendedUntil()))));
     }
 }

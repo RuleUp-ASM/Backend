@@ -1,6 +1,8 @@
 package com.ruleup.ruleup_backend.challenge.service;
 
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
+import com.ruleup.ruleup_backend.applink.AppLinkType;
+import com.ruleup.ruleup_backend.applink.AppLinks;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeInvitation;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus;
@@ -30,13 +32,13 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class RoomAdminService {
-    private static final String CHALLENGE_INVITE_BASE_URL = "https://android.ruleup.co.kr/c/";
     private final ChallengeRepository challengeRepository;
     private final ChallengeMemberRepository memberRepository;
     private final ChallengeInvitationRepository invitationRepository;
     private final UserChallengeCounterRepository counterRepository;
     private final NotificationPublisher notificationPublisher;
     private final ApplicationEventPublisher eventPublisher;
+    private final AppLinks appLinks;
 
     @Transactional
     public RoomAdminDtos.InvitationResponse invite(UUID ownerId, UUID challengeId) {
@@ -49,7 +51,7 @@ public class RoomAdminService {
         ChallengeInvitation invitation = invitationRepository.saveAndFlush(
                 ChallengeInvitation.create(challengeId, ownerId, InvitationTokens.hash(token), expiresAt));
         return new RoomAdminDtos.InvitationResponse(invitation.getId().toString(), token,
-                CHALLENGE_INVITE_BASE_URL + token, expiresAt.toString());
+                appLinks.build(AppLinkType.CHALLENGE_INVITATION, token), expiresAt.toString());
     }
 
     @Transactional

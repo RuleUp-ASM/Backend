@@ -88,13 +88,13 @@ class RoomOperationsApiIT extends ChallengeApiSupport {
 
         MvcResult report = postJson("/api/v1/reports", reporter.token(), Map.of(
                 "targetType", "USER", "targetUserId", target.id().toString(),
-                "contextType", "PROFILE", "reason", "ABUSE", "detail", "반복적인 모욕적인 표현입니다."));
+                "contextType", "PROFILE", "reason", "INAPPROPRIATE"));
         assertThat(report.getResponse().getStatus()).isEqualTo(201);
-        assertThat((Boolean) read(report, "$.data.blacklisted")).isTrue();
+        assertThat((Boolean) read(report, "$.data.blocked")).isTrue();
         assertThat((String) read(report, "$.data.hiddenEffect")).isEqualTo("USER_CONTENT_MASKED");
 
-        MvcResult blacklist = getAuth("/api/v1/users/me/blacklist", reporter.token());
-        assertThat((String) read(blacklist, "$.data.users[0].userId")).isEqualTo(target.id().toString());
+        MvcResult blocks = getAuth("/api/v1/users/me/blocks", reporter.token());
+        assertThat((String) read(blocks, "$.data.users[0].userId")).isEqualTo(target.id().toString());
 
         MvcResult profile = getAuth("/api/v1/users/" + target.id() + "/profile", reporter.token());
         String targetHex = target.id().toString().replace("-", "");
@@ -103,7 +103,7 @@ class RoomOperationsApiIT extends ChallengeApiSupport {
                 .isEqualTo(targetHex.substring(targetHex.length() - 8));
         assertThat((Object) read(profile, "$.data.profileImageUrl")).isNull();
 
-        MvcResult removed = mvc.perform(delete("/api/v1/users/me/blacklist/users/" + target.id())
+        MvcResult removed = mvc.perform(delete("/api/v1/users/me/blocks/users/" + target.id())
                 .header("Authorization", "Bearer " + reporter.token())).andReturn();
         assertThat(removed.getResponse().getStatus()).isEqualTo(200);
         assertThat((Boolean) read(removed, "$.data.removed")).isTrue();

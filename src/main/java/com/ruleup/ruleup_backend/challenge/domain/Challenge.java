@@ -76,8 +76,6 @@ public class Challenge extends AssignedIdEntity {
     @Column(name = "mode", nullable = false)
     private ParticipationType participationType;
 
-    @Column(name = "min_manner_temperature", precision = 4, scale = 1)
-    private BigDecimal minMannerTemperature;
 
     // 최대 참여 인원(정원). SOLO는 1 고정, GROUP은 방장이 지정(§3·§4). 방장만 수정, 현재 인원 미만 축소 불가.
     @Column(name = "capacity")
@@ -221,65 +219,6 @@ public class Challenge extends AssignedIdEntity {
         return start.plusDays((long) durationDays - 1);
     }
 
-    public static Challenge create(UUID creatorId, String title, String description, String imageUrl,
-                                   String category, ParticipationType participationType,
-                                   BigDecimal minMannerTemperature, Integer maxParticipants, List<String> repeatDays,
-                                   int durationDays, LocalDate startDate,
-                                   Long templateId, VerificationConfig verificationConfig,
-                                   Map<String, Object> params,
-                                   PenaltyConfig penalty, RewardConfig reward,
-                                   Anonymity anonymity, boolean aiAssisted) {
-        Challenge c = new Challenge();
-        c.id = UuidGenerator.generate();
-        c.creatorId = creatorId;
-        c.ownerType = OwnerType.USER;
-        c.ownerGrantedAt = Instant.now();
-        c.ownerGrantReason = GRANT_CREATE;
-        c.title = title;
-        c.description = description;
-        c.imageUrl = imageUrl;
-        c.category = category;
-        c.participationType = participationType;
-        c.minMannerTemperature = (participationType == ParticipationType.GROUP) ? minMannerTemperature : null;
-        // SOLO는 정원 1 고정, GROUP은 방장이 지정한 값(생성 서비스에서 필수 검증). Integer 유지(자동 언박싱 NPE 방지).
-        c.maxParticipants = (participationType == ParticipationType.SOLO) ? Integer.valueOf(1) : maxParticipants;
-        c.repeatDays = (repeatDays != null) ? new ArrayList<>(repeatDays) : new ArrayList<>();
-        c.weeklyCount = (repeatDays != null && !repeatDays.isEmpty())
-                ? Math.min(repeatDays.size(), 7) : 7;
-        c.durationDays = durationDays;
-        c.startDate = startDate;
-        c.endDate = deriveEndDate(startDate, durationDays);
-        c.templateId = templateId;
-        c.verificationConfig = verificationConfig;
-        c.params = (params != null) ? new LinkedHashMap<>(params) : new LinkedHashMap<>();
-        c.penalty = penalty;
-        c.reward = reward;
-        c.anonymity = anonymity;
-        c.status = ChallengeStatus.UPCOMING;
-        // 가시성 게이트는 "이미지" 기준(§3-3): 이미지가 있으면 비동기 SafeSearch 검수 후 공개(PENDING_REVIEW),
-        // 이미지가 없으면 검수 대상이 없어 즉시 모집 가능(NONE). 이름(제목/설명)은 별도 검수하지 않는다
-        // (LLM draft Step2가 생성 시점에 대체 — 이름 모더레이션 non-goal).
-        boolean hasImage = imageUrl != null && !imageUrl.isBlank();
-        c.moderationStatus = hasImage
-                ? ChallengeModerationStatus.PENDING_REVIEW
-                : ChallengeModerationStatus.NONE;
-        c.aiAssisted = aiAssisted;
-        c.participantCount = 0;
-        // 탐색 정렬·필터용 승격 컬럼(인증 방식). verificationConfig 스냅샷의 selectedMethod 를 그대로 반영.
-        c.verificationType = (verificationConfig != null && verificationConfig.selectedMethod() != null)
-                ? verificationConfig.selectedMethod().name() : null;
-        c.trendingScore = 0.0;
-        c.failCount = 0;
-        return c;
-    }
-
-    /**
-     * 신규 계약 생성(챌린지 생성·라이프사이클 스펙) — draft 원본 대조를 마친 확정값으로 조립한다.
-     *  - ai_title 은 draft 행에서 서버가 복사(대체 표시용), penalties 는 서버 강제값.
-     *  - 구 단일 moderationStatus 게이트는 사용하지 않는다(NONE 고정) — 항목별 상태가 대체.
-     *  - repeat_days 는 레거시 호환용으로 월~일 전체를 저장하고, 실제 일정은 weekly_count 기반 FREQUENCY다.
-     *  - duration_days·penalty/reward JSON 은 인증·점수 모듈 호환용 내부 값(계약 미노출).
-     */
     public static Challenge createFromDraft(UUID ownerId, String title, String aiTitle, String description,
                                             String imageUrl, String category, ParticipationType mode,
                                             String visibility, Boolean rankingVisible, Integer capacity,
@@ -535,10 +474,6 @@ public class Challenge extends AssignedIdEntity {
     public void changeParams(Map<String, Object> v) { if (v != null) this.params = new LinkedHashMap<>(v); }
     public void changePenalty(PenaltyConfig v) { if (v != null) this.penalty = v; }
     public void changeReward(RewardConfig v)   { if (v != null) this.reward = v; }
-    public void changeMinMannerTemperature(BigDecimal v) {
-        if (v != null && participationType == ParticipationType.GROUP) this.minMannerTemperature = v;
-    }
-
     /** 최대 참여 인원 변경. SOLO(정원 1 고정)는 무시. GROUP만 반영(축소 하한 검증은 서비스에서). */
     public void changeMaxParticipants(Integer v) {
         if (v != null && participationType == ParticipationType.GROUP) this.maxParticipants = v;

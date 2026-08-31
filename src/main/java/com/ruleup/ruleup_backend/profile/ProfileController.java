@@ -5,7 +5,6 @@ import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.response.ApiResponse;
 import com.ruleup.ruleup_backend.profile.dto.ProfileImageResponse;
 import com.ruleup.ruleup_backend.profile.dto.ProfileResponse;
-import com.ruleup.ruleup_backend.profile.dto.UpdateProfileRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -20,8 +19,11 @@ import com.ruleup.ruleup_backend.common.image.UploadRateLimiter;
 import java.util.UUID;
 
 /**
- * 프로필 API (스펙 4.8 ~ 4.11). 모두 로그인 필요.
- * 명세 경로: /api/v1/profile (조회·수정), /api/v1/profile/image (업로드·삭제)
+ * 프로필 조회·사진 API. 모두 로그인 필요.
+ *
+ * <p>편집(PATCH)은 여기 없다 — 마이페이지 계약이 {@code PATCH /api/v1/users/me/profile} 로 옮겼다
+ * ({@link MyProfileController}). 닉네임과 사진이 <b>통합 1개월 잠금</b>을 공유하게 되면서
+ * 프로필 화면 전용 API 가 아니라 회원 편집 API 가 됐기 때문이다.
  */
 @Tag(name = "Profile", description = "프로필 조회 · 수정 · 사진 — 검수(PENDING/APPROVED/REJECTED)에 따라 타인에게 보이는 값이 달라진다")
 @SecurityRequirement(name = "bearerAuth")    // Swagger UI에서 자물쇠(토큰 입력) 표시
@@ -55,46 +57,6 @@ public class ProfileController {
     @GetMapping
     public ApiResponse<ProfileResponse> getMyProfile(@AuthenticationPrincipal String userId) {
         return ApiResponse.ok(profileService.getMyProfile(UUID.fromString(userId)));
-    }
-
-    @Operation(
-            summary = "프로필 수정",
-            description = """
-                    **부분 수정**이다. 보낸 필드만 바뀌고, 빼거나 null 로 둔 필드는 그대로 유지된다.
-                    현재 값과 같은 값을 보내면 변경으로 치지 않는다(닉네임 변경 주기도 소모되지 않는다).
-
-                    **닉네임 변경은 30일에 한 번**이다. 아직 기간이 남았으면 403 이고,
-                    가능해지는 시각은 조회 응답의 `nicknameChangeableAfter` 에 있다.
-                    단 **검수에서 거절(REJECTED)된 닉네임을 고치는 경우는 이 제한에서 빠진다** —
-                    거절당하고도 30일을 기다려야 한다면 그동안 임시 닉네임으로 지내야 하기 때문이다.
-
-                    변경이 성공하면 이런 일이 함께 일어난다.
-                    - 상태가 `PENDING` 으로 돌아가고 재검수에 들어간다. **승인 전까지 타인에게는 임시 닉네임이 보인다**
-                    - **쓰던 닉네임은 심사가 끝날 때까지 계속 본인 것**이다. 남이 가져가려 하면 409 `NICKNAME_DUPLICATED` 다.
-                      새 닉네임이 **승인되는 순간** 이전 값이 풀려 누구나 쓸 수 있게 된다(별도 유예 기간은 없다)
-
-                    `interestCategories` 는 보낸 배열로 **통째로 교체**된다(추가가 아니다). 0~6개이며 빈 배열이면 전부 해제된다.
-
-                    `profileImageUrl` 로 URL 을 직접 지정하면 사진도 재검수 대상이 된다.
-                    파일 업로드는 `POST /api/v1/profile/image` 를 쓴다.
-
-                    잠금(LOCKED) 계정은 쓰기가 막혀 403 이다.
-                    """
-    )
-    @ApiErrorCodes({
-            ErrorCode.NICKNAME_FORMAT_INVALID,
-            ErrorCode.CATEGORY_INVALID,
-            ErrorCode.CATEGORY_LIMIT_EXCEEDED,
-            ErrorCode.LOGIN_REQUIRED,
-            ErrorCode.NICKNAME_CHANGE_LOCKED,
-            ErrorCode.ACCOUNT_LOCKED,
-            ErrorCode.ACCOUNT_BANNED,
-            ErrorCode.NICKNAME_DUPLICATED
-    })
-    @PatchMapping
-    public ApiResponse<ProfileResponse> updateMyProfile(@AuthenticationPrincipal String userId,
-                                                        @RequestBody UpdateProfileRequest request) {
-        return ApiResponse.ok(profileService.updateProfile(UUID.fromString(userId), request));
     }
 
     @Operation(

@@ -34,7 +34,8 @@ public enum ErrorCode {
     // ===== 닉네임 / 카테고리 / 약관 / 온보딩 (4.3 / 4.6 / 4.9) =====
     NICKNAME_FORMAT_INVALID(HttpStatus.BAD_REQUEST, "닉네임 형식이 올바르지 않습니다."),
     NICKNAME_DUPLICATED(HttpStatus.CONFLICT, "이미 사용 중인 닉네임입니다."),
-    NICKNAME_CHANGE_LOCKED(HttpStatus.FORBIDDEN, "닉네임은 30일에 한 번만 변경할 수 있습니다."),
+    // 닉네임·사진 통합 잠금. 재시도로 풀리는 게 아니라 상태 충돌이라 409 다(마이페이지 오픈 이슈 #9 — 온보딩 문서와 통일).
+    PROFILE_CHANGE_LOCKED(HttpStatus.CONFLICT, "닉네임과 프로필 사진은 한 달에 한 번만 바꿀 수 있어요."),
     CATEGORY_INVALID(HttpStatus.BAD_REQUEST, "유효하지 않은 관심 카테고리입니다."),
     CATEGORY_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "관심 카테고리는 최대 6개까지 선택할 수 있습니다."),
     INTEREST_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "관심 카테고리는 0~6개까지 선택할 수 있습니다."),
@@ -78,7 +79,6 @@ public enum ErrorCode {
     INVALID_REWARD(HttpStatus.BAD_REQUEST, "보상 설정이 올바르지 않습니다."),
     START_DATE_REQUIRED(HttpStatus.BAD_REQUEST, "시작일을 입력해주세요."),
     INVALID_MIN_MANNER_TEMPERATURE(HttpStatus.BAD_REQUEST, "참여 기준 매너 온도는 생성자 본인의 매너 온도보다 높을 수 없습니다."),
-    MIN_TEMP_EXCEEDS_OWNER(HttpStatus.BAD_REQUEST, "가입 기준 온도는 생성자 본인의 온도를 초과할 수 없습니다."),
     /** 동시 참여 한도 초과 — 생성 경로. 가입 경로는 JOIN_BLOCKED + reason=FREE_LIMIT 로 내려간다. */
     CHALLENGE_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "함께 진행할 수 있는 챌린지 수를 넘었어요. 진행 중인 챌린지를 마치고 새로 만들어 주세요."),
     MAX_PARTICIPANTS_REQUIRED(HttpStatus.BAD_REQUEST, "그룹 챌린지는 최대 참여 인원을 지정해야 합니다."),
@@ -141,7 +141,6 @@ public enum ErrorCode {
     VERSION_CONFLICT(HttpStatus.CONFLICT, "다른 곳에서 챌린지 정보가 바뀌었어요. 새로고침 후 다시 시도해주세요."),
     INVALID_FIELD_VALUE(HttpStatus.BAD_REQUEST, "입력값을 다시 확인해주세요."),
     CAPACITY_BELOW_CURRENT(HttpStatus.BAD_REQUEST, "모집 인원은 현재 참여 인원보다 적게 줄일 수 없어요."),
-    MODERATION_LOCKED(HttpStatus.TOO_MANY_REQUESTS, "수정이 잠시 제한되었어요. 1시간 뒤에 다시 시도해주세요."),
     ROUTINE_DESCRIPTION_TOO_LONG(HttpStatus.BAD_REQUEST, "루틴 설명은 200자를 초과할 수 없습니다."),
     TEMPLATE_ID_REQUIRED(HttpStatus.BAD_REQUEST, "추천 루틴을 선택해주세요."),
     TEMPLATE_NOT_FOUND(HttpStatus.NOT_FOUND, "선택한 루틴을 찾을 수 없어요. 다른 루틴을 골라주세요."),
@@ -154,7 +153,12 @@ public enum ErrorCode {
     // ===== 마이프로필 (마이 홈·캘린더·통계·평판·초대) =====
     INVALID_CALENDAR_MONTH(HttpStatus.BAD_REQUEST, "월 형식이 올바르지 않습니다. (YYYY-MM)"),
     INVALID_CALENDAR_DATE(HttpStatus.BAD_REQUEST, "날짜 형식이 올바르지 않습니다. (YYYY-MM-DD)"),
-    INVALID_STATS_PERIOD(HttpStatus.BAD_REQUEST, "통계 기간이 올바르지 않습니다. (WEEKLY / MONTHLY / YEARLY)"),
+    // 챌린지 콘텐츠 반복 거부 잠금(챌린지 설정 모듈). 프로필 편집에서는 폐기됐다 — 마이페이지 오픈 이슈 #8.
+    MODERATION_LOCKED(HttpStatus.TOO_MANY_REQUESTS, "수정이 잠시 제한되었어요. 1시간 뒤에 다시 시도해주세요."),
+    APP_LINK_URL_REQUIRED(HttpStatus.BAD_REQUEST, "확인할 링크가 필요해요."),
+    INVALID_HISTORY_MONTHS(HttpStatus.BAD_REQUEST, "조회 기간은 1개월부터 12개월까지 고를 수 있어요."),
+    // 타인의 제재·검출 이력 조회 시도. 애초에 타인 조회 경로를 만들지 않는 것이 1차 방어이고, 이건 2차다.
+    SANCTION_HISTORY_FORBIDDEN(HttpStatus.FORBIDDEN, "제재 이력은 본인만 확인할 수 있어요."),
 
     // ===== 방 내부(스레드·랭킹·방 홈) =====
     // 공지·댓글 코드(NOTICE_*/COMMENT_*/REPLY_DEPTH_EXCEEDED)는 Phase 2 이관과 함께 제거했다.
@@ -172,11 +176,15 @@ public enum ErrorCode {
     // ===== 신고·차단·다른 사용자 프로필 =====
     INVALID_REPORT_TARGET(HttpStatus.BAD_REQUEST, "신고 대상이 올바르지 않습니다."),
     INVALID_REPORT_REASON(HttpStatus.BAD_REQUEST, "신고 사유가 올바르지 않습니다."),
-    DETAIL_REQUIRED(HttpStatus.BAD_REQUEST, "신고 상세 내용을 입력해주세요."),
     CANNOT_REPORT_SELF(HttpStatus.BAD_REQUEST, "본인을 신고할 수 없습니다."),
-    REPORT_SUSPENDED(HttpStatus.FORBIDDEN, "신고 기능이 일시적으로 제한되었습니다."),
+    /**
+     * 신고 기능 정지 — <b>자동 발동이 아니다</b>. 운영자가 남용으로 확정해 건 조치이며
+     * {@code sanctions} 의 FEATURE_SUSPENSION(feature_code=REPORT)이 실체다.
+     * 해제 예정 시각을 {@code error.reason} 에 함께 싣는다.
+     */
+    REPORT_SUSPENDED(HttpStatus.FORBIDDEN, "지금은 신고 기능을 사용할 수 없어요."),
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."),
-    BLACKLIST_ENTRY_NOT_FOUND(HttpStatus.NOT_FOUND, "차단 내역을 찾을 수 없습니다."),
+    BLOCK_ENTRY_NOT_FOUND(HttpStatus.NOT_FOUND, "차단 내역을 찾을 수 없어요."),
 
     // ===== 알림 =====
     /** 필수(A) 타입의 토글을 끄려 함 — 토글 자체가 미노출이므로 발생하면 클라이언트 버그다. */

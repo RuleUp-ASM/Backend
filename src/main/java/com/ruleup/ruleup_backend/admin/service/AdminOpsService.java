@@ -61,7 +61,8 @@ public class AdminOpsService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
 
         Long reportCount = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM reports WHERE target_user_id = ?", Long.class, bytes(userId));
+                "SELECT COUNT(*) FROM reports WHERE target_type = 'USER' AND target_id = ?",
+                Long.class, bytes(userId));
 
         return new AdminDtos.UserView(
                 userId.toString(),
