@@ -10,8 +10,6 @@ import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
 import com.ruleup.ruleup_backend.routine.service.ResolvedRoutine;
 import com.ruleup.ruleup_backend.routine.service.RoutineSelectionService;
-import com.ruleup.ruleup_backend.reputation.domain.ReputationScore;
-import com.ruleup.ruleup_backend.reputation.ReputationScoreRepository;
 import com.ruleup.ruleup_backend.score.UserScoreSummaryRepository;
 import com.ruleup.ruleup_backend.score.domain.Tier;
 import com.ruleup.ruleup_backend.user.domain.InterestCategory;
@@ -51,7 +49,6 @@ public class ChallengeService {
     private final ChallengeRepository challengeRepository;
     private final ChallengeMemberRepository memberRepository;
     private final UserRepository userRepository;
-    private final ReputationScoreRepository reputationScoreRepository;
     private final UserScoreSummaryRepository scoreSummaryRepository;
     private final RoutineSelectionService routineSelectionService;
     private final VerificationDailyRepository verificationDailyRepository;
@@ -60,14 +57,6 @@ public class ChallengeService {
 
     /** 하루 경계 계산의 사용자 로컬 = MVP는 KST 고정. */
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
-
-    /** 그룹 기준 매너 온도가 생성자 본인 온도보다 높으면 거부 (생성/수정 공용, §3). */
-    private void checkMinMannerNotAboveOwner(UUID ownerId, BigDecimal minManner) {
-        if (minManner == null) return;
-        if (mannerTemp(ownerId).compareTo(minManner) < 0) {
-            throw new BusinessException(ErrorCode.MIN_TEMP_EXCEEDS_OWNER);
-        }
-    }
 
     /** 정원 검증(§3·§4): GROUP은 최대 참여 인원 필수(≥1). SOLO는 1 고정이라 입력 무시. */
     private void validateMaxParticipants(ParticipationType participationType, Integer maxParticipants) {
@@ -97,29 +86,6 @@ public class ChallengeService {
 
     private void ensureOwner(Challenge c, UUID userId) {
         if (!c.isOwner(userId)) throw new BusinessException(ErrorCode.NOT_CHALLENGE_OWNER);
-    }
-
-    /** ACTIVE 멤버들의 매너 온도 평균(소수 첫째 자리). 멤버 없으면 null. */
-    private BigDecimal averageActiveMannerTemperature(UUID challengeId) {
-        List<ChallengeMember> actives =
-                memberRepository.findByChallengeIdAndStatusOrderByJoinedAtAsc(challengeId, MemberStatus.ACTIVE);
-        if (actives.isEmpty()) return null;
-
-        List<UUID> userIds = actives.stream().map(ChallengeMember::getUserId).toList();
-        Map<UUID, BigDecimal> tempByUser = reputationScoreRepository.findAllById(userIds).stream()
-                .collect(Collectors.toMap(ReputationScore::getUserId, ReputationScore::getMannerTemperature));
-
-        BigDecimal sum = BigDecimal.ZERO;
-        for (UUID id : userIds) {
-            sum = sum.add(tempByUser.getOrDefault(id, ReputationScore.INITIAL_TEMPERATURE));
-        }
-        return sum.divide(BigDecimal.valueOf(userIds.size()), 1, RoundingMode.HALF_UP);
-    }
-
-    private BigDecimal mannerTemp(UUID userId) {
-        return reputationScoreRepository.findById(userId)
-                .map(ReputationScore::getMannerTemperature)
-                .orElse(ReputationScore.INITIAL_TEMPERATURE);
     }
 
     // ===== 입력 검증 =====

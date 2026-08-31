@@ -60,6 +60,17 @@ public class UserScoreSummary extends AssignedIdEntity {
     @Override
     public UUID getId() { return userId; }   // Persistable(신규 판별)용 — PK는 user_id
 
+    /**
+     * 점수를 적용하고 티어를 다시 맞춘다. 실제 티어는 점수만으로 즉시 정해지고,
+     * 표시 티어는 강등에만 20점 유예를 둔다 — 승급은 유예 없이 즉시다.
+     */
+    public void applyScore(long scoreAfter) {
+        this.totalScore = scoreAfter;
+        Tier actual = TierBands.of(scoreAfter);
+        this.displayTier = TierBands.displayTier(scoreAfter, actual, this.displayTier);
+        this.actualTier = actual;
+    }
+
     /** 가입 시 초기 요약 — 브론즈 10점. */
     public static UserScoreSummary initialize(UUID userId) {
         UserScoreSummary s = new UserScoreSummary();

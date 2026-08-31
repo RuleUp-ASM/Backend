@@ -74,7 +74,7 @@ public class MeTierHistoryService {
 
     /** 월말 스냅샷 — 그 달 마지막 변동의 잔액. 변동이 없던 달은 점이 없다(그래프가 직선으로 잇는다). */
     private List<MeTierHistoryResponse.Monthly> monthly(List<ScoreTransaction> ledger) {
-        Map<YearMonth, Long> lastOfMonth = new LinkedHashMap<>();
+        Map<YearMonth, Integer> lastOfMonth = new LinkedHashMap<>();
         for (ScoreTransaction t : ledger) {
             YearMonth ym = YearMonth.from(LocalDate.ofInstant(t.getCreatedAt(), KST));
             lastOfMonth.put(ym, t.getBalanceAfter());   // 오래된 순이라 마지막 put 이 월말 값이다
