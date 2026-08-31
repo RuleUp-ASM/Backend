@@ -73,7 +73,11 @@ public abstract class AuthApiSupport {
         return m;
     }
 
-    /** 필수 3종 동의 + 마케팅 동의, 이벤트·야간 미동의 (계약 예시 기본값). */
+    /**
+     * 약관 5종 — 필수 3종 동의 + 마케팅 동의, 이벤트 미동의 (계약 예시 기본값).
+     * 야간 푸시 동의 약관은 2026-08-28 폐지됐고, 법정 개별 동의 2종은 가입이 아니라
+     * POST /api/v1/users/me/agreements 로 받는다.
+     */
     protected static Map<String, Object> allAgreements() {
         Map<String, Object> ag = new LinkedHashMap<>();
         ag.put("termsOfService", agreementItem(true));
@@ -81,7 +85,6 @@ public abstract class AuthApiSupport {
         ag.put("locationService", agreementItem(true));
         ag.put("marketing", agreementItem(true));
         ag.put("event", agreementItem(false));
-        ag.put("nightPush", agreementItem(false));
         return ag;
     }
 

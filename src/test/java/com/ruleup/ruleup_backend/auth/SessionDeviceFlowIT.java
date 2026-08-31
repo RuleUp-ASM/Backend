@@ -148,7 +148,6 @@ class SessionDeviceFlowIT {
         ag.put("locationService", agreement(true));
         ag.put("marketing", agreement(false));
         ag.put("event", agreement(false));
-        ag.put("nightPush", agreement(false));
         body.put("agreements", ag);
         body.put("deviceId", "dev-" + tag);
         body.put("deviceInfo", deviceInfo());

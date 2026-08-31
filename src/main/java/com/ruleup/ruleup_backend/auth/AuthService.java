@@ -3,8 +3,7 @@ import com.ruleup.ruleup_backend.user.domain.*;
 import com.ruleup.ruleup_backend.auth.domain.*;
 
 import com.ruleup.ruleup_backend.agreement.domain.AgreementType;
-import com.ruleup.ruleup_backend.agreement.domain.UserAgreement;
-import com.ruleup.ruleup_backend.agreement.UserAgreementRepository;
+import com.ruleup.ruleup_backend.agreement.AgreementService;
 import com.ruleup.ruleup_backend.auth.dto.*;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
@@ -68,7 +67,7 @@ public class AuthService {
     private final UserRepository userRepository;
     private final ReputationScoreRepository reputationScoreRepository;
     private final RefreshTokenRepository refreshTokenRepository;
-    private final UserAgreementRepository userAgreementRepository;
+    private final AgreementService agreementService;
     private final ModerationRequestRepository moderationRequestRepository;
     private final UserScoreSummaryRepository scoreSummaryRepository;
     private final TokenService tokenService;
@@ -463,34 +462,33 @@ public class AuthService {
         user.updateCountryCode(countryResolver.resolveFor(user.getCountryCode(), country, timeZone));
     }
 
-    /** 약관 6종 append-only 저장 — 미동의(false)·항목 누락(선택 약관)도 false 행으로 남긴다. */
+    /**
+     * 약관 5종 저장 — 미동의(false)·항목 누락(선택 약관)도 false 로 남긴다.
+     *
+     * <p>법정 개별 동의 2종(LOCATION_INFO·HEALTH_INFO)은 여기서 받지 않는다. 최소수집 원칙에 따라
+     * 해당 인증 수단을 처음 쓰는 시점에 {@code POST /api/v1/users/me/agreements} 로 받으며,
+     * 행이 없는 것이 곧 "한 번도 동의한 적 없음"이다.
+     */
     private void saveAgreements(User user, SignupRequest.Agreements ag) {
-        saveAgreement(user, AgreementType.TOS, ag.termsOfService());
-        saveAgreement(user, AgreementType.PRIVACY, ag.privacyPolicy());
-        saveAgreement(user, AgreementType.LOCATION, ag.locationService());
-        saveAgreement(user, AgreementType.MARKETING, ag.marketing());
-        saveAgreement(user, AgreementType.EVENT, ag.event());
-        saveAgreement(user, AgreementType.NIGHT_PUSH, ag.nightPush());
+        Instant now = Instant.now();
+        saveAgreement(user, AgreementType.TOS, ag.termsOfService(), now);
+        saveAgreement(user, AgreementType.PRIVACY, ag.privacyPolicy(), now);
+        saveAgreement(user, AgreementType.LOCATION, ag.locationService(), now);
+        saveAgreement(user, AgreementType.MARKETING, ag.marketing(), now);
+        saveAgreement(user, AgreementType.EVENT, ag.event(), now);
     }
 
-    private void saveAgreement(User user, AgreementType type, SignupRequest.AgreementItem item) {
+    /** 상태 UPSERT + 이력 INSERT 를 한 트랜잭션에서 함께 쓴다 — AgreementService.record 가 그 경로다. */
+    private void saveAgreement(User user, AgreementType type, SignupRequest.AgreementItem item, Instant at) {
         boolean agreed = item != null && item.isAgreed();
         String version = (item != null && item.version() != null && !item.version().isBlank())
                 ? item.version() : currentVersionOf(type);   // 미전송 시 서버가 아는 현행 버전으로
-        userAgreementRepository.save(UserAgreement.of(user, type, agreed, version));
+        agreementService.record(user, type, agreed, version, at);
     }
 
     /** 인트로가 내려주는 현행 약관 버전과 같은 값 — 클라가 version 을 생략해도 기록이 어긋나지 않게. */
     private String currentVersionOf(AgreementType type) {
-        AppProperties.Client.TermsVersions v = props.client().termsVersions();
-        return switch (type) {
-            case TOS -> v.termsOfService();
-            case PRIVACY -> v.privacyPolicy();
-            case LOCATION -> v.locationService();
-            case MARKETING -> v.marketing();
-            case EVENT -> v.event();
-            case NIGHT_PUSH -> v.nightPush();
-        };
+        return props.client().termsVersions().of(type);
     }
 
     // ===== 토큰 재발급 (회전) =====

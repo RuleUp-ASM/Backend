@@ -1,8 +1,8 @@
 package com.ruleup.ruleup_backend.user;
 
-import com.ruleup.ruleup_backend.agreement.UserAgreementRepository;
+import com.ruleup.ruleup_backend.agreement.UserAgreementStateRepository;
 import com.ruleup.ruleup_backend.agreement.domain.AgreementType;
-import com.ruleup.ruleup_backend.agreement.domain.UserAgreement;
+import com.ruleup.ruleup_backend.agreement.domain.UserAgreementState;
 import com.ruleup.ruleup_backend.auth.RefreshTokenRepository;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeMemberService;
 import com.ruleup.ruleup_backend.auth.dto.UserResponse;
@@ -40,20 +40,24 @@ public class UserAccountService {
     private static final long ARCHIVE_RETENTION_DAYS = 365;
     private static final String RESTORE_NOTE = "1년 안에 같은 소셜 계정으로 로그인하면 기록이 복원돼요";
 
-    /** agreements 응답 키(계약) ↔ 저장 enum 매핑. */
+    /**
+     * agreements 응답 키(계약) ↔ 저장 enum 매핑. 약관 5종 + 법정 개별 동의 2종.
+     * 구 nightPush 는 야간 동의 약관 폐지(2026-08-28)로 사라졌다.
+     */
     private static final Map<AgreementType, String> AGREEMENT_KEYS = new LinkedHashMap<>() {{
         put(AgreementType.TOS, "termsOfService");
         put(AgreementType.PRIVACY, "privacyPolicy");
         put(AgreementType.LOCATION, "locationService");
         put(AgreementType.MARKETING, "marketing");
         put(AgreementType.EVENT, "event");
-        put(AgreementType.NIGHT_PUSH, "nightPush");
+        put(AgreementType.LOCATION_INFO, "locationInfo");
+        put(AgreementType.HEALTH_INFO, "healthInfo");
     }};
 
     private final UserRepository userRepository;
     private final ChallengeMemberService challengeMemberService;
     private final RefreshTokenRepository refreshTokenRepository;
-    private final UserAgreementRepository userAgreementRepository;
+    private final UserAgreementStateRepository userAgreementStateRepository;
     private final UserScoreSummaryRepository scoreSummaryRepository;
 
     /**
@@ -83,22 +87,25 @@ public class UserAccountService {
         return new WithdrawResponse(true, archiveExpiresAt.toString(), RESTORE_NOTE);
     }
 
-    /** 내 프로필 조회 — user 블록(로그인 응답과 동일) + 생일·성별·약관 6종 현재 상태. */
+    /** 내 프로필 조회 — user 블록(로그인 응답과 동일) + 생일·성별·동의 7종 현재 상태. */
     @Transactional(readOnly = true)
     public UserMeResponse me(UUID userId) {
         User user = userRepository.findByIdAndDeletedAtIsNull(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.LOGIN_REQUIRED));
         UserScoreSummary summary = scoreSummaryRepository.findById(userId).orElse(null);
 
-        // 약관 현재 상태 = 타입별 최신 행 (append-only 이력)
-        List<UserAgreement> history = userAgreementRepository.findByUser_IdOrderByCreatedAtDescIdDesc(userId);
+        // 동의 현재 상태 — 상태 테이블 하나만 읽는다. 유저당 최대 7행이라 이력을 뒤질 이유가 없다.
+        Map<AgreementType, UserAgreementState> states = new LinkedHashMap<>();
+        userAgreementStateRepository.findByUserId(userId)
+                .forEach(s -> states.put(s.getAgreementType(), s));
         Map<String, UserMeResponse.AgreementState> agreements = new LinkedHashMap<>();
-        AGREEMENT_KEYS.forEach((type, key) -> history.stream()
-                .filter(a -> a.getAgreementType() == type)
-                .findFirst()   // 최신순 정렬이므로 첫 행이 현재 상태
-                .ifPresent(a -> agreements.put(key, new UserMeResponse.AgreementState(
-                        a.isAgreed(), a.getVersion(),
-                        a.getCreatedAt() != null ? a.getCreatedAt().toString() : null))));
+        AGREEMENT_KEYS.forEach((type, key) -> {
+            UserAgreementState s = states.get(type);
+            // 기록이 없는 항목은 키 자체를 빼서 "한 번도 동의한 적 없음"을 드러낸다.
+            if (s != null) agreements.put(key, new UserMeResponse.AgreementState(
+                    s.isAgreed(), s.getVersion(),
+                    s.getAgreedAt() != null ? s.getAgreedAt().toString() : null));
+        });
 
         return new UserMeResponse(
                 UserResponse.from(user, summary),

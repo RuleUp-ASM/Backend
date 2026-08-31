@@ -11,7 +11,7 @@ import java.util.List;
  *
  * - birthDate: 필수, YYYY-MM-DD, 만 14세 미만 400 (서버 재검증)
  * - gender: 필수 필드 — MALE/FEMALE/NON_BINARY (UI 건너뛰기 시 클라가 NON_BINARY 전송)
- * - agreements: 약관 6종 각 { agreed, version }
+ * - agreements: 약관 5종 각 { agreed, version } (법정 개별 동의 2종은 인증 수단 최초 사용 시점에 별도로 받는다)
  * - installationId: 동일 설치 다계정 가입 차단 판정 키 (회원 정책 §1)
  * - deviceId/deviceInfo: 단일 활성 기기 판정 + 기기 스펙 기반 추천
  */
@@ -50,7 +50,7 @@ public record SignupRequest(
                 requiredMode = Schema.RequiredMode.REQUIRED)
         String gender,
 
-        @Schema(description = "약관 동의 6종. 필수 3종이 모두 agreed=true 여야 가입된다.",
+        @Schema(description = "약관 동의 5종. 필수 3종이 모두 agreed=true 여야 가입된다.",
                 requiredMode = Schema.RequiredMode.REQUIRED)
         Agreements agreements,
 
@@ -83,10 +83,12 @@ public record SignupRequest(
         }
     }
 
-    /** 약관 6종 — 필수 3(이용약관·개인정보·위치기반) + 선택 3(마케팅·이벤트·야간 알림). */
+    /** 약관 5종 — 필수 3(이용약관·개인정보·위치기반) + 선택 2(마케팅·이벤트). 구 nightPush 는 폐지됐다. */
     @Schema(name = "Agreements", description = """
-            약관 6종. 필수 3종(termsOfService·privacyPolicy·locationService)이 모두 agreed=true 여야 가입되고,
-            선택 3종(marketing·event·nightPush)은 전부 거부해도 가입된다.
+            약관 5종. 필수 3종(termsOfService·privacyPolicy·locationService)이 모두 agreed=true 여야 가입되고,
+            선택 2종(marketing·event)은 전부 거부해도 가입된다.
+            야간 푸시 동의 약관(구 nightPush)은 2026-08-28 폐지됐다 — 야간은 알림 분류별로 일괄 처리한다.
+            개인위치정보·건강정보 개별 동의는 가입이 아니라 POST /api/v1/users/me/agreements 로 받는다.
             미동의·항목 누락도 false 기록으로 남긴다(이력은 append-only).""")
     public record Agreements(
 
@@ -103,10 +105,7 @@ public record SignupRequest(
             AgreementItem marketing,
 
             @Schema(description = "이벤트·혜택 알림 (선택)")
-            AgreementItem event,
-
-            @Schema(description = "야간 푸시 알림 (선택)")
-            AgreementItem nightPush) {
+            AgreementItem event) {
 
         /** 필수 3종이 모두 명시적으로 동의(agreed=true)됐는지. */
         public boolean requiredAllAgreed() {

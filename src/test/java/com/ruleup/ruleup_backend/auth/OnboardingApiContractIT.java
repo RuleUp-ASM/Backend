@@ -216,11 +216,11 @@ class OnboardingApiContractIT extends AuthApiSupport {
         }
 
         @Test
-        @DisplayName("현행 약관 버전 6종(termsVersions)을 내려준다 — 클라 하드코딩 방지")
+        @DisplayName("현행 동의 버전 7종(termsVersions)을 내려준다 — 클라 하드코딩 방지")
         void intro_returns_terms_versions() throws Exception {
             MvcResult res = intro("ANDROID", 9999);
             for (String key : List.of("termsOfService", "privacyPolicy", "locationService",
-                    "marketing", "event", "nightPush")) {
+                    "marketing", "event", "locationInfo", "healthInfo")) {
                 assertThat((String) read(res, "$.data.termsVersions." + key))
                         .as("termsVersions.%s", key).isNotBlank();
             }

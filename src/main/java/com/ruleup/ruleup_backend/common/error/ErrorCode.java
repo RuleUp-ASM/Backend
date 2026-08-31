@@ -37,6 +37,13 @@ public enum ErrorCode {
     CATEGORY_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "관심 카테고리는 최대 6개까지 선택할 수 있습니다."),
     INTEREST_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "관심 카테고리는 0~6개까지 선택할 수 있습니다."),
     REQUIRED_AGREEMENT_MISSING(HttpStatus.BAD_REQUEST, "필수 약관(이용약관·개인정보·위치기반)에 모두 동의해야 합니다."),
+    /** 개인위치정보·건강정보 개별 동의가 없는 상태로 해당 인증 수단을 쓰려 함 — 온보딩 5-7.
+     *  해소 경로는 POST /api/v1/users/me/agreements 하나뿐이다. */
+    AGREEMENT_REQUIRED(HttpStatus.FORBIDDEN, "이 인증 방법을 쓰려면 먼저 동의가 필요해요."),
+    /** 필수 약관 3종은 철회할 수 없다 — 철회하려면 탈퇴해야 한다. */
+    AGREEMENT_REVOKE_FORBIDDEN(HttpStatus.BAD_REQUEST, "필수 약관은 철회할 수 없어요. 탈퇴를 원하시면 회원 탈퇴를 진행해주세요."),
+    /** 구 버전을 동의본으로 남기면 입증이 깨지므로 현행 버전만 받는다. */
+    AGREEMENT_VERSION_MISMATCH(HttpStatus.BAD_REQUEST, "약관이 새 버전으로 바뀌었어요. 다시 불러온 뒤 동의해주세요."),
     BIRTHDATE_INVALID(HttpStatus.BAD_REQUEST, "생년월일 형식이 올바르지 않습니다. (YYYY-MM-DD)"),
     BIRTHDATE_UNDERAGE(HttpStatus.BAD_REQUEST, "만 14세 미만은 가입할 수 없습니다."),
     GENDER_REQUIRED(HttpStatus.BAD_REQUEST, "성별 값이 누락되었거나 올바르지 않습니다. (MALE/FEMALE/NON_BINARY)"),

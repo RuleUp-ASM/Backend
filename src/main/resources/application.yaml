@@ -169,7 +169,8 @@ app:
       location-service: ${TERMS_VERSION_LOCATION:1.0}
       marketing: ${TERMS_VERSION_MARKETING:1.0}
       event: ${TERMS_VERSION_EVENT:1.0}
-      night-push: ${TERMS_VERSION_NIGHT_PUSH:1.0}
+      location-info: ${TERMS_VERSION_LOCATION_INFO:1.0}
+      health-info: ${TERMS_VERSION_HEALTH_INFO:1.0}
 
   # 리버스 프록시(EC2 + Cloudflare 터널) 뒤에서 Swagger Try-it-out이 정확한 주소로 가도록.
   # 로컬은 비워두고, EC2에서만 systemd 환경변수로 채운다: SWAGGER_SERVER_URL=https://<도메인>

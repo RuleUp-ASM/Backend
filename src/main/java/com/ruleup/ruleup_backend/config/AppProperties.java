@@ -70,8 +70,9 @@ public record AppProperties(Jwt jwt, Oauth oauth, Llm llm, Client client) {
          * 서버 기준값으로도 쓴다(클라가 version 을 안 보내면 이 값으로 저장).
          */
         @io.swagger.v3.oas.annotations.media.Schema(name = "TermsVersions", description = """
-                현행 약관 버전 6종. 가입 시 동의 버전 기록의 서버 기준값이며,
-                내 프로필의 저장 버전과 비교해 약관 개정 재동의 여부를 판단한다.""")
+                현행 동의 버전 7종 — 약관 5종 + 법정 개별 동의 2종. 가입·동의 제출 시 서버가 받아들이는
+                유일한 버전이며, 저장 버전과 비교해 개정 재동의 여부를 판단한다.
+                구 nightPush 는 야간 동의 약관 폐지(2026-08-28)로 사라졌다.""")
         public record TermsVersions(
                 @io.swagger.v3.oas.annotations.media.Schema(description = "이용약관 (필수)", example = "1.0")
                 String termsOfService,
@@ -88,9 +89,26 @@ public record AppProperties(Jwt jwt, Oauth oauth, Llm llm, Client client) {
                 @io.swagger.v3.oas.annotations.media.Schema(description = "이벤트·혜택 알림 (선택)", example = "1.0")
                 String event,
 
-                @io.swagger.v3.oas.annotations.media.Schema(description = "야간 푸시 알림 (선택)", example = "1.0")
-                String nightPush
-        ) {}
+                @io.swagger.v3.oas.annotations.media.Schema(description = "개인위치정보 수집·이용 (법정 개별 동의)", example = "1.0")
+                String locationInfo,
+
+                @io.swagger.v3.oas.annotations.media.Schema(description = "건강정보 수집·이용 (법정 개별 동의)", example = "1.0")
+                String healthInfo
+        ) {
+
+            /** 동의 항목별 현행 버전 — 제출 검증과 재동의 판정이 모두 이 값을 기준으로 한다. */
+            public String of(com.ruleup.ruleup_backend.agreement.domain.AgreementType type) {
+                return switch (type) {
+                    case TOS -> termsOfService;
+                    case PRIVACY -> privacyPolicy;
+                    case LOCATION -> locationService;
+                    case MARKETING -> marketing;
+                    case EVENT -> event;
+                    case LOCATION_INFO -> locationInfo;
+                    case HEALTH_INFO -> healthInfo;
+                };
+            }
+        }
 
         /** 플랫폼별 버전 정책. 알 수 없는 값이면 안드로이드 기준을 쓴다(컨트롤러가 먼저 400으로 막는다). */
         public Version versionOf(com.ruleup.ruleup_backend.user.domain.Platform platform) {

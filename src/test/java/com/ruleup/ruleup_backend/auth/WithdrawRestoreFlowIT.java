@@ -136,7 +136,6 @@ class WithdrawRestoreFlowIT {
         ag.put("locationService", agreement(true));
         ag.put("marketing", agreement(true));
         ag.put("event", agreement(false));
-        ag.put("nightPush", agreement(false));
         body.put("agreements", ag);
         body.put("deviceId", "dev-" + tag);
         body.put("deviceInfo", deviceInfo());
@@ -508,7 +507,9 @@ class WithdrawRestoreFlowIT {
             assertThat((String) read(res, "$.data.agreements.termsOfService.agreedAt")).isNotBlank();
             assertThat((Boolean) read(res, "$.data.agreements.marketing.agreed")).isTrue();
             assertThat((Boolean) read(res, "$.data.agreements.event.agreed")).isFalse();
-            assertThat((Boolean) read(res, "$.data.agreements.nightPush.agreed")).isFalse();
+            // 법정 개별 동의 2종은 가입 시점에 받지 않으므로 키 자체가 없다 — 인증 수단 최초 사용 시점에 받는다.
+            assertThat((Map<String, Object>) read(res, "$.data.agreements"))
+                    .doesNotContainKeys("locationInfo", "healthInfo");
         }
 
         @Test
