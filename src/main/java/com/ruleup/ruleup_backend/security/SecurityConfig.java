@@ -24,6 +24,7 @@ public class SecurityConfig {
     private final JwtProvider jwtProvider;
     private final JwtAuthenticationEntryPoint entryPoint;
     private final com.ruleup.ruleup_backend.user.UserRepository userRepository;
+    private final com.ruleup.ruleup_backend.sanction.SanctionService sanctionService;
 
     // 로그인 없이 접근 가능한 공개 경로
     private static final String[] PUBLIC = {
@@ -49,9 +50,9 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         JwtAuthenticationFilter jwtFilter = new JwtAuthenticationFilter(jwtProvider);
-        // 제재 상태 강제(§7) — 잠금은 열람 전용, 영구 정지는 전면 차단. 인증이 세팅된 뒤 검사한다.
+        // 계정 상태 게이트 — status 를 먼저 보고 SUSPENDED 일 때만 sanctions 로 차단 범위를 정한다.
         // (@Component 로 두면 Boot 가 서블릿 필터로도 자동 등록해 이중 실행되므로 여기서 직접 만든다)
-        AccountStatusFilter accountStatusFilter = new AccountStatusFilter(userRepository);
+        AccountStatusFilter accountStatusFilter = new AccountStatusFilter(userRepository, sanctionService);
 
         http
                 .csrf(AbstractHttpConfigurer::disable)

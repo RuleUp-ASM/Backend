@@ -17,7 +17,9 @@ public enum ErrorCode {
     LOGIN_PROVIDER_UNAVAILABLE(HttpStatus.BAD_GATEWAY, "소셜 로그인 제공자에 연결할 수 없습니다."),
     INVALID_REDIRECT_URI(HttpStatus.BAD_REQUEST, "redirectUri가 올바르지 않습니다."),
     ACCOUNT_BANNED(HttpStatus.FORBIDDEN, "영구 정지된 계정입니다."),
-    ACCOUNT_LOCKED(HttpStatus.FORBIDDEN, "잠금 상태의 계정은 이 기능을 사용할 수 없습니다."),
+    ACCOUNT_LOCKED(HttpStatus.FORBIDDEN, "지금은 둘러보기만 할 수 있어요. 마이페이지에서 사유와 해제일을 확인해주세요."),
+    /** 기능 정지 — 해당 기능만 막히고 나머지는 정상 동작한다(sanctions.feature_code). */
+    ACCOUNT_SUSPENDED(HttpStatus.FORBIDDEN, "이 기능은 지금 사용할 수 없어요. 마이페이지에서 해제일을 확인해주세요."),
     /** reason 에 그 계정의 소셜 제공자(KAKAO/GOOGLE)를 실어 보낸다 — 클라가 "카카오로 로그인" 까지 안내할 수 있게. */
     INSTALLATION_ALREADY_REGISTERED(HttpStatus.FORBIDDEN,
             "이 기기는 다른 계정으로 가입한 이력이 있어요. 처음 가입할 때 쓰신 계정으로 로그인해주세요."),

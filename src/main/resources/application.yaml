@@ -172,6 +172,11 @@ app:
       location-info: ${TERMS_VERSION_LOCATION_INFO:1.0}
       health-info: ${TERMS_VERSION_HEALTH_INFO:1.0}
 
+  # 밴리스트 해시 솔트. 바꾸면 기존 영구 정지 차단이 전부 풀리므로 로테이션 시 재해시가 선행돼야 한다.
+  security:
+    ban-salt: ${BAN_LIST_SALT:ruleup-local-ban-salt}
+
+
   # 리버스 프록시(EC2 + Cloudflare 터널) 뒤에서 Swagger Try-it-out이 정확한 주소로 가도록.
   # 로컬은 비워두고, EC2에서만 systemd 환경변수로 채운다: SWAGGER_SERVER_URL=https://<도메인>
   swagger:

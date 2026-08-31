@@ -59,14 +59,15 @@ public class UserAccountService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final UserAgreementStateRepository userAgreementStateRepository;
     private final UserScoreSummaryRepository scoreSummaryRepository;
+    private final com.ruleup.ruleup_backend.sanction.SanctionService sanctionService;
 
     /**
      * 회원 탈퇴 — 멱등(이미 탈퇴 상태면 무해하게 같은 응답).
      *
-     * <p>정지(BANNED) 계정도 탈퇴할 수 있다. 예전에는 제재 세탁을 막으려고 403 으로 거절했지만,
-     * 그러면 정지된 사람은 계정을 지울 수조차 없었다. 이제는 <b>막는 대신 따라오게</b> 한다 —
-     * 탈퇴 직전 상태와 설치 ID 가 계정 행에 남아, 같은 기기에서 재가입하면 그 상태를 승계한다
-     * (회원 정책 §6, {@code User#withdraw()}).
+     * <p>제재 중인 계정도 탈퇴할 수 있다. 막으면 정지된 사람은 계정을 지울 수조차 없다.
+     * 대신 <b>제재가 따라오게</b> 한다 — {@code sanctions} 는 계정 행에 붙어 있고 계정 행은
+     * 지우지 않으므로 털어낼 대상이 애초에 없다. 남는 구멍은 "탈퇴한 채 시간을 흘려보내
+     * 제재를 소진시키는" 경로 하나뿐이고, 그것을 잔여 기간 동결로 막는다(온보딩 5-10).
      */
     @Transactional
     public WithdrawResponse withdraw(UUID userId, String confirmPhrase) {
@@ -77,8 +78,12 @@ public class UserAccountService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.LOGIN_REQUIRED));
 
         if (!user.isWithdrawn()) {
+            Instant now = Instant.now();
+            // 잔여 제재 기간을 얼린다 — 탈퇴한 채 시간을 흘려보내 제재를 소진시키는 경로를 막는다.
+            // withdraw() 로 status 가 WITHDRAWN 으로 덮이기 전에 해야 대상 조회가 어긋나지 않는다.
+            sanctionService.freezeAll(userId, now);
             user.withdraw();                                                    // WITHDRAWN + deleted_at + 직전 상태 보존
-            refreshTokenRepository.revokeAllByUserId(userId, Instant.now());    // 전 세션 종료
+            refreshTokenRepository.revokeAllByUserId(userId, now);              // 전 세션 종료
             // 참여 중인 방에서도 전부 나간다. 남겨두면 인증하지 않는 유령 멤버가 남의 방 정원을 먹고,
             // 그 방은 유령방 자동 삭제 대상에서도 빠져 영영 남는다.
             challengeMemberService.leaveAllForWithdrawal(userId);

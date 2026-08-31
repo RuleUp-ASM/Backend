@@ -3,6 +3,9 @@ package com.ruleup.ruleup_backend.security;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.error.ErrorResponse;
 import com.ruleup.ruleup_backend.common.response.ApiResponse;
+import com.ruleup.ruleup_backend.sanction.SanctionService;
+import com.ruleup.ruleup_backend.sanction.domain.Sanction;
+import com.ruleup.ruleup_backend.sanction.domain.SanctionType;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import com.ruleup.ruleup_backend.user.domain.UserStatus;
 import jakarta.servlet.FilterChain;
@@ -19,31 +22,32 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
 /**
- * 제재 상태(LOCKED / BANNED)에 따른 접근 제한 — 회원 정책 §7.
+ * 계정 상태 게이트 — 온보딩 테크 스펙 5-6.
  *
- * <p><b>LOCKED(잠금)은 열람 전용</b>이다. 조회(GET/HEAD/OPTIONS)는 통과시키고 상태 변경
- * (POST/PUT/PATCH/DELETE)만 403 ACCOUNT_LOCKED 로 막는다 — 챌린지 참여·생성, 인증 데이터 제출,
- * 이의 제기, 신고, 프로필 편집 등.
+ * <p>판정은 두 단계다. {@code users.status} 를 먼저 읽고, <b>SUSPENDED 일 때만</b> 활성
+ * {@code sanctions} 를 조회해 차단 범위를 정한다. 정상 사용자는 두 번째 조회를 하지 않으므로
+ * 일반 요청의 게이트 비용은 status 한 번을 보는 수준이다 — 상태값을 세분화하지 않고도 제재
+ * 종류를 분리할 수 있는 이유가 이것이다.
  *
- * <p><b>BANNED(정지)는 조회까지 전부</b> 403 ACCOUNT_BANNED 다. 정지 계정은 로그인 자체가 막히지만,
- * <b>이미 로그인한 뒤에 제재를 받은 경우</b> 손에 쥔 액세스 토큰이 만료될 때까지(30분) 그대로 쓸 수 있다.
- * 제재는 즉시 걸려야 하므로 요청 시점에 DB 상태를 보고 막는다.
+ * <table>
+ *   <tr><th>제재</th><th>차단 범위</th><th>응답</th></tr>
+ *   <tr><td>FEATURE_SUSPENSION</td><td>{@code featureCode} 에 적힌 API 만</td><td>403 ACCOUNT_SUSPENDED</td></tr>
+ *   <tr><td>LOCK</td><td>열람 전용 — 상태 변경만</td><td>403 ACCOUNT_LOCKED</td></tr>
+ *   <tr><td>BAN</td><td>조회까지 전부</td><td>403 ACCOUNT_BANNED</td></tr>
+ * </table>
  *
- * <p>두 상태 모두 예외적으로 허용하는 요청:
- * <ul>
- *   <li>{@code POST /api/v1/auth/logout} — 세션을 못 끊으면 로그인 상태에 갇힌다</li>
- *   <li>{@code DELETE /api/v1/users/me} — 탈퇴. 정지 계정도 계정을 지울 수 있어야 한다(§7.5).
- *       탈퇴해도 설치가 계속 묶여 있어 소셜만 바꿔 다시 시작할 수 없으므로 세탁 수단이 되지 않는다</li>
- * </ul>
- * 로그인·토큰 재발급은 공개 경로라 인증 컨텍스트가 없어 이 필터를 그냥 통과한다.
+ * <p><b>화이트리스트가 안전장치다.</b> 잠금 사유와 해제일을 볼 수 없으면 사용자는 자기 상황을
+ * 알 방법이 없고, 제재 고지는 알림함에 쌓인다. 그래서 제재 이력·알림함·동의 상태 조회와
+ * 로그아웃·탈퇴는 제재 중에도 열어 둔다.
  *
- * <p>상태를 JWT 클레임이 아니라 DB 에서 읽는 이유: 제재는 운영자가 언제든 걸 수 있는데
- * 클레임에 넣으면 액세스 토큰 수명(30분)만큼 우회가 생긴다. 대신 엔티티 전체가 아니라
- * status 컬럼만 읽어(projection) 요청당 비용을 PK 조회 1건으로 묶는다.
+ * <p>상태를 JWT 클레임이 아니라 DB 에서 읽는 이유: 제재는 운영자가 언제든 걸 수 있는데 클레임에
+ * 넣으면 액세스 토큰 수명(30분)만큼 우회가 생긴다.
  */
 @RequiredArgsConstructor
 public class AccountStatusFilter extends OncePerRequestFilter {
@@ -53,7 +57,21 @@ public class AccountStatusFilter extends OncePerRequestFilter {
     private static final Set<String> READ_ONLY_METHODS =
             Set.of(HttpMethod.GET.name(), HttpMethod.HEAD.name(), HttpMethod.OPTIONS.name());
 
+    /**
+     * 제재 중에도 반드시 열려야 하는 경로.
+     *
+     * <p>앞의 둘은 갇힘 방지다 — 세션을 못 끊거나 계정을 못 지우면 사용자가 빠져나올 수 없다.
+     * 뒤의 셋은 상황 인지다 — 제재 사유·해제일과 고지를 볼 수 없으면 왜 막혔는지 알 수 없다.
+     */
+    private static final Set<String> ALWAYS_ALLOWED = Set.of(
+            "POST /api/v1/auth/logout",
+            "DELETE /api/v1/users/me",
+            "GET /api/v1/users/me/sanctions",
+            "GET /api/v1/notifications",
+            "GET /api/v1/users/me/agreements");
+
     private final UserRepository userRepository;
+    private final SanctionService sanctionService;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
@@ -70,12 +88,30 @@ public class AccountStatusFilter extends OncePerRequestFilter {
     private ErrorCode blockedReason(HttpServletRequest request) {
         UUID userId = currentUserId();
         if (userId == null) return null;                 // 미인증(공개 경로) — 그대로 통과
-        if (isAlwaysAllowed(request)) return null;       // 로그아웃·탈퇴는 제재 중에도 허용
+        if (isAlwaysAllowed(request)) return null;
 
         UserStatus status = userRepository.findStatusById(userId).orElse(null);
-        if (status == UserStatus.BANNED) return ErrorCode.ACCOUNT_BANNED;   // 조회 포함 전면 차단
-        if (status == UserStatus.LOCKED && !isReadOnly(request)) return ErrorCode.ACCOUNT_LOCKED;
-        return null;
+        if (status != UserStatus.SUSPENDED) return null;  // ACTIVE·WITHDRAWN 은 sanctions 를 읽지 않는다
+
+        // SUSPENDED 인데 활성 제재가 없으면 스스로 되돌린다. 해제 배치가 밀려도 사용자가
+        // 해제일 이후까지 묶이지 않게 하는 방어다(온보딩 부록 A).
+        Optional<Sanction> active = sanctionService.activeSanction(userId);
+        if (active.isEmpty()) {
+            sanctionService.syncStatus(userId, Instant.now());
+            return null;
+        }
+        return blockedBy(active.get(), request);
+    }
+
+    private ErrorCode blockedBy(Sanction sanction, HttpServletRequest request) {
+        SanctionType type = sanction.getType();
+        if (type == SanctionType.BAN) return ErrorCode.ACCOUNT_BANNED;       // 조회 포함 전면 차단
+        if (type == SanctionType.LOCK)
+            return isReadOnly(request) ? null : ErrorCode.ACCOUNT_LOCKED;    // 열람 전용
+        // FEATURE_SUSPENSION — 지정한 기능만 막는다. 나머지는 정상 동작해야 한다.
+        return (sanction.getFeatureCode() != null
+                && sanction.getFeatureCode().blocks(request.getMethod(), request.getRequestURI()))
+                ? ErrorCode.ACCOUNT_SUSPENDED : null;
     }
 
     private boolean isReadOnly(HttpServletRequest request) {
@@ -83,10 +119,7 @@ public class AccountStatusFilter extends OncePerRequestFilter {
     }
 
     private boolean isAlwaysAllowed(HttpServletRequest request) {
-        String path = request.getRequestURI();
-        String method = request.getMethod();
-        if (HttpMethod.POST.name().equals(method) && "/api/v1/auth/logout".equals(path)) return true;
-        return HttpMethod.DELETE.name().equals(method) && "/api/v1/users/me".equals(path);
+        return ALWAYS_ALLOWED.contains(request.getMethod() + " " + request.getRequestURI());
     }
 
     /** 인증 컨텍스트의 userId (미인증이면 null — 공개 경로는 그대로 통과). */

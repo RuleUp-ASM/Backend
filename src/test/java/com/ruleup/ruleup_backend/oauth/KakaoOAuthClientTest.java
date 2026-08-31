@@ -47,7 +47,7 @@ class KakaoOAuthClientTest {
     private AppProperties props() {
         AppProperties.Oauth.Provider kakao =
                 new AppProperties.Oauth.Provider("client-id", "client-secret", CONFIGURED_REDIRECT_URI);
-        return new AppProperties(null, new AppProperties.Oauth(kakao, null, null), null, null);
+        return new AppProperties(null, new AppProperties.Oauth(kakao, null, null), null, null, null);
     }
 
     private void expectExchange(String expectedRedirectUri) {

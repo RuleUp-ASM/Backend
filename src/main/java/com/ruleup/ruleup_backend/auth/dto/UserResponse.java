@@ -97,8 +97,13 @@ public record UserResponse(
                 ? user.getApprovedNickname() : user.getNickname();
     }
 
+    /**
+     * 제재 중이라는 사실만 알린다. 종류·사유·해제일은 {@code sanctions} 가 소유하므로
+     * 여기서 조회하지 않고 <b>GET /api/v1/users/me/sanctions</b> 로 보낸다 — 로그인 응답마다
+     * 제재 테이블을 읽으면 정상 사용자까지 비용을 물게 된다.
+     */
     private static LockInfo lockInfo(User user) {
-        if (!user.isLocked()) return null;
-        return new LockInfo("계정 잠금", null);   // 사유·해제일은 처벌 도메인 스펙에서 확정
+        if (!user.isSuspended()) return null;
+        return new LockInfo("계정 제재", null);
     }
 }

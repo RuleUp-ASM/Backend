@@ -3,7 +3,15 @@ package com.ruleup.ruleup_backend.config;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "app")
-public record AppProperties(Jwt jwt, Oauth oauth, Llm llm, Client client) {
+public record AppProperties(Jwt jwt, Oauth oauth, Llm llm, Client client, Security security) {
+
+    /**
+     * 해시 솔트 등 보안 파라미터.
+     *
+     * <p>{@code banSalt} 은 밴리스트 해시의 솔트다 — <b>바꾸면 기존 차단이 전부 무력화</b>되므로
+     * 로테이션하려면 재해시 배치가 선행돼야 한다. prod 는 Secrets Manager 로 주입한다.
+     */
+    public record Security(String banSalt) {}
 
     public record Jwt(
             String secret,

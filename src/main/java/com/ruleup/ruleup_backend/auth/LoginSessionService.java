@@ -35,6 +35,7 @@ import java.util.UUID;
 public class LoginSessionService {
 
     private final UserRepository userRepository;
+    private final com.ruleup.ruleup_backend.sanction.SanctionService sanctionService;
     private final RefreshTokenRepository refreshTokenRepository;
     private final UserScoreSummaryRepository scoreSummaryRepository;
     private final SocialTokenService socialTokenService;
@@ -49,7 +50,8 @@ public class LoginSessionService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.LOGIN_FAILED));
 
         // 영구 정지 계정은 로그인 자체를 차단한다.
-        if (user.isBanned()) throw new BusinessException(ErrorCode.ACCOUNT_BANNED);
+        if (sanctionService.isBanActive(user.getId()))
+            throw new BusinessException(ErrorCode.ACCOUNT_BANNED);
 
         // 탈퇴 계정은 여기로 오지 않는다 — AuthService 가 신규 분기(signupToken)로 보내고,
         // 복원은 가입 요청에서 처리한다("탈퇴 후에는 회원가입을 거쳐 로그인", 회원 정책 §6).

@@ -22,12 +22,13 @@ import java.util.UUID;
  * OAuth(provider+subject)로 식별. 개인정보(생일·성별·이메일)는 user_information(1:1)으로 분리.
  * - 생성은 반드시 정적 팩토리 create(...)를 통한다 (id 자동 채움).
  * - 탈퇴는 소프트 탈퇴: status=WITHDRAWN + deleted_at 기록 (withdraw()).
+ * - status 는 ACTIVE/SUSPENDED/WITHDRAWN 3종뿐이다. 정지의 종류·기간은 sanctions 가 소유한다.
  * - 닉네임 2컬럼 모델: nickname(신청값, 본인 화면) / approvedNickname(타인에게 항상 노출).
  *   최초 가입 직후 approvedNickname 은 UUID 기반 임시 8자리.
  * - PK는 UUID v7 → BINARY(16).
  *
  * <p><b>{@code @DynamicUpdate} 인 이유</b>: 이 행은 서로 다른 트랜잭션이 각자 다른 컬럼을 고친다 —
- * 비동기 검수(닉네임/사진 상태), 로그인(기기·접속 시각), 탈퇴·잠금(status·deleted_at).
+ * 비동기 검수(닉네임/사진 상태), 로그인(기기·접속 시각), 탈퇴·제재(status·deleted_at).
  * 전체 컬럼 UPDATE(기본 동작)면 늦게 커밋되는 쪽이 자기가 읽은 낡은 스냅샷으로 남의 변경을
  * 덮어쓴다(lost update). 실제로 커밋 직후 시작되는 검수가 탈퇴/잠금을 ACTIVE로 되돌렸다.
  * 변경 컬럼만 UPDATE하면 서로 다른 컬럼을 고치는 한 충돌하지 않는다.
@@ -352,12 +353,17 @@ public class User extends AssignedIdEntity {
     }
 
 
-    public void lock()  { this.status = UserStatus.LOCKED; }
-    public void ban()   { this.status = UserStatus.BANNED; }
+    /**
+     * 제재 중으로 전이. <b>반드시 sanctions INSERT 와 같은 트랜잭션</b>에서 호출한다 —
+     * 이 값만 바뀌고 제재 행이 없으면 게이트가 스스로 ACTIVE 로 되돌린다(온보딩 부록 A).
+     */
+    public void suspend() { this.status = UserStatus.SUSPENDED; }
+
+    /** 활성 제재가 모두 사라졌을 때 복귀. 해제 배치와 게이트의 자가 복구가 호출한다. */
+    public void activate() { this.status = UserStatus.ACTIVE; }
 
     public boolean isWithdrawn() { return status == UserStatus.WITHDRAWN; }
-    public boolean isBanned()    { return status == UserStatus.BANNED; }
-    public boolean isLocked()    { return status == UserStatus.LOCKED; }
+    public boolean isSuspended() { return status == UserStatus.SUSPENDED; }
 
     public void changeInterestCategories(List<String> categories) {
         this.interestCategories.clear();
