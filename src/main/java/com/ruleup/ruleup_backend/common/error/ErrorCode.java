@@ -249,6 +249,15 @@ public enum ErrorCode {
     /** 챌린지(방) 초대 — 감시자 초대와 별개 도메인이다. */
     INVITATION_NOT_FOUND(HttpStatus.NOT_FOUND, "초대를 찾을 수 없습니다."),
 
+    // ===== 운영자 백오피스 =====
+    ADMIN_FORBIDDEN(HttpStatus.FORBIDDEN, "접근 권한이 없어요."),
+    REPORT_NOT_FOUND(HttpStatus.NOT_FOUND, "신고 내역을 찾을 수 없어요."),
+    /** 2단계 확인 없이 집행 시도 — 428 은 "선행 조건이 필요하다"는 뜻이라 이 상황에 맞는다. */
+    CONFIRMATION_REQUIRED(HttpStatus.PRECONDITION_REQUIRED, "실행 전에 내용을 한 번 더 확인해주세요."),
+    SANCTION_ALREADY_ACTIVE(HttpStatus.CONFLICT, "이미 같은 수준의 제재가 진행 중이에요."),
+    REVIEW_ALREADY_RESOLVED(HttpStatus.CONFLICT, "다른 운영자가 먼저 처리했어요."),
+    APPEAL_ALREADY_USED(HttpStatus.CONFLICT, "재검토를 이미 사용했어요."),
+
     // ===== 공통 =====
     TOO_MANY_REQUESTS(HttpStatus.TOO_MANY_REQUESTS, "요청이 너무 많습니다. 잠시 후 다시 시도해주세요."),
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류가 발생했습니다."),

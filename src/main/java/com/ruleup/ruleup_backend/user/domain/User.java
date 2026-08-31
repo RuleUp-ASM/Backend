@@ -57,6 +57,11 @@ public class User extends AssignedIdEntity {
     @Column(name = "status", nullable = false)
     private UserStatus status = UserStatus.ACTIVE;
 
+    /** 백오피스 접근 롤. 부여는 운영 결정이며 앱에서 바꾸는 경로를 두지 않는다. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "role", nullable = false)
+    private UserRole role = UserRole.MEMBER;
+
     /**
      * 탈퇴 직전 상태(ACTIVE/LOCKED/BANNED). 탈퇴한 적 없으면 null.
      * status 가 WITHDRAWN 으로 덮이면 정지·잠금 여부가 지워지므로, 재가입 승계용으로 따로 남긴다.
@@ -361,6 +366,8 @@ public class User extends AssignedIdEntity {
 
     /** 활성 제재가 모두 사라졌을 때 복귀. 해제 배치와 게이트의 자가 복구가 호출한다. */
     public void activate() { this.status = UserStatus.ACTIVE; }
+
+    public boolean isOperator() { return role == UserRole.OPERATOR; }
 
     public boolean isWithdrawn() { return status == UserStatus.WITHDRAWN; }
     public boolean isSuspended() { return status == UserStatus.SUSPENDED; }
