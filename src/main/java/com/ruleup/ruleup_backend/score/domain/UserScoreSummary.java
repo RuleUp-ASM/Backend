@@ -60,6 +60,25 @@ public class UserScoreSummary extends AssignedIdEntity {
     @Override
     public UUID getId() { return userId; }   // Persistable(신규 판별)용 — PK는 user_id
 
+    /**
+     * 표시 티어를 강제로 놓는다 — <b>개발용 토큰 발급 전용</b>이다.
+     * 점수 구간과 어긋난 표시 티어(강등 유예 상태)를 재현하려면 정상 경로로는 사이클을 돌려야 한다.
+     */
+    public void forceDisplayTierForTest(Tier tier) {
+        this.displayTier = tier;
+    }
+
+    /**
+     * 점수를 적용하고 티어를 다시 맞춘다. 실제 티어는 점수만으로 즉시 정해지고,
+     * 표시 티어는 강등에만 20점 유예를 둔다 — 승급은 유예 없이 즉시다.
+     */
+    public void applyScore(long scoreAfter) {
+        this.totalScore = scoreAfter;
+        Tier actual = TierBands.of(scoreAfter);
+        this.displayTier = TierBands.displayTier(scoreAfter, actual, this.displayTier);
+        this.actualTier = actual;
+    }
+
     /** 가입 시 초기 요약 — 브론즈 10점. */
     public static UserScoreSummary initialize(UUID userId) {
         UserScoreSummary s = new UserScoreSummary();
@@ -70,11 +89,4 @@ public class UserScoreSummary extends AssignedIdEntity {
         return s;
     }
 
-    /**
-     * 응답용 "티어 내 점수 0~99" — 정식 밴드 계산은 온도 계산(티어) 스펙에서 확정한다.
-     * 그 전까지는 총점을 0~99로 클램프해 내려준다(가입 직후 BRONZE 10 계약 충족).
-     */
-    public int scoreInTier() {
-        return (int) Math.max(0, Math.min(totalScore, 99));
-    }
 }

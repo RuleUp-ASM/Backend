@@ -18,8 +18,6 @@ import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.oauth.OAuthClient;
 import com.ruleup.ruleup_backend.oauth.OAuthClientResolver;
 import com.ruleup.ruleup_backend.oauth.OAuthUserInfo;
-import com.ruleup.ruleup_backend.reputation.domain.ReputationScore;
-import com.ruleup.ruleup_backend.reputation.ReputationScoreRepository;
 import com.ruleup.ruleup_backend.score.UserScoreSummaryRepository;
 import com.ruleup.ruleup_backend.score.domain.UserScoreSummary;
 import com.ruleup.ruleup_backend.security.JwtProvider;
@@ -66,7 +64,6 @@ public class AuthService {
 
     private final OAuthClientResolver resolver;
     private final UserRepository userRepository;
-    private final ReputationScoreRepository reputationScoreRepository;
     private final RefreshTokenRepository refreshTokenRepository;
     private final AgreementService agreementService;
     private final com.ruleup.ruleup_backend.sanction.SanctionService sanctionService;
@@ -82,7 +79,6 @@ public class AuthService {
     private final AppProperties props;
     private final ApplicationEventPublisher eventPublisher;
     private final CountryResolver countryResolver;
-    private final com.ruleup.ruleup_backend.reputation.MilestoneService milestoneService;
     private final com.ruleup.ruleup_backend.invitation.InvitationService invitationService;
     private final com.ruleup.ruleup_backend.notification.NotificationPublisher notificationPublisher;
 
@@ -275,9 +271,7 @@ public class AuthService {
         applyCountry(user, req.deviceInfo());   // 지오 헤더 → 기기 지역 → Accept-Language → 기기 타임존 → 기본값
         userRepository.save(user);
 
-        reputationScoreRepository.save(ReputationScore.createDefault(user));   // 매너온도 병존(전환 전)
         UserScoreSummary summary = scoreSummaryRepository.save(UserScoreSummary.initialize(user.getId()));   // 브론즈 10점
-        milestoneService.recordSignup(user.getId(), LocalDate.now(KST));
         invitationService.recordSignup(req.inviteCode(), user.getId(), java.time.Instant.now());   // 친구 초대 기록(선택)
         saveAgreements(user, ag);
         moderationRequestRepository.save(
