@@ -155,6 +155,7 @@ public enum ErrorCode {
     INVALID_CALENDAR_DATE(HttpStatus.BAD_REQUEST, "날짜 형식이 올바르지 않습니다. (YYYY-MM-DD)"),
     // 챌린지 콘텐츠 반복 거부 잠금(챌린지 설정 모듈). 프로필 편집에서는 폐기됐다 — 마이페이지 오픈 이슈 #8.
     MODERATION_LOCKED(HttpStatus.TOO_MANY_REQUESTS, "수정이 잠시 제한되었어요. 1시간 뒤에 다시 시도해주세요."),
+    APP_LINK_URL_REQUIRED(HttpStatus.BAD_REQUEST, "확인할 링크가 필요해요."),
     INVALID_HISTORY_MONTHS(HttpStatus.BAD_REQUEST, "조회 기간은 1개월부터 12개월까지 고를 수 있어요."),
     // 타인의 제재·검출 이력 조회 시도. 애초에 타인 조회 경로를 만들지 않는 것이 1차 방어이고, 이건 2차다.
     SANCTION_HISTORY_FORBIDDEN(HttpStatus.FORBIDDEN, "제재 이력은 본인만 확인할 수 있어요."),
