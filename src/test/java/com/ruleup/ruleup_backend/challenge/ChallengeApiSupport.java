@@ -19,6 +19,11 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 
 /**
  * 챌린지 통합 테스트 공통 헬퍼.
+ *
+ * <p><b>SQL 픽스처에서 CURDATE() 를 쓰지 않는다.</b> start_date·end_date·target_date 는 KST 달력
+ * 날짜인데 CURDATE() 는 DB 세션(UTC) 기준이라, 00~09시 KST 사이에는 하루가 어긋난다. 그 시간대에만
+ * 깨지는 테스트가 되므로 {@code DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00'))} 으로 KST
+ * 오늘을 만든다 — UTC_TIMESTAMP() 는 세션 타임존과 무관하고, KST 는 DST 가 없어 고정 오프셋이 정확하다.
  *  - 가입 → accessToken 발급 (AuthApiSupport 재사용)
  *  - 루틴 템플릿 픽스처 insert (루틴 테이블은 시드 없이 스키마만 — 테스트가 직접 채운다)
  *  - challenges/challenge_members 픽스처 insert (배치·게이트 상황 재현용)
@@ -68,7 +73,7 @@ public abstract class ChallengeApiSupport extends AuthApiSupport {
                         " duration_days, start_date, end_date, verification_config, params, " +
                         " penalty_config, reward_config, anonymity, status, moderation_status, ai_assisted, participant_count) " +
                         "VALUES (?, ?, ?, ?, ?, ?, ?, 50, '[\"MON\",\"TUE\",\"WED\",\"THU\",\"FRI\",\"SAT\",\"SUN\"]', " +
-                        " 14, CURDATE(), DATE_ADD(CURDATE(), INTERVAL 14 DAY), " +
+                        " 14, DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), DATE_ADD(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 14 DAY), " +
                         " '{\"selectedMethod\":\"MANUAL\",\"verificationType\":\"MANUAL\",\"signalSource\":\"SELF_CHECK\",\"wearableReq\":\"NONE\",\"requiredPermissions\":[]}', " +
                         " '{}', '{\"mannerDeduction\":1.0}', '{\"mannerGain\":1.0}', 'REAL', ?, 'NONE', 1, 1)",
                 bytes(id), bytes(ownerId), "테스트 챌린지", "테스트 챌린지", "설명", category, mode, status);

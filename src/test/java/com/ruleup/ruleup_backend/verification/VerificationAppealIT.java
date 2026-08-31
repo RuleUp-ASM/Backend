@@ -188,7 +188,7 @@ class VerificationAppealIT extends VerificationApiSupport {
                 jdbc().update("INSERT INTO VerificationDaily " +
                                 "(id, challengeMemberId, challengeId, userId, targetDate, status, method, " +
                                 " failureReason, verifiedAt, appealClosesAt, shareableAt) " +
-                                "VALUES (?, ?, ?, ?, DATE_SUB(CURDATE(), INTERVAL ? DAY), 'FAILED', 'GPS_PRESENCE', " +
+                                "VALUES (?, ?, ?, ?, DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL ? DAY), 'FAILED', 'GPS_PRESENCE', " +
                                 " 'INSUFFICIENT_DWELL', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6) + INTERVAL 1 DAY, " +
                                 " UTC_TIMESTAMP(6) + INTERVAL 1 DAY)",
                         bytes(id), bytes(f.memberId()), bytes(f.challengeId()), bytes(f.owner().id()), daysAgo);
@@ -210,7 +210,7 @@ class VerificationAppealIT extends VerificationApiSupport {
             jdbc().update("INSERT INTO VerificationDaily " +
                             "(id, challengeMemberId, challengeId, userId, targetDate, status, method, " +
                             " finalizeAfter, appealClosesAt) " +
-                            "VALUES (?, ?, ?, ?, DATE_SUB(CURDATE(), INTERVAL 1 DAY), 'PENDING', 'GPS_PRESENCE', " +
+                            "VALUES (?, ?, ?, ?, DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 1 DAY), 'PENDING', 'GPS_PRESENCE', " +
                             " UTC_TIMESTAMP(6) + INTERVAL 1 DAY, UTC_TIMESTAMP(6) + INTERVAL 1 DAY)",
                     bytes(verificationId), bytes(memberId), bytes(challengeId), bytes(me.id()));
             return verificationId;

@@ -51,7 +51,7 @@ public abstract class VerificationApiSupport extends ChallengeApiSupport {
                         " penalty_config, reward_config, anonymity, status, moderation_status, ai_assisted, participant_count) " +
                         "VALUES (?, ?, ?, ?, ?, 'EXERCISE', 'GROUP', 50, " +
                         " '[\"MON\",\"TUE\",\"WED\",\"THU\",\"FRI\",\"SAT\",\"SUN\"]', 7, " +
-                        " 14, CURDATE(), DATE_ADD(CURDATE(), INTERVAL 14 DAY), ?, ?, ?, " +
+                        " 14, DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), DATE_ADD(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 14 DAY), ?, ?, ?, " +
                         " '{\"mannerDeduction\":1.0}', '{\"mannerGain\":1.0}', 'REAL', 'ACTIVE', 'NONE', 1, 1)",
                 bytes(id), bytes(ownerId), "자동 " + verificationMethod, "자동 " + verificationMethod, "설명",
                 templateId,

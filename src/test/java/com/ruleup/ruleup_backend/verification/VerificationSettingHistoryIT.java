@@ -60,7 +60,7 @@ class VerificationSettingHistoryIT extends VerificationApiSupport {
     }
 
     private void startedDaysAgo(UUID challengeId, int days) {
-        jdbc().update("UPDATE challenges SET start_date = DATE_SUB(CURDATE(), INTERVAL ? DAY) WHERE id = ?",
+        jdbc().update("UPDATE challenges SET start_date = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL ? DAY) WHERE id = ?",
                 days, bytes(challengeId));
     }
 
@@ -77,14 +77,14 @@ class VerificationSettingHistoryIT extends VerificationApiSupport {
                 anchorsJson, bytes(challengeMemberId));
         jdbc().update("INSERT INTO verification_setting_snapshots " +
                         "(id, challengeMemberId, kind, effectiveFrom, payload) " +
-                        "VALUES (?, ?, 'ANCHORS', CURDATE(), ?)",
+                        "VALUES (?, ?, 'ANCHORS', DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), ?)",
                 bytes(UUID.randomUUID()), bytes(challengeMemberId), anchorsJson);
     }
 
     private void seedAnchorHistory(UUID challengeMemberId, int daysAgo, String anchorsJson) {
         jdbc().update("INSERT INTO verification_setting_snapshots " +
                         "(id, challengeMemberId, kind, effectiveFrom, payload) " +
-                        "VALUES (?, ?, 'ANCHORS', DATE_SUB(CURDATE(), INTERVAL ? DAY), ?)",
+                        "VALUES (?, ?, 'ANCHORS', DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL ? DAY), ?)",
                 bytes(UUID.randomUUID()), bytes(challengeMemberId), daysAgo, anchorsJson);
     }
 

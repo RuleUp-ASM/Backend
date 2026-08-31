@@ -170,7 +170,7 @@ class RoomPhase1ScopeIT extends ChallengeApiSupport {
                 (rs, i) -> uuidOf(rs.getBytes(1)), bytes(challengeId), bytes(userId));
         jdbcTemplate.update("INSERT INTO VerificationDaily " +
                         "(id, challengeMemberId, challengeId, userId, targetDate, status, verifiedAt, shareableAt) " +
-                        "VALUES (?, ?, ?, ?, CURDATE(), 'SUCCESS', " +
+                        "VALUES (?, ?, ?, ?, DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), 'SUCCESS', " +
                         "DATE_SUB(NOW(6), INTERVAL 1 MINUTE), DATE_SUB(NOW(6), INTERVAL 1 MINUTE))",
                 bytes(UUID.randomUUID()), bytes(memberId), bytes(challengeId), bytes(userId));
     }

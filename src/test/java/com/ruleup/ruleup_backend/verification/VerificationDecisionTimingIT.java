@@ -193,14 +193,14 @@ class VerificationDecisionTimingIT extends VerificationApiSupport {
             UUID challenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
             UUID memberId = insertReadyMember(challenge, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
             // 어제도 챌린지 기간 안이어야 인증 대상이다 — 시작일을 당긴다.
-            jdbc().update("UPDATE challenges SET start_date = DATE_SUB(CURDATE(), INTERVAL 3 DAY) WHERE id = ?",
+            jdbc().update("UPDATE challenges SET start_date = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 3 DAY) WHERE id = ?",
                     bytes(challenge));
 
             // 어제 귀속 건이 목표 미달로 남아 있다(귀속일은 끝났고 확정은 아직).
             UUID verificationId = UUID.randomUUID();
             jdbc().update("INSERT INTO VerificationDaily " +
                             "(id, challengeMemberId, challengeId, userId, targetDate, status, finalizeAfter, appealClosesAt) " +
-                            "VALUES (?, ?, ?, ?, DATE_SUB(CURDATE(), INTERVAL 1 DAY), 'PENDING', " +
+                            "VALUES (?, ?, ?, ?, DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 1 DAY), 'PENDING', " +
                             " UTC_TIMESTAMP(6) + INTERVAL 1 DAY, UTC_TIMESTAMP(6) + INTERVAL 1 DAY)",
                     bytes(verificationId), bytes(memberId), bytes(challenge), bytes(me.id()));
 
