@@ -3,7 +3,8 @@ package com.ruleup.ruleup_backend.moderation;
 import com.ruleup.ruleup_backend.moderation.domain.ModerationRequest;
 import com.ruleup.ruleup_backend.moderation.domain.ModerationRequestStatus;
 import com.ruleup.ruleup_backend.moderation.domain.ModerationTarget;
-import com.ruleup.ruleup_backend.notification.NotificationService;
+import com.ruleup.ruleup_backend.notification.NotificationPublisher;
+import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.user.domain.User;
 import com.ruleup.ruleup_backend.user.UserRepository;
@@ -34,7 +35,7 @@ public class UserModerationService {
     private final UserRepository userRepository;
     private final ModerationRequestRepository moderationRequestRepository;
     private final ContentModerationClient moderationClient;
-    private final NotificationService notificationService;
+    private final NotificationPublisher notificationPublisher;
 
     @Transactional
     public void moderate(UUID userId) {
@@ -64,10 +65,11 @@ public class UserModerationService {
                     user.rejectNickname();
                     decideRequest(userId, ModerationTarget.NICKNAME, false, "커뮤니티 기준 위반");
                     checked = true;
-                    notificationService.notify(userId, NotificationType.NICKNAME_REJECTED,
+                    notificationPublisher.publish(NotificationEvent.of(userId,
+                            NotificationType.MODERATION_REJECTED,
                             "닉네임을 바꿔주세요",
                             "회원님의 닉네임이 커뮤니티 기준에 맞지 않아 다른 사용자에게는 임시 닉네임으로 표시됩니다. "
-                                    + "닉네임을 변경하면 다시 노출됩니다.");
+                                    + "닉네임을 변경하면 다시 노출됩니다."));
                 }
                 case UNAVAILABLE -> log.info("닉네임 검수 보류(PENDING 유지) userId={}", userId);
             }
@@ -86,10 +88,11 @@ public class UserModerationService {
                     user.rejectProfileImage();
                     decideRequest(userId, ModerationTarget.PROFILE_IMAGE, false, "커뮤니티 기준 위반");
                     checked = true;
-                    notificationService.notify(userId, NotificationType.PROFILE_IMAGE_REJECTED,
+                    notificationPublisher.publish(NotificationEvent.of(userId,
+                            NotificationType.MODERATION_REJECTED,
                             "프로필 사진을 바꿔주세요",
                             "회원님의 프로필 사진이 커뮤니티 기준에 맞지 않아 다른 사용자에게는 숨겨집니다. "
-                                    + "사진을 변경하면 다시 노출됩니다.");
+                                    + "사진을 변경하면 다시 노출됩니다."));
                 }
                 case UNAVAILABLE -> log.info("사진 검수 보류(PENDING 유지) userId={}", userId);
             }

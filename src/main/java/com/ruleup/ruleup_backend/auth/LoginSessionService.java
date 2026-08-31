@@ -6,7 +6,8 @@ import com.ruleup.ruleup_backend.auth.dto.OAuthLoginResponse;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.web.CountryResolver;
-import com.ruleup.ruleup_backend.notification.NotificationService;
+import com.ruleup.ruleup_backend.notification.NotificationPublisher;
+import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.oauth.OAuthUserInfo;
 import com.ruleup.ruleup_backend.score.UserScoreSummaryRepository;
@@ -39,7 +40,7 @@ public class LoginSessionService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final UserScoreSummaryRepository scoreSummaryRepository;
     private final SocialTokenService socialTokenService;
-    private final NotificationService notificationService;
+    private final NotificationPublisher notificationPublisher;
     private final CountryResolver countryResolver;
     private final TokenService tokenService;
 
@@ -61,9 +62,11 @@ public class LoginSessionService {
                 && !req.deviceId().equals(user.getDeviceId());
         if (deviceChanged) {
             refreshTokenRepository.revokeAllByUserId(user.getId(), Instant.now());
-            notificationService.notify(user.getId(), NotificationType.SYSTEM,
+            // 필수(A) — 계정 보안 고지라 야간에도 즉시 나간다.
+            notificationPublisher.publish(NotificationEvent.of(user.getId(),
+                    NotificationType.DEVICE_LOGGED_OUT,
                     "다른 기기에서 로그인됨",
-                    "새 기기에서 로그인되어 기존 기기의 세션이 종료됐어요. 본인이 아니라면 계정 보안을 확인해주세요.");
+                    "새 기기에서 로그인되어 기존 기기의 세션이 종료됐어요. 본인이 아니라면 계정 보안을 확인해주세요."));
         }
 
         // ===== 설치 인계 — uq_users_active_installation_id: 하나의 설치는 한 활성 계정에만 연결 =====

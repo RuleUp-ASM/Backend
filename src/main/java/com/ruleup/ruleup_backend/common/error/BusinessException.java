@@ -17,6 +17,10 @@ public class BusinessException extends RuntimeException {
     private final String rejoinAvailableAt;
     /** 선택: SETTING_CHANGE_LIMIT 일 때의 다음 변경 가능 시각(ISO). 없으면 null. */
     private final String nextChangeAvailableAt;
+    /** 선택: CONFIRMATION_REQUIRED 일 때의 확인 토큰. 없으면 null. */
+    private final String confirmationToken;
+    /** 선택: CONFIRMATION_REQUIRED 일 때 재확인 화면에 보여줄 요약. 없으면 null. */
+    private final Object preview;
 
     public BusinessException(ErrorCode errorCode) {
         this(errorCode, null);
@@ -32,11 +36,27 @@ public class BusinessException extends RuntimeException {
 
     private BusinessException(ErrorCode errorCode, String detail,
                               String rejoinAvailableAt, String nextChangeAvailableAt) {
+        this(errorCode, detail, rejoinAvailableAt, nextChangeAvailableAt, null, null);
+    }
+
+    private BusinessException(ErrorCode errorCode, String detail, String rejoinAvailableAt,
+                              String nextChangeAvailableAt, String confirmationToken, Object preview) {
         super(errorCode.getMessage());
         this.errorCode = errorCode;
         this.detail = detail;
         this.rejoinAvailableAt = rejoinAvailableAt;
         this.nextChangeAvailableAt = nextChangeAvailableAt;
+        this.confirmationToken = confirmationToken;
+        this.preview = preview;
+    }
+
+    /**
+     * 2단계 확인 요구 — 무엇을 확인하는지(preview)와 그 확인에 한해 유효한 토큰을 함께 던진다.
+     * 토큰 없이 실행을 시도하면 항상 여기서 멈추므로, 클라이언트 모달을 우회해도 집행되지 않는다.
+     */
+    public static BusinessException confirmationRequired(String confirmationToken, Object preview) {
+        return new BusinessException(ErrorCode.CONFIRMATION_REQUIRED, null, null, null,
+                confirmationToken, preview);
     }
 
     /**

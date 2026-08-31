@@ -57,6 +57,11 @@ public class User extends AssignedIdEntity {
     @Column(name = "status", nullable = false)
     private UserStatus status = UserStatus.ACTIVE;
 
+    /** 백오피스 접근 롤. 부여는 운영 결정이며 앱에서 바꾸는 경로를 두지 않는다. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "role", nullable = false)
+    private UserRole role = UserRole.MEMBER;
+
     /**
      * 탈퇴 직전 상태(ACTIVE/LOCKED/BANNED). 탈퇴한 적 없으면 null.
      * status 가 WITHDRAWN 으로 덮이면 정지·잠금 여부가 지워지므로, 재가입 승계용으로 따로 남긴다.
@@ -80,6 +85,17 @@ public class User extends AssignedIdEntity {
     /** 실제 승인 닉네임이 마지막으로 변경된 시각(거절 후 재신청만으로는 갱신 안 함). */
     @Column(name = "nickname_changed_at")
     private Instant nicknameChangedAt;
+
+    /**
+     * 닉네임·사진 <b>통합</b> 잠금의 시작 시각 — 마이페이지 5-4.
+     *
+     * <p>둘 중 하나라도 바꾸는 저장을 하면 그 시점부터 두 항목이 함께 1개월 잠긴다. 항목별 변경
+     * 시각으로는 이 규칙을 표현할 수 없어(사진만 바꾼 사람의 닉네임 잠금을 판정할 근거가 없다)
+     * 저장 시각을 한 칸으로 둔다. 이 한 칸이 동시 수정 규칙도 함께 해결한다 — 잠금이 방금
+     * 시작됐으면 같은 저장 세션이라 잠그지 않는다.
+     */
+    @Column(name = "profile_changed_at")
+    private Instant profileChangedAt;
 
     /** 사용자가 현재 제출한 이미지 (PENDING/REJECTED 상태일 수 있음). */
     @Column(name = "profile_image_url")
@@ -362,8 +378,37 @@ public class User extends AssignedIdEntity {
     /** 활성 제재가 모두 사라졌을 때 복귀. 해제 배치와 게이트의 자가 복구가 호출한다. */
     public void activate() { this.status = UserStatus.ACTIVE; }
 
+    public boolean isOperator() { return role == UserRole.OPERATOR; }
+
     public boolean isWithdrawn() { return status == UserStatus.WITHDRAWN; }
     public boolean isSuspended() { return status == UserStatus.SUSPENDED; }
+
+    /**
+     * 닉네임·사진 통합 잠금 규칙 — {@link ProfileLockPolicy}.
+     *
+     * <p>잠겨 있으면 저장을 막고, 잠기지 않았으면 이번 저장으로 잠금을 새로 시작한다.
+     * 모더레이션 거부를 고치는 재제출은 잠금·횟수 어느 쪽에도 들어가지 않는다 —
+     * 서버가 물린 거부를 사용자 책임으로 셀 수 없기 때문이다.
+     */
+    public boolean isProfileLocked(Instant now) {
+        return !isFixingRejection() && ProfileLockPolicy.isLocked(profileChangedAt, now);
+    }
+
+    /** 이번 저장으로 잠금을 시작한다. 이미 같은 저장 세션 안이면 시작 시각을 밀지 않는다. */
+    public void startProfileLock(Instant now) {
+        if (!ProfileLockPolicy.isSameSaveSession(profileChangedAt, now)) this.profileChangedAt = now;
+    }
+
+    /** 잠금 해제 시각(마지막 저장 +1개월). 잠긴 적이 없으면 null. */
+    public Instant profileLockedUntil() {
+        return ProfileLockPolicy.lockedUntil(profileChangedAt);
+    }
+
+    /** 모더레이션이 거부한 값을 고치는 중인지 — 이 재제출은 잠금에서 제외된다. */
+    private boolean isFixingRejection() {
+        return nicknameStatus == NicknameStatus.REJECTED
+                || profileImageStatus == ProfileImageStatus.REJECTED;
+    }
 
     public void changeInterestCategories(List<String> categories) {
         this.interestCategories.clear();

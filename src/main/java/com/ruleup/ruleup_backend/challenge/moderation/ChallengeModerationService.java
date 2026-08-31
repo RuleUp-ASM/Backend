@@ -5,7 +5,8 @@ import com.ruleup.ruleup_backend.challenge.domain.TargetModerationStatus;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.moderation.ContentModerationClient;
 import com.ruleup.ruleup_backend.moderation.ModerationResult;
-import com.ruleup.ruleup_backend.notification.NotificationService;
+import com.ruleup.ruleup_backend.notification.NotificationPublisher;
+import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -36,7 +37,7 @@ public class ChallengeModerationService {
     private final ChallengeRepository challengeRepository;
     private final ContentModerationClient moderationClient;
     private final ChallengeNameBlocklist blocklist;
-    private final NotificationService notificationService;
+    private final NotificationPublisher notificationPublisher;
 
     @Transactional
     public void moderate(UUID challengeId) {
@@ -91,10 +92,13 @@ public class ChallengeModerationService {
             }
         }
         if (anyRejected) {
-            notificationService.notify(c.getCreatorId(), NotificationType.CHALLENGE_NAME_REJECTED,
+            notificationPublisher.publish(NotificationEvent.forChallenge(c.getCreatorId(),
+                    NotificationType.MODERATION_REJECTED,
                     "챌린지 제목·설명을 바꿔주세요",
                     "[" + c.publicTitle() + "] 챌린지의 제목 또는 설명이 커뮤니티 기준에 맞지 않아요. "
-                            + "수정 전까지 다른 사람에게는 임시 제목으로 보여요.");
+                            + "수정 전까지 다른 사람에게는 임시 제목으로 보여요.", c.getId())
+                    // 프로필이 아니라 그 방 수정 화면으로 보내야 바로 고칠 수 있다.
+                    .withDeeplink("ruleup://challenges/" + c.getId() + "/edit"));
             log.info("moderation_result target=TEXT approved=false challengeId={}", c.getId());
         } else if (titlePending || descriptionPending) {
             log.info("moderation_result target=TEXT approved=true challengeId={}", c.getId());
@@ -118,10 +122,11 @@ public class ChallengeModerationService {
             }
             case REJECTED -> {
                 c.rejectAndRemoveImage();
-                notificationService.notify(c.getCreatorId(), NotificationType.CHALLENGE_IMAGE_REJECTED,
+                notificationPublisher.publish(NotificationEvent.forChallenge(c.getCreatorId(),
+                        NotificationType.CHALLENGE_IMAGE_REMOVED,
                         "챌린지 대표 이미지를 바꿔주세요",
                         "[" + c.publicTitle() + "] 챌린지의 대표 이미지가 커뮤니티 기준에 맞지 않아 내렸어요. "
-                                + "새 이미지를 올려주세요.");
+                                + "새 이미지를 올려주세요.", c.getId()));
                 log.info("moderation_result target=IMAGE approved=false challengeId={}", c.getId());
                 return true;
             }

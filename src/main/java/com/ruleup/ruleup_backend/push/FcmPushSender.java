@@ -38,24 +38,55 @@ public class FcmPushSender implements PushSender {
     private final DeviceTokenService deviceTokenService;
 
     @Override
+    public void sendDisplay(UUID userId, DisplayPush push) {
+        for (String token : deviceTokenService.tokensOf(userId)) {
+            send(userId, token, buildDisplay(token, push));
+        }
+    }
+
+    @Override
     public void sendSilent(UUID userId, SilentPush push) {
         List<String> tokens = deviceTokenService.tokensOf(userId);
         if (tokens.isEmpty()) return;   // 계약: 등록 토큰 없으면 no-op
 
         for (String token : tokens) {
-            try {
-                firebaseMessaging.send(build(token, push));
-            } catch (FirebaseMessagingException e) {
-                MessagingErrorCode code = e.getMessagingErrorCode();
-                if (code == MessagingErrorCode.UNREGISTERED || code == MessagingErrorCode.INVALID_ARGUMENT) {
-                    deviceTokenService.remove(token);   // 죽은/잘못된 토큰 정리
-                } else {
-                    log.warn("FCM 전송 실패 userId={} code={}: {}", userId, code, e.getMessage());
-                }
-            } catch (Exception e) {
-                log.warn("FCM 전송 예외 userId={}: {}", userId, e.getMessage());
-            }
+            send(userId, token, build(token, push));
         }
+    }
+
+    /** 전송 예외는 호출부로 전파하지 않는다 — 푸시 실패가 배치·트리거 흐름을 깨면 안 된다. */
+    private void send(UUID userId, String token, Message message) {
+        try {
+            firebaseMessaging.send(message);
+        } catch (FirebaseMessagingException e) {
+            MessagingErrorCode code = e.getMessagingErrorCode();
+            if (code == MessagingErrorCode.UNREGISTERED || code == MessagingErrorCode.INVALID_ARGUMENT) {
+                deviceTokenService.remove(token);   // 죽은/잘못된 토큰 정리
+            } else {
+                log.warn("FCM 전송 실패 userId={} code={}: {}", userId, code, e.getMessage());
+            }
+        } catch (Exception e) {
+            log.warn("FCM 전송 예외 userId={}: {}", userId, e.getMessage());
+        }
+    }
+
+    /** 화면에 뜨는 메시지 — notification 블록을 담아 OS 가 직접 표시하게 한다. */
+    private Message buildDisplay(String token, DisplayPush push) {
+        return Message.builder()
+                .setToken(token)
+                .setNotification(com.google.firebase.messaging.Notification.builder()
+                        .setTitle(push.title())
+                        .setBody(push.body())
+                        .build())
+                .putAllData(push.data())
+                .setAndroidConfig(AndroidConfig.builder()
+                        .setPriority(AndroidConfig.Priority.HIGH)
+                        .build())
+                .setApnsConfig(ApnsConfig.builder()
+                        .putHeader("apns-priority", "10")
+                        .setAps(Aps.builder().setSound("default").build())
+                        .build())
+                .build();
     }
 
     private Message build(String token, SilentPush push) {

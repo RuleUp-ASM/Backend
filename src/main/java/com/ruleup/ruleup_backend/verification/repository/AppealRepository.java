@@ -16,6 +16,9 @@ public interface AppealRepository extends JpaRepository<Appeal, UUID> {
 
     boolean existsByVerificationDailyId(UUID verificationDailyId);
 
+    /** 마이페이지 이의 현황: 내가 낸 이의 전건(최신순). 전건이 인용이라 상태 조건이 없다. */
+    List<Appeal> findByUserIdOrderByAcceptedAtDesc(UUID userId);
+
     /** 이상탐지 입력: 그 사용자의 최근 이의 이력(빈도·반복 사유·동일 이미지 판정용). */
     List<Appeal> findByUserIdAndAcceptedAtGreaterThanEqualOrderByAcceptedAtDesc(UUID userId, Instant since);
 }

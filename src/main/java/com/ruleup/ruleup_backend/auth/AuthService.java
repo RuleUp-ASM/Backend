@@ -13,12 +13,11 @@ import com.ruleup.ruleup_backend.moderation.ModerationRequestRepository;
 import com.ruleup.ruleup_backend.moderation.UserModerationRequested;
 import com.ruleup.ruleup_backend.moderation.domain.ModerationRequest;
 import com.ruleup.ruleup_backend.moderation.domain.ModerationTarget;
+import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.oauth.OAuthClient;
 import com.ruleup.ruleup_backend.oauth.OAuthClientResolver;
 import com.ruleup.ruleup_backend.oauth.OAuthUserInfo;
-import com.ruleup.ruleup_backend.reputation.domain.ReputationScore;
-import com.ruleup.ruleup_backend.reputation.ReputationScoreRepository;
 import com.ruleup.ruleup_backend.score.UserScoreSummaryRepository;
 import com.ruleup.ruleup_backend.score.domain.UserScoreSummary;
 import com.ruleup.ruleup_backend.security.JwtProvider;
@@ -65,7 +64,6 @@ public class AuthService {
 
     private final OAuthClientResolver resolver;
     private final UserRepository userRepository;
-    private final ReputationScoreRepository reputationScoreRepository;
     private final RefreshTokenRepository refreshTokenRepository;
     private final AgreementService agreementService;
     private final com.ruleup.ruleup_backend.sanction.SanctionService sanctionService;
@@ -81,9 +79,8 @@ public class AuthService {
     private final AppProperties props;
     private final ApplicationEventPublisher eventPublisher;
     private final CountryResolver countryResolver;
-    private final com.ruleup.ruleup_backend.reputation.MilestoneService milestoneService;
     private final com.ruleup.ruleup_backend.invitation.InvitationService invitationService;
-    private final com.ruleup.ruleup_backend.notification.NotificationService notificationService;
+    private final com.ruleup.ruleup_backend.notification.NotificationPublisher notificationPublisher;
 
     // ===== OAuth 로그인 =====
     // ⚠️ 일부러 @Transactional 을 붙이지 않는다.
@@ -274,9 +271,7 @@ public class AuthService {
         applyCountry(user, req.deviceInfo());   // 지오 헤더 → 기기 지역 → Accept-Language → 기기 타임존 → 기본값
         userRepository.save(user);
 
-        reputationScoreRepository.save(ReputationScore.createDefault(user));   // 매너온도 병존(전환 전)
         UserScoreSummary summary = scoreSummaryRepository.save(UserScoreSummary.initialize(user.getId()));   // 브론즈 10점
-        milestoneService.recordSignup(user.getId(), LocalDate.now(KST));
         invitationService.recordSignup(req.inviteCode(), user.getId(), java.time.Instant.now());   // 친구 초대 기록(선택)
         saveAgreements(user, ag);
         moderationRequestRepository.save(
@@ -340,9 +335,10 @@ public class AuthService {
         if (nicknameTaken) {
             tempNicknameAllocator.assign(user, candidate -> userRepository.isNicknameTaken(candidate, user.getId()));
             user.markNicknameConflict();
-            notificationService.notify(user.getId(), NotificationType.SYSTEM,
+            notificationPublisher.publish(NotificationEvent.of(user.getId(),
+                    NotificationType.MODERATION_REJECTED,
                     "닉네임을 변경해주세요",
-                    "쓰시던 닉네임을 다른 분이 사용 중이라 임시 닉네임으로 시작했어요. 프로필에서 새 닉네임을 정해주세요.");
+                    "쓰시던 닉네임을 다른 분이 사용 중이라 임시 닉네임으로 시작했어요. 프로필에서 새 닉네임을 정해주세요."));
         }
 
         user.restore(req.installationId(), req.deviceId());   // 탈퇴 직전 상태로 되돌린다

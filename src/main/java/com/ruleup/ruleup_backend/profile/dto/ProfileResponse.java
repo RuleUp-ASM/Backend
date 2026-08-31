@@ -4,7 +4,6 @@ import com.ruleup.ruleup_backend.user.domain.NicknamePolicy;
 import com.ruleup.ruleup_backend.user.domain.User;
 import io.swagger.v3.oas.annotations.media.Schema;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
@@ -57,16 +56,13 @@ public record ProfileResponse(
                 example = "2026-08-15T04:11:07Z")
         String nicknameChangeableAfter,
 
-        @Schema(description = "매너 온도", example = "36.5")
-        BigDecimal mannerTemperature,
-
         @Schema(description = "선택한 관심 카테고리 코드 목록", example = "[\"EXERCISE\",\"STUDY\"]")
         List<String> interestCategories,
 
         @Schema(description = "가입 시각(ISO-8601)", example = "2026-08-01T09:12:33Z")
         String createdAt) {
 
-    public static ProfileResponse from(User user, BigDecimal temp) {
+    public static ProfileResponse from(User user) {
         Instant changedAt = user.getNicknameChangedAt();
         String changeableAfter = (changedAt != null)
                 ? changedAt.plus(NicknamePolicy.CHANGE_INTERVAL).toString() : null;
@@ -75,7 +71,7 @@ public record ProfileResponse(
                 user.getNicknameStatus().name(), user.getProfileImageStatus().name(), user.getApprovedNickname(),
                 (changedAt != null ? changedAt.toString() : null),
                 changeableAfter,
-                temp, user.getInterestCategories(),
+                user.getInterestCategories(),
                 (user.getCreatedAt() != null ? user.getCreatedAt().toString() : null));
     }
 }

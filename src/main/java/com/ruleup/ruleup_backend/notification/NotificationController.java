@@ -22,12 +22,24 @@ import java.util.UUID;
 public class NotificationController {
     private final NotificationService service;
 
+    @io.swagger.v3.oas.annotations.Operation(
+            summary = "알림함 목록",
+            description = """
+                    커서 페이징. 보관 **6개월**을 넘긴 건은 응답에 없다.
+
+                    커서는 `createdAt(epochMilli)|id` 복합값이다 — 00시 판정 피크에는 같은 밀리초에
+                    여러 건이 적재되므로 단일 id 커서로는 페이지 경계 항목이 빠지거나 겹친다.
+
+                    분류(`category`)는 A 필수 · B 기능 · C 마케팅이다. **모든 알림은 푸시 발송 여부와
+                    무관하게 여기 적재**되며, 필수(A) 알림의 법적 고지는 이 적재 시점에 성립한다.
+
+                    ⚠️ **잠금 계정도 열람할 수 있다** — 제재 고지가 여기 쌓이기 때문이다.
+                    """)
     @GetMapping("/api/v1/notifications")
     public ApiResponse<NotificationResponse> list(@AuthenticationPrincipal String userId,
-                                                  @RequestParam(defaultValue = "ALL") String filter,
                                                   @RequestParam(required = false) String cursor,
                                                   @RequestParam(required = false) Integer size) {
-        return ApiResponse.ok(service.list(UUID.fromString(userId), filter, cursor, size));
+        return ApiResponse.ok(service.list(UUID.fromString(userId), cursor, size));
     }
 
     @PostMapping("/api/v1/notifications/{notificationId}/read")

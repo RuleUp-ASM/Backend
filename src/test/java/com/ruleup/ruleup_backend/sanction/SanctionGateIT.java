@@ -205,15 +205,18 @@ class SanctionGateIT extends AuthApiSupport {
         }
 
         @Test
-        @DisplayName("FEATURE_SUSPENSION 은 지정한 기능만 막는다 — 다른 기능은 정상 동작")
+        @DisplayName("FEATURE_SUSPENSION 은 지정한 기능만 막고, 그 기능의 고유 코드를 내린다")
         void feature_suspension_blocks_only_that_feature() throws Exception {
             Account a = join("기능정지");
             impose(a.userId(), SanctionType.FEATURE_SUSPENSION, FeatureCode.REPORT,
                     Instant.now().plus(Duration.ofDays(7)));
 
+            // 게이트 자체는 일반적이지만 클라는 화면별로 분기한다. 신고 API 명세가 고유 코드를
+            // 정해 뒀으므로 ACCOUNT_SUSPENDED 가 아니라 REPORT_SUSPENDED 를 내린다.
             expectError(postAuth("/api/v1/reports", a.accessToken(),
-                    Map.of("targetType", "USER", "targetId", UUID.randomUUID().toString(),
-                            "reason", "SPAM")), 403, "ACCOUNT_SUSPENDED");
+                    Map.of("targetType", "USER", "targetUserId", UUID.randomUUID().toString(),
+                            "contextType", "PROFILE", "reason", "INAPPROPRIATE")),
+                    403, "REPORT_SUSPENDED");
 
             // 신고만 막힌 것이지 잠금이 아니다 — 나머지 쓰기는 그대로 통과해야 한다.
             MvcResult other = postAuth("/api/v1/nicknames/check", a.accessToken(),

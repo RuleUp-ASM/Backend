@@ -375,9 +375,11 @@ class SessionDeviceFlowIT {
             assertThat(user.getDeviceId()).isEqualTo("dev-" + tag + "-b");
             assertThat(user.getInstallationId()).isEqualTo("inst-" + tag + "-b");
 
-            // 기존 기기에 "다른 기기에서 로그인됨" 알림 (인앱 — 다음 접속 시 확인)
-            boolean notified = notificationRepository.findByUserIdOrderByCreatedAtDesc(user.getId()).stream()
-                    .anyMatch(n -> n.getType() == NotificationType.SYSTEM);
+            // 기존 기기에 "다른 기기에서 로그인됨" 알림 — 계정 보안 고지라 필수(A)다.
+            boolean notified = notificationRepository
+                    .findInbox(user.getId(), null, null, org.springframework.data.domain.Limit.unlimited())
+                    .stream()
+                    .anyMatch(n -> NotificationType.DEVICE_LOGGED_OUT.name().equals(n.getType()));
             assertThat(notified).isTrue();
         }
 

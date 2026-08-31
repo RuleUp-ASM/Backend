@@ -91,7 +91,7 @@ class NicknameLifecycleIT extends AuthApiSupport {
     private MvcResult changeNickname(String accessToken, String nickname) throws Exception {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("nickname", nickname);
-        return mvc.perform(patch("/api/v1/profile")
+        return mvc.perform(patch("/api/v1/users/me/profile")
                 .header("Authorization", "Bearer " + accessToken)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(OM.writeValueAsString(body))).andReturn();

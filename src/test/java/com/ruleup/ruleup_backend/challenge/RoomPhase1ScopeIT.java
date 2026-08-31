@@ -146,8 +146,12 @@ class RoomPhase1ScopeIT extends ChallengeApiSupport {
                 Integer.class);
         assertThat(pinConstraint).isEqualTo(1);
 
+        // 공지·댓글 알림 5종은 Phase 2 이관분이라 레지스트리에 아직 없다. 알림 타입이 VARCHAR 라
+        // 롤백 후 옛 값이 남을 수 있으므로 적재분이 없는지도 함께 본다.
+        assertThat(com.ruleup.ruleup_backend.notification.domain.NotificationType.find("NOTICE_CREATED"))
+                .isEmpty();
         Integer leftovers = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM Notification WHERE type IN ('NOTICE_CREATED','COMMENT_CREATED')",
+                "SELECT COUNT(*) FROM notifications WHERE type IN ('NOTICE_CREATED','COMMENT_CREATED')",
                 Integer.class);
         assertThat(leftovers).isZero();
     }

@@ -5,7 +5,7 @@ import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
 import com.ruleup.ruleup_backend.room.RoomAuthority;
 import com.ruleup.ruleup_backend.room.dto.ThreadDtos;
-import com.ruleup.ruleup_backend.report.BlacklistService;
+import com.ruleup.ruleup_backend.report.BlockService;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import com.ruleup.ruleup_backend.user.domain.User;
 import com.ruleup.ruleup_backend.verification.domain.VerificationDaily;
@@ -47,7 +47,7 @@ public class ThreadService {
     private final RoomAuthority authority;
     private final VerificationDailyRepository verificationRepository;
     private final UserRepository userRepository;
-    private final BlacklistService blacklistService;
+    private final BlockService blockService;
 
     private record Cursor(Instant at, UUID id) {}
     private record UserDate(UUID userId, java.time.LocalDate targetDate) {}
@@ -56,7 +56,7 @@ public class ThreadService {
         authority.requireMember(challengeId, viewerId);
         int size = requestedSize == null ? 20 : Math.max(1, Math.min(requestedSize, 50));
         Instant now = Instant.now();
-        Set<UUID> blocked = blacklistService.blockedUsers(viewerId);
+        Set<UUID> blocked = blockService.blockedUsers(viewerId);
 
         Cursor decoded = decode(cursor);
         List<VerificationDaily> fetched = decoded == null
