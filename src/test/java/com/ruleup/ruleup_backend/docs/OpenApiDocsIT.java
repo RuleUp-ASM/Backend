@@ -97,7 +97,7 @@ class OpenApiDocsIT {
                 "/api/v1/challenges/{challengeId}/owner",
                 "/api/v1/challenges/{challengeId}/owner/claim",
                 "/api/v1/reports",
-                "/api/v1/users/me/blacklist");
+                "/api/v1/users/me/blocks");
     }
 
     @Test
@@ -308,8 +308,8 @@ class OpenApiDocsIT {
                     "JoinResponse", "LeaveResponse", "MemberListResponse", "ChallengeMemberItem",
                     "KickRequest", "KickResponse", "OwnerTransferRequest", "OwnerTransferResponse",
                     "OwnerClaimResponse",
-                    "ReportCreateRequest", "ReportCreateResponse", "BlacklistResponse",
-                    "BlacklistUserItem", "BlacklistChallengeItem", "BlacklistDeleteResponse");
+                    "ReportCreateRequest", "ReportCreateResponse", "BlockListResponse",
+                    "BlockedUserItem", "BlockedChallengeItem", "BlockDeleteResponse");
         }
 
         @Test
@@ -368,7 +368,7 @@ class OpenApiDocsIT {
                     "$.paths['/api/v1/challenges/{challengeId}/owner'].patch.security",
                     "$.paths['/api/v1/challenges/{challengeId}/owner/claim'].post.security",
                     "$.paths['/api/v1/reports'].post.security",
-                    "$.paths['/api/v1/users/me/blacklist'].get.security")) {
+                    "$.paths['/api/v1/users/me/blocks'].get.security")) {
                 assertThat(doc().<List<Object>>read(path)).as(path).isNotEmpty();
             }
         }

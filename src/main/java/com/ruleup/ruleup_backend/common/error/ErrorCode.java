@@ -172,11 +172,15 @@ public enum ErrorCode {
     // ===== 신고·차단·다른 사용자 프로필 =====
     INVALID_REPORT_TARGET(HttpStatus.BAD_REQUEST, "신고 대상이 올바르지 않습니다."),
     INVALID_REPORT_REASON(HttpStatus.BAD_REQUEST, "신고 사유가 올바르지 않습니다."),
-    DETAIL_REQUIRED(HttpStatus.BAD_REQUEST, "신고 상세 내용을 입력해주세요."),
     CANNOT_REPORT_SELF(HttpStatus.BAD_REQUEST, "본인을 신고할 수 없습니다."),
-    REPORT_SUSPENDED(HttpStatus.FORBIDDEN, "신고 기능이 일시적으로 제한되었습니다."),
+    /**
+     * 신고 기능 정지 — <b>자동 발동이 아니다</b>. 운영자가 남용으로 확정해 건 조치이며
+     * {@code sanctions} 의 FEATURE_SUSPENSION(feature_code=REPORT)이 실체다.
+     * 해제 예정 시각을 {@code error.reason} 에 함께 싣는다.
+     */
+    REPORT_SUSPENDED(HttpStatus.FORBIDDEN, "지금은 신고 기능을 사용할 수 없어요."),
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."),
-    BLACKLIST_ENTRY_NOT_FOUND(HttpStatus.NOT_FOUND, "차단 내역을 찾을 수 없습니다."),
+    BLOCK_ENTRY_NOT_FOUND(HttpStatus.NOT_FOUND, "차단 내역을 찾을 수 없어요."),
 
     // ===== 알림 =====
     /** 필수(A) 타입의 토글을 끄려 함 — 토글 자체가 미노출이므로 발생하면 클라이언트 버그다. */

@@ -15,7 +15,7 @@ import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.room.RoomAuthority;
-import com.ruleup.ruleup_backend.report.BlacklistService;
+import com.ruleup.ruleup_backend.report.BlockService;
 import com.ruleup.ruleup_backend.score.UserScoreSummaryRepository;
 import com.ruleup.ruleup_backend.score.domain.Tier;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
@@ -75,7 +75,7 @@ public class ChallengeMemberService {
     private final VerificationDailyRepository verificationDailyRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final RoomAuthority roomAuthority;
-    private final BlacklistService blacklistService;
+    private final BlockService blockService;
 
     // ===== 가입 =====
     /**
@@ -344,7 +344,7 @@ public class ChallengeMemberService {
                 .collect(Collectors.toMap(User::getId, Function.identity()));
         Map<UUID, com.ruleup.ruleup_backend.score.domain.Tier> tierMap = scoreSummaryRepository.findAllById(userIds)
                 .stream().collect(Collectors.toMap(s -> s.getUserId(), s -> s.getDisplayTier()));
-        Set<UUID> blockedUsers = blacklistService.blockedUsers(viewerId);
+        Set<UUID> blockedUsers = blockService.blockedUsers(viewerId);
 
         List<MemberListResponse.Member> dto = members.stream().map(m -> {
             User u = userMap.get(m.getUserId());

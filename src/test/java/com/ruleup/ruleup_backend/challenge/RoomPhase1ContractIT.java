@@ -216,7 +216,7 @@ class RoomPhase1ContractIT extends ChallengeApiSupport {
                 .content(OM.writeValueAsString(Map.of("targetType", "USER",
                         "targetUserId", target.id().toString(), "contextType", "ROOM",
                         "targetChallengeId", challengeId.toString(),
-                        "reason", "ABUSE", "detail", "반복적인 모욕적인 표현입니다.")))).andReturn();
+                        "reason", "INAPPROPRIATE")))).andReturn();
         assertThat(res.getResponse().getStatus()).isEqualTo(201);
     }
 
