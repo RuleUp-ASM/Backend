@@ -103,7 +103,7 @@ class ChallengeModerationFlowIT extends ChallengeApiSupport {
 
     private int notificationCount(UUID userId, String type) {
         return jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM Notification WHERE userId = ? AND type = ?",
+                "SELECT COUNT(*) FROM notifications WHERE user_id = ? AND type = ?",
                 Integer.class, bytes(userId), type);
     }
 
@@ -142,7 +142,7 @@ class ChallengeModerationFlowIT extends ChallengeApiSupport {
             Map<String, Object> row = awaitTitleDecided(id);
             assertThat(row.get("moderation_title")).isEqualTo("REJECTED");
             assertThat(((Number) row.get("moderation_reject_count")).intValue()).isEqualTo(1);
-            assertThat(notificationCount(m.id(), "CHALLENGE_NAME_REJECTED")).isGreaterThanOrEqualTo(1);
+            assertThat(notificationCount(m.id(), "MODERATION_REJECTED")).isGreaterThanOrEqualTo(1);
         }
 
         @Test
@@ -208,7 +208,7 @@ class ChallengeModerationFlowIT extends ChallengeApiSupport {
             Map<String, Object> row = moderationRow(id);
             assertThat(row.get("moderation_image")).isEqualTo("REJECTED");
             assertThat(row.get("image_url")).isNull();
-            assertThat(notificationCount(m.id(), "CHALLENGE_IMAGE_REJECTED")).isGreaterThanOrEqualTo(1);
+            assertThat(notificationCount(m.id(), "CHALLENGE_IMAGE_REMOVED")).isGreaterThanOrEqualTo(1);
         }
 
         @Test

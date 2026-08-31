@@ -1,6 +1,7 @@
 package com.ruleup.ruleup_backend.watcher.service;
 
-import com.ruleup.ruleup_backend.notification.NotificationService;
+import com.ruleup.ruleup_backend.notification.NotificationEvent;
+import com.ruleup.ruleup_backend.notification.NotificationPublisher;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import com.ruleup.ruleup_backend.watcher.domain.Watcher;
@@ -40,7 +41,7 @@ public class WatcherNotificationDispatcher {
 
     private final WatcherNotificationRepository notificationRepository;
     private final WatcherRepository watcherRepository;
-    private final NotificationService notificationService;
+    private final NotificationPublisher notificationPublisher;
     private final SmsSender smsSender;
     private final ContactCipher contactCipher;
     private final UserRepository userRepository;
@@ -89,9 +90,10 @@ public class WatcherNotificationDispatcher {
 
         if (watcher.getChannel() == WatcherChannel.IN_APP) {
             // 인앱은 가벼운 톤(§8.2).
-            notificationService.notify(watcher.getWatcherUserId(), NotificationType.WATCHER_ROUTINE_FAILED,
+            notificationPublisher.publish(NotificationEvent.of(watcher.getWatcherUserId(),
+                    NotificationType.PENALTY_FAILURE_SHARED,
                     "감시 알림",
-                    nickname + "님이 " + countPhrase + "루틴 약속을 지키지 못했어요.");
+                    nickname + "님이 " + countPhrase + "루틴 약속을 지키지 못했어요."));
         } else if (watcher.getChannel() == WatcherChannel.SMS) {
             if (watcher.getContactEnc() == null) return;   // 연락처 파기된 경우 발송 생략
             String phone = contactCipher.decrypt(watcher.getContactEnc());

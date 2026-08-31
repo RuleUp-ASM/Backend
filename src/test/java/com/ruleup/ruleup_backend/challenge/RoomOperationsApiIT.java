@@ -157,23 +157,28 @@ class RoomOperationsApiIT extends ChallengeApiSupport {
                 Integer.class, bytes(challengeId), bytes(target.id()));
         assertThat(waitDays).isEqualTo(7);
 
-        MvcResult notifications = getAuth("/api/v1/notifications?filter=ROOM", target.token());
-        assertThat((String) read(notifications, "$.data.items[0].type")).isEqualTo("CHALLENGE_MEMBER_KICKED");
+        // 강퇴 확정은 필수(A) — 야간에도 즉시 나가고 끌 수 없다.
+        MvcResult notifications = getAuth("/api/v1/notifications", target.token());
+        assertThat((String) read(notifications, "$.data.items[0].type")).isEqualTo("CHALLENGE_KICKED");
+        assertThat((String) read(notifications, "$.data.items[0].category")).isEqualTo("A");
     }
 
     @Test
-    @DisplayName("알림 설정은 부분 수정 후 동일 계약으로 조회된다")
+    @DisplayName("알림 설정은 유형별 토글로 저장되고 같은 계약으로 조회된다")
     void notificationSettingsPatch() throws Exception {
         Member member = member(uniq("settings"));
         MvcResult patched = patchJsonAuth("/api/v1/users/me/notification-settings", member.token(),
-                Map.of("roomActivity", false, "nightPush", true));
+                Map.of("types", java.util.List.of(
+                        Map.of("type", "ROUTINE_REMINDER", "enabled", false))));
         assertThat(patched.getResponse().getStatus()).isEqualTo(200);
-        assertThat((Boolean) read(patched, "$.data.roomActivity")).isFalse();
-        assertThat((Boolean) read(patched, "$.data.nightPush")).isTrue();
 
         MvcResult fetched = getAuth("/api/v1/users/me/notification-settings", member.token());
-        assertThat((Boolean) read(fetched, "$.data.roomActivity")).isFalse();
-        assertThat((Boolean) read(fetched, "$.data.challengeActivity")).isTrue();
+        java.util.List<Map<String, Object>> types = read(fetched, "$.data.types");
+        assertThat(types).filteredOn(t -> "ROUTINE_REMINDER".equals(t.get("type")))
+                .singleElement().satisfies(t -> assertThat(t.get("enabled")).isEqualTo(false));
+        // 건드리지 않은 항목은 기본 ON 그대로다 — 행이 없으면 ON 으로 해석한다.
+        assertThat(types).filteredOn(t -> "TIER_CHANGED".equals(t.get("type")))
+                .singleElement().satisfies(t -> assertThat(t.get("enabled")).isEqualTo(true));
     }
 
     private MvcResult postJson(String url, String token, Map<String, ?> body) throws Exception {

@@ -20,6 +20,13 @@ public class LoggingPushSender implements PushSender {
     private static final Logger log = LoggerFactory.getLogger(LoggingPushSender.class);
 
     @Override
+    public void sendDisplay(UUID userId, DisplayPush push) {
+        // 문구는 남기지 않는다 — 알림 본문에 사용자 식별 정보가 섞일 수 있다.
+        log.info("[push:stub] 표시 푸시 (미전송 — FCM 어댑터 없음) userId={} type={} deeplink={}",
+                userId, push.type(), push.deeplink());
+    }
+
+    @Override
     public void sendSilent(UUID userId, SilentPush push) {
         // 실제 어댑터가 붙기 전까지는 "무엇을 보낼지"만 관측 가능하게 남긴다(개인정보 최소화 — 토큰/문구 없음).
         log.info("[push:stub] 무음 푸시 (미전송 — FCM 어댑터 없음) userId={} type={} data={}",

@@ -13,7 +13,6 @@ import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
-import com.ruleup.ruleup_backend.notification.NotificationService;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.room.RoomAuthority;
 import com.ruleup.ruleup_backend.report.BlacklistService;
@@ -74,7 +73,6 @@ public class ChallengeMemberService {
     private final UserRepository userRepository;
     private final UserScoreSummaryRepository scoreSummaryRepository;
     private final VerificationDailyRepository verificationDailyRepository;
-    private final NotificationService notificationService;
     private final ApplicationEventPublisher eventPublisher;
     private final RoomAuthority roomAuthority;
     private final BlacklistService blacklistService;
@@ -322,12 +320,8 @@ public class ChallengeMemberService {
 
     /** 봇방장 전환 사실을 잔류 ACTIVE 멤버 전원에게 알린다(선착순 클레임 유도). */
     private void notifyBotOwnerActivated(Challenge c, UUID leavingUserId) {
-        for (ChallengeMember m : memberRepository
-                .findByChallengeIdAndStatusOrderByJoinedAtAsc(c.getId(), MemberStatus.ACTIVE)) {
-            if (m.getUserId().equals(leavingUserId)) continue;
-            notificationService.notify(m.getUserId(), NotificationType.BOT_OWNER_ACTIVATED,
-                    "방장 자리가 비었어요", c.getTitle());
-        }
+        // 봇방장 전환 통지는 폐지됐다 — 선착순 클레임이 사라지면서 알릴 행동이 없어졌다
+        // (챌린지 정책 §11, 알림 정책 2026-08-25). 방은 그대로 운영되고 수정만 불가해진다.
     }
 
     private BusinessException blocked(JoinBlockReason reason) {

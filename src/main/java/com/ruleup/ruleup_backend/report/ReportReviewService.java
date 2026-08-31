@@ -6,7 +6,8 @@ import com.ruleup.ruleup_backend.challenge.repository.UserChallengeCounterReposi
 import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.common.UuidGenerator;
 import com.ruleup.ruleup_backend.llm.LlmClient;
-import com.ruleup.ruleup_backend.notification.NotificationService;
+import com.ruleup.ruleup_backend.notification.NotificationPublisher;
+import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -25,7 +26,7 @@ import java.util.UUID;
 public class ReportReviewService {
     private final JdbcTemplate jdbc;
     private final LlmClient llm;
-    private final NotificationService notificationService;
+    private final NotificationPublisher notificationPublisher;
     private final UserChallengeCounterRepository counterRepository;
     private final UserJoinCounterService joinCounterService;
     private final ApplicationEventPublisher events;
@@ -68,7 +69,6 @@ public class ReportReviewService {
                                 "WHERE target_user_id=? AND target_challenge_id=? AND review_status='VALID' " +
                                 "AND behavior_violation=1 AND duplicate_report=0",
                         Integer.class, bytes(targetUser), bytes(challenge));
-                notifyOwner(challenge, targetUser);
                 if (distinct != null && distinct >= 5) kickNonOwner(challenge, targetUser);
                 if (distinct != null && distinct >= 10) enqueueAdminReview("USER", targetUser, challenge);
             }
@@ -109,18 +109,16 @@ public class ReportReviewService {
         // (새 트랜잭션으로 재계산하면 미커밋 강퇴가 안 보여 옛값을 쓴다).
         counterRepository.setCount(targetUserId, joinCounterService.countActiveSlots(targetUserId));
         events.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "REPORT_AUTO_KICK"));
-        notificationService.notify(targetUserId, NotificationType.CHALLENGE_MEMBER_KICKED,
-                "챌린지에서 내보내졌어요", "유효한 신고가 누적되어 자동 조치되었습니다.");
+        notificationPublisher.publish(NotificationEvent.forChallenge(targetUserId,
+                NotificationType.CHALLENGE_KICKED,
+                "챌린지에서 내보내졌어요", "유효한 신고가 누적되어 자동 조치되었습니다.", challengeId));
     }
 
-    private void notifyOwner(UUID challengeId, UUID targetUserId) {
-        UUID ownerId = jdbc.query("SELECT owner_id FROM challenges WHERE id=? AND owner_type='USER'",
-                rs -> rs.next() ? nullableUuid(rs.getBytes(1)) : null, bytes(challengeId));
-        if (ownerId != null && !ownerId.equals(targetUserId)) {
-            notificationService.notify(ownerId, NotificationType.REPORT_BEHAVIOR_RECEIVED,
-                    "멤버 행동 신고가 접수됐어요", "유효한 신고가 확인되어 방 운영 검토가 필요합니다.");
-        }
-    }
+    /**
+     * 신고 발생 시 방장에게 보내던 알림은 <b>정책상 폐지</b>됐다(알림 정책 2026-08-25).
+     * 방장 권한이 축소되면서 신고는 운영자 검토로만 가고 방장은 개입하지 않는다.
+     * 호출부를 지우지 않고 빈 메서드로 남겨 두면 폐지 사실이 드러나지 않으므로 호출도 함께 제거했다.
+     */
 
     private void enqueueAdminReview(String targetType, UUID targetUser, UUID challenge) {
         Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM report_admin_review_queue WHERE target_type=? " +

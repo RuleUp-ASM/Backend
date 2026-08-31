@@ -15,7 +15,8 @@ import com.ruleup.ruleup_backend.challenge.repository.UserChallengeCounterReposi
 import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
-import com.ruleup.ruleup_backend.notification.NotificationService;
+import com.ruleup.ruleup_backend.notification.NotificationPublisher;
+import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
@@ -34,7 +35,7 @@ public class RoomAdminService {
     private final ChallengeMemberRepository memberRepository;
     private final ChallengeInvitationRepository invitationRepository;
     private final UserChallengeCounterRepository counterRepository;
-    private final NotificationService notificationService;
+    private final NotificationPublisher notificationPublisher;
     private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
@@ -76,8 +77,8 @@ public class RoomAdminService {
         challengeRepository.decrementParticipantCount(challengeId);
         counterRepository.decrement(targetUserId);   // 동시 참여 3개 카운터도 함께 정리
         eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "KICK"));
-        notificationService.notify(targetUserId, NotificationType.CHALLENGE_MEMBER_KICKED,
-                "챌린지에서 내보내졌어요", normalized);
+        notificationPublisher.publish(NotificationEvent.forChallenge(targetUserId,
+                NotificationType.CHALLENGE_KICKED, "챌린지에서 내보내졌어요", normalized, challengeId));
         return new RoomAdminDtos.KickResponse(true, targetUserId.toString(), rejoinAt.toString());
     }
 
@@ -96,8 +97,7 @@ public class RoomAdminService {
         target.changeRole(MemberRole.OWNER);
         // 직접 넘겨받은 방장은 3일 면책 대상이 아니다(정책 §11.3) — 경위를 TRANSFER 로 남긴다.
         challenge.transferOwner(targetUserId, Instant.now(), Challenge.GRANT_TRANSFER);
-        notificationService.notify(targetUserId, NotificationType.OWNER_TRANSFERRED,
-                "방장 권한을 받았어요", challenge.getTitle());
+        // 방장 승계 통지는 방장 권한 축소로 폐지됐다(알림 정책 2026-08-25). 위임 자체가 Phase 2 다.
         return new RoomAdminDtos.TransferResponse(targetUserId.toString(), "MEMBER");
     }
 
