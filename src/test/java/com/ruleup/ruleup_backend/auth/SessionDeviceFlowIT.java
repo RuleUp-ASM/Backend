@@ -63,6 +63,30 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 @Import(TestcontainersConfiguration.class)
 class SessionDeviceFlowIT {
 
+    // ===== 제재 (테스트 보조) =====
+    // 정지의 종류·기간은 sanctions 가 소유하고 users.status 전이는 그와 같은 트랜잭션이어야 한다.
+    // 상태값만 직접 바꾸면 게이트가 스스로 되돌려 버리므로 운영 경로와 같은 서비스를 거친다.
+    @Autowired com.ruleup.ruleup_backend.sanction.SanctionService sanctionService;
+
+    private void lock(java.util.UUID userId) {
+        sanctionService.impose(userId,
+                com.ruleup.ruleup_backend.sanction.domain.SanctionTrack.DISCRETIONARY,
+                com.ruleup.ruleup_backend.sanction.domain.SanctionType.LOCK, null,
+                com.ruleup.ruleup_backend.sanction.domain.SanctionReason.REPORT_CONFIRMED,
+                "테스트 잠금",
+                com.ruleup.ruleup_backend.sanction.domain.SanctionSource.DIRECT, null, null,
+                java.time.Instant.now().plus(java.time.Duration.ofDays(30)));
+    }
+
+    private void ban(java.util.UUID userId) {
+        sanctionService.impose(userId,
+                com.ruleup.ruleup_backend.sanction.domain.SanctionTrack.DISCRETIONARY,
+                com.ruleup.ruleup_backend.sanction.domain.SanctionType.BAN, null,
+                com.ruleup.ruleup_backend.sanction.domain.SanctionReason.ILLEGAL_CONTENT,
+                "테스트 영구 정지",
+                com.ruleup.ruleup_backend.sanction.domain.SanctionSource.DIRECT, null, null, null);
+    }
+
     private static final AtomicInteger SEQ = new AtomicInteger();
 
     @Autowired WebApplicationContext wac;
@@ -222,9 +246,7 @@ class SessionDeviceFlowIT {
         void banned_login_rejected() throws Exception {
             String tag = uniq();
             signup(tag);
-            User user = findUser(tag);
-            user.ban();
-            userRepository.save(user);
+            ban(findUser(tag).getId());
 
             // 로그인 차단 — (provider, subject)가 살아 있으므로 신규 가입 분기로도 못 빠진다
             MvcResult res = postJson("/api/v1/auth/oauth/kakao", loginBody(tag, "inst-" + tag, "dev-" + tag));
@@ -232,18 +254,16 @@ class SessionDeviceFlowIT {
         }
 
         @Test
-        @DisplayName("잠금(LOCKED) 계정은 열람 전용으로 로그인된다 — accountStatus=LOCKED + lockInfo")
+        @DisplayName("잠금 계정은 열람 전용으로 로그인된다 — accountStatus=SUSPENDED + lockInfo")
         void locked_login_allowed_readonly() throws Exception {
             String tag = uniq();
             signup(tag);
-            User user = findUser(tag);
-            user.lock();
-            userRepository.save(user);
+            lock(findUser(tag).getId());
 
             MvcResult res = postJson("/api/v1/auth/oauth/kakao", loginBody(tag, "inst-" + tag, "dev-" + tag));
             assertThat(res.getResponse().getStatus()).isEqualTo(200);
             assertThat((Boolean) read(res, "$.data.isNewUser")).isFalse();
-            assertThat((String) read(res, "$.data.user.accountStatus")).isEqualTo("LOCKED");
+            assertThat((String) read(res, "$.data.user.accountStatus")).isEqualTo("SUSPENDED");
             assertThat((Object) read(res, "$.data.user.lockInfo")).isNotNull();
             assertThat((String) read(res, "$.data.accessToken")).isNotBlank();   // 열람 전용 홈 진입용
         }
@@ -290,9 +310,7 @@ class SessionDeviceFlowIT {
         void locked_can_logout() throws Exception {
             String tag = uniq();
             signup(tag);
-            User user = findUser(tag);
-            user.lock();
-            userRepository.save(user);
+            lock(findUser(tag).getId());
 
             MvcResult login = postJson("/api/v1/auth/oauth/kakao", loginBody(tag, "inst-" + tag, "dev-" + tag));
             String at = read(login, "$.data.accessToken");
@@ -321,9 +339,7 @@ class SessionDeviceFlowIT {
         /** 가입 → 잠금 → 재로그인해서 잠금 상태의 accessToken 을 얻는다. */
         private String lockAndRelogin(String tag) throws Exception {
             signup(tag);
-            User user = findUser(tag);
-            user.lock();
-            userRepository.save(user);
+            lock(findUser(tag).getId());
 
             MvcResult res = postJson("/api/v1/auth/oauth/kakao", loginBody(tag, "inst-" + tag, "dev-" + tag));
             assertThat(res.getResponse().getStatus()).isEqualTo(200);
@@ -359,9 +375,11 @@ class SessionDeviceFlowIT {
             assertThat(user.getDeviceId()).isEqualTo("dev-" + tag + "-b");
             assertThat(user.getInstallationId()).isEqualTo("inst-" + tag + "-b");
 
-            // 기존 기기에 "다른 기기에서 로그인됨" 알림 (인앱 — 다음 접속 시 확인)
-            boolean notified = notificationRepository.findByUserIdOrderByCreatedAtDesc(user.getId()).stream()
-                    .anyMatch(n -> n.getType() == NotificationType.SYSTEM);
+            // 기존 기기에 "다른 기기에서 로그인됨" 알림 — 계정 보안 고지라 필수(A)다.
+            boolean notified = notificationRepository
+                    .findInbox(user.getId(), null, null, org.springframework.data.domain.Limit.unlimited())
+                    .stream()
+                    .anyMatch(n -> NotificationType.DEVICE_LOGGED_OUT.name().equals(n.getType()));
             assertThat(notified).isTrue();
         }
 

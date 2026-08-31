@@ -3,7 +3,7 @@ package com.ruleup.ruleup_backend.profile;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.profile.dto.PublicProfileResponse;
-import com.ruleup.ruleup_backend.report.BlacklistService;
+import com.ruleup.ruleup_backend.report.BlockService;
 import com.ruleup.ruleup_backend.score.UserScoreSummaryRepository;
 import com.ruleup.ruleup_backend.score.domain.Tier;
 import com.ruleup.ruleup_backend.user.UserRepository;
@@ -21,7 +21,7 @@ import java.util.UUID;
 public class PublicProfileService {
     private final UserRepository userRepository;
     private final UserScoreSummaryRepository scoreRepository;
-    private final BlacklistService blacklistService;
+    private final BlockService blockService;
     private final JdbcTemplate jdbc;
 
     @Transactional(readOnly = true)
@@ -29,7 +29,7 @@ public class PublicProfileService {
         User user = userRepository.findById(targetId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
         boolean withdrawn = user.isWithdrawn();
-        boolean blocked = blacklistService.isUserBlocked(viewerId, targetId);
+        boolean blocked = blockService.isUserBlocked(viewerId, targetId);
         Tier tier = scoreRepository.findById(targetId).map(s -> s.getDisplayTier()).orElse(Tier.UNRANKED);
         Long completed = jdbc.queryForObject(
                 "SELECT (SELECT COUNT(*) FROM challenge_members m JOIN challenges c ON c.id=m.challenge_id " +

@@ -13,12 +13,11 @@ import com.ruleup.ruleup_backend.moderation.ModerationRequestRepository;
 import com.ruleup.ruleup_backend.moderation.UserModerationRequested;
 import com.ruleup.ruleup_backend.moderation.domain.ModerationRequest;
 import com.ruleup.ruleup_backend.moderation.domain.ModerationTarget;
+import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.oauth.OAuthClient;
 import com.ruleup.ruleup_backend.oauth.OAuthClientResolver;
 import com.ruleup.ruleup_backend.oauth.OAuthUserInfo;
-import com.ruleup.ruleup_backend.reputation.domain.ReputationScore;
-import com.ruleup.ruleup_backend.reputation.ReputationScoreRepository;
 import com.ruleup.ruleup_backend.score.UserScoreSummaryRepository;
 import com.ruleup.ruleup_backend.score.domain.UserScoreSummary;
 import com.ruleup.ruleup_backend.security.JwtProvider;
@@ -65,9 +64,9 @@ public class AuthService {
 
     private final OAuthClientResolver resolver;
     private final UserRepository userRepository;
-    private final ReputationScoreRepository reputationScoreRepository;
     private final RefreshTokenRepository refreshTokenRepository;
     private final AgreementService agreementService;
+    private final com.ruleup.ruleup_backend.sanction.SanctionService sanctionService;
     private final ModerationRequestRepository moderationRequestRepository;
     private final UserScoreSummaryRepository scoreSummaryRepository;
     private final TokenService tokenService;
@@ -80,9 +79,8 @@ public class AuthService {
     private final AppProperties props;
     private final ApplicationEventPublisher eventPublisher;
     private final CountryResolver countryResolver;
-    private final com.ruleup.ruleup_backend.reputation.MilestoneService milestoneService;
     private final com.ruleup.ruleup_backend.invitation.InvitationService invitationService;
-    private final com.ruleup.ruleup_backend.notification.NotificationService notificationService;
+    private final com.ruleup.ruleup_backend.notification.NotificationPublisher notificationPublisher;
 
     // ===== OAuth 로그인 =====
     // ⚠️ 일부러 @Transactional 을 붙이지 않는다.
@@ -191,8 +189,8 @@ public class AuthService {
      * "회원가입까지는 되고 로그인이 막힌다"는 정책이라, 트랜잭션 안에서 던져 복원을 롤백시키면 안 된다.
      */
     private SignupResponse requireNotBanned(SignupResponse res) {
-        if (res != null && res.user() != null
-                && UserStatus.BANNED.name().equals(res.user().accountStatus()))
+        if (res != null && res.user() != null && res.user().id() != null
+                && sanctionService.isBanActive(UUID.fromString(res.user().id())))
             throw new BusinessException(ErrorCode.ACCOUNT_BANNED);
         return res;
     }
@@ -216,8 +214,11 @@ public class AuthService {
         if (existing != null && !existing.isWithdrawn()) return loginResponseFor(existing);
         if (existing != null) return restoreAndLogin(existing, req, claims, tokenConsumed);
 
-        // 이 설치의 주인이 다른 소셜 계정이면 신규 가입을 막는다(로그인 단계에서 이미 걸렀지만 서버 단독으로도 성립해야 한다).
-        // 소셜만 바꿔 점수·제재를 리셋하는 우회로를 닫는 것이다 — 돌아오려면 원래 소셜 계정으로 와야 한다.
+        // 검사 순서가 계약이다 — 뒤로 갈수록 비싸다(온보딩 5-10).
+        //  1·2) 밴리스트 대조. 영구 정지는 개인정보가 파기돼도 유지되므로 계정 행이 아니라 해시를 본다.
+        //  3)   설치 점유. 소셜만 바꿔 점수·제재를 리셋하는 우회로를 닫는다.
+        if (sanctionService.isBanned(provider.name(), oauthSubject, req.installationId()))
+            throw new BusinessException(ErrorCode.ACCOUNT_BANNED);
         requireInstallationAvailable(req.installationId(), provider, oauthSubject);
 
         // 닉네임 형식 → 중복(신청 PENDING·승인 닉네임 모두 점유로 본다)
@@ -270,9 +271,7 @@ public class AuthService {
         applyCountry(user, req.deviceInfo());   // 지오 헤더 → 기기 지역 → Accept-Language → 기기 타임존 → 기본값
         userRepository.save(user);
 
-        reputationScoreRepository.save(ReputationScore.createDefault(user));   // 매너온도 병존(전환 전)
         UserScoreSummary summary = scoreSummaryRepository.save(UserScoreSummary.initialize(user.getId()));   // 브론즈 10점
-        milestoneService.recordSignup(user.getId(), LocalDate.now(KST));
         invitationService.recordSignup(req.inviteCode(), user.getId(), java.time.Instant.now());   // 친구 초대 기록(선택)
         saveAgreements(user, ag);
         moderationRequestRepository.save(
@@ -336,12 +335,16 @@ public class AuthService {
         if (nicknameTaken) {
             tempNicknameAllocator.assign(user, candidate -> userRepository.isNicknameTaken(candidate, user.getId()));
             user.markNicknameConflict();
-            notificationService.notify(user.getId(), NotificationType.SYSTEM,
+            notificationPublisher.publish(NotificationEvent.of(user.getId(),
+                    NotificationType.MODERATION_REJECTED,
                     "닉네임을 변경해주세요",
-                    "쓰시던 닉네임을 다른 분이 사용 중이라 임시 닉네임으로 시작했어요. 프로필에서 새 닉네임을 정해주세요.");
+                    "쓰시던 닉네임을 다른 분이 사용 중이라 임시 닉네임으로 시작했어요. 프로필에서 새 닉네임을 정해주세요."));
         }
 
-        user.restore(req.installationId(), req.deviceId());   // 탈퇴 직전 상태(정지·잠금 포함)로 되돌린다
+        user.restore(req.installationId(), req.deviceId());   // 탈퇴 직전 상태로 되돌린다
+        // 얼려둔 제재 잔여 기간을 다시 흐르게 하고, 남은 제재가 있으면 SUSPENDED 로 복귀시킨다.
+        // 점수·티어는 계정 행에 붙어 있어 별도 복구가 필요 없다 — 그대로 살아난다.
+        sanctionService.thawAll(user.getId(), Instant.now());
         applyDeviceInfo(user, req.deviceInfo());
         applyCountry(user, req.deviceInfo());
         socialTokenService.flushPending(claims.getId(), user.getId(), user.getOauthProvider());
@@ -376,7 +379,8 @@ public class AuthService {
 
     /** 기존 계정에 토큰을 발급해 가입 응답 형태(isNewUser=false)로 감싼다. */
     private SignupResponse loginResponseFor(User existing) {
-        if (existing.isBanned()) throw new BusinessException(ErrorCode.ACCOUNT_BANNED);
+        if (sanctionService.isBanActive(existing.getId()))
+            throw new BusinessException(ErrorCode.ACCOUNT_BANNED);
         TokenService.TokenPair pair = tokenService.issueTokenPair(existing);
         UserScoreSummary summary = scoreSummaryRepository.findById(existing.getId()).orElse(null);
         return new SignupResponse(false, false, pair.accessToken(), pair.refreshToken(), "Bearer",

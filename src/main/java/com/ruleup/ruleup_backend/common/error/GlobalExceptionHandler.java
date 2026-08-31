@@ -59,6 +59,17 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(org.springframework.http.HttpStatus.METHOD_NOT_ALLOWED).build();
     }
 
+    /**
+     * 상태 코드를 스스로 정해 던진 예외는 그 코드를 그대로 내리고 <b>본문은 비운다</b>.
+     * 개발용 토큰 발급처럼 "존재를 숨겨야 하는" 경로가 이걸 쓴다 — 에러 코드가 내려가면
+     * 그것만으로 경로가 존재한다는 사실이 드러난다. 만능 핸들러가 500 으로 삼키지 않도록 구체 처리.
+     */
+    @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
+    public ResponseEntity<Void> handleResponseStatus(
+            org.springframework.web.server.ResponseStatusException e) {
+        return ResponseEntity.status(e.getStatusCode()).build();
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleUnexpected(Exception e) {
         // sync 본문 상한에 걸려 읽기를 끊은 신호는 어떤 파서를 거쳐 오든 413 이다.

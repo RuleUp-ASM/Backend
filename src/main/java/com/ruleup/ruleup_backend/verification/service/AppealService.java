@@ -89,7 +89,8 @@ public class AppealService {
                 ChallengeStatsRefreshRequested.of(daily.getChallengeId(), "APPEAL_ACCEPTED"));
         // 이상탐지는 인용 이후 비동기로 돈다 — 개별 인용을 지연하거나 뒤집지 않는다.
         eventPublisher.publishEvent(new AppealAccepted(
-                appeal.getId(), userId, daily.getChallengeId(), daily.getTargetDate(), now));
+                appeal.getId(), userId, daily.getChallengeId(), daily.getId(),
+                daily.getTargetDate(), now));
 
         return new AppealResponse(
                 appeal.getId().toString(),
@@ -146,7 +147,12 @@ public class AppealService {
         return 0;
     }
 
-    /** 인용 사실. 이상탐지 기록 등 인용 이후 처리를 트리거한다. */
-    public record AppealAccepted(UUID appealId, UUID userId, UUID challengeId,
+    /**
+     * 인용 사실. 이상탐지 기록과 <b>점수 소급 정정</b>을 트리거한다.
+     *
+     * <p>{@code verificationDailyId} 가 정정의 멱등 앵커다 — 같은 판정을 두 번 정정하면 점수가
+     * 두 번 오르므로 그 키로 막는다.
+     */
+    public record AppealAccepted(UUID appealId, UUID userId, UUID challengeId, UUID verificationDailyId,
                                  LocalDate targetDate, Instant acceptedAt) {}
 }
