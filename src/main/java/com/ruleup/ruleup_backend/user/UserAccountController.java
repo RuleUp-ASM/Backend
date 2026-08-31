@@ -39,11 +39,10 @@ public class UserAccountController {
                     로그인 응답의 `user` 블록에 **본인만 볼 수 있는 항목**(생일·성별·약관 동의 상태)을 더해 내려준다.
                     타인이 보는 공개 프로필과는 다른 API 다.
 
-                    `agreements` 는 약관 6종의 **현재 상태**다. 동의 이력은 append-only 로 쌓이고 여기에는 각 약관의 최신 1건만 나온다.
-                    키는 가입 요청과 같은 `termsOfService`·`privacyPolicy`·`locationService`·`marketing`·`event`·`nightPush` 이고,
-                    각 항목은 `{ agreed, version, agreedAt }` 형태다.
-                    저장된 `version` 을 `GET /api/v1/intro` 의 현행 버전과 비교하면 재동의가 필요한지 판단할 수 있다.
-                    한 번도 기록이 없는 약관은 키 자체가 빠진다.
+                    `agreements` 는 동의 7종(약관 5종 + 법정 개별 동의 2종)의 **현재 상태**다.
+                    키는 `termsOfService`·`privacyPolicy`·`locationService`·`marketing`·`event`·`locationInfo`·`healthInfo` 이고,
+                    각 항목은 `{ agreed, version, agreedAt }` 형태다. 한 번도 기록이 없는 항목은 키 자체가 빠진다.
+                    재동의 필요 여부까지 서버가 계산해 주는 **`GET /api/v1/users/me/agreements`** 를 쓰는 편이 낫다.
 
                     `birthDate`·`gender` 는 온보딩에서 수집하지 않았다면 null 이다.
 

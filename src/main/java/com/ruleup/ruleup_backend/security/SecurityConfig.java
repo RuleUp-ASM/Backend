@@ -24,6 +24,7 @@ public class SecurityConfig {
     private final JwtProvider jwtProvider;
     private final JwtAuthenticationEntryPoint entryPoint;
     private final com.ruleup.ruleup_backend.user.UserRepository userRepository;
+    private final com.ruleup.ruleup_backend.sanction.SanctionService sanctionService;
 
     // 로그인 없이 접근 가능한 공개 경로
     private static final String[] PUBLIC = {
@@ -34,6 +35,8 @@ public class SecurityConfig {
             "/api/v1/nicknames/**",          // 4.6 닉네임 검사
             "/api/v1/categories",            // 4.7 카테고리 마스터
             "/api/v1/challenge-categories",  // 탐색 §2.2 홈 카테고리 그리드(공개 표시용 수치)
+            "/api/v1/app-links/check",       // 딥링크 진입 시점 — 아직 로그인 전일 수 있다
+            "/api/v1/dev/tokens",            // 개발용 토큰 발급(비-prod 전용). 시크릿 헤더로 따로 막는다
             "/files/**",                     // 정적 이미지 서빙
             "/actuator/health"
     };
@@ -49,9 +52,9 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         JwtAuthenticationFilter jwtFilter = new JwtAuthenticationFilter(jwtProvider);
-        // 제재 상태 강제(§7) — 잠금은 열람 전용, 영구 정지는 전면 차단. 인증이 세팅된 뒤 검사한다.
+        // 계정 상태 게이트 — status 를 먼저 보고 SUSPENDED 일 때만 sanctions 로 차단 범위를 정한다.
         // (@Component 로 두면 Boot 가 서블릿 필터로도 자동 등록해 이중 실행되므로 여기서 직접 만든다)
-        AccountStatusFilter accountStatusFilter = new AccountStatusFilter(userRepository);
+        AccountStatusFilter accountStatusFilter = new AccountStatusFilter(userRepository, sanctionService);
 
         http
                 .csrf(AbstractHttpConfigurer::disable)
@@ -61,13 +64,10 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(PUBLIC).permitAll()
                         .requestMatchers(SWAGGER).permitAll()
-                        // 감시자(§11.4): 공개 진입/비유저 동의 경로. 초대 진입(GET)은 로그인 선택(토큰 있으면 viewerIsUser).
-                        // accept(유저 수락)는 공개 목록에서 제외 → 인증 필요(anyRequest).
+                        // 감시자: 초대 진입(GET)은 로그인 선택 — 링크를 받은 사람이 아직 회원이 아닐 수 있다.
+                        // 수락(POST)은 관계를 만드는 행위라 인증이 필요하다(공개 목록에서 제외).
+                        // 구 OTP·비유저 동의·수신거부 경로는 감시자 도메인 개편(2026-08-28)으로 사라졌다.
                         .requestMatchers(HttpMethod.GET,  "/api/v1/watchers/invitations/*").permitAll()
-                        .requestMatchers(HttpMethod.POST,
-                                "/api/v1/watchers/invitations/*/otp",
-                                "/api/v1/watchers/invitations/*/consent",
-                                "/api/v1/watchers/unsubscribe").permitAll()
                         // 4.5 로그아웃은 명세상 "로그인 O" → 인증 필요(공개 목록에서 제외)
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").authenticated()
                         .anyRequest().authenticated()

@@ -1,9 +1,10 @@
 package com.ruleup.ruleup_backend.watcher.controller;
 
-import com.ruleup.ruleup_backend.common.error.BusinessException;
+import com.ruleup.ruleup_backend.common.docs.ApiErrorCodes;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.response.ApiResponse;
-import com.ruleup.ruleup_backend.watcher.dto.*;
+import com.ruleup.ruleup_backend.watcher.dto.InvitationEntryResponse;
+import com.ruleup.ruleup_backend.watcher.dto.WatcherAcceptResponse;
 import com.ruleup.ruleup_backend.watcher.service.WatcherInvitationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -14,10 +15,12 @@ import org.springframework.web.bind.annotation.*;
 import java.util.UUID;
 
 /**
- * 감시자 초대 진입·수락·동의(OTP)·수신거부 (§11.4).
- * 진입(GET)·OTP·동의·수신거부는 공개(비유저 접근). 수락(accept)만 유저 로그인 필요.
+ * 초대 진입과 수락.
+ *
+ * <p>구 계약의 <b>OTP 발송·비유저 웹 동의·수신거부 3종은 폐지</b>됐다. SMS·이메일 채널과
+ * 비유저 감시자 개념이 사라졌고, 동의 성립은 인앱 수락 하나로 단일화됐다.
  */
-@Tag(name = "WatcherInvitation", description = "감시자 초대 진입 · 수락 · 동의(OTP) · 수신거부")
+@Tag(name = "WatcherInvitation", description = "감시자 초대 진입 · 인앱 수락")
 @RestController
 @RequestMapping("/api/v1/watchers")
 @RequiredArgsConstructor
@@ -25,53 +28,33 @@ public class WatcherInvitationController {
 
     private final WatcherInvitationService invitationService;
 
-    @Operation(summary = "초대 진입(공개)",
-            description = "토큰 검증 + 안내. viewerIsUser로 인앱 수락(유저)/웹 동의 폼(비유저) 분기. "
-                    + "30일 차단이면 200 + blocked=true.")
+    @Operation(
+            summary = "초대 카드 조회",
+            description = """
+                    딥링크로 열렸을 때 "누가 무엇으로 초대했는지"를 보여준다.
+                    **이 호출만으로는 어떤 동의도 성립하지 않는다.**
+                    """)
+    @ApiErrorCodes({ErrorCode.INVITATION_INVALID, ErrorCode.INVITATION_EXPIRED})
     @GetMapping("/invitations/{token}")
-    public ApiResponse<InvitationEntryResponse> entry(@AuthenticationPrincipal String userId,
-                                                      @PathVariable String token) {
-        UUID viewer = (userId != null) ? UUID.fromString(userId) : null;
-        return ApiResponse.ok(invitationService.getByToken(token, viewer));
+    public ApiResponse<InvitationEntryResponse> entry(@PathVariable String token) {
+        return ApiResponse.ok(invitationService.getByToken(token));
     }
 
-    @Operation(summary = "유저 수락(인앱=동의)", description = "룰업 유저 감시자의 인앱 수락. 채널 IN_APP. 로그인 필요.")
+    @Operation(
+            summary = "인앱 수락",
+            description = """
+                    **동의가 성립하는 유일한 경로**다. 서버가 토큰 검증과 로그인 확인을 모두 마친 뒤에만
+                    PENDING → ACTIVE 로 전이하고 수락 시각을 남긴다 —
+                    클라이언트가 "수락했다"고 주장하는 것으로는 전이하지 않는다.
+
+                    **로그인 필수**다. 웹 수락은 동의 주체 확인이 약해 인정하지 않으며,
+                    미설치자는 스토어를 거쳐 가입한 뒤 이 경로로 들어온다.
+                    """)
+    @ApiErrorCodes({ErrorCode.INVITATION_INVALID, ErrorCode.INVITATION_EXPIRED,
+            ErrorCode.ALREADY_WATCHER, ErrorCode.CANNOT_WATCH_SELF, ErrorCode.LOGIN_REQUIRED})
     @PostMapping("/invitations/{token}/accept")
     public ApiResponse<WatcherAcceptResponse> accept(@AuthenticationPrincipal String userId,
                                                      @PathVariable String token) {
         return ApiResponse.ok(invitationService.accept(token, UUID.fromString(userId)));
-    }
-
-    @Operation(summary = "비유저 OTP 발송(공개)",
-            description = "감시자 본인이 입력한 번호로 SMS OTP 발송(야간 디퍼 예외=즉시). 재발송 쿨다운 적용.")
-    @PostMapping("/invitations/{token}/otp")
-    public ApiResponse<OtpSendResponse> sendOtp(@PathVariable String token,
-                                                @RequestBody OtpSendRequest request) {
-        return ApiResponse.ok(invitationService.sendOtp(token, request.phone()));
-    }
-
-    @Operation(summary = "비유저 동의(공개)",
-            description = "OTP 검증 + 연락처·수신동의 저장. 채널 SMS, 생성자에겐 마스킹 번호만 노출.")
-    @PostMapping("/invitations/{token}/consent")
-    public ApiResponse<WatcherConsentResponse> consent(@PathVariable String token,
-                                                       @RequestBody ConsentRequest request) {
-        UUID otpId = parseOtpId(request.otpId());
-        return ApiResponse.ok(invitationService.consent(token, otpId, request.otpCode(), request.consent()));
-    }
-
-    @Operation(summary = "SMS 수신거부(공개)",
-            description = "SMS 본문 링크의 서명 토큰으로 처리. 즉시 REVOKED + 발송 중단 + 동일 생성자 30일 재초대 차단.")
-    @PostMapping("/unsubscribe")
-    public ApiResponse<WatcherUnsubscribeResponse> unsubscribe(@RequestParam String token) {
-        return ApiResponse.ok(invitationService.unsubscribe(token));
-    }
-
-    private UUID parseOtpId(String raw) {
-        if (raw == null || raw.isBlank()) throw new BusinessException(ErrorCode.OTP_INVALID);
-        try {
-            return UUID.fromString(raw);
-        } catch (IllegalArgumentException e) {
-            throw new BusinessException(ErrorCode.OTP_INVALID);
-        }
     }
 }

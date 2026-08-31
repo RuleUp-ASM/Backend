@@ -3,9 +3,9 @@ package com.ruleup.ruleup_backend.auth;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jayway.jsonpath.JsonPath;
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
-import com.ruleup.ruleup_backend.agreement.UserAgreementRepository;
+import com.ruleup.ruleup_backend.agreement.UserAgreementEventRepository;
 import com.ruleup.ruleup_backend.agreement.domain.AgreementType;
-import com.ruleup.ruleup_backend.agreement.domain.UserAgreement;
+import com.ruleup.ruleup_backend.agreement.domain.UserAgreementEvent;
 import com.ruleup.ruleup_backend.config.AppProperties;
 import com.ruleup.ruleup_backend.moderation.ModerationRequestRepository;
 import com.ruleup.ruleup_backend.moderation.domain.ModerationRequest;
@@ -77,7 +77,7 @@ class SignupFlowIT {
     private final ObjectMapper om = new ObjectMapper();   // 직렬화 전용(빈 아님 — Boot4는 Jackson3 빈)
     @Autowired AppProperties props;
     @Autowired UserRepository userRepository;
-    @Autowired UserAgreementRepository agreementRepository;
+    @Autowired UserAgreementEventRepository agreementRepository;
     @Autowired ModerationRequestRepository moderationRequestRepository;
     @Autowired UserScoreSummaryRepository scoreSummaryRepository;
 
@@ -153,7 +153,6 @@ class SignupFlowIT {
         ag.put("locationService", agreement(true));
         ag.put("marketing", agreement(true));
         ag.put("event", agreement(false));
-        ag.put("nightPush", agreement(false));
         return ag;
     }
 
@@ -233,9 +232,10 @@ class SignupFlowIT {
             assertThat(user.getApprovedNickname()).hasSize(8).isNotEqualTo(user.getNickname());
             assertThat(user.getNicknameStatus()).isIn(NicknameStatus.PENDING, NicknameStatus.APPROVED);
 
-            // 약관 6종 이력 — 필수 3종 true, event/nightPush 는 false 로도 행이 남는다(append-only)
-            List<UserAgreement> ags = agreementRepository.findByUser_IdOrderByCreatedAtDescIdDesc(user.getId());
-            assertThat(ags).hasSize(6);
+            // 약관 5종 이력 — 필수 3종 true, event 는 false 로도 행이 남는다(append-only).
+            // 법정 개별 동의 2종은 가입에서 받지 않으므로 여기 없다.
+            List<UserAgreementEvent> ags = agreementRepository.findByUser_IdOrderByCreatedAtDescIdDesc(user.getId());
+            assertThat(ags).hasSize(5);
             assertThat(ags).filteredOn(a -> a.getAgreementType() == AgreementType.TOS).singleElement()
                     .satisfies(a -> assertThat(a.isAgreed()).isTrue());
             assertThat(ags).filteredOn(a -> a.getAgreementType() == AgreementType.LOCATION).singleElement()
@@ -278,13 +278,12 @@ class SignupFlowIT {
         }
 
         @Test
-        @DisplayName("선택 약관(마케팅·이벤트·야간)은 모두 거부해도 가입된다")
+        @DisplayName("선택 약관(마케팅·이벤트)은 모두 거부해도 가입된다")
         void signup_optional_agreements_all_false_allowed() throws Exception {
             Map<String, Object> body = preparedSignup(uniq(), "선택거부" + SEQ.get());
             Map<String, Object> ag = allAgreements();
             ag.put("marketing", agreement(false));
             ag.put("event", agreement(false));
-            ag.put("nightPush", agreement(false));
             body.put("agreements", ag);
             assertThat(postJson("/api/v1/auth/signup", body).getResponse().getStatus()).isEqualTo(200);
         }

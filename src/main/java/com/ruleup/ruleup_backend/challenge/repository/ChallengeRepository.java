@@ -89,26 +89,6 @@ public interface ChallengeRepository extends JpaRepository<Challenge, UUID> {
             "AND c.endDate >= :today")
     List<Challenge> findExploreCandidates(@Param("today") LocalDate today);
 
-    /**
-     * 목록 화면(§3): 공통 제외(삭제·COMPLETED·미승인·종료) 후 필터(AND)를 적용해 후보를 가져온다.
-     * 정렬·커서 페이지네이션은 앱단(ChallengeExploreService)에서 역정규화 값으로 처리한다.
-     * 필터 파라미터가 null 이면 그 조건은 건너뛴다(전체). applyManner=true 면 "내가 들어갈 수 있는 것"만.
-     */
-    @Query("SELECT c FROM Challenge c WHERE c.deletedAt IS NULL " +
-            "AND c.moderationStatus IN (com.ruleup.ruleup_backend.challenge.domain.ChallengeModerationStatus.NONE, com.ruleup.ruleup_backend.challenge.domain.ChallengeModerationStatus.APPROVED) " +
-            "AND c.status <> com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus.COMPLETED " +
-            "AND c.endDate >= :today " +
-            "AND (:category IS NULL OR c.category = :category) " +
-            "AND (:participationType IS NULL OR c.participationType = :participationType) " +
-            "AND (:verificationType IS NULL OR c.verificationType = :verificationType) " +
-            "AND (:applyManner = false OR c.minMannerTemperature IS NULL OR c.minMannerTemperature <= :myTemp)")
-    List<Challenge> findExploreList(@Param("today") LocalDate today,
-                                    @Param("category") String category,
-                                    @Param("participationType") ParticipationType participationType,
-                                    @Param("verificationType") String verificationType,
-                                    @Param("applyManner") boolean applyManner,
-                                    @Param("myTemp") BigDecimal myTemp);
-
     /** 템플릿별 사용자 수(§3.2.1): 파생된 모든(삭제 제외) 챌린지의 현재 참여자 수 합. */
     @Query("SELECT c.templateId, SUM(c.participantCount) FROM Challenge c " +
             "WHERE c.deletedAt IS NULL AND c.templateId IS NOT NULL GROUP BY c.templateId")

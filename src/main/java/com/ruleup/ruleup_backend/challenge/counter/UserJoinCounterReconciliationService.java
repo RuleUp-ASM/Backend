@@ -90,9 +90,13 @@ public class UserJoinCounterReconciliationService {
      * 위 보정으로는 절대 드러나지 않는다. 라이프사이클 배치 정지를 조기에 잡기 위한 창이다.
      */
     private void observeStuckChallenges() {
+        // end_date 는 KST 달력 날짜다. CURDATE() 는 DB 세션(UTC) 기준이라 00~09시 KST 사이에는
+        // 하루 전 날짜를 주고, 그 시간대에는 어제 끝난 방을 아직 안 끝난 것으로 본다.
+        // UTC_TIMESTAMP() 는 세션 타임존과 무관하게 UTC 이므로 거기서 +09:00 으로 옮겨 KST 오늘을 만든다.
         Integer stuck = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM challenges " +
-                        "WHERE status <> 'COMPLETED' AND deleted_at IS NULL AND end_date < CURDATE()",
+                        "WHERE status <> 'COMPLETED' AND deleted_at IS NULL " +
+                        "  AND end_date < DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00'))",
                 Integer.class);
         if (stuck != null && stuck > 0) {
             log.warn("join_counter_stuck_challenges count={} — 종료일이 지났는데 COMPLETED 가 아닌 방이 있다"

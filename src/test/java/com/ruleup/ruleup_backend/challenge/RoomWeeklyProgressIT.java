@@ -85,7 +85,7 @@ class RoomWeeklyProgressIT extends ChallengeApiSupport {
         Member me = member(uniq("weekly-upcoming"));
         UUID challengeId = insertChallenge(me.id(), "EXERCISE", "UPCOMING", "GROUP");
         insertActiveMembership(challengeId, me.id(), "OWNER");
-        jdbcTemplate.update("UPDATE challenges SET start_date = DATE_ADD(CURDATE(), INTERVAL 2 DAY) WHERE id=?",
+        jdbcTemplate.update("UPDATE challenges SET start_date = DATE_ADD(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 2 DAY) WHERE id=?",
                 bytes(challengeId));
 
         JsonNode data = room(challengeId, me);
@@ -130,7 +130,7 @@ class RoomWeeklyProgressIT extends ChallengeApiSupport {
     private UUID room(Member me, int startedDaysAgo, int weeklyCount) {
         UUID challengeId = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
         insertActiveMembership(challengeId, me.id(), "OWNER");
-        jdbcTemplate.update("UPDATE challenges SET start_date = DATE_SUB(CURDATE(), INTERVAL ? DAY), " +
+        jdbcTemplate.update("UPDATE challenges SET start_date = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL ? DAY), " +
                         " weekly_count = ? WHERE id = ?",
                 startedDaysAgo, weeklyCount, bytes(challengeId));
         // 방장은 시작일부터 있던 사람이다 — 중간 입장 분기를 타지 않게 가입 시각을 시작일로 맞춘다.
@@ -156,7 +156,7 @@ class RoomWeeklyProgressIT extends ChallengeApiSupport {
                 (rs, i) -> uuidOf(rs.getBytes(1)), bytes(challengeId), bytes(me.id()));
         jdbcTemplate.update("INSERT INTO VerificationDaily " +
                         "(id, challengeMemberId, challengeId, userId, targetDate, status, verifiedAt) " +
-                        "VALUES (?, ?, ?, ?, DATE_SUB(CURDATE(), INTERVAL ? DAY), 'SUCCESS', NOW(6))",
+                        "VALUES (?, ?, ?, ?, DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL ? DAY), 'SUCCESS', NOW(6))",
                 bytes(UUID.randomUUID()), bytes(memberId), bytes(challengeId), bytes(me.id()), daysAgo);
     }
 

@@ -6,7 +6,8 @@ import com.ruleup.ruleup_backend.auth.dto.OAuthLoginResponse;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.web.CountryResolver;
-import com.ruleup.ruleup_backend.notification.NotificationService;
+import com.ruleup.ruleup_backend.notification.NotificationPublisher;
+import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.oauth.OAuthUserInfo;
 import com.ruleup.ruleup_backend.score.UserScoreSummaryRepository;
@@ -35,10 +36,11 @@ import java.util.UUID;
 public class LoginSessionService {
 
     private final UserRepository userRepository;
+    private final com.ruleup.ruleup_backend.sanction.SanctionService sanctionService;
     private final RefreshTokenRepository refreshTokenRepository;
     private final UserScoreSummaryRepository scoreSummaryRepository;
     private final SocialTokenService socialTokenService;
-    private final NotificationService notificationService;
+    private final NotificationPublisher notificationPublisher;
     private final CountryResolver countryResolver;
     private final TokenService tokenService;
 
@@ -49,7 +51,8 @@ public class LoginSessionService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.LOGIN_FAILED));
 
         // 영구 정지 계정은 로그인 자체를 차단한다.
-        if (user.isBanned()) throw new BusinessException(ErrorCode.ACCOUNT_BANNED);
+        if (sanctionService.isBanActive(user.getId()))
+            throw new BusinessException(ErrorCode.ACCOUNT_BANNED);
 
         // 탈퇴 계정은 여기로 오지 않는다 — AuthService 가 신규 분기(signupToken)로 보내고,
         // 복원은 가입 요청에서 처리한다("탈퇴 후에는 회원가입을 거쳐 로그인", 회원 정책 §6).
@@ -59,9 +62,11 @@ public class LoginSessionService {
                 && !req.deviceId().equals(user.getDeviceId());
         if (deviceChanged) {
             refreshTokenRepository.revokeAllByUserId(user.getId(), Instant.now());
-            notificationService.notify(user.getId(), NotificationType.SYSTEM,
+            // 필수(A) — 계정 보안 고지라 야간에도 즉시 나간다.
+            notificationPublisher.publish(NotificationEvent.of(user.getId(),
+                    NotificationType.DEVICE_LOGGED_OUT,
                     "다른 기기에서 로그인됨",
-                    "새 기기에서 로그인되어 기존 기기의 세션이 종료됐어요. 본인이 아니라면 계정 보안을 확인해주세요.");
+                    "새 기기에서 로그인되어 기존 기기의 세션이 종료됐어요. 본인이 아니라면 계정 보안을 확인해주세요."));
         }
 
         // ===== 설치 인계 — uq_users_active_installation_id: 하나의 설치는 한 활성 계정에만 연결 =====

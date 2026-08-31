@@ -85,7 +85,7 @@ class VerificationGraceWindowIT extends VerificationApiSupport {
 
     /** 챌린지 시작일을 당겨 과거 날짜도 인증 대상이 되게 한다. */
     private void startedDaysAgo(UUID challengeId, int days) {
-        jdbc().update("UPDATE challenges SET start_date = DATE_SUB(CURDATE(), INTERVAL ? DAY) WHERE id = ?",
+        jdbc().update("UPDATE challenges SET start_date = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL ? DAY) WHERE id = ?",
                 days, bytes(challengeId));
     }
 

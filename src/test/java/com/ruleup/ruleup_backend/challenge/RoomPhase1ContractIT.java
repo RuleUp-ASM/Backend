@@ -216,7 +216,7 @@ class RoomPhase1ContractIT extends ChallengeApiSupport {
                 .content(OM.writeValueAsString(Map.of("targetType", "USER",
                         "targetUserId", target.id().toString(), "contextType", "ROOM",
                         "targetChallengeId", challengeId.toString(),
-                        "reason", "ABUSE", "detail", "반복적인 모욕적인 표현입니다.")))).andReturn();
+                        "reason", "INAPPROPRIATE")))).andReturn();
         assertThat(res.getResponse().getStatus()).isEqualTo(201);
     }
 
@@ -236,7 +236,7 @@ class RoomPhase1ContractIT extends ChallengeApiSupport {
         UUID id = UUID.randomUUID();
         jdbcTemplate.update("INSERT INTO VerificationDaily " +
                         "(id, challengeMemberId, challengeId, userId, targetDate, status, verifiedAt, shareableAt) " +
-                        "VALUES (?, ?, ?, ?, DATE_SUB(CURDATE(), INTERVAL ? DAY), ?, " + PAST + ", "
+                        "VALUES (?, ?, ?, ?, DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL ? DAY), ?, " + PAST + ", "
                         + (shareableSql == null ? "NULL" : shareableSql) + ")",
                 bytes(id), bytes(memberId), bytes(challengeId), bytes(userId), daysAgo, status);
         return id;
@@ -250,7 +250,7 @@ class RoomPhase1ContractIT extends ChallengeApiSupport {
         UUID id = UUID.randomUUID();
         jdbcTemplate.update("INSERT INTO VerificationDaily " +
                         "(id,challengeMemberId,challengeId,userId,targetDate,status,verifiedAt,shareableAt) " +
-                        "VALUES (?,?,?,?,DATE_SUB(CURDATE(), INTERVAL ? DAY),?," +
+                        "VALUES (?,?,?,?,DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL ? DAY),?," +
                         "DATE_SUB(NOW(6), INTERVAL ? MINUTE),DATE_SUB(NOW(6), INTERVAL ? MINUTE))",
                 bytes(id), bytes(memberId), bytes(challengeId), bytes(userId), daysAgo, status,
                 minutesAgo, minutesAgo);

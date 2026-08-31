@@ -50,6 +50,30 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 @Import(TestcontainersConfiguration.class)
 class WithdrawRestoreFlowIT {
 
+    // ===== 제재 (테스트 보조) =====
+    // 정지의 종류·기간은 sanctions 가 소유하고 users.status 전이는 그와 같은 트랜잭션이어야 한다.
+    // 상태값만 직접 바꾸면 게이트가 스스로 되돌려 버리므로 운영 경로와 같은 서비스를 거친다.
+    @Autowired com.ruleup.ruleup_backend.sanction.SanctionService sanctionService;
+
+    private void lock(java.util.UUID userId) {
+        sanctionService.impose(userId,
+                com.ruleup.ruleup_backend.sanction.domain.SanctionTrack.DISCRETIONARY,
+                com.ruleup.ruleup_backend.sanction.domain.SanctionType.LOCK, null,
+                com.ruleup.ruleup_backend.sanction.domain.SanctionReason.REPORT_CONFIRMED,
+                "테스트 잠금",
+                com.ruleup.ruleup_backend.sanction.domain.SanctionSource.DIRECT, null, null,
+                java.time.Instant.now().plus(java.time.Duration.ofDays(30)));
+    }
+
+    private void ban(java.util.UUID userId) {
+        sanctionService.impose(userId,
+                com.ruleup.ruleup_backend.sanction.domain.SanctionTrack.DISCRETIONARY,
+                com.ruleup.ruleup_backend.sanction.domain.SanctionType.BAN, null,
+                com.ruleup.ruleup_backend.sanction.domain.SanctionReason.ILLEGAL_CONTENT,
+                "테스트 영구 정지",
+                com.ruleup.ruleup_backend.sanction.domain.SanctionSource.DIRECT, null, null, null);
+    }
+
     private static final AtomicInteger SEQ = new AtomicInteger();
 
     @Autowired WebApplicationContext wac;
@@ -136,7 +160,6 @@ class WithdrawRestoreFlowIT {
         ag.put("locationService", agreement(true));
         ag.put("marketing", agreement(true));
         ag.put("event", agreement(false));
-        ag.put("nightPush", agreement(false));
         body.put("agreements", ag);
         body.put("deviceId", "dev-" + tag);
         body.put("deviceInfo", deviceInfo());
@@ -253,20 +276,19 @@ class WithdrawRestoreFlowIT {
         }
 
         @Test
-        @DisplayName("영구 정지(BANNED) 계정도 탈퇴할 수 있다 — 막는 대신 제재를 따라오게 한다")
+        @DisplayName("영구 정지 계정도 탈퇴할 수 있다 — 막는 대신 제재를 따라오게 한다")
         void banned_can_withdraw_but_sanction_is_kept() throws Exception {
             String tag = uniq();
             String at = read(signup(tag, "정지유저" + SEQ.get()), "$.data.accessToken");
-            User user = findUser(tag);
-            user.ban();
-            userRepository.save(user);
+            ban(findUser(tag).getId());
 
             assertThat(withdraw(at, "탈퇴할게요").getResponse().getStatus()).isEqualTo(200);
 
             User withdrawn = findUser(tag);
             assertThat(withdrawn.getStatus()).isEqualTo(UserStatus.WITHDRAWN);
-            // 정지였다는 사실이 남아야 재가입 승계가 가능하다 — 이게 없으면 탈퇴가 곧 세탁이다.
-            assertThat(withdrawn.carriedOverStatus()).isEqualTo(UserStatus.BANNED);
+            // 제재였다는 사실이 남아야 재가입 승계가 가능하다 — 이게 없으면 탈퇴가 곧 세탁이다.
+            // 제재의 종류·기간 자체는 sanctions 가 계정 행에 붙어 그대로 남는다.
+            assertThat(withdrawn.carriedOverStatus()).isEqualTo(UserStatus.SUSPENDED);
             assertThat(withdrawn.getInstallationId()).isNotNull();
         }
 
@@ -275,16 +297,14 @@ class WithdrawRestoreFlowIT {
         void banned_can_sign_up_again_but_cannot_log_in() throws Exception {
             String tag = uniq();
             String at = read(signup(tag, "정지복원" + SEQ.get()), "$.data.accessToken");
-            User user = findUser(tag);
-            user.ban();
-            userRepository.save(user);
+            ban(findUser(tag).getId());
             withdraw(at, "탈퇴할게요");
 
             expectError(comeBack(tag, "inst-" + tag), 403, "ACCOUNT_BANNED");   // 토큰을 주지 않는다
 
             // 가입(복원) 자체는 커밋됐다 — 롤백해버리면 "가입까지는 된다"가 성립하지 않는다
             User restored = findUser(tag);
-            assertThat(restored.getStatus()).isEqualTo(UserStatus.BANNED);
+            assertThat(restored.getStatus()).isEqualTo(UserStatus.SUSPENDED);
             assertThat(restored.getDeletedAt()).isNull();
         }
     }
@@ -508,7 +528,9 @@ class WithdrawRestoreFlowIT {
             assertThat((String) read(res, "$.data.agreements.termsOfService.agreedAt")).isNotBlank();
             assertThat((Boolean) read(res, "$.data.agreements.marketing.agreed")).isTrue();
             assertThat((Boolean) read(res, "$.data.agreements.event.agreed")).isFalse();
-            assertThat((Boolean) read(res, "$.data.agreements.nightPush.agreed")).isFalse();
+            // 법정 개별 동의 2종은 가입 시점에 받지 않으므로 키 자체가 없다 — 인증 수단 최초 사용 시점에 받는다.
+            assertThat((Map<String, Object>) read(res, "$.data.agreements"))
+                    .doesNotContainKeys("locationInfo", "healthInfo");
         }
 
         @Test

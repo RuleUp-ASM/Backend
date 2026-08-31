@@ -22,12 +22,13 @@ import java.util.UUID;
  * OAuth(provider+subject)로 식별. 개인정보(생일·성별·이메일)는 user_information(1:1)으로 분리.
  * - 생성은 반드시 정적 팩토리 create(...)를 통한다 (id 자동 채움).
  * - 탈퇴는 소프트 탈퇴: status=WITHDRAWN + deleted_at 기록 (withdraw()).
+ * - status 는 ACTIVE/SUSPENDED/WITHDRAWN 3종뿐이다. 정지의 종류·기간은 sanctions 가 소유한다.
  * - 닉네임 2컬럼 모델: nickname(신청값, 본인 화면) / approvedNickname(타인에게 항상 노출).
  *   최초 가입 직후 approvedNickname 은 UUID 기반 임시 8자리.
  * - PK는 UUID v7 → BINARY(16).
  *
  * <p><b>{@code @DynamicUpdate} 인 이유</b>: 이 행은 서로 다른 트랜잭션이 각자 다른 컬럼을 고친다 —
- * 비동기 검수(닉네임/사진 상태), 로그인(기기·접속 시각), 탈퇴·잠금(status·deleted_at).
+ * 비동기 검수(닉네임/사진 상태), 로그인(기기·접속 시각), 탈퇴·제재(status·deleted_at).
  * 전체 컬럼 UPDATE(기본 동작)면 늦게 커밋되는 쪽이 자기가 읽은 낡은 스냅샷으로 남의 변경을
  * 덮어쓴다(lost update). 실제로 커밋 직후 시작되는 검수가 탈퇴/잠금을 ACTIVE로 되돌렸다.
  * 변경 컬럼만 UPDATE하면 서로 다른 컬럼을 고치는 한 충돌하지 않는다.
@@ -56,6 +57,11 @@ public class User extends AssignedIdEntity {
     @Column(name = "status", nullable = false)
     private UserStatus status = UserStatus.ACTIVE;
 
+    /** 백오피스 접근 롤. 부여는 운영 결정이며 앱에서 바꾸는 경로를 두지 않는다. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "role", nullable = false)
+    private UserRole role = UserRole.MEMBER;
+
     /**
      * 탈퇴 직전 상태(ACTIVE/LOCKED/BANNED). 탈퇴한 적 없으면 null.
      * status 가 WITHDRAWN 으로 덮이면 정지·잠금 여부가 지워지므로, 재가입 승계용으로 따로 남긴다.
@@ -79,6 +85,17 @@ public class User extends AssignedIdEntity {
     /** 실제 승인 닉네임이 마지막으로 변경된 시각(거절 후 재신청만으로는 갱신 안 함). */
     @Column(name = "nickname_changed_at")
     private Instant nicknameChangedAt;
+
+    /**
+     * 닉네임·사진 <b>통합</b> 잠금의 시작 시각 — 마이페이지 5-4.
+     *
+     * <p>둘 중 하나라도 바꾸는 저장을 하면 그 시점부터 두 항목이 함께 1개월 잠긴다. 항목별 변경
+     * 시각으로는 이 규칙을 표현할 수 없어(사진만 바꾼 사람의 닉네임 잠금을 판정할 근거가 없다)
+     * 저장 시각을 한 칸으로 둔다. 이 한 칸이 동시 수정 규칙도 함께 해결한다 — 잠금이 방금
+     * 시작됐으면 같은 저장 세션이라 잠그지 않는다.
+     */
+    @Column(name = "profile_changed_at")
+    private Instant profileChangedAt;
 
     /** 사용자가 현재 제출한 이미지 (PENDING/REJECTED 상태일 수 있음). */
     @Column(name = "profile_image_url")
@@ -352,12 +369,46 @@ public class User extends AssignedIdEntity {
     }
 
 
-    public void lock()  { this.status = UserStatus.LOCKED; }
-    public void ban()   { this.status = UserStatus.BANNED; }
+    /**
+     * 제재 중으로 전이. <b>반드시 sanctions INSERT 와 같은 트랜잭션</b>에서 호출한다 —
+     * 이 값만 바뀌고 제재 행이 없으면 게이트가 스스로 ACTIVE 로 되돌린다(온보딩 부록 A).
+     */
+    public void suspend() { this.status = UserStatus.SUSPENDED; }
+
+    /** 활성 제재가 모두 사라졌을 때 복귀. 해제 배치와 게이트의 자가 복구가 호출한다. */
+    public void activate() { this.status = UserStatus.ACTIVE; }
+
+    public boolean isOperator() { return role == UserRole.OPERATOR; }
 
     public boolean isWithdrawn() { return status == UserStatus.WITHDRAWN; }
-    public boolean isBanned()    { return status == UserStatus.BANNED; }
-    public boolean isLocked()    { return status == UserStatus.LOCKED; }
+    public boolean isSuspended() { return status == UserStatus.SUSPENDED; }
+
+    /**
+     * 닉네임·사진 통합 잠금 규칙 — {@link ProfileLockPolicy}.
+     *
+     * <p>잠겨 있으면 저장을 막고, 잠기지 않았으면 이번 저장으로 잠금을 새로 시작한다.
+     * 모더레이션 거부를 고치는 재제출은 잠금·횟수 어느 쪽에도 들어가지 않는다 —
+     * 서버가 물린 거부를 사용자 책임으로 셀 수 없기 때문이다.
+     */
+    public boolean isProfileLocked(Instant now) {
+        return !isFixingRejection() && ProfileLockPolicy.isLocked(profileChangedAt, now);
+    }
+
+    /** 이번 저장으로 잠금을 시작한다. 이미 같은 저장 세션 안이면 시작 시각을 밀지 않는다. */
+    public void startProfileLock(Instant now) {
+        if (!ProfileLockPolicy.isSameSaveSession(profileChangedAt, now)) this.profileChangedAt = now;
+    }
+
+    /** 잠금 해제 시각(마지막 저장 +1개월). 잠긴 적이 없으면 null. */
+    public Instant profileLockedUntil() {
+        return ProfileLockPolicy.lockedUntil(profileChangedAt);
+    }
+
+    /** 모더레이션이 거부한 값을 고치는 중인지 — 이 재제출은 잠금에서 제외된다. */
+    private boolean isFixingRejection() {
+        return nicknameStatus == NicknameStatus.REJECTED
+                || profileImageStatus == ProfileImageStatus.REJECTED;
+    }
 
     public void changeInterestCategories(List<String> categories) {
         this.interestCategories.clear();

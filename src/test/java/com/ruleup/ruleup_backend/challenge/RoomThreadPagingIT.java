@@ -135,7 +135,7 @@ class RoomThreadPagingIT extends ChallengeApiSupport {
             UUID id = UUID.randomUUID();
             jdbcTemplate.update("INSERT INTO VerificationDaily " +
                             "(id, challengeMemberId, challengeId, userId, targetDate, status, verifiedAt, shareableAt) " +
-                            "VALUES (?, ?, ?, ?, DATE_SUB(CURDATE(), INTERVAL ? DAY), 'SUCCESS', "
+                            "VALUES (?, ?, ?, ?, DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL ? DAY), 'SUCCESS', "
                             + PAST_BASE + ", " + PAST_BASE + ")",
                     bytes(id), bytes(memberId), bytes(challengeId), bytes(userId), i, i + 1, i + 1);
             newestFirst.add(id);   // i가 커질수록 과거 → 그대로가 최신순

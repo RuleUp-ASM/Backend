@@ -77,7 +77,7 @@ class ChallengeLifecycleBatchIT extends ChallengeApiSupport {
             Member owner = member(uniq("lc-act"));
             UUID id = insertChallenge(owner.id(), "EXERCISE", "UPCOMING", "SOLO");
             insertActiveMembership(id, owner.id(), "OWNER");
-            jdbcTemplate.update("UPDATE challenges SET start_date = CURDATE(), " +
+            jdbcTemplate.update("UPDATE challenges SET start_date = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), " +
                     "moderation_title = 'IN_REVIEW' WHERE id = ?", bytes(id));
 
             activationService.activateDueChallenges();
@@ -91,7 +91,7 @@ class ChallengeLifecycleBatchIT extends ChallengeApiSupport {
             Member owner = member(uniq("lc-done"));
             UUID id = insertChallenge(owner.id(), "EXERCISE", "ACTIVE", "SOLO");
             insertActiveMembership(id, owner.id(), "OWNER");
-            jdbcTemplate.update("UPDATE challenges SET end_date = DATE_SUB(CURDATE(), INTERVAL 1 DAY) " +
+            jdbcTemplate.update("UPDATE challenges SET end_date = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 1 DAY) " +
                     "WHERE id = ?", bytes(id));
 
             completionService.completeEndedChallenges();
@@ -118,7 +118,7 @@ class ChallengeLifecycleBatchIT extends ChallengeApiSupport {
                             "SUBSTR(HEX(id),17,4),'-',SUBSTR(HEX(id),21))) FROM challenge_members WHERE challenge_id = ?",
                     String.class, bytes(id)));
             jdbcTemplate.update("INSERT INTO VerificationDaily (id, challengeMemberId, challengeId, userId, targetDate, status) " +
-                            "VALUES (?, ?, ?, ?, CURDATE(), 'SUCCESS')",
+                            "VALUES (?, ?, ?, ?, DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), 'SUCCESS')",
                     bytes(UUID.randomUUID()), bytes(memberId), bytes(id), bytes(owner.id()));
 
             autoDeleteService.runOnce();
@@ -283,8 +283,8 @@ class ChallengeLifecycleBatchIT extends ChallengeApiSupport {
 
         /** 방 하나를 어제 끝난 것으로 만든다(종료 배치가 집도록). */
         private void endYesterday(UUID challengeId) {
-            jdbcTemplate.update("UPDATE challenges SET start_date = DATE_SUB(CURDATE(), INTERVAL 10 DAY), " +
-                    "end_date = DATE_SUB(CURDATE(), INTERVAL 1 DAY) WHERE id = ?", (Object) bytes(challengeId));
+            jdbcTemplate.update("UPDATE challenges SET start_date = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 10 DAY), " +
+                    "end_date = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 1 DAY) WHERE id = ?", (Object) bytes(challengeId));
         }
 
         @Test

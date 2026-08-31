@@ -1,8 +1,8 @@
 package com.ruleup.ruleup_backend.user;
 
-import com.ruleup.ruleup_backend.agreement.UserAgreementRepository;
+import com.ruleup.ruleup_backend.agreement.UserAgreementStateRepository;
 import com.ruleup.ruleup_backend.agreement.domain.AgreementType;
-import com.ruleup.ruleup_backend.agreement.domain.UserAgreement;
+import com.ruleup.ruleup_backend.agreement.domain.UserAgreementState;
 import com.ruleup.ruleup_backend.auth.RefreshTokenRepository;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeMemberService;
 import com.ruleup.ruleup_backend.auth.dto.UserResponse;
@@ -40,29 +40,34 @@ public class UserAccountService {
     private static final long ARCHIVE_RETENTION_DAYS = 365;
     private static final String RESTORE_NOTE = "1년 안에 같은 소셜 계정으로 로그인하면 기록이 복원돼요";
 
-    /** agreements 응답 키(계약) ↔ 저장 enum 매핑. */
+    /**
+     * agreements 응답 키(계약) ↔ 저장 enum 매핑. 약관 5종 + 법정 개별 동의 2종.
+     * 구 nightPush 는 야간 동의 약관 폐지(2026-08-28)로 사라졌다.
+     */
     private static final Map<AgreementType, String> AGREEMENT_KEYS = new LinkedHashMap<>() {{
         put(AgreementType.TOS, "termsOfService");
         put(AgreementType.PRIVACY, "privacyPolicy");
         put(AgreementType.LOCATION, "locationService");
         put(AgreementType.MARKETING, "marketing");
         put(AgreementType.EVENT, "event");
-        put(AgreementType.NIGHT_PUSH, "nightPush");
+        put(AgreementType.LOCATION_INFO, "locationInfo");
+        put(AgreementType.HEALTH_INFO, "healthInfo");
     }};
 
     private final UserRepository userRepository;
     private final ChallengeMemberService challengeMemberService;
     private final RefreshTokenRepository refreshTokenRepository;
-    private final UserAgreementRepository userAgreementRepository;
+    private final UserAgreementStateRepository userAgreementStateRepository;
     private final UserScoreSummaryRepository scoreSummaryRepository;
+    private final com.ruleup.ruleup_backend.sanction.SanctionService sanctionService;
 
     /**
      * 회원 탈퇴 — 멱등(이미 탈퇴 상태면 무해하게 같은 응답).
      *
-     * <p>정지(BANNED) 계정도 탈퇴할 수 있다. 예전에는 제재 세탁을 막으려고 403 으로 거절했지만,
-     * 그러면 정지된 사람은 계정을 지울 수조차 없었다. 이제는 <b>막는 대신 따라오게</b> 한다 —
-     * 탈퇴 직전 상태와 설치 ID 가 계정 행에 남아, 같은 기기에서 재가입하면 그 상태를 승계한다
-     * (회원 정책 §6, {@code User#withdraw()}).
+     * <p>제재 중인 계정도 탈퇴할 수 있다. 막으면 정지된 사람은 계정을 지울 수조차 없다.
+     * 대신 <b>제재가 따라오게</b> 한다 — {@code sanctions} 는 계정 행에 붙어 있고 계정 행은
+     * 지우지 않으므로 털어낼 대상이 애초에 없다. 남는 구멍은 "탈퇴한 채 시간을 흘려보내
+     * 제재를 소진시키는" 경로 하나뿐이고, 그것을 잔여 기간 동결로 막는다(온보딩 5-10).
      */
     @Transactional
     public WithdrawResponse withdraw(UUID userId, String confirmPhrase) {
@@ -73,8 +78,12 @@ public class UserAccountService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.LOGIN_REQUIRED));
 
         if (!user.isWithdrawn()) {
+            Instant now = Instant.now();
+            // 잔여 제재 기간을 얼린다 — 탈퇴한 채 시간을 흘려보내 제재를 소진시키는 경로를 막는다.
+            // withdraw() 로 status 가 WITHDRAWN 으로 덮이기 전에 해야 대상 조회가 어긋나지 않는다.
+            sanctionService.freezeAll(userId, now);
             user.withdraw();                                                    // WITHDRAWN + deleted_at + 직전 상태 보존
-            refreshTokenRepository.revokeAllByUserId(userId, Instant.now());    // 전 세션 종료
+            refreshTokenRepository.revokeAllByUserId(userId, now);              // 전 세션 종료
             // 참여 중인 방에서도 전부 나간다. 남겨두면 인증하지 않는 유령 멤버가 남의 방 정원을 먹고,
             // 그 방은 유령방 자동 삭제 대상에서도 빠져 영영 남는다.
             challengeMemberService.leaveAllForWithdrawal(userId);
@@ -83,22 +92,25 @@ public class UserAccountService {
         return new WithdrawResponse(true, archiveExpiresAt.toString(), RESTORE_NOTE);
     }
 
-    /** 내 프로필 조회 — user 블록(로그인 응답과 동일) + 생일·성별·약관 6종 현재 상태. */
+    /** 내 프로필 조회 — user 블록(로그인 응답과 동일) + 생일·성별·동의 7종 현재 상태. */
     @Transactional(readOnly = true)
     public UserMeResponse me(UUID userId) {
         User user = userRepository.findByIdAndDeletedAtIsNull(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.LOGIN_REQUIRED));
         UserScoreSummary summary = scoreSummaryRepository.findById(userId).orElse(null);
 
-        // 약관 현재 상태 = 타입별 최신 행 (append-only 이력)
-        List<UserAgreement> history = userAgreementRepository.findByUser_IdOrderByCreatedAtDescIdDesc(userId);
+        // 동의 현재 상태 — 상태 테이블 하나만 읽는다. 유저당 최대 7행이라 이력을 뒤질 이유가 없다.
+        Map<AgreementType, UserAgreementState> states = new LinkedHashMap<>();
+        userAgreementStateRepository.findByUserId(userId)
+                .forEach(s -> states.put(s.getAgreementType(), s));
         Map<String, UserMeResponse.AgreementState> agreements = new LinkedHashMap<>();
-        AGREEMENT_KEYS.forEach((type, key) -> history.stream()
-                .filter(a -> a.getAgreementType() == type)
-                .findFirst()   // 최신순 정렬이므로 첫 행이 현재 상태
-                .ifPresent(a -> agreements.put(key, new UserMeResponse.AgreementState(
-                        a.isAgreed(), a.getVersion(),
-                        a.getCreatedAt() != null ? a.getCreatedAt().toString() : null))));
+        AGREEMENT_KEYS.forEach((type, key) -> {
+            UserAgreementState s = states.get(type);
+            // 기록이 없는 항목은 키 자체를 빼서 "한 번도 동의한 적 없음"을 드러낸다.
+            if (s != null) agreements.put(key, new UserMeResponse.AgreementState(
+                    s.isAgreed(), s.getVersion(),
+                    s.getAgreedAt() != null ? s.getAgreedAt().toString() : null));
+        });
 
         return new UserMeResponse(
                 UserResponse.from(user, summary),

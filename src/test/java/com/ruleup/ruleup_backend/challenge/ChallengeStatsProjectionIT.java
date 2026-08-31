@@ -223,8 +223,8 @@ class ChallengeStatsProjectionIT extends ChallengeApiSupport {
             UUID challengeId = activeChallenge(member.id());
             insertActiveMembership(challengeId, member.id(), "MEMBER");
             jdbcTemplate.update("UPDATE challenges SET participant_count = 1, " +
-                    "start_date = DATE_SUB(CURDATE(), INTERVAL 1 DAY), " +
-                    "end_date = DATE_ADD(CURDATE(), INTERVAL 14 DAY) WHERE id = ?", (Object) bytes(challengeId));
+                    "start_date = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 1 DAY), " +
+                    "end_date = DATE_ADD(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 14 DAY) WHERE id = ?", (Object) bytes(challengeId));
 
             manualVerificationService.submit(member.id(), challengeId,
                     new ManualVerificationRequest(null, null));
@@ -240,7 +240,7 @@ class ChallengeStatsProjectionIT extends ChallengeApiSupport {
             UUID owner = member(uniq("stats-activation")).id();
             UUID challengeId = insertChallenge(owner, "EXERCISE", "UPCOMING", "GROUP");
             jdbcTemplate.update("UPDATE challenges SET visibility = 'PUBLIC', " +
-                    "start_date = CURDATE() WHERE id = ?", (Object) bytes(challengeId));
+                    "start_date = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')) WHERE id = ?", (Object) bytes(challengeId));
 
             activationService.activateDueChallenges();
 

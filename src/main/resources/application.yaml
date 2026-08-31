@@ -73,16 +73,16 @@ app:
     # 루틴 아웃컴 수집 배치(RoutineOutcomeCollector, 매일 03:30 KST). 첫 수집 시 최근 N일치 소급.
     outcome-lookback-days: ${RECO_OUTCOME_LOOKBACK_DAYS:30}
 
-  # 매너 온도 계산(온도 계산 테크스펙 §5). 밴드 재조정 시 코드 변경 없이 env/yaml로 튜닝.
-  # 미설정이어도 ReputationTemperatureProperties 기본값(스펙값)으로 동작.
-  reputation:
-    pace-pivot: ${REP_PACE_PIVOT:0.75}                      # 페이스 중립 성공률
-    volume-learning-rate: ${REP_VOLUME_ETA:0.006667}       # η_V = 1/150
-    qualifying-threshold: ${REP_QUALIFY_THRESHOLD:0.6}     # 연차 적립 자격 s_d 문턱
-    tenure-decay-per-day: ${REP_TENURE_DECAY:0.005479}     # −2/365 (방치 시 연차 감소)
-    grace-days: ${REP_GRACE_DAYS:7}                        # 루틴 전환 유예
-    temperature-ceiling: ${REP_TEMP_CEILING:93}
-    temperature-floor: ${REP_TEMP_FLOOR:5}
+  # 앱링크(딥링크) — 발급과 검사가 같은 규칙을 써야 하므로 베이스 URL 을 한 곳에 둔다.
+  # 커스텀 스킴(ruleup://)도 같은 경로 규칙을 공유한다.
+  app-links:
+    base-url: ${APP_LINK_BASE_URL:https://android.ruleup.co.kr}
+    scheme: ${APP_LINK_SCHEME:ruleup}
+
+  # 개발용 토큰 발급. 시크릿이 비어 있으면 헤더가 무엇이든 404 라, 미설정이 곧 비활성이다.
+  # prod 프로필에서는 빈 자체가 등록되지 않는다(@Profile("!prod")).
+  dev-tokens:
+    secret: ${DEV_TOKEN_SECRET:}
 
   # 시스템 자원 지표 샘플러(SystemMetricsSampler, 개발기간 관찰용). test 프로파일에선 비활성.
   observability:
@@ -169,7 +169,13 @@ app:
       location-service: ${TERMS_VERSION_LOCATION:1.0}
       marketing: ${TERMS_VERSION_MARKETING:1.0}
       event: ${TERMS_VERSION_EVENT:1.0}
-      night-push: ${TERMS_VERSION_NIGHT_PUSH:1.0}
+      location-info: ${TERMS_VERSION_LOCATION_INFO:1.0}
+      health-info: ${TERMS_VERSION_HEALTH_INFO:1.0}
+
+  # 밴리스트 해시 솔트. 바꾸면 기존 영구 정지 차단이 전부 풀리므로 로테이션 시 재해시가 선행돼야 한다.
+  security:
+    ban-salt: ${BAN_LIST_SALT:ruleup-local-ban-salt}
+
 
   # 리버스 프록시(EC2 + Cloudflare 터널) 뒤에서 Swagger Try-it-out이 정확한 주소로 가도록.
   # 로컬은 비워두고, EC2에서만 systemd 환경변수로 채운다: SWAGGER_SERVER_URL=https://<도메인>

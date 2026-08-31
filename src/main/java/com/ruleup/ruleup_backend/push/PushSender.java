@@ -15,6 +15,14 @@ import java.util.UUID;
 public interface PushSender {
 
     /**
+     * 화면에 뜨는 푸시 발송 — 알림함에 적재된 알림을 사용자에게 알린다.
+     * 대상의 등록 토큰이 없으면 no-op 이며, <b>실패해도 재시도하지 않는다</b>(알림함이 대체한다).
+     *
+     * @throws RuntimeException 전송 채널 오류. 호출부가 결과를 기록만 하고 삼킨다.
+     */
+    void sendDisplay(UUID userId, DisplayPush push);
+
+    /**
      * 무음(데이터 전용) 푸시 발송. 화면에 알림을 띄우지 않고 앱만 깨운다.
      * 대상의 등록 토큰이 없으면 no-op.
      */

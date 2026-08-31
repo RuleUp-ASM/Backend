@@ -97,16 +97,16 @@ class ChallengeExploreListIT extends ChallengeApiSupport {
 
         @Test
         @DisplayName("내가 신고한 방은 내 화면에서만 빠진다")
-        void hidesMyReportedRooms() throws Exception {
+        void hidesMyBlockedRooms() throws Exception {
             var reporter = member(uniq("ex-reporter"));
             String other = memberToken(uniq("ex-other"));
             UUID reported = room("EXERCISE", "ACTIVE");
             UUID kept = room("EXERCISE", "ACTIVE");
 
-            jdbcTemplate.update("INSERT INTO reports " +
-                            "(id, reporter_id, target_type, target_challenge_id, context_type, reason) " +
-                            "VALUES (?, ?, 'CHALLENGE', ?, 'CHALLENGE_DETAIL', 'SPAM')",
-                    bytes(UUID.randomUUID()), bytes(reporter.id()), bytes(reported));
+            // 숨기는 근거는 신고가 아니라 차단이다 — 해제하면 다시 보여야 하기 때문이다.
+            jdbcTemplate.update(
+                    "INSERT INTO user_blocks (blocker_id, target_type, target_id) VALUES (?, 'CHALLENGE', ?)",
+                    bytes(reporter.id()), bytes(reported));
 
             assertThat(ids(explore(reporter.token(), ""))).containsExactly(kept.toString());
             assertThat(ids(explore(other, ""))).contains(reported.toString(), kept.toString());
@@ -211,11 +211,11 @@ class ChallengeExploreListIT extends ChallengeApiSupport {
             String token = memberToken(uniq("ex-sorts"));
             UUID few = room("EXERCISE", "ACTIVE");
             set(few, "participant_count", 2);
-            jdbcTemplate.update("UPDATE challenges SET end_date = DATE_ADD(CURDATE(), INTERVAL 30 DAY), " +
+            jdbcTemplate.update("UPDATE challenges SET end_date = DATE_ADD(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 30 DAY), " +
                     "created_at = DATE_SUB(NOW(6), INTERVAL 10 DAY) WHERE id = ?", (Object) bytes(few));
             UUID many = room("EXERCISE", "ACTIVE");
             set(many, "participant_count", 20);
-            jdbcTemplate.update("UPDATE challenges SET end_date = DATE_ADD(CURDATE(), INTERVAL 2 DAY), " +
+            jdbcTemplate.update("UPDATE challenges SET end_date = DATE_ADD(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 2 DAY), " +
                     "created_at = NOW(6) WHERE id = ?", (Object) bytes(many));
 
             assertThat(ids(explore(token, "sort=PARTICIPANTS"))).containsExactly(many.toString(), few.toString());

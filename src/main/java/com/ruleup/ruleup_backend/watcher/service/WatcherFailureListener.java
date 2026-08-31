@@ -2,33 +2,34 @@ package com.ruleup.ruleup_backend.watcher.service;
 
 import com.ruleup.ruleup_backend.common.event.RoutineFailureConfirmed;
 import lombok.RequiredArgsConstructor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 /**
- * 루틴 실패 확정 → 감시자 통지 적재(§9/§11.4).
- * 동기 @EventListener — verification 확정 트랜잭션 안에서 큐 적재가 원자적으로 일어난다
- * (적재는 DB만 건드리므로 트랜잭션 안에서 안전. 실제 외부 발송은 별도 스윕).
- * 통지 적재 실패가 인증 확정을 롤백시키지 않도록 예외는 삼킨다.
+ * 실패 확정 이벤트 구독 → 감시자 통지.
+ *
+ * <p>이 리스너가 <b>이의 기간 가드레일의 실행부</b>다. 스스로 시각을 판단하지 않고 인증 모듈이
+ * 확정 시점에 발행한 이벤트만 받는다 — 여기서 "확정됐을 것 같은" 건을 추정하기 시작하면
+ * 조기 발송이 생긴다.
+ *
+ * <p>통지 실패가 인증 확정을 롤백시키지 않도록 예외는 삼킨다. 놓친 건은 보정 배치가 줍는다.
  */
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class WatcherFailureListener {
 
-    private static final Logger log = LoggerFactory.getLogger(WatcherFailureListener.class);
-
-    private final WatcherNotificationService notificationService;
+    private final WatcherNoticeService noticeService;
 
     @EventListener
     public void onRoutineFailure(RoutineFailureConfirmed event) {
         try {
-            notificationService.enqueueForFailure(
-                    event.challengeId(), event.userId(), event.targetDate(), event.confirmedAt());
+            noticeService.onFailureConfirmed(event.challengeId(), event.userId(),
+                    event.verificationId(), event.targetDate(), event.confirmedAt());
         } catch (Exception e) {
-            log.warn("감시자 통지 적재 실패 challengeId={} userId={}: {}",
-                    event.challengeId(), event.userId(), e.getMessage());
+            log.warn("감시자 통지 실패 challengeId={} userId={}: {}",
+                    event.challengeId(), event.userId(), e.toString());
         }
     }
 }

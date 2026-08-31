@@ -134,8 +134,8 @@ class UserJoinCounterIT extends ChallengeApiSupport {
             assertThat((String) read(blocked, "$.data.joinBlockReason")).isEqualTo("FREE_LIMIT");
 
             for (UUID id : rooms) {
-                jdbcTemplate.update("UPDATE challenges SET start_date = DATE_SUB(CURDATE(), INTERVAL 10 DAY), " +
-                        "end_date = DATE_SUB(CURDATE(), INTERVAL 1 DAY) WHERE id = ?", (Object) bytes(id));
+                jdbcTemplate.update("UPDATE challenges SET start_date = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 10 DAY), " +
+                        "end_date = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 1 DAY) WHERE id = ?", (Object) bytes(id));
             }
             completionService.completeEndedChallenges();
 

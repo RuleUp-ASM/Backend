@@ -206,7 +206,7 @@ class MyChallengeListApiIT extends ChallengeApiSupport {
     private UUID joined(Member me, String status) {
         UUID challengeId = insertChallenge(me.id(), "EXERCISE", status, "GROUP");
         insertActiveMembership(challengeId, me.id(), "OWNER");
-        jdbcTemplate.update("UPDATE challenges SET end_date = DATE_ADD(CURDATE(), INTERVAL ? DAY) WHERE id = ?",
+        jdbcTemplate.update("UPDATE challenges SET end_date = DATE_ADD(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL ? DAY) WHERE id = ?",
                 (int) (Math.abs(challengeId.getLeastSignificantBits()) % 90), bytes(challengeId));
         return challengeId;
     }
@@ -220,7 +220,7 @@ class MyChallengeListApiIT extends ChallengeApiSupport {
     private void archiveAndDelete(UUID challengeId, Member me) {
         jdbcTemplate.update("INSERT INTO challenge_history " +
                         "(challenge_id, title_snapshot, image_snapshot, category, start_date, end_date, deleted_at) " +
-                        "VALUES (?, '삭제된 방 제목', NULL, 'EXERCISE', CURDATE(), CURDATE(), NOW(6))",
+                        "VALUES (?, '삭제된 방 제목', NULL, 'EXERCISE', DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), NOW(6))",
                 bytes(challengeId));
         jdbcTemplate.update("INSERT INTO challenge_member_history " +
                         "(challenge_id, user_id, final_role, left_type, left_at, final_success_rate) " +
