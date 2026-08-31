@@ -79,7 +79,8 @@ class OpenApiDocsIT {
                 "/api/v1/me/tier",
                 "/api/v1/me/tier/history",
                 "/api/v1/users/me/appeals",
-                "/api/v1/users/{targetUserId}/profile");
+                "/api/v1/users/{targetUserId}/profile",
+                "/api/v1/app-links/check");
     }
 
     @Test

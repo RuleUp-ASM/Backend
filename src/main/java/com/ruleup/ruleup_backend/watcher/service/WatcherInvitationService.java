@@ -1,6 +1,8 @@
 package com.ruleup.ruleup_backend.watcher.service;
 
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
+import com.ruleup.ruleup_backend.applink.AppLinkType;
+import com.ruleup.ruleup_backend.applink.AppLinks;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
@@ -15,7 +17,6 @@ import com.ruleup.ruleup_backend.watcher.repository.WatcherConsentLogRepository;
 import com.ruleup.ruleup_backend.watcher.repository.WatcherInvitationRepository;
 import com.ruleup.ruleup_backend.watcher.repository.WatcherRelationRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,9 +42,8 @@ public class WatcherInvitationService {
     private final WatcherConsentLogRepository consentLogRepository;
     private final ChallengeQueryService challengeQuery;
     private final UserRepository userRepository;
+    private final AppLinks appLinks;
 
-    @Value("${app.watcher.invite-base-url:https://ruleup.app}")
-    private String inviteBaseUrl;
 
     // ===== 초대 발급 =====
 
@@ -158,6 +158,6 @@ public class WatcherInvitationService {
     }
 
     private String inviteUrl(String token) {
-        return inviteBaseUrl + "/w/" + token;
+        return appLinks.build(AppLinkType.WATCHER_INVITATION, token);
     }
 }
