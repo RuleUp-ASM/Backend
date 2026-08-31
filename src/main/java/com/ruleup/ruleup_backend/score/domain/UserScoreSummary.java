@@ -70,11 +70,4 @@ public class UserScoreSummary extends AssignedIdEntity {
         return s;
     }
 
-    /**
-     * 응답용 "티어 내 점수 0~99" — 정식 밴드 계산은 온도 계산(티어) 스펙에서 확정한다.
-     * 그 전까지는 총점을 0~99로 클램프해 내려준다(가입 직후 BRONZE 10 계약 충족).
-     */
-    public int scoreInTier() {
-        return (int) Math.max(0, Math.min(totalScore, 99));
-    }
 }

@@ -34,7 +34,8 @@ public enum ErrorCode {
     // ===== 닉네임 / 카테고리 / 약관 / 온보딩 (4.3 / 4.6 / 4.9) =====
     NICKNAME_FORMAT_INVALID(HttpStatus.BAD_REQUEST, "닉네임 형식이 올바르지 않습니다."),
     NICKNAME_DUPLICATED(HttpStatus.CONFLICT, "이미 사용 중인 닉네임입니다."),
-    NICKNAME_CHANGE_LOCKED(HttpStatus.FORBIDDEN, "닉네임은 30일에 한 번만 변경할 수 있습니다."),
+    // 닉네임·사진 통합 잠금. 재시도로 풀리는 게 아니라 상태 충돌이라 409 다(마이페이지 오픈 이슈 #9 — 온보딩 문서와 통일).
+    PROFILE_CHANGE_LOCKED(HttpStatus.CONFLICT, "닉네임과 프로필 사진은 한 달에 한 번만 바꿀 수 있어요."),
     CATEGORY_INVALID(HttpStatus.BAD_REQUEST, "유효하지 않은 관심 카테고리입니다."),
     CATEGORY_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "관심 카테고리는 최대 6개까지 선택할 수 있습니다."),
     INTEREST_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "관심 카테고리는 0~6개까지 선택할 수 있습니다."),
@@ -141,7 +142,6 @@ public enum ErrorCode {
     VERSION_CONFLICT(HttpStatus.CONFLICT, "다른 곳에서 챌린지 정보가 바뀌었어요. 새로고침 후 다시 시도해주세요."),
     INVALID_FIELD_VALUE(HttpStatus.BAD_REQUEST, "입력값을 다시 확인해주세요."),
     CAPACITY_BELOW_CURRENT(HttpStatus.BAD_REQUEST, "모집 인원은 현재 참여 인원보다 적게 줄일 수 없어요."),
-    MODERATION_LOCKED(HttpStatus.TOO_MANY_REQUESTS, "수정이 잠시 제한되었어요. 1시간 뒤에 다시 시도해주세요."),
     ROUTINE_DESCRIPTION_TOO_LONG(HttpStatus.BAD_REQUEST, "루틴 설명은 200자를 초과할 수 없습니다."),
     TEMPLATE_ID_REQUIRED(HttpStatus.BAD_REQUEST, "추천 루틴을 선택해주세요."),
     TEMPLATE_NOT_FOUND(HttpStatus.NOT_FOUND, "선택한 루틴을 찾을 수 없어요. 다른 루틴을 골라주세요."),
@@ -154,7 +154,11 @@ public enum ErrorCode {
     // ===== 마이프로필 (마이 홈·캘린더·통계·평판·초대) =====
     INVALID_CALENDAR_MONTH(HttpStatus.BAD_REQUEST, "월 형식이 올바르지 않습니다. (YYYY-MM)"),
     INVALID_CALENDAR_DATE(HttpStatus.BAD_REQUEST, "날짜 형식이 올바르지 않습니다. (YYYY-MM-DD)"),
-    INVALID_STATS_PERIOD(HttpStatus.BAD_REQUEST, "통계 기간이 올바르지 않습니다. (WEEKLY / MONTHLY / YEARLY)"),
+    // 챌린지 콘텐츠 반복 거부 잠금(챌린지 설정 모듈). 프로필 편집에서는 폐기됐다 — 마이페이지 오픈 이슈 #8.
+    MODERATION_LOCKED(HttpStatus.TOO_MANY_REQUESTS, "수정이 잠시 제한되었어요. 1시간 뒤에 다시 시도해주세요."),
+    INVALID_HISTORY_MONTHS(HttpStatus.BAD_REQUEST, "조회 기간은 1개월부터 12개월까지 고를 수 있어요."),
+    // 타인의 제재·검출 이력 조회 시도. 애초에 타인 조회 경로를 만들지 않는 것이 1차 방어이고, 이건 2차다.
+    SANCTION_HISTORY_FORBIDDEN(HttpStatus.FORBIDDEN, "제재 이력은 본인만 확인할 수 있어요."),
 
     // ===== 방 내부(스레드·랭킹·방 홈) =====
     // 공지·댓글 코드(NOTICE_*/COMMENT_*/REPLY_DEPTH_EXCEEDED)는 Phase 2 이관과 함께 제거했다.

@@ -75,6 +75,10 @@ class OpenApiDocsIT {
                 "/api/v1/users/me/profile-image",
                 "/api/v1/profile",
                 "/api/v1/profile/image",
+                "/api/v1/users/me/profile",
+                "/api/v1/me/tier",
+                "/api/v1/me/tier/history",
+                "/api/v1/users/me/appeals",
                 "/api/v1/users/{targetUserId}/profile");
     }
 
@@ -199,17 +203,14 @@ class OpenApiDocsIT {
         }
 
         @Test
-        @DisplayName("프로필 수정 — 닉네임 30일 변경 제한(403)과 중복(409)이 갈라져 있다")
+        @DisplayName("프로필 편집 — 통합 잠금과 닉네임 중복이 같은 409 안에서 갈라져 있다")
         void profileUpdateNicknameErrors() throws Exception {
+            // 잠금은 재시도로 풀리는 게 아니라 상태 충돌이라 429·403 이 아니라 409 다(마이페이지 오픈 이슈 #9).
+            // 중복도 409 라 둘이 같은 상태 코드 아래 예시로 나란히 서야 클라가 code 로 분기할 수 있다.
             assertThat(doc().<Map<String, Object>>read(
-                    "$.paths['/api/v1/profile'].patch.responses['403']"
+                    "$.paths['/api/v1/users/me/profile'].patch.responses['409']"
                             + ".content['application/json'].examples"))
-                    .containsKey("NICKNAME_CHANGE_LOCKED");
-
-            assertThat(doc().<Map<String, Object>>read(
-                    "$.paths['/api/v1/profile'].patch.responses['409']"
-                            + ".content['application/json'].examples"))
-                    .containsKey("NICKNAME_DUPLICATED");
+                    .containsKeys("PROFILE_CHANGE_LOCKED", "NICKNAME_DUPLICATED");
         }
 
         @Test
