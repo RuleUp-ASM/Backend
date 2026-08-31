@@ -143,7 +143,8 @@ public class VerificationFinalizeService {
         // 확정된 실패만 감시자 통지 적재. 실패 예정 단계에서는 통지하지 않는다(확정이 아니므로).
         if (confirmedFail && member != null) {
             eventPublisher.publishEvent(new RoutineFailureConfirmed(
-                    daily.getChallengeId(), member.getUserId(), daily.getTargetDate(), now));
+                    daily.getChallengeId(), member.getUserId(), daily.getId(),
+                    daily.getTargetDate(), now));
         }
         return member != null;
     }
