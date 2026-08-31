@@ -68,16 +68,24 @@ class MyPageContractIT extends ChallengeApiSupport {
                 "WHERE user_id = ?", score, actualTier, displayTier, bytes(userId));
     }
 
-    /** 점수 변동 1건. daysAgo 는 KST 달력이 아니라 실제 경과 시간이라 UTC 로 빼도 된다. */
-    private void insertScoreEvent(UUID userId, UUID challengeId, String reason, long amount,
-                                  long balanceAfter, int daysAgo) {
+    /**
+     * 점수 변동 1건. {@code reason} 은 <b>저장</b> 사건이고 화면 표기는 서버가 매핑한다.
+     * daysAgo 는 KST 달력이 아니라 실제 경과 시간이라 UTC 로 빼도 된다.
+     */
+    private void insertScoreEvent(UUID userId, UUID challengeId, String reason, String incidentType,
+                                  long delta, long balanceAfter, int daysAgo) {
         jdbc().update("INSERT INTO score_transactions " +
-                        "(id, user_id, amount, balance_after, transaction_type, source_type, source_id, " +
-                        " challenge_id, reason, idempotency_key, created_at) " +
-                        "VALUES (?, ?, ?, ?, 'CHALLENGE_SUCCESS', 'CHALLENGE_CYCLE', NULL, ?, ?, ?, " +
-                        " DATE_SUB(NOW(3), INTERVAL ? DAY))",
-                bytes(UUID.randomUUID()), bytes(userId), amount, balanceAfter,
-                challengeId == null ? null : bytes(challengeId), reason, uniq("idem"), daysAgo);
+                        "(id, user_id, raw_delta, limited_delta, applied_delta, cycle_limit_applied, " +
+                        " balance_after, reason, challenge_id, cycle_no, incident_type, " +
+                        " idempotency_key, created_at) " +
+                        "VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, 1, ?, ?, DATE_SUB(NOW(3), INTERVAL ? DAY))",
+                bytes(UUID.randomUUID()), bytes(userId), delta, delta, delta, balanceAfter, reason,
+                challengeId == null ? null : bytes(challengeId), incidentType, uniq("idem"), daysAgo);
+    }
+
+    private void insertScoreEvent(UUID userId, UUID challengeId, String reason,
+                                  long delta, long balanceAfter, int daysAgo) {
+        insertScoreEvent(userId, challengeId, reason, null, delta, balanceAfter, daysAgo);
     }
 
     /** 확정된 일 판정 1건(RoutineOutcome = 통계·스트릭의 원천). targetDate 는 KST 달력 날짜다. */
@@ -222,8 +230,8 @@ class MyPageContractIT extends ChallengeApiSupport {
         void recent_changes() throws Exception {
             Member me = member("tier-changes");
             UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
-            for (int i = 0; i < 12; i++) insertScoreEvent(me.id(), ch, "CYCLE_SUCCESS", 5, 10 + 5L * i, 12 - i);
-            insertScoreEvent(me.id(), ch, "CHEAT", -50, 20, 0);
+            for (int i = 0; i < 12; i++) insertScoreEvent(me.id(), ch, "DAILY_SUCCESS", 5, 10 + 5L * i, 12 - i);
+            insertScoreEvent(me.id(), ch, "INCIDENT", "CHEAT_DETECTED", -50, 20, 0);
 
             Map<String, Object> d = data(getAuth("/api/v1/me/tier", me.token()));
             List<Map<String, Object>> changes = (List<Map<String, Object>>) d.get("recentChanges");
@@ -264,9 +272,9 @@ class MyPageContractIT extends ChallengeApiSupport {
         void monthly_snapshots() throws Exception {
             Member me = member("hist-basic");
             UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
-            insertScoreEvent(me.id(), ch, "CYCLE_SUCCESS", 90, 100, 70);    // 약 2달 전
-            insertScoreEvent(me.id(), ch, "CYCLE_SUCCESS", 250, 350, 40);   // 약 1달 전 — 역대 최고
-            insertScoreEvent(me.id(), ch, "CYCLE_FAIL", -50, 300, 5);       // 이번 달
+            insertScoreEvent(me.id(), ch, "DAILY_SUCCESS", 90, 100, 70);    // 약 2달 전
+            insertScoreEvent(me.id(), ch, "DAILY_SUCCESS", 250, 350, 40);   // 약 1달 전 — 역대 최고
+            insertScoreEvent(me.id(), ch, "CONFIRMED_MISS", -50, 300, 5);   // 이번 달
 
             Map<String, Object> d = data(getAuth("/api/v1/me/tier/history", me.token()));
 
@@ -301,7 +309,7 @@ class MyPageContractIT extends ChallengeApiSupport {
         void retention_one_year() throws Exception {
             Member me = member("hist-retention");
             UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
-            insertScoreEvent(me.id(), ch, "CYCLE_SUCCESS", 900, 910, 400);   // 13개월 전 — 역대 최고였지만 만료
+            insertScoreEvent(me.id(), ch, "DAILY_SUCCESS", 900, 910, 400);   // 13개월 전 — 역대 최고였지만 만료
 
             Map<String, Object> d = data(getAuth("/api/v1/me/tier/history", me.token()));
 

@@ -79,7 +79,6 @@ public enum ErrorCode {
     INVALID_REWARD(HttpStatus.BAD_REQUEST, "보상 설정이 올바르지 않습니다."),
     START_DATE_REQUIRED(HttpStatus.BAD_REQUEST, "시작일을 입력해주세요."),
     INVALID_MIN_MANNER_TEMPERATURE(HttpStatus.BAD_REQUEST, "참여 기준 매너 온도는 생성자 본인의 매너 온도보다 높을 수 없습니다."),
-    MIN_TEMP_EXCEEDS_OWNER(HttpStatus.BAD_REQUEST, "가입 기준 온도는 생성자 본인의 온도를 초과할 수 없습니다."),
     /** 동시 참여 한도 초과 — 생성 경로. 가입 경로는 JOIN_BLOCKED + reason=FREE_LIMIT 로 내려간다. */
     CHALLENGE_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "함께 진행할 수 있는 챌린지 수를 넘었어요. 진행 중인 챌린지를 마치고 새로 만들어 주세요."),
     MAX_PARTICIPANTS_REQUIRED(HttpStatus.BAD_REQUEST, "그룹 챌린지는 최대 참여 인원을 지정해야 합니다."),
@@ -156,6 +155,7 @@ public enum ErrorCode {
     INVALID_CALENDAR_DATE(HttpStatus.BAD_REQUEST, "날짜 형식이 올바르지 않습니다. (YYYY-MM-DD)"),
     // 챌린지 콘텐츠 반복 거부 잠금(챌린지 설정 모듈). 프로필 편집에서는 폐기됐다 — 마이페이지 오픈 이슈 #8.
     MODERATION_LOCKED(HttpStatus.TOO_MANY_REQUESTS, "수정이 잠시 제한되었어요. 1시간 뒤에 다시 시도해주세요."),
+    APP_LINK_URL_REQUIRED(HttpStatus.BAD_REQUEST, "확인할 링크가 필요해요."),
     INVALID_HISTORY_MONTHS(HttpStatus.BAD_REQUEST, "조회 기간은 1개월부터 12개월까지 고를 수 있어요."),
     // 타인의 제재·검출 이력 조회 시도. 애초에 타인 조회 경로를 만들지 않는 것이 1차 방어이고, 이건 2차다.
     SANCTION_HISTORY_FORBIDDEN(HttpStatus.FORBIDDEN, "제재 이력은 본인만 확인할 수 있어요."),

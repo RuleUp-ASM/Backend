@@ -11,8 +11,6 @@ import com.ruleup.ruleup_backend.profile.dto.ProfileImageResponse;
 import com.ruleup.ruleup_backend.profile.dto.ProfileResponse;
 import com.ruleup.ruleup_backend.profile.dto.ProfileUpdateResponse;
 import com.ruleup.ruleup_backend.profile.dto.UpdateProfileRequest;
-import com.ruleup.ruleup_backend.reputation.domain.ReputationScore;
-import com.ruleup.ruleup_backend.reputation.ReputationScoreRepository;
 import com.ruleup.ruleup_backend.user.domain.InterestCategory;
 import com.ruleup.ruleup_backend.user.domain.NicknamePolicy;
 import com.ruleup.ruleup_backend.user.domain.User;
@@ -25,7 +23,6 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import com.ruleup.ruleup_backend.common.image.ImageStorageService;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -34,7 +31,6 @@ import java.util.UUID;
 public class ProfileService {
 
     private final UserRepository userRepository;
-    private final ReputationScoreRepository reputationScoreRepository;
     private final ModerationRequestRepository moderationRequestRepository;
     private final ImageStorageService imageStorage;
     private final ApplicationEventPublisher eventPublisher;
@@ -42,7 +38,7 @@ public class ProfileService {
     @Transactional(readOnly = true)
     public ProfileResponse getMyProfile(UUID userId) {
         User user = loadActive(userId);
-        return ProfileResponse.from(user, mannerTemp(userId));
+        return ProfileResponse.from(user);
     }
 
     /**
@@ -136,9 +132,4 @@ public class ProfileService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.LOGIN_REQUIRED));
     }
 
-    private BigDecimal mannerTemp(UUID userId) {
-        return reputationScoreRepository.findById(userId)
-                .map(ReputationScore::getMannerTemperature)
-                .orElse(ReputationScore.INITIAL_TEMPERATURE);
-    }
 }

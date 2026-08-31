@@ -14,14 +14,17 @@ import java.util.UUID;
 public interface ScoreTransactionRepository extends JpaRepository<ScoreTransaction, UUID> {
 
     /**
-     * 최근 변동 — 사건 종류가 있는 행만. reason 이 없는 행은 화면에 이름을 붙일 수 없어 건너뛴다
-     * (점수 산식 스택 이전에 쌓인 행이 그렇다).
+     * 최근 변동 — 실제로 점수가 움직인 행만. 한도나 0~2,000 경계에 걸려 반영량이 0이었던 행은
+     * 화면에 "0점 변동"으로 보이면 혼란만 주므로 뺀다(원장에는 그대로 남아 감사에 쓰인다).
      */
     @Query("""
             SELECT t FROM ScoreTransaction t
-            WHERE t.userId = :userId AND t.reason IS NOT NULL
+            WHERE t.userId = :userId AND t.appliedDelta <> 0
             ORDER BY t.createdAt DESC, t.id DESC""")
     List<ScoreTransaction> findRecent(@Param("userId") UUID userId, Pageable pageable);
+
+    /** 같은 이벤트가 두 번 쌓이는 것을 막는 최종 방어선의 조회 짝. */
+    boolean existsByIdempotencyKey(String idempotencyKey);
 
     /** 보관 기간(1년) 안의 변동을 오래된 순으로 — 월말 스냅샷을 접어 만들기 위한 순서다. */
     @Query("""

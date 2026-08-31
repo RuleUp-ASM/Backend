@@ -16,7 +16,7 @@ public final class TierBands {
     public static final int GRACE_POINTS = 20;
 
     /** 점수 상한. 루비 안에서도 점수는 계속 쌓이지만 여기서 멈춘다. */
-    public static final long MAX_SCORE = 2_000L;
+    public static final int MAX_SCORE = 2_000;
 
     private TierBands() {}
 
@@ -77,5 +77,17 @@ public final class TierBands {
     /** 브론즈는 더 내려갈 티어가 없어 강등 안내를 내리지 않는다. */
     public static boolean hasDemotion(Tier displayTier) {
         return displayTier != Tier.BRONZE && displayTier != Tier.UNRANKED;
+    }
+
+    /**
+     * 새 표시 티어 — 승급은 즉시, 강등만 유예한다.
+     *
+     * <p>큰 감점으로 유예 구간을 한 번에 관통하면 실제 티어까지 바로 내려간다. 유예는 경계에서
+     * 점수가 진동할 때 표시가 깜빡이는 것을 막으려는 장치이지 강등을 미루는 장치가 아니다.
+     */
+    public static Tier displayTier(long score, Tier actualTier, Tier previousDisplayTier) {
+        if (actualTier.ordinal() >= previousDisplayTier.ordinal()) return actualTier;   // 승급·동급은 즉시
+        if (isInGraceBand(score, previousDisplayTier)) return previousDisplayTier;
+        return actualTier;
     }
 }
