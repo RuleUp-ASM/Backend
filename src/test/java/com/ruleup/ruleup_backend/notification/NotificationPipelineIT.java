@@ -74,8 +74,15 @@ class NotificationPipelineIT extends AuthApiSupport {
         return new Account(read(res, "$.data.accessToken"), UUID.fromString(read(res, "$.data.user.id")));
     }
 
+    /**
+     * 적재·분기 단계를 직접 부른다.
+     *
+     * <p>{@code publish} 가 아니라 {@code deliver} 인 이유: publish 는 이제 아웃박스에 발행 의사만
+     * 적고 끝난다. 이 스위트가 다루는 것은 <b>분기 규칙</b>(토글·음소거·중복·야간)이라 디스패처를
+     * 한 번 거칠 이유가 없다. 아웃박스 계약 자체는 {@code NotificationOutboxIT} 가 따로 지킨다.
+     */
     private Notification publish(UUID userId, NotificationType type) {
-        return publisher.publish(NotificationEvent.of(userId, type, "제목", "본문")).orElse(null);
+        return publisher.deliver(NotificationEvent.of(userId, type, "제목", "본문")).orElse(null);
     }
 
     private NotificationDelivery deliveryOf(Notification n) {
@@ -239,7 +246,10 @@ class NotificationPipelineIT extends AuthApiSupport {
         void morning_digest_is_idempotent() throws Exception {
             Account a = join("아침요약");
             Notification n = publish(a.userId(), NotificationType.TIER_CHANGED);
+
+            batch.flushMorningDigest();
             Instant firstSentAt = deliveryOf(n).getSentAt();
+            assertThat(firstSentAt).as("1회차에 발송 처리가 끝난다").isNotNull();
 
             batch.flushMorningDigest();
 

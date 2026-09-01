@@ -32,7 +32,8 @@ import java.util.UUID;
  * 계정 상태 게이트 — 온보딩 테크 스펙 5-6.
  *
  * <p>판정은 두 단계다. {@code users.status} 를 먼저 읽고, <b>SUSPENDED 일 때만</b> 활성
- * {@code sanctions} 를 조회해 차단 범위를 정한다. 정상 사용자는 두 번째 조회를 하지 않으므로
+ * {@code sanctions} 를 조회해 차단 범위를 정한다. {@code WITHDRAWN} 은 sanctions 를 보지 않고
+ * <b>전역 차단</b>한다 — 허용 범위가 "없음"이다(온보딩 5-6). 정상 사용자는 두 번째 조회를 하지 않으므로
  * 일반 요청의 게이트 비용은 status 한 번을 보는 수준이다 — 상태값을 세분화하지 않고도 제재
  * 종류를 분리할 수 있는 이유가 이것이다.
  *
@@ -71,6 +72,17 @@ public class AccountStatusFilter extends OncePerRequestFilter {
             "GET /api/v1/notifications",
             "GET /api/v1/users/me/agreements");
 
+    /**
+     * 탈퇴 계정에도 남겨 두는 경로 — <b>여기만</b> 열고 나머지는 전부 막는다.
+     *
+     * <p>제재 화이트리스트보다 훨씬 좁다. 제재는 "갇히지 않게" 열어 두는 것이지만 탈퇴는 이미
+     * 나간 계정이라 볼 것이 없다 — 알림함·제재 이력·동의 상태는 모두 닫는다. 남는 둘은
+     * 세션을 끊는 경로와, 멱등해야 하는 탈퇴 재요청뿐이다.
+     */
+    private static final Set<String> ALLOWED_WHEN_WITHDRAWN = Set.of(
+            "POST /api/v1/auth/logout",
+            "DELETE /api/v1/users/me");
+
     private final UserRepository userRepository;
     private final SanctionService sanctionService;
 
@@ -89,10 +101,20 @@ public class AccountStatusFilter extends OncePerRequestFilter {
     private Blocked blockedReason(HttpServletRequest request) {
         UUID userId = currentUserId();
         if (userId == null) return null;                 // 미인증(공개 경로) — 그대로 통과
-        if (isAlwaysAllowed(request)) return null;
 
         UserStatus status = userRepository.findStatusById(userId).orElse(null);
-        if (status != UserStatus.SUSPENDED) return null;  // ACTIVE·WITHDRAWN 은 sanctions 를 읽지 않는다
+
+        // 탈퇴는 화이트리스트보다 먼저 본다. 탈퇴 시 RT 를 전부 revoke 해도 <b>이미 발급된 AT 는
+        // 최대 30분 살아 있으므로</b>, 그 창에서 참여·인증 같은 쓰기 API 가 그대로 통한다.
+        // 개별 API 가 각자 deletedAt 을 보게 두면 빠뜨린 API 가 곧 구멍이 되므로 여기서 전역으로 막는다.
+        if (status == UserStatus.WITHDRAWN) {
+            // 401 이다 — 탈퇴 계정에 남은 토큰은 "권한이 없는" 게 아니라 "세션이 없는" 것이다.
+            // 클라이언트는 저장된 토큰을 지우고 로그인 화면으로 간다(GET /users/me 와 같은 응답).
+            return isAllowedWhenWithdrawn(request) ? null : new Blocked(ErrorCode.LOGIN_REQUIRED, null);
+        }
+
+        if (isAlwaysAllowed(request)) return null;
+        if (status != UserStatus.SUSPENDED) return null;   // ACTIVE 는 sanctions 를 읽지 않는다
 
         // SUSPENDED 인데 활성 제재가 없으면 스스로 되돌린다. 해제 배치가 밀려도 사용자가
         // 해제일 이후까지 묶이지 않게 하는 방어다(온보딩 부록 A).
@@ -129,6 +151,10 @@ public class AccountStatusFilter extends OncePerRequestFilter {
 
     private boolean isAlwaysAllowed(HttpServletRequest request) {
         return ALWAYS_ALLOWED.contains(request.getMethod() + " " + request.getRequestURI());
+    }
+
+    private boolean isAllowedWhenWithdrawn(HttpServletRequest request) {
+        return ALLOWED_WHEN_WITHDRAWN.contains(request.getMethod() + " " + request.getRequestURI());
     }
 
     /** 인증 컨텍스트의 userId (미인증이면 null — 공개 경로는 그대로 통과). */

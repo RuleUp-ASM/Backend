@@ -7,7 +7,6 @@ import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.cache.CacheManager;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -20,14 +19,16 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * 인기 점수 갱신 배치 — 매시 정각 (탐색 백엔드 테크스펙 §9-2, 2026-08-11 10분→1시간 확정).
+ * 인기 점수 스냅샷 배치 — 5분 (탐색 테크스펙 5-5-3 "5분 스윕").
  *
  * <p>인기 기준은 "현재 인원"이 아니라 <b>최근 24시간에 발생한 가입 수</b>다. 그래서 탈퇴·강퇴했다고
  * 과거 가입 이벤트를 소급해서 빼지 않는다 — 이미 일어난 참여는 그 시간대의 열기를 나타낸다.
  *
- * <p>인기를 Caffeine 에만 두지 않고 {@code challenge_stats} 에 저장하는 이유는, 홈 Top 20 뿐 아니라
- * {@code explore?sort=POPULAR} 에서 <b>필터를 적용한 뒤 인기순 커서 페이징</b>을 해야 하기 때문이다.
- * DB 컬럼이어야 일반 정렬 키로 쓸 수 있다.
+ * <p>정렬 원천은 Redis 지만 이 스냅샷을 계속 유지하는 이유는 <b>폴백 경로가 읽을 것이 있어야
+ * 하기 때문</b>이다(탐색 테크스펙 5-3 "폴백용"). Redis 가 죽었을 때 인기순 커서 페이징이 그대로
+ * 동작하려면 정렬 키가 DB 컬럼으로도 존재해야 한다. 이관이 아니라 이중화다.
+ *
+ * <p>주기를 1시간에서 5분으로 좁혔다 — 폴백 중 순위가 최대 한 시간 묵으면 "이중화"라고 부를 수 없다.
  */
 @Service
 @RequiredArgsConstructor
@@ -39,7 +40,6 @@ public class PopularityRefreshJob {
     private static final int CHUNK = 500;
 
     private final JdbcTemplate jdbc;
-    private final CacheManager cacheManager;
     private final MeterRegistry meterRegistry;
     private final AtomicReference<Instant> lastSuccessAt = new AtomicReference<>();
 
@@ -53,9 +53,9 @@ public class PopularityRefreshJob {
                 .register(meterRegistry);
     }
 
-    /** 매시 정각 KST. */
-    @Scheduled(cron = "0 0 * * * *", zone = "Asia/Seoul")
-    public void runHourly() {
+    /** 5분마다 KST. Redis 인덱스 투영은 {@code ExploreIndexJobs} 가 같은 주기로 따로 돈다. */
+    @Scheduled(cron = "0 */5 * * * *", zone = "Asia/Seoul")
+    public void runEveryFiveMinutes() {
         runOnce();
     }
 
@@ -103,12 +103,7 @@ public class PopularityRefreshJob {
             }
         }
 
-        if (allSucceeded) {
-            // 갱신이 끝난 뒤에만 랭킹 캐시를 비운다 → 다음 요청이 새 Top 20 을 읽는다.
-            var cache = cacheManager.getCache(TrendingRankingCache.CACHE);
-            if (cache != null) cache.clear();
-            lastSuccessAt.set(Instant.now());
-        }
+        if (allSucceeded) lastSuccessAt.set(Instant.now());
         log.info("popularity_batch updated={} chunks={} allSucceeded={}",
                 updated, (targets.size() + CHUNK - 1) / CHUNK, allSucceeded);
         return updated;
