@@ -51,8 +51,13 @@ public class NotificationBatch {
     /**
      * 미발송 보정 — 예정 시각이 지났는데 아직 안 나간 건을 재시도한다.
      * 상시 0에 가깝게 유지돼야 하며, 값이 쌓이면 큐나 배치가 죽은 것이다.
+     *
+     * <p><b>이 배치가 푸시 유실을 막는 쪽이다.</b> 정상 경로는 적재 커밋 직후의 즉시 발송
+     * ({@link NotificationPushDispatcher})이지만 그건 JVM 콜백이라 서버가 죽으면 사라진다.
+     * 주기를 시간 단위에서 5분으로 좁힌 이유가 이것이다 — 필수(A) 고지가 최대 한 시간 늦게
+     * 도착하는 것은 "즉시 발송"이라는 분류의 약속과 어긋난다.
      */
-    @Scheduled(cron = "0 30 * * * *", zone = "Asia/Seoul")
+    @Scheduled(cron = "0 */5 * * * *", zone = "Asia/Seoul")
     @Transactional
     public int reconcilePending() {
         return flushDue(Instant.now(), "reconcile");

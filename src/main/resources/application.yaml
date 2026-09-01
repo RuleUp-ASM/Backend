@@ -73,6 +73,10 @@ app:
     # 루틴 아웃컴 수집 배치(RoutineOutcomeCollector, 매일 03:30 KST). 첫 수집 시 최근 N일치 소급.
     outcome-lookback-days: ${RECO_OUTCOME_LOOKBACK_DAYS:30}
 
+  # 발행 대기함 스윕 주기. 즉시 경로가 죽었을 때 이 간격만큼이 최대 지연이다.
+  outbox:
+    sweep-interval-ms: ${OUTBOX_SWEEP_INTERVAL_MS:30000}
+
   # 앱링크(딥링크) — 발급과 검사가 같은 규칙을 써야 하므로 베이스 URL 을 한 곳에 둔다.
   # 커스텀 스킴(ruleup://)도 같은 경로 규칙을 공유한다.
   app-links:
