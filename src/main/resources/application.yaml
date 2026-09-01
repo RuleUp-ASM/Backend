@@ -163,9 +163,24 @@ app:
       client-secret: ${NAVER_CLIENT_SECRET:}
       timeout-ms: 3000
 
-  # 프로필 이미지 로컬 저장 위치 (ImageStorageService 기본값과 동일)
+  # 이미지 저장소. 바깥 주소는 어느 쪽이든 /files/{파일명} 으로 같고, 바이트가 놓이는 곳만 바뀐다.
+  #  · local — 로컬 디스크. 개발·테스트 기본값.
+  #            **운영에서 쓰면 안 된다.** Fargate 디스크는 임시라 배포마다 업로드본이 사라진다.
+  #  · s3    — ElastiCache 와 달리 폴백이 없다. 버킷을 지정하지 않으면 기동에 실패한다(조용히
+  #            로컬로 떨어지면 배포마다 사진이 사라지는 것을 아무도 모른 채 지나간다).
   upload:
+    storage: ${IMAGE_STORAGE:local}
     dir: ./uploads
+    s3:
+      bucket: ${IMAGE_S3_BUCKET:}
+      # 버킷 안 정리·수명주기용 접두사. 바깥 주소에는 드러나지 않으므로 나중에 바꿔도 안전하다.
+      key-prefix: ${IMAGE_S3_PREFIX:media}
+      # 리전을 비우면 기본 provider 체인(ECS 는 AWS_REGION)에서 읽는다.
+      region: ${IMAGE_S3_REGION:}
+      # 실제 AWS 면 비워 둔다. LocalStack·MinIO 로 띄울 때만 채운다(path-style 이 함께 켜진다).
+      endpoint: ${IMAGE_S3_ENDPOINT:}
+      # presigned GET 수명. 짧을수록 유출 창이 작지만, 너무 짧으면 목록을 스크롤하는 동안 만료된다.
+      presign-ttl-seconds: ${IMAGE_S3_PRESIGN_TTL_SECONDS:300}
 
   # 감시자(§11.4). 연락처 암호화 키는 prod 필수(Secrets Manager), 로컬은 미설정 시 임시 키로 동작.
   watcher:
