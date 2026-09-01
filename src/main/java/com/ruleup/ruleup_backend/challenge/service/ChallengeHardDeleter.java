@@ -1,7 +1,9 @@
 package com.ruleup.ruleup_backend.challenge.service;
 
+import com.ruleup.ruleup_backend.challenge.explore.store.ExploreIndexer;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.nio.ByteBuffer;
@@ -15,15 +17,20 @@ import java.util.UUID;
  * 대표 이미지는 URL로만 참조하므로 DB 행 삭제와 무관하게 스토리지에 남는다 — 호출부가 imageUrl을 로깅한다.
  */
 @Component
+@RequiredArgsConstructor
 public class ChallengeHardDeleter {
 
     @PersistenceContext
     private EntityManager entityManager;
 
+    private final ExploreIndexer exploreIndexer;
+
     /** 챌린지 challengeId 와 그 자식 행 전부를 물리 삭제한다. 호출부의 @Transactional 안에서 실행. */
     public void hardDelete(UUID challengeId) {
         // 대기 중인 영속 변경(알림 insert 등)을 먼저 DB에 반영(네이티브 삭제가 최신 상태를 지우도록).
         entityManager.flush();
+        // 파생 인덱스에서 뺄 때 필요하다 — 행이 사라진 뒤에는 읽을 수 없으므로 지금 읽어 둔다.
+        String category = readCategory(challengeId);
         // 인증 기록 원본(VerificationDaily·MethodResult)·이의(Objection)·통계(RoutineOutcome)는 보존한다
         // (자동 삭제 스펙: 잔디는 삭제, 인증 원본·통계값 보존 — V6 소프트 참조 전환).
         // 감시자 — 반응 → 통지 → 이력 → 관계 순으로 잎에서부터 지운다. FK 에 ON DELETE CASCADE 가
@@ -43,6 +50,16 @@ public class ChallengeHardDeleter {
         exec("DELETE FROM challenges WHERE id = :cid", challengeId);
         // 네이티브 삭제는 1차 캐시를 갱신하지 않으므로, 삭제된 엔티티가 캐시에서 되살아나지 않도록 detach.
         entityManager.clear();
+        // 탐색 파생 인덱스에서도 뺀다. 03:30 대조가 어차피 걷어내지만, 그때까지 목록에 유령이 뜬다.
+        exploreIndexer.remove(challengeId, category);
+    }
+
+    /** 카테고리별 인기 ZSET 에서 빼려면 값을 알아야 한다. 행이 사라지기 전에 읽는다. */
+    private String readCategory(UUID challengeId) {
+        var rows = entityManager.createNativeQuery("SELECT category FROM challenges WHERE id = :cid")
+                .setParameter("cid", uuidToBytes(challengeId))
+                .getResultList();
+        return rows.isEmpty() ? null : String.valueOf(rows.getFirst());
     }
 
     /** binary(16) UUID 바인딩 네이티브 삭제. */

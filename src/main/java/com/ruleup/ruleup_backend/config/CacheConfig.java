@@ -59,11 +59,8 @@ public class CacheConfig {
                 .expireAfterWrite(Duration.ofMinutes(1))
                 .build());
 
-        // 홈 인기 랭킹 — 1시간(2026-08-11 확정). 배치가 성공하면 즉시 evict 하므로 TTL 은 백스톱.
-        manager.registerCustomCache("challengeTrending", Caffeine.newBuilder()
-                .maximumSize(50)
-                .expireAfterWrite(Duration.ofHours(1))
-                .build());
+        // 홈 인기 랭킹은 여기 없다 — Redis ZSET 이 소유한다(TrendingRankingSource).
+        // 인스턴스 로컬 캐시로 두면 서버가 늘 때 같은 사용자가 새로고침마다 다른 순위를 본다.
 
         return manager;
     }
