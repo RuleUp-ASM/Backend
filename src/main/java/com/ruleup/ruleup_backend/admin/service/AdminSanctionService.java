@@ -5,6 +5,8 @@ import com.ruleup.ruleup_backend.admin.domain.AdminAuditLog;
 import com.ruleup.ruleup_backend.admin.dto.AdminDtos;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
+import com.ruleup.ruleup_backend.common.outbox.OutboxDispatcher;
+import com.ruleup.ruleup_backend.common.outbox.OutboxService;
 import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.NotificationPublisher;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
@@ -15,11 +17,8 @@ import com.ruleup.ruleup_backend.user.UserRepository;
 import com.ruleup.ruleup_backend.user.domain.User;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -35,6 +34,12 @@ import java.util.UUID;
  * </pre>
  * ⑥ 을 커밋 뒤로 미루는 이유는 두 방향이다 — <b>알림 실패가 제재를 롤백시키면 안 되고,
  * 제재가 롤백됐는데 고지만 나가면 더 안 된다.</b>
+ *
+ * <h4>미루되 잃지 않는다 — 아웃박스</h4>
+ * ⑥ 을 {@code afterCommit} 콜백에 맡기면 <b>DB 커밋 직후 서버가 죽는 순간 필수(A) 고지와 자동
+ * 탈퇴가 통째로 사라진다</b>. 콜백은 JVM 메모리에만 있어 재시작 후 주울 근거가 남지 않는다.
+ * 그래서 발행 의사를 ⑤ 와 <b>같은 커밋</b>에 {@code outbox_messages} 로 적고, 디스패처가 커밋
+ * 이후에 집어 간다. 제재가 롤백되면 발행 의사도 함께 사라지므로 반대 방향도 그대로 지켜진다.
  */
 @Slf4j
 @Service
@@ -50,7 +55,8 @@ public class AdminSanctionService {
     private final AdminAuditService auditService;
     private final ConfirmationTokens confirmationTokens;
     private final NotificationPublisher notificationPublisher;
-    private final ApplicationEventPublisher eventPublisher;
+    private final OutboxService outboxService;
+    private final OutboxDispatcher outboxDispatcher;
 
     @Transactional
     public AdminDtos.SanctionResponse apply(UUID operatorId, UUID targetUserId,
@@ -95,9 +101,10 @@ public class AdminSanctionService {
                 reasonCode, request.reasonText(), source,
                 parseUuid(request.sourceId()), operatorId, endsAt);
 
-        // ⑥ 고지와 자동 탈퇴는 커밋 뒤에. notifiedAt 은 먼저 채워 "고지 없는 제재"로 보이지 않게 한다.
+        // ⑥ 고지와 자동 탈퇴는 커밋 뒤에 — 다만 "무엇을 발행할지"는 지금 이 커밋에 적는다.
+        //    notifiedAt 은 먼저 채워 "고지 없는 제재"로 보이지 않게 한다.
         sanction.markNotified(Instant.now());
-        publishAfterCommit(sanction, target, type);
+        enqueueSideEffects(sanction, target, type);
 
         return new AdminDtos.SanctionResponse(
                 sanction.getId().toString(), targetUserId.toString(), type.name(),
@@ -120,32 +127,35 @@ public class AdminSanctionService {
                 AdminAuditLog.TargetType.USER, targetUserId, sanctionId.toString());
         sanctionService.revoke(sanctionId, Instant.now());
 
-        UUID userId = sanction.getUserId();
-        registerAfterCommit(() -> notificationPublisher.publish(NotificationEvent.of(
-                userId, NotificationType.ACCOUNT_SANCTION,
-                "제재가 해제됐어요", "재검토 결과 제재가 해제됐어요. 다시 이용하실 수 있어요.")));
+        // publish 는 이 트랜잭션에 합류해 발행 의사만 적는다 — 해제가 롤백되면 고지도 함께 사라진다.
+        notificationPublisher.publish(NotificationEvent.of(
+                sanction.getUserId(), NotificationType.ACCOUNT_SANCTION,
+                "제재가 해제됐어요", "재검토 결과 제재가 해제됐어요. 다시 이용하실 수 있어요."));
     }
 
     /**
-     * 커밋 후 발행. 필수(A) 고지와 전 챌린지 자동 탈퇴가 여기서 나간다.
+     * 부수 효과 예약 — 필수(A) 고지와 전 챌린지 자동 탈퇴. <b>제재와 같은 커밋에 적는다.</b>
      *
      * <p>자동 탈퇴는 <b>강퇴가 아니다</b> — 감점도 재참여 백오프도 붙지 않는다. 수신하는 챌린지
      * 도메인이 그렇게 처리하도록 사유를 실어 보낸다.
+     *
+     * <p>자동 탈퇴에는 dedup 키로 제재 ID 를 쓴다. 같은 제재로 두 번 나가게 만들 이유가 없고,
+     * 재시도 중복은 아웃박스 단계에서 걸러 두는 편이 아래 도메인이 방어하는 것보다 확실하다.
      */
-    private void publishAfterCommit(Sanction sanction, User target, SanctionType type) {
-        UUID userId = target.getId();
-        String reasonText = sanction.getReasonText();
+    private void enqueueSideEffects(Sanction sanction, User target, SanctionType type) {
         String endsAt = sanction.getEndsAt() == null ? null : sanction.getEndsAt().toString();
 
-        registerAfterCommit(() -> {
-            notificationPublisher.publish(NotificationEvent.of(userId,
-                    NotificationType.ACCOUNT_SANCTION,
-                    noticeTitle(type),
-                    // 본문에 민감정보를 담지 않는다 — 상세는 앱 안에서 본다.
-                    endsAt == null ? "자세한 내용은 마이페이지에서 확인해주세요."
-                            : "해제 예정일까지 일부 기능을 이용할 수 없어요. 자세한 내용은 마이페이지에서 확인해주세요."));
-            eventPublisher.publishEvent(new SanctionLeaveRequested(userId, reasonText));
-        });
+        notificationPublisher.publish(NotificationEvent.of(target.getId(),
+                NotificationType.ACCOUNT_SANCTION,
+                noticeTitle(type),
+                // 본문에 민감정보를 담지 않는다 — 상세는 앱 안에서 본다.
+                endsAt == null ? "자세한 내용은 마이페이지에서 확인해주세요."
+                        : "해제 예정일까지 일부 기능을 이용할 수 없어요. 자세한 내용은 마이페이지에서 확인해주세요."));
+
+        outboxService.enqueue(SanctionLeaveListener.OUTBOX_TYPE,
+                new SanctionLeaveListener.Payload(target.getId(), sanction.getReasonText()),
+                "sanction-leave:" + sanction.getId());
+        outboxDispatcher.requestFlush();
     }
 
     private String noticeTitle(SanctionType type) {
@@ -154,19 +164,6 @@ public class AdminSanctionService {
             case LOCK -> "계정이 잠겼어요";
             case FEATURE_SUSPENSION -> "일부 기능이 정지됐어요";
         };
-    }
-
-    private void registerAfterCommit(Runnable action) {
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            action.run();
-            return;
-        }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                action.run();
-            }
-        });
     }
 
     /** 확인 지문의 입력 — 대상·내용이 바뀌면 토큰이 무효가 된다. */
@@ -200,9 +197,4 @@ public class AdminSanctionService {
         return s == null ? "" : s;
     }
 
-    /**
-     * 계정 제재에 따른 전 챌린지 자동 탈퇴 요청.
-     * <b>강퇴가 아니므로</b> 감점·재참여 백오프를 적용하지 않는다.
-     */
-    public record SanctionLeaveRequested(UUID userId, String reason) {}
 }

@@ -57,27 +57,37 @@ class RoomOperationsApiIT extends ChallengeApiSupport {
     }
 
     @Test
-    @DisplayName("방장 위임은 수락 절차 없이 OWNER 역할을 원자적으로 교체한다")
-    void ownerTransferIsImmediate() throws Exception {
-        Member owner = member(uniq("owner-old"));
-        Member target = member(uniq("owner-new"));
+    @DisplayName("페이지2로 밀린 방장 운영 3종은 매핑 자체가 없다 — 클라에서 감추는 것으로는 부족하다")
+    void phase2OwnerAdminEndpointsAreNotMapped() throws Exception {
+        Member owner = member(uniq("phase2-owner"));
+        Member target = member(uniq("phase2-target"));
         UUID challengeId = insertChallenge(owner.id(), "EXERCISE", "ACTIVE", "GROUP");
         insertActiveMembership(challengeId, owner.id(), "OWNER");
         insertActiveMembership(challengeId, target.id(), "MEMBER");
 
-        MvcResult response = mvc.perform(patch("/api/v1/challenges/" + challengeId + "/owner")
+        // 방장 위임 — 폐지(챌린지 정책 §11). 방장이 나가면 봇방장으로 자동 전환될 뿐이다.
+        assertThat(mvc.perform(patch("/api/v1/challenges/" + challengeId + "/owner")
                 .header("Authorization", "Bearer " + owner.token())
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(OM.writeValueAsString(Map.of("targetUserId", target.id().toString())))).andReturn();
+                .content(OM.writeValueAsString(Map.of("targetUserId", target.id().toString()))))
+                .andReturn().getResponse().getStatus()).isEqualTo(404);
 
-        assertThat(response.getResponse().getStatus()).isEqualTo(200);
-        assertThat((String) read(response, "$.data.newOwnerUserId")).isEqualTo(target.id().toString());
+        // 방장 승계(선착순 클레임) — 폐지. 승계가 없으므로 3일 면책 규칙도 함께 사라졌다.
+        assertThat(mvc.perform(post("/api/v1/challenges/" + challengeId + "/owner/claim")
+                .header("Authorization", "Bearer " + target.token()))
+                .andReturn().getResponse().getStatus()).isEqualTo(404);
+
+        // 방장 재량 강퇴 — 비활성. 페이지1의 강퇴 경로는 자동 제재 3종뿐이며 전부 배치가 처리한다.
+        assertThat(mvc.perform(delete("/api/v1/challenges/" + challengeId + "/members/" + target.id())
+                .header("Authorization", "Bearer " + owner.token())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(OM.writeValueAsString(Map.of("reason", "반복적인 운영 규칙 위반입니다."))))
+                .andReturn().getResponse().getStatus()).isEqualTo(404);
+
+        // 매핑만 빠진 것이지 멤버십이 바뀌어서는 안 된다.
         assertThat(jdbcTemplate.queryForObject(
-                "SELECT role FROM challenge_members WHERE challenge_id=? AND user_id=?",
-                String.class, bytes(challengeId), bytes(target.id()))).isEqualTo("OWNER");
-        assertThat(jdbcTemplate.queryForObject(
-                "SELECT role FROM challenge_members WHERE challenge_id=? AND user_id=?",
-                String.class, bytes(challengeId), bytes(owner.id()))).isEqualTo("MEMBER");
+                "SELECT status FROM challenge_members WHERE challenge_id=? AND user_id=?",
+                String.class, bytes(challengeId), bytes(target.id()))).isEqualTo("ACTIVE");
     }
 
     @Test
@@ -128,39 +138,17 @@ class RoomOperationsApiIT extends ChallengeApiSupport {
     }
 
     @Test
-    @DisplayName("방장은 비공개 방 초대를 만들고 멤버를 강퇴하며 ROOM 알림을 남긴다")
-    void invitationKickAndNotification() throws Exception {
+    @DisplayName("방장은 비공개 방 초대를 만들 수 있다 — 초대는 페이지1에 남은 유일한 방장 운영 API다")
+    void invitationIssue() throws Exception {
         Member owner = member(uniq("admin-owner"));
-        Member target = member(uniq("admin-target"));
         UUID challengeId = insertChallenge(owner.id(), "EXERCISE", "ACTIVE", "GROUP");
         insertActiveMembership(challengeId, owner.id(), "OWNER");
-        insertActiveMembership(challengeId, target.id(), "MEMBER");
         jdbcTemplate.update("UPDATE challenges SET visibility='PRIVATE' WHERE id=?", bytes(challengeId));
 
         MvcResult invitation = mvc.perform(post("/api/v1/challenges/" + challengeId + "/invitations")
                 .header("Authorization", "Bearer " + owner.token())).andReturn();
         assertThat(invitation.getResponse().getStatus()).isEqualTo(201);
         assertThat((String) read(invitation, "$.data.token")).isNotBlank();
-
-        MvcResult kicked = mvc.perform(delete("/api/v1/challenges/" + challengeId + "/members/" + target.id())
-                .header("Authorization", "Bearer " + owner.token())
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(OM.writeValueAsString(Map.of("reason", "반복적인 운영 규칙 위반입니다.")))).andReturn();
-        assertThat((Boolean) read(kicked, "$.data.kicked")).isTrue();
-        assertThat(jdbcTemplate.queryForObject(
-                "SELECT status FROM challenge_members WHERE challenge_id=? AND user_id=?",
-                String.class, bytes(challengeId), bytes(target.id()))).isEqualTo("REMOVED");
-        // 재입장 대기는 1주 → 2주 → 4주 매번 두 배(제재 정책 §4.3). 첫 강퇴이므로 1주.
-        Integer waitDays = jdbcTemplate.queryForObject(
-                "SELECT TIMESTAMPDIFF(DAY, left_at, rejoin_available_at) FROM challenge_members " +
-                        "WHERE challenge_id=? AND user_id=?",
-                Integer.class, bytes(challengeId), bytes(target.id()));
-        assertThat(waitDays).isEqualTo(7);
-
-        // 강퇴 확정은 필수(A) — 야간에도 즉시 나가고 끌 수 없다.
-        MvcResult notifications = getAuth("/api/v1/notifications", target.token());
-        assertThat((String) read(notifications, "$.data.items[0].type")).isEqualTo("CHALLENGE_KICKED");
-        assertThat((String) read(notifications, "$.data.items[0].category")).isEqualTo("A");
     }
 
     @Test
