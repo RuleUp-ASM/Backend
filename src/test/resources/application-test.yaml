@@ -26,6 +26,11 @@ app:
     sync-min-interval-sec: 0
     sync-backlog-min-interval-sec: 0
 
+  explore:
+    # Redis 없이 도는 것이 기본이다. 켜진 경로는 ExploreRedisFallbackIT 가 프로퍼티를 덮어써서 검증한다.
+    redis:
+      enabled: false
+
   join-counter:
     # 동시 참여 카운터 보정 배치는 무차별이라, 멤버십 없이 카운터만 심어 FREE_LIMIT 을 검증하는
     # 테스트(ChallengeJoinGateIT 등)의 픽스처를 되돌려 놓는다 → 첫 실행을 멀리 밀어 사실상 끈다.
@@ -57,3 +62,12 @@ spring:
   # (CacheConfig의 CaffeineCacheManager 빈은 @Profile("!test")로 빠진다.)
   cache:
     type: simple
+  # 테스트에는 Redis 컨테이너를 띄우지 않는다 — 대부분의 IT 는 탐색과 무관하고,
+  # 컨테이너를 하나 더 띄우면 전체 스위트가 느려진다. 탐색은 회로가 열린 채 MySQL 경로로 돈다.
+  # Redis 경로와 두 경로의 순서 동일성은 ExploreRedisFallbackIT 가 실제 Redis 로 따로 검증한다.
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 16379
+      timeout: 100ms
+      connect-timeout: 100ms

@@ -31,13 +31,30 @@ spring:
     enabled: true
     locations: classpath:db/migration   # 1단계에서 여기에 SQL 넣을 예정
 
-  # 캐시는 Caffeine(JVM 로컬). 캐시 매니저는 CacheConfig(@Profile("!test"))가 명시적으로 구성하므로
-  # spring.cache.type / spring.data.redis 설정 불필요(ElastiCache(Redis) 제거).
+  # 캐시는 Caffeine(JVM 로컬). 캐시 매니저는 CacheConfig(@Profile("!test"))가 명시적으로 구성한다.
+  #
+  # Redis 는 캐시가 아니라 **탐색 파생 인덱스의 저장소**로 쓴다(정렬 ZSET·표시 HASH·필터 SET).
+  # 인스턴스 로컬 캐시로는 서버가 늘 때 순위가 서로 달라져 커서 페이징이 깨지기 때문이다.
+  # 미배포 환경에서는 회로차단기가 열려 MySQL 폴백으로 돌므로 기동에 영향이 없다.
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: ${REDIS_TIMEOUT:500ms}
+      connect-timeout: ${REDIS_CONNECT_TIMEOUT:500ms}
 
   servlet:
     multipart:
       max-file-size: 10MB     # 프로필 사진 10MB 제한 (스펙)
       max-request-size: 11MB
+
+# Redis 헬스체크는 끈다. 탐색은 Redis 없이도 폴백으로 정상 동작하는데, 여기서 DOWN 이 되면
+# Redis 미배포 환경의 태스크가 헬스체크 실패로 재시작 루프에 빠진다.
+# 폴백 여부는 explore_redis_circuit_open 게이지로 본다.
+management:
+  health:
+    redis:
+      enabled: ${REDIS_HEALTH_CHECK:false}
 
 # 우리 앱 전용 설정 (외부에서 받는 값은 전부 .env에서 주입)
 app:
@@ -72,6 +89,13 @@ app:
     segment-window-days: ${RECO_SEGMENT_WINDOW_DAYS:30}        # 최근 N일 생성 챌린지만 인기도 집계
     # 루틴 아웃컴 수집 배치(RoutineOutcomeCollector, 매일 03:30 KST). 첫 수집 시 최근 N일치 소급.
     outcome-lookback-days: ${RECO_OUTCOME_LOOKBACK_DAYS:30}
+
+  # 탐색 파생 인덱스(Redis). 끄면 처음부터 MySQL 경로로만 돈다.
+  explore:
+    redis:
+      enabled: ${EXPLORE_REDIS_ENABLED:true}
+      # 회로가 열린 뒤 다시 Redis 를 찔러 보기까지의 시간.
+      open-duration-ms: ${EXPLORE_REDIS_OPEN_MS:30000}
 
   # 발행 대기함 스윕 주기. 즉시 경로가 죽었을 때 이 간격만큼이 최대 지연이다.
   outbox:
