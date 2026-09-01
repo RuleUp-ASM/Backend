@@ -31,6 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 /**
@@ -250,6 +251,27 @@ class WithdrawRestoreFlowIT {
 
             expectError(refresh(rt), 401, "SESSION_EXPIRED");   // RT 전부 revoke
             expectError(me(at), 401, "LOGIN_REQUIRED");          // 탈퇴 후 보호 API 차단
+        }
+
+        @Test
+        @DisplayName("탈퇴 직후 남은 AT 로는 쓰기도 읽기도 안 된다 — 보안 필터에서 전역 차단한다")
+        void withdrawn_access_token_is_blocked_globally() throws Exception {
+            String tag = uniq();
+            String at = read(signup(tag, "전역차단" + SEQ.get()), "$.data.accessToken");
+            assertThat(withdraw(at, "탈퇴할게요").getResponse().getStatus()).isEqualTo(200);
+
+            // AT 는 stateless 라 탈퇴해도 서명·만료가 30분간 그대로 유효하다. 개별 API 가 각자
+            // deletedAt 을 확인하는 방식이면 빠뜨린 API 가 곧 구멍이므로 게이트에서 막아야 한다.
+            expectError(mvc.perform(patch("/api/v1/users/me/notification-settings")
+                    .header("Authorization", "Bearer " + at)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(om.writeValueAsString(Map.of("types", List.of(
+                            Map.of("type", "ROUTINE_REMINDER", "enabled", false))))))
+                    .andReturn(), 401, "LOGIN_REQUIRED");
+
+            // 제재 화이트리스트(알림함 열람)도 탈퇴에는 열리지 않는다 — 허용 범위가 "없음"이다.
+            expectError(mvc.perform(get("/api/v1/notifications")
+                    .header("Authorization", "Bearer " + at)).andReturn(), 401, "LOGIN_REQUIRED");
         }
 
         // 회원 탈퇴 UI가 나오면 확정
