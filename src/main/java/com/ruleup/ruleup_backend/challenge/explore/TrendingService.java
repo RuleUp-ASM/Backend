@@ -15,7 +15,6 @@ import com.ruleup.ruleup_backend.score.UserScoreSummaryRepository;
 import com.ruleup.ruleup_backend.score.domain.Tier;
 import com.ruleup.ruleup_backend.user.domain.InterestCategory;
 import lombok.RequiredArgsConstructor;
-import org.springframework.cache.CacheManager;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,39 +30,40 @@ import java.util.stream.Collectors;
 /**
  * 홈 실시간 인기 조회 (탐색 백엔드 테크스펙 §11-1).
  *
- * <p>순위는 캐시에서, <b>표시값과 사용자별 값은 DB 에서</b> 읽어 합친다. 인기에는 티어 필터를
- * 적용하지 않는다 — 내 티어로 못 들어가는 방도 보이고 {@code joinable} 로 잠금만 표시한다(정책 §3.1).
+ * <p>순위는 {@link TrendingRankingSource}(Redis ZSET, 장애 시 MySQL) 에서, <b>표시값과 사용자별
+ * 값은 DB 에서</b> 읽어 합친다. 인기에는 티어 필터를 적용하지 않는다 — 내 티어로 못 들어가는 방도
+ * 보이고 {@code joinable} 로 잠금만 표시한다(정책 §3.1).
  */
 @Service
 @RequiredArgsConstructor
 public class TrendingService {
 
-    private final TrendingRankingCache rankingCache;
+    private final TrendingRankingSource rankingSource;
     private final ChallengeRepository challengeRepository;
     private final UserScoreSummaryRepository scoreSummaryRepository;
     private final MyMembershipReader myMembershipReader;
-    private final CacheManager cacheManager;
     private final MeterRegistry meterRegistry;
-    private final AtomicLong cacheHits = new AtomicLong();
-    private final AtomicLong cacheMisses = new AtomicLong();
+    private final AtomicLong redisServed = new AtomicLong();
+    private final AtomicLong sqlServed = new AtomicLong();
 
     @PostConstruct
     void registerMetrics() {
-        Gauge.builder("trending_cache_hit_ratio", this, TrendingService::cacheHitRatio)
-                .description("Trending 랭킹 Caffeine 캐시 적중률")
+        // 폴백이 조용히 상시화되는 것이 가장 나쁘다 — 비율을 늘 볼 수 있게 둔다.
+        Gauge.builder("trending_redis_serve_ratio", this, TrendingService::redisServeRatio)
+                .description("인기 랭킹을 Redis 로 응답한 비율 — 1 미만이면 폴백이 돌고 있다")
                 .register(meterRegistry);
     }
 
     @Transactional(readOnly = true)
     public TrendingResponse getTrending(UUID userId, String category) {
         String normalized = normalizeCategory(category);
-        recordCacheLookup(normalized);
-        TrendingRankingCache.Ranking ranking = rankingCache.ranking(normalized);
+        TrendingRankingSource.Ranking ranking = rankingSource.ranking(normalized);
+        recordSource(ranking.source());
         if (ranking.entries().isEmpty()) {
             return new TrendingResponse(ranking.calculatedAt(), List.of());
         }
 
-        List<UUID> ids = ranking.entries().stream().map(TrendingRankingCache.Entry::challengeId).toList();
+        List<UUID> ids = ranking.entries().stream().map(TrendingRankingSource.Entry::challengeId).toList();
         Map<UUID, Challenge> byId = challengeRepository.findAllById(ids).stream()
                 .collect(Collectors.toMap(Challenge::getId, Function.identity()));
         Tier myTier = displayTier(userId);
@@ -72,7 +72,7 @@ public class TrendingService {
 
         List<TrendingResponse.Item> items = new ArrayList<>();
         int rank = 1;
-        for (TrendingRankingCache.Entry entry : ranking.entries()) {
+        for (TrendingRankingSource.Entry entry : ranking.entries()) {
             Challenge c = byId.get(entry.challengeId());
             if (!isCurrentlyVisible(c, normalized)) continue;
             items.add(new TrendingResponse.Item(
@@ -92,22 +92,20 @@ public class TrendingService {
         return new TrendingResponse(ranking.calculatedAt(), items);
     }
 
-    private void recordCacheLookup(String category) {
-        var cache = cacheManager.getCache(TrendingRankingCache.CACHE);
-        String key = category == null ? "ALL" : category;
-        if (cache != null && cache.get(key) != null) cacheHits.incrementAndGet();
-        else cacheMisses.incrementAndGet();
+    private void recordSource(ExploreDataSource source) {
+        if (source == ExploreDataSource.REDIS) redisServed.incrementAndGet();
+        else sqlServed.incrementAndGet();
     }
 
-    private double cacheHitRatio() {
-        long hits = cacheHits.get();
-        long requests = hits + cacheMisses.get();
-        return requests == 0 ? 0d : (double) hits / requests;
+    private double redisServeRatio() {
+        long redis = redisServed.get();
+        long total = redis + sqlServed.get();
+        return total == 0 ? 0d : (double) redis / total;
     }
 
     /**
-     * 랭킹은 최대 1시간 전 스냅샷이므로 응답 직전에 존재 은닉 조건을 다시 확인한다.
-     * 공개 범위·모드·상태·카테고리는 캐시 수명 중에도 바뀔 수 있다.
+     * 랭킹은 파생 스냅샷이므로 응답 직전에 존재 은닉 조건을 다시 확인한다.
+     * 공개 범위·모드·상태·카테고리는 인덱스가 따라오기 전에도 바뀔 수 있다.
      */
     private boolean isCurrentlyVisible(Challenge c, String category) {
         if (c == null || c.getDeletedAt() != null) return false;

@@ -98,15 +98,12 @@ class OpenApiDocsIT {
                 "/api/v1/challenges/{challengeId}/invitations",
                 "/api/v1/challenges/invitations/{token}",
                 "/api/v1/challenges/invitations/{token}/accept",
-                "/api/v1/challenges/{challengeId}/members/{targetUserId}",
-                "/api/v1/challenges/{challengeId}/owner",
-                "/api/v1/challenges/{challengeId}/owner/claim",
                 "/api/v1/reports",
                 "/api/v1/users/me/blocks");
     }
 
     @Test
-    @DisplayName("Phase 2로 빠진 공지·댓글 경로는 문서에 없다")
+    @DisplayName("Phase 2로 빠진 공지·댓글·방장 운영 경로는 문서에 없다")
     void documentHasNoPhase2Paths() throws Exception {
         Map<String, Object> paths = doc().read("$.paths");
 
@@ -115,7 +112,12 @@ class OpenApiDocsIT {
                 "/api/v1/challenges/{challengeId}/notices/{noticeId}",
                 "/api/v1/challenges/{challengeId}/notices/{noticeId}/pin",
                 "/api/v1/comments",
-                "/api/v1/comments/{commentId}");
+                "/api/v1/comments/{commentId}",
+                // 방장 권한 축소(챌린지 정책 §7.1 · §11, 2026-08-25) — 강퇴·위임·승계 전부 스펙아웃.
+                // 문서에 남아 있으면 클라이언트가 "쓸 수 있는 API" 로 읽는다.
+                "/api/v1/challenges/{challengeId}/members/{targetUserId}",
+                "/api/v1/challenges/{challengeId}/owner",
+                "/api/v1/challenges/{challengeId}/owner/claim");
     }
 
     @Test
@@ -123,11 +125,13 @@ class OpenApiDocsIT {
     void tagsAreOrderedByCallOrder() throws Exception {
         List<String> names = doc().read("$.tags[*].name");
 
-        assertThat(names.subList(0, 14)).containsExactly(
+        // "Challenge Admin" 은 빠졌다 — 그 태그가 묶던 강퇴·위임·승계가 전부 페이지2로 밀렸고,
+        // 항목 없는 태그만 남기면 문서에 빈 섹션이 생긴다.
+        assertThat(names.subList(0, 13)).containsExactly(
                 "Intro", "Auth", "Category", "Onboarding", "Account", "Profile",
                 "Challenge Member", "Challenge Invitation", "Challenge Room",
                 "인증 구현 - 챌린지", "인증 구현",
-                "Challenge Ranking", "Challenge Admin", "Report");
+                "Challenge Ranking", "Report");
         // 같은 태그가 두 번 실리면 Swagger UI 에 그룹이 중복으로 그려진다.
         assertThat(names).doesNotHaveDuplicates();
 
@@ -255,20 +259,6 @@ class OpenApiDocsIT {
         }
 
         @Test
-        @DisplayName("방 운영 — 강퇴 사유 400, 클레임 경합 409 가 문서화된다")
-        void adminErrors() throws Exception {
-            assertThat(doc().<Map<String, Object>>read(
-                    "$.paths['/api/v1/challenges/{challengeId}/members/{targetUserId}'].delete.responses['400']"
-                            + ".content['application/json'].examples"))
-                    .containsKey("KICK_REASON_REQUIRED");
-
-            assertThat(doc().<Map<String, Object>>read(
-                    "$.paths['/api/v1/challenges/{challengeId}/owner/claim'].post.responses['409']"
-                            + ".content['application/json'].examples"))
-                    .containsKey("OWNER_ALREADY_EXISTS");
-        }
-
-        @Test
         @DisplayName("신고 — 남용 제재 403 이 문서화된다")
         void reportErrors() throws Exception {
             assertThat(doc().<Map<String, Object>>read(
@@ -308,8 +298,8 @@ class OpenApiDocsIT {
                     "CrossRankingResponse", "CrossRankingItem",
                     "InvitationPreviewResponse", "InvitationChallengeSummary", "InvitationIssueResponse",
                     "JoinResponse", "LeaveResponse", "MemberListResponse", "ChallengeMemberItem",
-                    "KickRequest", "KickResponse", "OwnerTransferRequest", "OwnerTransferResponse",
-                    "OwnerClaimResponse",
+                    // 강퇴·위임·승계 DTO 는 여기 없다 — 매핑이 빠지면 스키마도 함께 빠진다.
+                    // 명세와 코드는 보존하되 문서에는 노출하지 않는 것이 스펙아웃의 의미다.
                     "ReportCreateRequest", "ReportCreateResponse", "BlockListResponse",
                     "BlockedUserItem", "BlockedChallengeItem", "BlockDeleteResponse");
         }
@@ -367,8 +357,6 @@ class OpenApiDocsIT {
                     "$.paths['/api/v1/challenges/invitations/{token}'].get.security",
                     "$.paths['/api/v1/challenges/invitations/{token}/accept'].post.security",
                     "$.paths['/api/v1/challenges/{challengeId}/invitations'].post.security",
-                    "$.paths['/api/v1/challenges/{challengeId}/owner'].patch.security",
-                    "$.paths['/api/v1/challenges/{challengeId}/owner/claim'].post.security",
                     "$.paths['/api/v1/reports'].post.security",
                     "$.paths['/api/v1/users/me/blocks'].get.security")) {
                 assertThat(doc().<List<Object>>read(path)).as(path).isNotEmpty();

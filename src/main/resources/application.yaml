@@ -31,13 +31,30 @@ spring:
     enabled: true
     locations: classpath:db/migration   # 1단계에서 여기에 SQL 넣을 예정
 
-  # 캐시는 Caffeine(JVM 로컬). 캐시 매니저는 CacheConfig(@Profile("!test"))가 명시적으로 구성하므로
-  # spring.cache.type / spring.data.redis 설정 불필요(ElastiCache(Redis) 제거).
+  # 캐시는 Caffeine(JVM 로컬). 캐시 매니저는 CacheConfig(@Profile("!test"))가 명시적으로 구성한다.
+  #
+  # Redis 는 캐시가 아니라 **탐색 파생 인덱스의 저장소**로 쓴다(정렬 ZSET·표시 HASH·필터 SET).
+  # 인스턴스 로컬 캐시로는 서버가 늘 때 순위가 서로 달라져 커서 페이징이 깨지기 때문이다.
+  # 미배포 환경에서는 회로차단기가 열려 MySQL 폴백으로 돌므로 기동에 영향이 없다.
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: ${REDIS_TIMEOUT:500ms}
+      connect-timeout: ${REDIS_CONNECT_TIMEOUT:500ms}
 
   servlet:
     multipart:
       max-file-size: 10MB     # 프로필 사진 10MB 제한 (스펙)
       max-request-size: 11MB
+
+# Redis 헬스체크는 끈다. 탐색은 Redis 없이도 폴백으로 정상 동작하는데, 여기서 DOWN 이 되면
+# Redis 미배포 환경의 태스크가 헬스체크 실패로 재시작 루프에 빠진다.
+# 폴백 여부는 explore_redis_circuit_open 게이지로 본다.
+management:
+  health:
+    redis:
+      enabled: ${REDIS_HEALTH_CHECK:false}
 
 # 우리 앱 전용 설정 (외부에서 받는 값은 전부 .env에서 주입)
 app:
@@ -72,6 +89,13 @@ app:
     segment-window-days: ${RECO_SEGMENT_WINDOW_DAYS:30}        # 최근 N일 생성 챌린지만 인기도 집계
     # 루틴 아웃컴 수집 배치(RoutineOutcomeCollector, 매일 03:30 KST). 첫 수집 시 최근 N일치 소급.
     outcome-lookback-days: ${RECO_OUTCOME_LOOKBACK_DAYS:30}
+
+  # 탐색 파생 인덱스(Redis). 끄면 처음부터 MySQL 경로로만 돈다.
+  explore:
+    redis:
+      enabled: ${EXPLORE_REDIS_ENABLED:true}
+      # 회로가 열린 뒤 다시 Redis 를 찔러 보기까지의 시간.
+      open-duration-ms: ${EXPLORE_REDIS_OPEN_MS:30000}
 
   # 발행 대기함 스윕 주기. 즉시 경로가 죽었을 때 이 간격만큼이 최대 지연이다.
   outbox:
@@ -139,9 +163,24 @@ app:
       client-secret: ${NAVER_CLIENT_SECRET:}
       timeout-ms: 3000
 
-  # 프로필 이미지 로컬 저장 위치 (ImageStorageService 기본값과 동일)
+  # 이미지 저장소. 바깥 주소는 어느 쪽이든 /files/{파일명} 으로 같고, 바이트가 놓이는 곳만 바뀐다.
+  #  · local — 로컬 디스크. 개발·테스트 기본값.
+  #            **운영에서 쓰면 안 된다.** Fargate 디스크는 임시라 배포마다 업로드본이 사라진다.
+  #  · s3    — ElastiCache 와 달리 폴백이 없다. 버킷을 지정하지 않으면 기동에 실패한다(조용히
+  #            로컬로 떨어지면 배포마다 사진이 사라지는 것을 아무도 모른 채 지나간다).
   upload:
+    storage: ${IMAGE_STORAGE:local}
     dir: ./uploads
+    s3:
+      bucket: ${IMAGE_S3_BUCKET:}
+      # 버킷 안 정리·수명주기용 접두사. 바깥 주소에는 드러나지 않으므로 나중에 바꿔도 안전하다.
+      key-prefix: ${IMAGE_S3_PREFIX:media}
+      # 리전을 비우면 기본 provider 체인(ECS 는 AWS_REGION)에서 읽는다.
+      region: ${IMAGE_S3_REGION:}
+      # 실제 AWS 면 비워 둔다. LocalStack·MinIO 로 띄울 때만 채운다(path-style 이 함께 켜진다).
+      endpoint: ${IMAGE_S3_ENDPOINT:}
+      # presigned GET 수명. 짧을수록 유출 창이 작지만, 너무 짧으면 목록을 스크롤하는 동안 만료된다.
+      presign-ttl-seconds: ${IMAGE_S3_PRESIGN_TTL_SECONDS:300}
 
   # 감시자(§11.4). 연락처 암호화 키는 prod 필수(Secrets Manager), 로컬은 미설정 시 임시 키로 동작.
   watcher:

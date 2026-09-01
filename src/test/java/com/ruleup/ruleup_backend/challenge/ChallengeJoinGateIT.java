@@ -301,26 +301,6 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("강퇴로 인원이 줄어도 version 이 오른다")
-        void kickBumpsVersion() throws Exception {
-            Member owner = member(uniq("kick-ver-owner"));
-            Member target = member(uniq("kick-ver-target"));
-            UUID challengeId = openGroup(owner.id());
-            join(target.token(), challengeId);
-            int before = versionOf(challengeId);
-
-            MvcResult res = mvc.perform(delete(
-                            "/api/v1/challenges/" + challengeId + "/members/" + target.id())
-                            .header("Authorization", "Bearer " + owner.token())
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content(OM.writeValueAsString(Map.of("reason", "규칙을 반복해서 어겼습니다"))))
-                    .andReturn();
-            assertThat(res.getResponse().getStatus()).isEqualTo(200);
-
-            assertThat(versionOf(challengeId)).isGreaterThan(before);
-        }
-
-        @Test
         @DisplayName("자진 탈퇴 → 감점 + 재입장 1주 대기, 그 안에 재가입하면 REJOIN_COOLDOWN")
         void leaveThenCooldown() throws Exception {
             Member owner = member(uniq("leave-owner"));
@@ -348,28 +328,6 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("강퇴 대기는 사유와 무관하게 배수로만 계산된다 — 영구 차단 경로는 없다 (정책 §10.2)")
-        void kickCooldownHasNoPermanentBan() throws Exception {
-            Member owner = member(uniq("kick-owner"));
-            Member target = member(uniq("kick-target"));
-            UUID challengeId = openGroup(owner.id());
-            join(target.token(), challengeId);
-
-            MvcResult kick = mvc.perform(delete("/api/v1/challenges/" + challengeId + "/members/" + target.id())
-                    .header("Authorization", "Bearer " + owner.token())
-                    .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
-                    .content("{\"reason\":\"반복적인 규칙 위반으로 내보냅니다\"}")).andReturn();
-            assertThat(kick.getResponse().getStatus()).isEqualTo(200);
-
-            // 대기 중에는 막히고
-            expectBlocked(join(target.token(), challengeId), "REJOIN_COOLDOWN");
-            // 배수가 지나면 언제든 다시 들어올 수 있다(영구 차단 없음)
-            jdbcTemplate.update("UPDATE challenge_members SET rejoin_available_at = DATE_SUB(NOW(6), INTERVAL 1 HOUR) "
-                    + "WHERE challenge_id = ? AND user_id = ?", bytes(challengeId), bytes(target.id()));
-            assertThat(join(target.token(), challengeId).getResponse().getStatus()).isEqualTo(200);
-        }
-
-        @Test
         @DisplayName("1주가 지나면 같은 방에 다시 들어갈 수 있다 (구 '재참여 영구 불가' 폐기)")
         void rejoinAfterCooldown() throws Exception {
             Member owner = member(uniq("rejoin-owner"));
@@ -391,7 +349,7 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
     class Succession {
 
         @Test
-        @DisplayName("방장이 넘기지 않고 나가면 즉시 봇방장 체제 — 멤버가 선착순으로 방장이 된다")
+        @DisplayName("방장이 넘기지 않고 나가면 즉시 봇방장 체제가 된다 — 새 방장을 뽑지는 않는다")
         void ownerLeavesThenBotOwnerThenClaim() throws Exception {
             Member owner = member(uniq("succ-owner"));
             Member joiner = member(uniq("succ-joiner"));
@@ -406,11 +364,8 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
                     "SELECT owner_type FROM challenges WHERE id = ?", String.class, bytes(challengeId));
             assertThat(ownerType).isEqualTo("BOT");
 
-            MvcResult claim = postJsonAuth("/api/v1/challenges/" + challengeId + "/owner/claim",
-                    joiner.token(), Map.of());
-            assertThat(claim.getResponse().getStatus()).isEqualTo(200);
-            assertThat((String) read(claim, "$.data.myRole")).isEqualTo("OWNER");
-            assertThat((String) read(claim, "$.data.graceUntil")).isNotBlank();
+            // 여기서 끝이다 — 멤버가 방장이 되는 경로는 페이지1에 없다. 봇방장 체제로 유지된다
+            // (챌린지 정책 §11.2). 선착순 클레임은 LegacyRoomAdminApiIT 가 플래그를 켜고 본다.
         }
 
         @Test
@@ -478,21 +433,5 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
             assertThat((Integer) read(res, "$.data.scoreDelta")).isZero();
         }
 
-        @Test
-        @DisplayName("직접 넘겨받은 방장은 면책 대상이 아니다 — 일반 탈퇴와 동일하게 감점")
-        void transferHasNoGrace() throws Exception {
-            Member owner = member(uniq("nograce-owner"));
-            Member joiner = member(uniq("nograce-joiner"));
-            UUID challengeId = openGroup(owner.id());
-            join(joiner.token(), challengeId);
-
-            MvcResult transfer = patchJsonAuth("/api/v1/challenges/" + challengeId + "/owner", owner.token(),
-                    Map.of("targetUserId", joiner.id().toString()));
-            assertThat(transfer.getResponse().getStatus()).isEqualTo(200);
-
-            MvcResult res = leave(joiner.token(), challengeId);
-            assertThat((Object) read(res, "$.data.exemptReason")).isNull();
-            assertThat((Integer) read(res, "$.data.scoreDelta")).isNegative();
-        }
     }
 }
