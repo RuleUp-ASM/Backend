@@ -114,8 +114,6 @@ public class OpenApiConfig {
                     .description("인증 신호 전송(sync) · 판정 결과 확인(ack) · 수동 인증 취소 · 진행률 일괄 조회"),
             new Tag().name("Challenge Ranking")
                     .description("방 밖 랭킹 — 같은 모드(GROUP/SOLO)끼리 챌린지를 비교한다. 하루 1회 03시 갱신"),
-            new Tag().name("Challenge Admin")
-                    .description("방장 전용 운영 — 멤버 강퇴 · 방장 권한 넘기기 · 봇방장 클레임"),
             new Tag().name("Report")
                     .description("신고 접수 · 블랙리스트 — 차단 효과는 내 화면에만 적용된다"));
 
