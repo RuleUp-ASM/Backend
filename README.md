@@ -274,7 +274,7 @@ JDK 25와 Docker가 필요합니다.
 
 ```bash
 cp .env.example .env
-docker compose up -d mysql
+docker compose up -d mysql redis
 SPRING_PROFILES_ACTIVE=local ./gradlew bootRun
 ```
 
@@ -284,6 +284,8 @@ Compose는 `ruleup` 데이터베이스를 생성하므로 `.env`에 다음 JDBC 
 DB_URL=jdbc:mysql://localhost:3306/ruleup?serverTimezone=UTC&characterEncoding=UTF-8&rewriteBatchedStatements=true
 JWT_SECRET=replace_with_at_least_32_random_bytes
 ```
+
+Redis는 탐색 파생 인덱스(정렬 ZSET·표시 HASH) 저장소입니다. 띄우지 않아도 회로차단기가 열려 MySQL 폴백으로 동작하지만, 그 경로만 검증됩니다. Redis 없이 돌릴 때는 `.env`에 `EXPLORE_REDIS_ENABLED=false`를 두면 폴백을 기다리지 않습니다.
 
 `local` 프로필은 실제 Kakao·Google 서버 대신 Mock OAuth client를 사용합니다. 전체 환경 변수 예시는 [.env.example](./.env.example), 기본값과 운영 튜닝 항목은 [application.yaml](./src/main/resources/application.yaml)에서 확인할 수 있습니다.
 
