@@ -16,9 +16,9 @@ RuleUp은 사용자가 루틴을 챌린지로 만들고 여러 사람과 함께 
 | --- | --- |
 | 서비스 | 함께 목표를 실천하고 자동·수동 인증으로 완주하는 챌린지 플랫폼 |
 | 백엔드 범위 | 로그인·회원, 챌린지, 인증, 추천, 랭킹, 알림, 감시자, 신고·검수, 배치 |
-| API | 26개 Controller, 88개 Endpoint |
-| 데이터 관리 | MySQL 8.4, Flyway Migration 18개, JPA `ddl-auto: none` |
-| 품질 관리 | 테스트 클래스 40개, Testcontainers, JaCoCo 커버리지 게이트 |
+| API | 38개 Controller, 104개 Endpoint |
+| 데이터 관리 | MySQL 8.4, Flyway Migration 33개, JPA `ddl-auto: none` |
+| 품질 관리 | 테스트 클래스 65개, Testcontainers, JaCoCo 커버리지 게이트 |
 | 문서화 | Swagger UI, OpenAPI JSON, 도메인별 기술 스펙 |
 | 배포 | Docker, GitHub Actions, Amazon ECR/ECS |
 
@@ -46,7 +46,7 @@ RuleUp은 사용자가 루틴을 챌린지로 만들고 여러 사람과 함께 
 
 - 챌린지 방, 인증 이벤트 피드, 방별·챌린지 간 랭킹
 - 활동 캘린더, 통계 리포트, 연속 달성 기록
-- 챌린지 성과와 활동 기간을 반영한 매너 온도
+- 챌린지 성과를 주 단위로 정산하는 점수·티어(BRONZE~RUBY)
 - 사용자 세그먼트와 행동 결과를 반영한 루틴 추천
 - 인앱 알림, FCM 푸시, 회원·비회원 감시자 알림
 
@@ -68,6 +68,7 @@ flowchart LR
     JPA --> DB[(MySQL 8.4)]
 
     Domain --> Cache[(Caffeine Cache)]
+    Domain --> Redis[(Redis<br/>Explore Index · MySQL Fallback)]
     Domain --> Event[Domain Events]
     Event --> Async[Async Workers]
     Async --> Outbox[(Notification / Push Outbox)]
@@ -76,6 +77,7 @@ flowchart LR
     Async --> AI[Gemini · AWS Bedrock]
     Domain --> Places[Naver Places]
     Outbox --> FCM[Firebase FCM]
+    Domain --> S3[(S3 Image Storage)]
 
     Flyway[Flyway] --> DB
     Scheduler[Scheduled Jobs] --> Domain
@@ -195,6 +197,7 @@ flowchart LR
 | Flyway | 개발·CI·운영의 스키마 변경 이력을 동일하게 재현하기 위해 |
 | 비관적 잠금 | 동일 Refresh Token의 경쟁처럼 충돌은 드물지만 발생 시 보안 영향이 큰 구간을 직렬화하기 위해 |
 | Caffeine | 현재 운영 규모에서 네트워크 캐시 의존성 없이 읽기 비용을 줄이기 위해 |
+| Redis(탐색 인덱스) | 인스턴스마다 순위가 달라지면 커서 페이징이 깨지므로, 정렬 결과를 인스턴스 밖 한 곳에 두기 위해 |
 | Rule-based 추천 | 행동 데이터가 적은 초기 서비스에서 결과를 설명하고 정책을 빠르게 조정하기 위해 |
 | Event + Outbox | 외부 API 실패를 핵심 트랜잭션에서 분리하고 재처리 가능성을 확보하기 위해 |
 | Testcontainers | H2 대체 동작이 아닌 실제 MySQL 8.4의 enum, lock, native query를 검증하기 위해 |
@@ -259,13 +262,14 @@ JaCoCo HTML 리포트는 `build/reports/jacoco/test/html/index.html`에 생성�
 | Language | Java 25 |
 | Framework | Spring Boot 4.1, Spring MVC, Spring Security, Spring Data JPA |
 | Database | MySQL 8.4, Flyway |
-| Cache | Caffeine |
+| Cache · Index | Caffeine(JVM 로컬), Redis(탐색 파생 인덱스) |
 | Auth | JWT, Kakao OAuth, Google OAuth, AES-GCM |
+| Storage | Amazon S3(이미지), 로컬 파일 시스템(로컬 프로필) |
 | External API | Apache HttpClient 5, Naver Search, Firebase FCM |
 | AI | Google Gemini, AWS Bedrock Nova |
 | Observability | Spring Boot Actuator, Micrometer, OSHI |
 | Test | JUnit 5, Testcontainers, JaCoCo |
-| Infra | Gradle, Docker, GitHub Actions, Amazon ECR/ECS |
+| Infra | Gradle, Docker, GitHub Actions, Amazon ECR/ECS/ElastiCache |
 | API Docs | springdoc OpenAPI, Swagger UI |
 
 ## 로컬 실행
@@ -293,27 +297,30 @@ Redis는 탐색 파생 인덱스(정렬 ZSET·표시 HASH) 저장소입니다. �
 
 ```text
 src/main/java/com/ruleup/ruleup_backend/
-├── auth, oauth, security       # 로그인, JWT, 세션, 보안 필터
-├── user, onboarding            # 회원, 약관, 온보딩
-├── challenge                   # 생성, 탐색, 참여, 운영, 라이프사이클
-├── routine, verification       # 루틴 템플릿, 신호 수집, 인증 판정
-├── room, recommendation        # 룸, 랭킹, 개인화 추천
-├── me, profile, reputation     # 홈, 캘린더, 프로필, 매너 온도
-├── notification, push          # 인앱 알림과 FCM outbox
-├── watcher                     # 회원·비회원 감시자
-├── report, moderation          # 신고, 차단, 콘텐츠 검수
-├── places, llm                 # 외부 API와 AI provider
-├── observability               # 애플리케이션·시스템 지표
-├── common                      # 공통 응답, 오류, 이미지, 검증
-└── config                      # Security, OpenAPI, Cache, HTTP 설정
+├── auth, oauth, security         # 로그인, JWT, 세션, 보안 필터
+├── user, onboarding, agreement   # 회원, 온보딩, 약관 동의 상태
+├── challenge                     # 생성, 탐색, 참여, 운영, 라이프사이클
+├── routine, verification         # 루틴 템플릿, 신호 수집, 인증 판정
+├── room, recommendation          # 룸, 공지, 랭킹, 개인화 추천
+├── me, profile, score            # 홈, 캘린더, 프로필, 점수·티어
+├── notification, push            # 인앱 알림과 FCM outbox
+├── watcher, invitation           # 회원·비회원 감시자, 초대 코드
+├── report, moderation, sanction  # 신고, 차단, 콘텐츠 검수, 제재
+├── admin                         # 백오피스 조회·조치
+├── intro, applink, devtoken      # 앱 진입 정책, 딥링크, 개발용 토큰
+├── places, llm                   # 외부 API와 AI provider
+├── observability                 # 애플리케이션·시스템 지표
+├── common                        # 공통 응답, 오류, 이미지, outbox, 검증
+└── config                        # Security, OpenAPI, Cache, S3, HTTP 설정
 ```
 
 ## 현재 한계와 확장 방향
 
 | 현재 선택 | 확장 시 고려할 점 |
 | --- | --- |
-| JVM local Caffeine cache | 다중 인스턴스 간 즉시 일관성이 필요해지면 Redis 또는 event 기반 invalidation 도입 |
-| 로컬 파일 시스템 이미지 저장 | 컨테이너 수평 확장 전 S3 같은 object storage와 CDN으로 이전 |
+| JVM local Caffeine cache(탐색 인덱스 제외) | 다중 인스턴스 간 즉시 일관성이 필요해지면 Redis 또는 event 기반 invalidation 도입 |
+| S3 presigned GET 302 이미지 서빙 | 트래픽이 늘면 CloudFront 같은 CDN을 앞에 두고 원본 요청 수를 줄임 |
+| Redis 인덱스가 비면 재기동·일일 대조까지 MySQL 폴백 | 폴백 구간을 줄이려면 스윕이 워밍업 플래그까지 복구하도록 확장 |
 | DB 상태 기반 멱등 scheduler | 배치 규모가 커지면 분산 lock 또는 별도 job orchestrator 도입 |
 | 규칙 기반 추천 | 충분한 행동 데이터가 쌓이면 offline evaluation을 거쳐 학습 기반 ranking과 혼합 |
 | 프로세스 내부 `@Async` | 유실 허용이 어려운 작업은 message broker 기반 비동기 처리로 이전 |
@@ -324,10 +331,10 @@ src/main/java/com/ruleup/ruleup_backend/
 
 - [챌린지 생성 및 라이프사이클](./docs/challenge/챌린지%20생성%20및%20라이프사이클.md)
 - [활동 인증 설계](./docs/check/인증구현.md)
-- [챌린지 룸·관리 기능](./docs/manage/챌린지공지_방내부기능_테크스펙.md)
+- [챌린지 룸·랭킹·스레드](./docs/manage/챌린지공지_방내부기능_테크스펙.md)
 - [프로필·캘린더](./docs/profile/마이프로필_캘린더_테크스펙.md)
 - [루틴 카테고리 추천](./docs/recommend/추천%20시스템%20-%20루틴%20카테고리%20추천.md)
-- [매너 온도 계산](./docs/score/온도%20계산%20테크스펙%20V1.md)
+- [점수·티어 계산](./docs/score/온도%20계산%20테크스펙%20V1.md)
 - [챌린지 탐색](./docs/search/챌린지탐색%20테크스펙.md)
 
 API 요청·응답 계약은 실행 중인 Swagger와 현재 코드를 기준으로 합니다.
