@@ -65,9 +65,25 @@ public class AuthController {
                     **설치 게이트**: 하나의 설치(`installationId`)는 하나의 소셜 계정에만 묶인다.
                     그 설치의 주인이 **다른 소셜 계정이면 활성·탈퇴를 가리지 않고** 403 `INSTALLATION_ALREADY_REGISTERED` 다.
                     온보딩을 다 채운 뒤 거절당하지 않도록 로그인 단계에서 끊는다.
-                    이때 `error.reason` 에 **그 계정의 소셜 제공자**(`KAKAO`/`GOOGLE`)를 실어 보내므로,
-                    클라이언트는 "카카오 계정으로 로그인해주세요"까지 안내할 수 있다.
+                    이때 `error.reason` 에 **그 계정의 소셜 제공자**(`KAKAO`/`GOOGLE`)를 실어 보낸다 — 클라이언트 분기용이다.
+                    **`error.message` 에는 소셜 이름을 넣지 않는다**: "이 기기는 다른 계정으로 가입한 이력이 있어요.
+                    처음 가입할 때 쓰신 계정으로 로그인해주세요."까지만 내려간다.
                     주인이 본인(같은 provider+subject)이면 통과한다 — 탈퇴 후 돌아오는 경로다.
+
+                    **실패 사유 구분**: `LOGIN_FAILED`·`LOGIN_PROVIDER_UNAVAILABLE`·`INVALID_DEVICE_INFO` 는
+                    원인이 여러 개인 코드라 `error.reason` 으로 갈라 내려주고, `error.message` 에는 그 원인에 맞는
+                    문구가 실린다. **분기는 `code` 로 하고 `message` 는 그대로 노출하면 된다.**
+                    어떤 문구에도 카카오·구글 같은 소셜 이름은 들어가지 않는다.
+
+                    | code | reason | 뜻 |
+                    |---|---|---|
+                    | `LOGIN_FAILED` | `MISSING_CODE` / `MISSING_CODE_VERIFIER` | 인가코드·PKCE 누락(클라 버그) |
+                    | `LOGIN_FAILED` | `UNSUPPORTED_PROVIDER` | 경로의 provider 가 지원 목록에 없음 |
+                    | `LOGIN_FAILED` | `IDP_REJECTED` | IdP 가 인가코드를 거절(만료·재사용·PKCE 불일치) → 다시 로그인 |
+                    | `LOGIN_FAILED` | `ACCOUNT_NOT_FOUND` | 계정을 다시 찾지 못함 → 처음부터 다시 |
+                    | `LOGIN_PROVIDER_UNAVAILABLE` | `IDP_ERROR` / `IDP_UNREACHABLE` / `IDP_BAD_RESPONSE` | IdP 장애·연결 실패·응답 이상 |
+                    | `LOGIN_PROVIDER_UNAVAILABLE` | `PROVIDER_NOT_SUPPORTED` | 아직 붙이지 않은 소셜(네이버·애플) |
+                    | `INVALID_DEVICE_INFO` | `MISSING_DEVICE_ID` / `MISSING_DEVICE_INFO` / `MALFORMED_DEVICE_INFO` | 기기 정보 누락·형식 오류 |
 
                     로그인은 **단일 활성 기기** 정책이다. 다른 기기에서 로그인하면 기존 기기의 refreshToken 이 전부 무효가 되고
                     이전 기기에는 세션 종료 알림이 나간다. 같은 기기에서 다시 로그인하는 경우에는 세션을 끊지 않는다.
@@ -285,7 +301,10 @@ public class AuthController {
         try {
             return OAuthProvider.valueOf(provider.toUpperCase());
         } catch (IllegalArgumentException e) {
-            throw new BusinessException(ErrorCode.LOGIN_FAILED);
+            // 경로에 kakao/google 아닌 값이 온 것 — 사용자가 고칠 수 있는 게 아니라서
+            // "로그인 실패"로만 두면 앱 업데이트 안내조차 못 한다.
+            throw BusinessException.withMessage(ErrorCode.LOGIN_FAILED, "UNSUPPORTED_PROVIDER",
+                    "지원하지 않는 소셜 로그인이에요. 다른 계정으로 로그인해주세요.");
         }
     }
 }

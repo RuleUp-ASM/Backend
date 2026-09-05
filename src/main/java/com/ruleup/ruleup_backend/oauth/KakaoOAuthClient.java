@@ -49,12 +49,18 @@ public class KakaoOAuthClient implements OAuthClient {
             // 카카오가 준 에러 바디(error, error_code: 예 KOE320)를 함께 남겨야 원인 파악 가능.
             // (status만으로는 redirect_uri 불일치 / PKCE / client_secret 중 무엇인지 알 수 없음)
             log.warn("Kakao OAuth failed: status={}, body={}", e.getStatusCode(), e.getResponseBodyAsString());
-            throw new BusinessException(e.getStatusCode().is4xxClientError()
-                    ? ErrorCode.LOGIN_FAILED : ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
+            // 4xx = 우리가 보낸 인가코드가 거절된 것(만료·재사용·PKCE 불일치) → 사용자는 다시 로그인하면 된다.
+            // 5xx = 카카오 쪽 장애 → 사용자가 할 수 있는 건 기다리는 것뿐이다. 안내가 서로 달라야 한다.
+            throw e.getStatusCode().is4xxClientError()
+                    ? BusinessException.withMessage(ErrorCode.LOGIN_FAILED, "IDP_REJECTED",
+                            "로그인 확인이 만료됐어요. 다시 로그인해주세요.")
+                    : BusinessException.withMessage(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE, "IDP_ERROR",
+                            "소셜 로그인 서버에 문제가 있어요. 잠시 후 다시 시도해주세요.");
         } catch (RestClientException e) {                    // 연결 실패·타임아웃 등
             log.warn("Kakao OAuth transport failed: type={}, message={}",
                     e.getClass().getSimpleName(), e.getMessage());
-            throw new BusinessException(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
+            throw BusinessException.withMessage(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE, "IDP_UNREACHABLE",
+                    "소셜 로그인 서버와 연결하지 못했어요. 네트워크를 확인하고 다시 시도해주세요.");
         }
     }
 
@@ -72,7 +78,8 @@ public class KakaoOAuthClient implements OAuthClient {
                 .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                 .body(form).retrieve().body(KakaoTokenResponse.class);
         if (res == null || res.accessToken() == null)
-            throw new BusinessException(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
+            throw BusinessException.withMessage(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE, "IDP_BAD_RESPONSE",
+                    "소셜 로그인 서버 응답을 읽지 못했어요. 잠시 후 다시 시도해주세요.");
         return res;
     }
 
@@ -92,7 +99,8 @@ public class KakaoOAuthClient implements OAuthClient {
                 .retrieve().body(KakaoUserResponse.class);
         // 200이지만 바디가 비었거나 역직렬화 실패 시 body()가 null → NPE 누수 방지
         if (res == null || res.id() == null)
-            throw new BusinessException(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
+            throw BusinessException.withMessage(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE, "IDP_BAD_RESPONSE",
+                    "소셜 계정에서 회원 정보를 받지 못했어요. 잠시 후 다시 시도해주세요.");
 
         String email = (res.kakaoAccount() != null) ? res.kakaoAccount().email() : null;
         String nickname = (res.kakaoAccount() != null && res.kakaoAccount().profile() != null)

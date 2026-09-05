@@ -23,7 +23,11 @@ public class OAuthClientResolver {
 
     public OAuthClient resolve(OAuthProvider provider) {
         OAuthClient client = clients.get(provider);
-        if (client == null) throw new BusinessException(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
+        // NAVER·APPLE 처럼 enum 에는 있지만 아직 붙이지 않은 provider — 사용자 잘못이 아니라
+        // 서버가 아직 지원하지 않는 것이다. "연결 실패"로 뭉치면 재시도만 반복하게 된다.
+        if (client == null)
+            throw BusinessException.withMessage(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE, "PROVIDER_NOT_SUPPORTED",
+                    "아직 지원하지 않는 소셜 로그인이에요. 다른 계정으로 로그인해주세요.");
         return client;
     }
 }

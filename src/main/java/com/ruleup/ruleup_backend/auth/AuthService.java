@@ -294,8 +294,9 @@ public class AuthService {
      * 다른 계정이면 활성·탈퇴 가리지 않고 막는다 — 소셜만 바꿔 점수·제재를 리셋하는 우회로이기 때문이다.
      * 앱을 지웠다 깔면 installationId 가 바뀌므로 기기 재사용 자체가 막히지는 않는다.
      *
-     * <p>거절할 때 어느 소셜로 가야 하는지 알려준다 — {@code error.reason} 에 그 계정의 provider 를 싣는다.
-     * 이게 없으면 사용자는 "가입이 안 된다"만 알고 무엇을 해야 할지 모른다.
+     * <p>거절할 때 어느 소셜로 가야 하는지는 {@code error.reason} 에만 싣는다. 사용자 문구에는
+     * 소셜 이름을 넣지 않는다 — "다른 계정으로 가입한 이력이 있다"까지만 알리고, 그게 카카오인지
+     * 구글인지는 화면에 드러내지 않는 게 방침이다(어느 소셜을 쓰는지도 계정 정보다).
      */
     private void requireInstallationAvailable(String installationId, OAuthProvider provider, String subject) {
         if (installationId == null || installationId.isBlank()) return;
@@ -373,7 +374,8 @@ public class AuthService {
         Claims claims = parseSignupToken(signupToken);
         OAuthProvider provider = OAuthProvider.valueOf((String) claims.get("provider"));
         User existing = userRepository.findByOauthProviderAndOauthSubject(provider, claims.getSubject())
-                .orElseThrow(() -> new BusinessException(ErrorCode.LOGIN_FAILED));
+                .orElseThrow(() -> BusinessException.withMessage(ErrorCode.LOGIN_FAILED, "ACCOUNT_NOT_FOUND",
+                        "로그인 정보를 확인하지 못했어요. 처음부터 다시 로그인해주세요."));
         return loginResponseFor(existing);
     }
 
@@ -423,14 +425,19 @@ public class AuthService {
 
     /**
      * OAuth 요청 자체의 형식 검증 (IdP 호출 전 조기 거부 — 테크 스펙 4-4).
-     *  · code·codeVerifier(PKCE) 누락 → 400 LOGIN_FAILED (검증 자체가 불가)
+     *  · code·codeVerifier(PKCE) 누락 → 400 LOGIN_FAILED (검증 자체가 불가).
+     *    같은 코드지만 {@code error.reason} 으로 MISSING_CODE / MISSING_CODE_VERIFIER 를 구분해 내려준다 —
+     *    "그냥 실패"로 뭉치면 클라 버그인지 사용자가 취소한 건지 로그만 보고는 알 수 없다.
      *  · 구글은 redirectUri 검증 필수 — 등록값과 다르면 400 INVALID_REDIRECT_URI.
      *    카카오는 카카오톡 간편 로그인 경로에서 SDK가 내부 처리해 null 이 올 수 있어 검증하지 않는다.
      */
     private void requireValidOAuthRequest(OAuthProvider provider, OAuthLoginRequest req) {
-        if (req.code() == null || req.code().isBlank()
-                || req.codeVerifier() == null || req.codeVerifier().isBlank())
-            throw new BusinessException(ErrorCode.LOGIN_FAILED);
+        if (req.code() == null || req.code().isBlank())
+            throw BusinessException.withMessage(ErrorCode.LOGIN_FAILED, "MISSING_CODE",
+                    "로그인 정보가 전달되지 않았어요. 다시 시도해주세요.");
+        if (req.codeVerifier() == null || req.codeVerifier().isBlank())
+            throw BusinessException.withMessage(ErrorCode.LOGIN_FAILED, "MISSING_CODE_VERIFIER",
+                    "로그인 정보가 전달되지 않았어요. 다시 시도해주세요.");
 
         if (provider == OAuthProvider.GOOGLE) {
             String registered = props.oauth().google().redirectUri();
@@ -439,12 +446,18 @@ public class AuthService {
         }
     }
 
-    /** deviceId·deviceInfo는 로그인·가입 양쪽 필수. 누락/형식오류면 INVALID_DEVICE_INFO. */
+    /**
+     * deviceId·deviceInfo는 로그인·가입 양쪽 필수. 누락/형식오류면 INVALID_DEVICE_INFO.
+     * 어느 쪽이 빠졌는지는 {@code error.reason} 으로 구분해 내려준다 — 클라 버그 제보를 받았을 때
+     * "기기 정보 오류" 한 줄만 있으면 deviceId 인지 deviceInfo 인지 되물어야 한다.
+     */
     private void requireValidDevice(String deviceId, DeviceInfoRequest device) {
         if (deviceId == null || deviceId.isBlank())
-            throw new BusinessException(ErrorCode.INVALID_DEVICE_INFO);
-        if (device == null || !device.isValid())
-            throw new BusinessException(ErrorCode.INVALID_DEVICE_INFO);
+            throw new BusinessException(ErrorCode.INVALID_DEVICE_INFO, "MISSING_DEVICE_ID");
+        if (device == null)
+            throw new BusinessException(ErrorCode.INVALID_DEVICE_INFO, "MISSING_DEVICE_INFO");
+        if (!device.isValid())
+            throw new BusinessException(ErrorCode.INVALID_DEVICE_INFO, "MALFORMED_DEVICE_INFO");
     }
 
     /** 기기 정보를 유저에 반영(최신 1건 갱신). 호출 전 requireValidDevice 로 검증됨. */

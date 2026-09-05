@@ -41,6 +41,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  *     구글 redirectUri 불일치 400 INVALID_REDIRECT_URI (카카오는 null 허용)
  *  3) IdP 실패: 인가 코드 검증 실패 400 LOGIN_FAILED, IdP 장애 502 LOGIN_PROVIDER_UNAVAILABLE
  *  4) 알 수 없는 provider 400 LOGIN_FAILED
+ *  5) 실패 안내: 같은 code 안에서 error.reason 으로 원인이 갈리고, error.message 에 그 원인에 맞는
+ *     문구가 실려 내려오는지. 단 문구에는 카카오·구글 같은 소셜 이름을 넣지 않는다 —
+ *     어느 소셜을 쓰는지도 계정 정보라, 이름은 클라 분기용 reason 으로만 내려간다
  */
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
@@ -151,6 +154,9 @@ class OAuthLoginContractIT extends AuthApiSupport {
                     loginBody(uniq("k"), install, "dev-" + tag));
             expectError(kakao, 403, "INSTALLATION_ALREADY_REGISTERED");
             assertThat((String) read(kakao, "$.error.reason")).isEqualTo("GOOGLE");
+            // 어느 소셜인지는 reason 으로만 알린다 — 문구에 이름을 드러내지 않는 게 방침이다.
+            assertThat((String) read(kakao, "$.error.message"))
+                    .doesNotContain("구글").doesNotContain("카카오");
         }
 
         @Test
@@ -164,6 +170,8 @@ class OAuthLoginContractIT extends AuthApiSupport {
                     googleLoginBody(uniq("g"), install, "dev-" + tag));
             expectError(google, 403, "INSTALLATION_ALREADY_REGISTERED");
             assertThat((String) read(google, "$.error.reason")).isEqualTo("KAKAO");
+            assertThat((String) read(google, "$.error.message"))
+                    .doesNotContain("카카오").doesNotContain("구글");
         }
 
         @Test
@@ -264,7 +272,9 @@ class OAuthLoginContractIT extends AuthApiSupport {
             String tag = uniq("nc");
             Map<String, Object> body = loginBody(tag, "inst-" + tag, "dev-" + tag);
             body.remove("code");
-            expectError(postJson("/api/v1/auth/oauth/kakao", body), 400, "LOGIN_FAILED");
+            MvcResult res = postJson("/api/v1/auth/oauth/kakao", body);
+            expectError(res, 400, "LOGIN_FAILED");
+            assertThat((String) read(res, "$.error.reason")).isEqualTo("MISSING_CODE");
         }
 
         @Test
@@ -273,7 +283,9 @@ class OAuthLoginContractIT extends AuthApiSupport {
             String tag = uniq("nv");
             Map<String, Object> body = loginBody(tag, "inst-" + tag, "dev-" + tag);
             body.remove("codeVerifier");
-            expectError(postJson("/api/v1/auth/oauth/kakao", body), 400, "LOGIN_FAILED");
+            MvcResult res = postJson("/api/v1/auth/oauth/kakao", body);
+            expectError(res, 400, "LOGIN_FAILED");
+            assertThat((String) read(res, "$.error.reason")).isEqualTo("MISSING_CODE_VERIFIER");
         }
 
         @Test
@@ -306,11 +318,15 @@ class OAuthLoginContractIT extends AuthApiSupport {
         }
 
         @Test
-        @DisplayName("알 수 없는 provider 는 400 LOGIN_FAILED")
+        @DisplayName("알 수 없는 provider 는 400 LOGIN_FAILED + reason=UNSUPPORTED_PROVIDER")
         void unknown_provider_rejected() throws Exception {
             String tag = uniq("up");
-            expectError(postJson("/api/v1/auth/oauth/facebook",
-                    loginBody(tag, "inst-" + tag, "dev-" + tag)), 400, "LOGIN_FAILED");
+            MvcResult res = postJson("/api/v1/auth/oauth/facebook",
+                    loginBody(tag, "inst-" + tag, "dev-" + tag));
+            expectError(res, 400, "LOGIN_FAILED");
+            assertThat((String) read(res, "$.error.reason")).isEqualTo("UNSUPPORTED_PROVIDER");
+            assertThat((String) read(res, "$.error.message"))
+                    .doesNotContain("카카오").doesNotContain("구글");
         }
     }
 
@@ -326,16 +342,25 @@ class OAuthLoginContractIT extends AuthApiSupport {
         @DisplayName("인가 코드 검증 실패는 400 LOGIN_FAILED")
         void invalid_authorization_code_rejected() throws Exception {
             String tag = uniq(MockOAuthClient.FAIL_INVALID_CODE + "-");
-            expectError(postJson("/api/v1/auth/oauth/kakao",
-                    loginBody(tag, "inst-" + tag, "dev-" + tag)), 400, "LOGIN_FAILED");
+            MvcResult res = postJson("/api/v1/auth/oauth/kakao",
+                    loginBody(tag, "inst-" + tag, "dev-" + tag));
+            expectError(res, 400, "LOGIN_FAILED");
+            // 사용자가 할 일은 "다시 로그인" — IdP 장애(기다리기)와 안내가 달라야 한다.
+            assertThat((String) read(res, "$.error.reason")).isEqualTo("IDP_REJECTED");
+            assertThat((String) read(res, "$.error.message"))
+                    .contains("다시 로그인").doesNotContain("카카오");
         }
 
         @Test
         @DisplayName("IdP 장애(타임아웃·5xx)는 502 LOGIN_PROVIDER_UNAVAILABLE — 가드레일 지표 대상")
         void idp_outage_returns_502() throws Exception {
             String tag = uniq(MockOAuthClient.FAIL_IDP_DOWN + "-");
-            expectError(postJson("/api/v1/auth/oauth/kakao",
-                    loginBody(tag, "inst-" + tag, "dev-" + tag)), 502, "LOGIN_PROVIDER_UNAVAILABLE");
+            MvcResult res = postJson("/api/v1/auth/oauth/kakao",
+                    loginBody(tag, "inst-" + tag, "dev-" + tag));
+            expectError(res, 502, "LOGIN_PROVIDER_UNAVAILABLE");
+            assertThat((String) read(res, "$.error.reason")).isEqualTo("IDP_ERROR");
+            assertThat((String) read(res, "$.error.message"))
+                    .contains("잠시 후").doesNotContain("카카오");
         }
 
         @Test

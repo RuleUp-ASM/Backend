@@ -48,7 +48,8 @@ public class LoginSessionService {
     public OAuthLoginResponse loginExisting(UUID userId, OAuthProvider provider,
                                             OAuthLoginRequest req, OAuthUserInfo info) {
         User user = userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.LOGIN_FAILED));
+                .orElseThrow(() -> BusinessException.withMessage(ErrorCode.LOGIN_FAILED, "ACCOUNT_NOT_FOUND",
+                        "로그인 정보를 확인하지 못했어요. 처음부터 다시 로그인해주세요."));
 
         // 영구 정지 계정은 로그인 자체를 차단한다.
         if (sanctionService.isBanActive(user.getId()))

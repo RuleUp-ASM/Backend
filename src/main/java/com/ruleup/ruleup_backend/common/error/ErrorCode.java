@@ -13,14 +13,25 @@ import org.springframework.http.HttpStatus;
 public enum ErrorCode {
 
     // ===== 로그인 (4.1 / 4.2) =====
-    LOGIN_FAILED(HttpStatus.BAD_REQUEST, "소셜 로그인에 실패했습니다."),
-    LOGIN_PROVIDER_UNAVAILABLE(HttpStatus.BAD_GATEWAY, "소셜 로그인 제공자에 연결할 수 없습니다."),
-    INVALID_REDIRECT_URI(HttpStatus.BAD_REQUEST, "redirectUri가 올바르지 않습니다."),
+    /**
+     * 소셜 로그인 실패의 공통 코드. 원인이 여러 개라 {@code error.reason} 으로 갈라 내려주고,
+     * {@code error.message} 에는 그 원인에 맞는 문구가 실린다(BusinessException.withMessage).
+     * reason: MISSING_CODE / MISSING_CODE_VERIFIER / UNSUPPORTED_PROVIDER / IDP_REJECTED / ACCOUNT_NOT_FOUND
+     * 문구에 카카오·구글 같은 소셜 이름은 넣지 않는다.
+     */
+    LOGIN_FAILED(HttpStatus.BAD_REQUEST, "소셜 로그인에 실패했어요. 다시 시도해주세요."),
+    /** reason: IDP_ERROR / IDP_UNREACHABLE / IDP_BAD_RESPONSE / PROVIDER_NOT_SUPPORTED */
+    LOGIN_PROVIDER_UNAVAILABLE(HttpStatus.BAD_GATEWAY, "소셜 로그인 서버에 연결하지 못했어요. 잠시 후 다시 시도해주세요."),
+    INVALID_REDIRECT_URI(HttpStatus.BAD_REQUEST, "로그인 설정이 맞지 않아요. 앱을 최신 버전으로 업데이트한 뒤 다시 시도해주세요."),
     ACCOUNT_BANNED(HttpStatus.FORBIDDEN, "영구 정지된 계정입니다."),
     ACCOUNT_LOCKED(HttpStatus.FORBIDDEN, "지금은 둘러보기만 할 수 있어요. 마이페이지에서 사유와 해제일을 확인해주세요."),
     /** 기능 정지 — 해당 기능만 막히고 나머지는 정상 동작한다(sanctions.feature_code). */
     ACCOUNT_SUSPENDED(HttpStatus.FORBIDDEN, "이 기능은 지금 사용할 수 없어요. 마이페이지에서 해제일을 확인해주세요."),
-    /** reason 에 그 계정의 소셜 제공자(KAKAO/GOOGLE)를 실어 보낸다 — 클라가 "카카오로 로그인" 까지 안내할 수 있게. */
+    /**
+     * reason 에 그 계정의 소셜 제공자(KAKAO/GOOGLE)를 실어 보낸다 — 클라이언트 분기용이다.
+     * 사용자 문구에는 소셜 이름을 넣지 않는다: "다른 계정으로 가입한 이력이 있다"까지만 알리고
+     * 그게 카카오인지 구글인지는 화면에 드러내지 않는다(어느 소셜을 쓰는지도 계정 정보다).
+     */
     INSTALLATION_ALREADY_REGISTERED(HttpStatus.FORBIDDEN,
             "이 기기는 다른 계정으로 가입한 이력이 있어요. 처음 가입할 때 쓰신 계정으로 로그인해주세요."),
 
@@ -29,7 +40,8 @@ public enum ErrorCode {
     INVALID_SIGNUP_TOKEN(HttpStatus.BAD_REQUEST, "유효하지 않거나 만료된 가입 세션입니다. 처음부터 다시 진행해주세요."),
 
     // ===== 기기 정보 (deviceInfo) (4.1 / 4.3) =====
-    INVALID_DEVICE_INFO(HttpStatus.BAD_REQUEST, "기기 정보(deviceInfo)가 누락되었거나 형식이 올바르지 않습니다."),
+    /** reason 으로 MISSING_DEVICE_ID / MISSING_DEVICE_INFO / MALFORMED_DEVICE_INFO 를 구분해 내려준다. */
+    INVALID_DEVICE_INFO(HttpStatus.BAD_REQUEST, "기기 정보를 확인하지 못했어요. 앱을 다시 실행한 뒤 시도해주세요."),
 
     // ===== 닉네임 / 카테고리 / 약관 / 온보딩 (4.3 / 4.6 / 4.9) =====
     NICKNAME_FORMAT_INVALID(HttpStatus.BAD_REQUEST, "닉네임 형식이 올바르지 않습니다."),

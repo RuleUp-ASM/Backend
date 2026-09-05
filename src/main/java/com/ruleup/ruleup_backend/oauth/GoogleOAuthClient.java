@@ -46,19 +46,26 @@ public class GoogleOAuthClient implements OAuthClient {
                     .retrieve().body(GoogleUserResponse.class);
             // 200이지만 바디가 비었거나 역직렬화 실패 시 body()가 null → NPE 누수 방지
             if (u == null || u.sub() == null)
-                throw new BusinessException(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
+                throw BusinessException.withMessage(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE, "IDP_BAD_RESPONSE",
+                        "소셜 계정에서 회원 정보를 받지 못했어요. 잠시 후 다시 시도해주세요.");
             java.time.Instant expiresAt = (token.expiresIn() != null)
                     ? java.time.Instant.now().plusSeconds(token.expiresIn()) : null;
             return new OAuthUserInfo(u.sub(), u.email(), u.name(), u.picture(),
                     new OAuthUserInfo.IdpTokens(token.accessToken(), token.refreshToken(), expiresAt));
         } catch (RestClientResponseException e) {
             log.warn("Google OAuth failed: status={}, body={}", e.getStatusCode(), e.getResponseBodyAsString());
-            throw new BusinessException(e.getStatusCode().is4xxClientError()
-                    ? ErrorCode.LOGIN_FAILED : ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
+            // 4xx = 인가코드 거절(만료·재사용·PKCE 불일치) → 다시 로그인하면 풀린다.
+            // 5xx = 구글 쪽 장애 → 기다리는 것 말고는 없다.
+            throw e.getStatusCode().is4xxClientError()
+                    ? BusinessException.withMessage(ErrorCode.LOGIN_FAILED, "IDP_REJECTED",
+                            "로그인 확인이 만료됐어요. 다시 로그인해주세요.")
+                    : BusinessException.withMessage(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE, "IDP_ERROR",
+                            "소셜 로그인 서버에 문제가 있어요. 잠시 후 다시 시도해주세요.");
         } catch (RestClientException e) {
             log.warn("Google OAuth transport failed: type={}, message={}",
                     e.getClass().getSimpleName(), e.getMessage());
-            throw new BusinessException(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
+            throw BusinessException.withMessage(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE, "IDP_UNREACHABLE",
+                    "소셜 로그인 서버와 연결하지 못했어요. 네트워크를 확인하고 다시 시도해주세요.");
         }
     }
 
@@ -79,7 +86,8 @@ public class GoogleOAuthClient implements OAuthClient {
                 .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                 .body(form).retrieve().body(GoogleTokenResponse.class);
         if (res == null || res.accessToken() == null)
-            throw new BusinessException(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
+            throw BusinessException.withMessage(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE, "IDP_BAD_RESPONSE",
+                    "소셜 로그인 서버 응답을 읽지 못했어요. 잠시 후 다시 시도해주세요.");
         return res;
     }
 

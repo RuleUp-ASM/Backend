@@ -21,6 +21,14 @@ public class BusinessException extends RuntimeException {
     private final String confirmationToken;
     /** 선택: CONFIRMATION_REQUIRED 일 때 재확인 화면에 보여줄 요약. 없으면 null. */
     private final Object preview;
+    /**
+     * 선택: 이 상황에 맞게 채워 넣은 사용자 문구. 없으면 {@link ErrorCode#getMessage()} 를 그대로 쓴다.
+     *
+     * <p>ErrorCode 의 문구는 상수라 "다른 계정" 같은 뭉뚱그린 표현밖에 못 담는다. 그런데 서버는
+     * 그게 <b>카카오</b>인지 구글인지 이미 알고 있다 — 아는 걸 문구에 넣어야 사용자가 다음에
+     * 뭘 눌러야 하는지 안다. code 는 그대로라 클라이언트 분기 계약은 바뀌지 않는다.
+     */
+    private final String userMessage;
 
     public BusinessException(ErrorCode errorCode) {
         this(errorCode, null);
@@ -41,13 +49,33 @@ public class BusinessException extends RuntimeException {
 
     private BusinessException(ErrorCode errorCode, String detail, String rejoinAvailableAt,
                               String nextChangeAvailableAt, String confirmationToken, Object preview) {
-        super(errorCode.getMessage());
+        this(errorCode, detail, rejoinAvailableAt, nextChangeAvailableAt, confirmationToken, preview, null);
+    }
+
+    private BusinessException(ErrorCode errorCode, String detail, String rejoinAvailableAt,
+                              String nextChangeAvailableAt, String confirmationToken, Object preview,
+                              String userMessage) {
+        super((userMessage != null) ? userMessage : errorCode.getMessage());
+        this.userMessage = userMessage;
         this.errorCode = errorCode;
         this.detail = detail;
         this.rejoinAvailableAt = rejoinAvailableAt;
         this.nextChangeAvailableAt = nextChangeAvailableAt;
         this.confirmationToken = confirmationToken;
         this.preview = preview;
+    }
+
+    /**
+     * 사유(reason)와 <b>그 사유에 맞춘 문구</b>를 함께 던진다 — 같은 code 안에서 원인이 여러 개일 때 쓴다.
+     * 예: LOGIN_FAILED 는 PKCE 누락일 수도, 인가코드 만료일 수도 있는데 사용자가 할 일은 서로 다르다.
+     */
+    public static BusinessException withMessage(ErrorCode errorCode, String reason, String userMessage) {
+        return new BusinessException(errorCode, reason, null, null, null, null, userMessage);
+    }
+
+    /** 실제로 내려보낼 사용자 문구 — 채워 넣은 게 있으면 그것, 없으면 ErrorCode 기본 문구. */
+    public String getUserMessage() {
+        return (userMessage != null) ? userMessage : errorCode.getMessage();
     }
 
     /**

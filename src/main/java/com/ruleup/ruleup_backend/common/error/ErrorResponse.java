@@ -51,10 +51,14 @@ public record ErrorResponse(
         return new ErrorResponse(errorCode.name(), errorCode.getMessage(), reason, null, null, null, null);
     }
 
-    /** 예외가 실어 보낸 부가 필드까지 그대로 옮긴다. 없는 값은 null 이라 직렬화에서 빠진다. */
+    /**
+     * 예외가 실어 보낸 부가 필드까지 그대로 옮긴다. 없는 값은 null 이라 직렬화에서 빠진다.
+     * message 는 예외가 상황에 맞춰 채운 문구가 있으면 그것을 쓴다(없으면 ErrorCode 기본 문구).
+     * code 는 언제나 ErrorCode 이름 그대로라 클라이언트 분기는 영향받지 않는다.
+     */
     public static ErrorResponse of(BusinessException e) {
         ErrorCode code = e.getErrorCode();
-        return new ErrorResponse(code.name(), code.getMessage(),
+        return new ErrorResponse(code.name(), e.getUserMessage(),
                 e.getDetail(), e.getRejoinAvailableAt(), e.getNextChangeAvailableAt(),
                 e.getConfirmationToken(), e.getPreview());
     }

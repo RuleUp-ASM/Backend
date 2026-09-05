@@ -13,8 +13,9 @@ import com.ruleup.ruleup_backend.user.domain.OAuthProvider;
  * 같은 code로 두 번 호출하면 같은 subject가 나오므로 "기존 회원"으로 잡힌다.
  *
  * <p>IdP 실패 계약도 테스트할 수 있도록 code 에 표식을 넣으면 실제 클라이언트와 같은 예외를 던진다.
- *  · {@value #FAIL_INVALID_CODE} 포함 → 400 LOGIN_FAILED (인가 코드 검증 실패)
- *  · {@value #FAIL_IDP_DOWN} 포함 → 502 LOGIN_PROVIDER_UNAVAILABLE (IdP 장애·타임아웃)
+ *  · {@value #FAIL_INVALID_CODE} 포함 → 400 LOGIN_FAILED, reason=IDP_REJECTED (인가 코드 검증 실패)
+ *  · {@value #FAIL_IDP_DOWN} 포함 → 502 LOGIN_PROVIDER_UNAVAILABLE, reason=IDP_ERROR (IdP 장애·타임아웃)
+ * 사유·문구까지 실제 클라이언트와 맞춰야 계약 테스트가 진짜 응답을 검증한다.
  */
 public class MockOAuthClient implements OAuthClient {
 
@@ -37,9 +38,11 @@ public class MockOAuthClient implements OAuthClient {
     @Override
     public OAuthUserInfo fetchUserInfo(String code, String codeVerifier, String redirectUri) {
         if (code != null && code.contains(FAIL_IDP_DOWN))
-            throw new BusinessException(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE);
+            throw BusinessException.withMessage(ErrorCode.LOGIN_PROVIDER_UNAVAILABLE, "IDP_ERROR",
+                    "소셜 로그인 서버에 문제가 있어요. 잠시 후 다시 시도해주세요.");
         if (code != null && code.contains(FAIL_INVALID_CODE))
-            throw new BusinessException(ErrorCode.LOGIN_FAILED);
+            throw BusinessException.withMessage(ErrorCode.LOGIN_FAILED, "IDP_REJECTED",
+                    "로그인 확인이 만료됐어요. 다시 로그인해주세요.");
 
         String subject = "mock-" + provider.name().toLowerCase() + "-" + code;
         return new OAuthUserInfo(subject, code + "@mock.local", "목유저", null,
