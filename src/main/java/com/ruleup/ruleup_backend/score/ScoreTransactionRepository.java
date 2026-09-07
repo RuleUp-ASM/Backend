@@ -26,6 +26,28 @@ public interface ScoreTransactionRepository extends JpaRepository<ScoreTransacti
     /** 같은 이벤트가 두 번 쌓이는 것을 막는 최종 방어선의 조회 짝. */
     boolean existsByIdempotencyKey(String idempotencyKey);
 
+    /**
+     * 점수 변동 이력 한 페이지 — 최신순, (시각, id) 복합 커서.
+     *
+     * <p>시각만으로 커서를 잡으면 같은 밀리초에 쌓인 행이 페이지 경계에서 통째로 새거나 겹친다.
+     * 확정 배치가 여러 챌린지의 사이클 점수를 한 번에 쌓으므로 동시각 행은 드물지 않다.
+     *
+     * <p>{@code appliedDelta <> 0} 은 최근 변동과 같은 규칙이다 — 한도나 0~2,000 경계에 걸려
+     * 반영량이 0이었던 행이 화면에 「0점 변동」으로 뜨면 혼란만 준다(원장에는 그대로 남는다).
+     */
+    @Query("""
+            SELECT t FROM ScoreTransaction t
+            WHERE t.userId = :userId AND t.appliedDelta <> 0 AND t.createdAt >= :since
+              AND (:cursorAt IS NULL
+                   OR t.createdAt < :cursorAt
+                   OR (t.createdAt = :cursorAt AND t.id < :cursorId))
+            ORDER BY t.createdAt DESC, t.id DESC""")
+    List<ScoreTransaction> findPage(@Param("userId") UUID userId,
+                                    @Param("since") Instant since,
+                                    @Param("cursorAt") Instant cursorAt,
+                                    @Param("cursorId") UUID cursorId,
+                                    Pageable pageable);
+
     /** 보관 기간(1년) 안의 변동을 오래된 순으로 — 월말 스냅샷을 접어 만들기 위한 순서다. */
     @Query("""
             SELECT t FROM ScoreTransaction t

@@ -82,6 +82,57 @@ class OnboardingApiContractIT extends AuthApiSupport {
     }
 
     // ==================================================================
+    // 0) 내 프로필 조회 — 연동된 소셜 계정
+    // ==================================================================
+
+    @Nested
+    @DisplayName("내 프로필 조회 — 연동 소셜 계정")
+    class LinkedProvider {
+
+        @Test
+        @DisplayName("가입·로그인 응답과 내 프로필이 모두 provider 를 내려준다")
+        void provider_is_exposed() throws Exception {
+            String tag = uniq("prov");
+            MvcResult signed = signup(tag, "소셜연동" + seq());
+
+            // 마이페이지 정책 §2-9 가 설정 허브의 계정 관리에 「연동된 소셜 계정 표시」를 요구한다.
+            // 로그인 시점에 앱이 아는 값이지만 재설치·기기 변경 후엔 알 수 없어 서버 값이 원본이다.
+            assertThat((String) read(signed, "$.data.user.provider")).isEqualTo("KAKAO");
+
+            String at = read(postJson("/api/v1/auth/oauth/kakao",
+                    loginBody(tag, "inst-" + tag, "dev-" + tag)), "$.data.accessToken");
+            MvcResult me = mvc.perform(get("/api/v1/users/me")
+                    .header("Authorization", "Bearer " + at)).andReturn();
+
+            // user 블록은 로그인 응답과 동일 스키마다 — 한쪽에만 넣으면 그 전제가 깨진다.
+            assertThat((String) read(me, "$.data.user.provider")).isEqualTo("KAKAO");
+        }
+
+        @Test
+        @DisplayName("사진 검수 상태도 user 블록에 온다 — 미등록이면 null")
+        void profile_image_status_is_exposed() throws Exception {
+            String tag = uniq("imgst");
+            MvcResult signed = signup(tag, "사진상태" + seq());
+
+            // 마이페이지가 「검수 중」 뱃지를 그리려면 이 값이 필요한데, 지금은 같은 값을
+            // /profile/me 만 내리고 있어 홈 진입 직후에는 알 수 없었다.
+            assertThat((String) read(signed, "$.data.user.profileImageStatus")).isNull();
+
+            String at = read(postJson("/api/v1/auth/oauth/kakao",
+                    loginBody(tag, "inst-" + tag, "dev-" + tag)), "$.data.accessToken");
+            mvc.perform(multipart("/api/v1/users/me/profile-image")
+                    .file(new org.springframework.mock.web.MockMultipartFile(
+                            "image", "a.png", "image/png", PNG_1X1))
+                    .header("Authorization", "Bearer " + at)).andReturn();
+
+            MvcResult me = mvc.perform(get("/api/v1/users/me")
+                    .header("Authorization", "Bearer " + at)).andReturn();
+            // 등록 직후는 항상 PENDING — 검수는 커밋 후 비동기로 돈다.
+            assertThat((String) read(me, "$.data.user.profileImageStatus")).isEqualTo("PENDING");
+        }
+    }
+
+    // ==================================================================
     // 1) 성별 4종
     // ==================================================================
 

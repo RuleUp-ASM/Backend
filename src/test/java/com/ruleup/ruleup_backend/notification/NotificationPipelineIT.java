@@ -3,6 +3,7 @@ package com.ruleup.ruleup_backend.notification;
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
 import com.ruleup.ruleup_backend.auth.AuthApiSupport;
 import com.ruleup.ruleup_backend.notification.domain.*;
+import com.ruleup.ruleup_backend.push.AndroidNotificationChannels;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -147,6 +148,47 @@ class NotificationPipelineIT extends AuthApiSupport {
             assertThat(NotificationType.ROUTINE_REMINDER.deeplink("abc"))
                     .isEqualTo("ruleup://challenges/abc");
             assertThat(NotificationType.TIER_CHANGED.deeplink(null)).isEqualTo("ruleup://me/tier");
+        }
+
+        @Test
+        @DisplayName("판정 결과는 방 상세로 보낸다 — 앱에 인증 상세 단독 화면이 없다")
+        void verification_result_opens_the_room() {
+            // 구 ruleup://verification/{id} 는 앱에 그 화면이 없어 빈 화면으로 갔다.
+            // 방 상세의 「오늘」 카드가 판정 결과를 보여주는 유일한 자리다.
+            assertThat(NotificationType.VERIFICATION_RESULT.deeplink("c1"))
+                    .isEqualTo("ruleup://challenges/c1");
+            // 계정 캘린더로 보내면 어느 방의 결과인지 사용자가 다시 찾아야 한다.
+            assertThat(NotificationType.VERIFICATION_RESULT.deeplink("c1"))
+                    .doesNotContain("me/calendar");
+        }
+
+        @Test
+        @DisplayName("이의 결과는 이의 현황으로 보낸다 — 계정 캘린더는 어느 이의인지 다시 찾게 만든다")
+        void appeal_result_opens_my_appeals() throws Exception {
+            // 이의 상세 화면으로 보내고 싶지만 뒷받침할 API 가 없다 —
+            // /users/me/appeals 는 목록 전용이고 단건 조회 경로가 없다.
+            // 없는 화면을 가리키면 VERIFICATION_RESULT 가 겪은 빈 화면 문제가 반복된다.
+            assertThat(NotificationType.APPEAL_RESULT.deeplink(null))
+                    .isEqualTo("ruleup://me/appeals");
+        }
+
+        @Test
+        @DisplayName("부정행위 검출은 제재 이력으로 보낸다 — 이의 진입이 있는 화면이다")
+        void cheat_detected_opens_sanctions() {
+            // 방 상세로 보내면 이의를 걸 경로가 없다(공통 오픈 이슈 #18).
+            // 검출 1회가 곧 강퇴·영구 차단이라 이미 나간 방으로 보낼 수도 없다.
+            assertThat(NotificationType.CHEAT_DETECTED.deeplink(null))
+                    .isEqualTo("ruleup://me/sanctions");
+        }
+
+        @Test
+        @DisplayName("안드로이드 채널은 ruleup_default 하나다 — 채널 ID 는 출시 후 바꿀 수 없다")
+        void single_android_channel() {
+            // 유형별로 쪼개면 서버가 모르는 두 번째 게이트가 생겨 발송 로그는 SUCCESS 인데
+            // 사용자는 못 받는 상태가 정상적으로 존재하게 된다. 앱 안에 3계층 토글이 이미 있어
+            // 제어 수단이 없는 것도 아니다. 차단율 관측 후 필요하면 그때 쪼갠다.
+            assertThat(AndroidNotificationChannels.DEFAULT).isEqualTo("ruleup_default");
+            assertThat(AndroidNotificationChannels.ALL).containsExactly("ruleup_default");
         }
 
         @Test

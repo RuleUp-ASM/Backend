@@ -143,6 +143,37 @@ class MyPageContractIT extends ChallengeApiSupport {
         return id;
     }
 
+    /**
+     * 닉네임 검수 완료 폴링 — 최대 5초.
+     *
+     * <p>검수는 {@code AFTER_COMMIT} + {@code @Async} 라 저장 응답이 돌아온 뒤에도 잠시 더
+     * 돌고 있다. 그 사이에 테스트가 {@code nickname_status} 를 심으면 <b>뒤늦게 도착한 검수가
+     * 덮어써</b> 전제가 조용히 사라진다 — 로컬에서는 대개 이기지만 CI 처럼 느린 환경에서 진다.
+     */
+    private void awaitNicknameDecided(UUID userId) throws Exception {
+        for (int i = 0; i < 50; i++) {
+            String status = jdbc().queryForObject(
+                    "SELECT nickname_status FROM users WHERE id = ?", String.class, bytes(userId));
+            if (!"PENDING".equals(status)) return;
+            Thread.sleep(100);
+        }
+    }
+
+    /** 삭제 배치가 하는 일 중 이 화면에 필요한 부분 — 제목 스냅샷 적재 후 방 행 제거. */
+    private void archiveAndDeleteChallenge(UUID challengeId, String titleSnapshot) {
+        jdbc().update("INSERT INTO challenge_history " +
+                        "(challenge_id, title_snapshot, image_snapshot, category, start_date, end_date, deleted_at) " +
+                        "SELECT id, ?, image_url, category, start_date, end_date, NOW(6) FROM challenges WHERE id = ?",
+                titleSnapshot, bytes(challengeId));
+        jdbc().update("DELETE FROM challenge_members WHERE challenge_id = ?", bytes(challengeId));
+        jdbc().update("DELETE FROM challenges WHERE id = ?", bytes(challengeId));
+    }
+
+    /** KST 기준 이번 달 — 픽스처의 daysAgo 가 KST 달력 날짜라 월도 KST 로 맞춘다. */
+    private static String thisMonth() {
+        return java.time.YearMonth.now(java.time.ZoneId.of("Asia/Seoul")).toString();
+    }
+
     private static UUID uuid(byte[] b) {
         java.nio.ByteBuffer bb = java.nio.ByteBuffer.wrap(b);
         return new UUID(bb.getLong(), bb.getLong());
@@ -151,6 +182,14 @@ class MyPageContractIT extends ChallengeApiSupport {
     @SuppressWarnings("unchecked")
     private Map<String, Object> data(MvcResult res) throws Exception {
         return read(res, "$.data");
+    }
+
+    /** cycles12w 의 마지막 칸 = 이번 주. 12칸 중 가장 최근이 맨 뒤다. */
+    @SuppressWarnings("unchecked")
+    private String currentWeek(Member me) throws Exception {
+        List<Map<String, Object>> cycles =
+                (List<Map<String, Object>>) data(getAuth("/api/v1/me/stats", me.token())).get("cycles12w");
+        return (String) cycles.get(cycles.size() - 1).get("result");
     }
 
     // ================================================================
@@ -245,6 +284,65 @@ class MyPageContractIT extends ChallengeApiSupport {
         }
 
         @Test
+        @DisplayName("변동 항목에 챌린지명이 함께 온다 — id 만으로는 사용자가 읽을 수 없다")
+        void recent_changes_carry_title() throws Exception {
+            Member me = member("tier-title");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
+            jdbc().update("UPDATE challenges SET title = ? WHERE id = ?", "아침 6:30 기상", bytes(ch));
+            insertScoreEvent(me.id(), ch, "DAILY_SUCCESS", 8, 18, 0);
+
+            List<Map<String, Object>> changes = (List<Map<String, Object>>)
+                    data(getAuth("/api/v1/me/tier", me.token())).get("recentChanges");
+
+            // 화면은 「아침 6:30 기상 · 사이클 성공 +8」로 그린다.
+            // 항목마다 방 상세를 조회하게 만들 수는 없다.
+            assertThat(changes.getFirst()).containsEntry("challengeTitle", "아침 6:30 기상");
+        }
+
+        @Test
+        @DisplayName("삭제된 방의 챌린지명은 이력에서 읽는다")
+        void recent_changes_title_from_history() throws Exception {
+            Member me = member("tier-title-hist");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "COMPLETED", "GROUP");
+            insertScoreEvent(me.id(), ch, "DAILY_SUCCESS", 8, 18, 0);
+            archiveAndDeleteChallenge(ch, "완료된 방");
+
+            List<Map<String, Object>> changes = (List<Map<String, Object>>)
+                    data(getAuth("/api/v1/me/tier", me.token())).get("recentChanges");
+
+            assertThat(changes.getFirst()).containsEntry("challengeTitle", "완료된 방");
+        }
+
+        @Test
+        @DisplayName("이력에도 없으면 null 이다 — 클라이언트는 사유만 그린다")
+        void recent_changes_title_null_when_unknown() throws Exception {
+            Member me = member("tier-title-null");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
+            insertScoreEvent(me.id(), ch, "DAILY_SUCCESS", 8, 18, 0);
+            jdbc().update("DELETE FROM challenges WHERE id = ?", bytes(ch));
+
+            List<Map<String, Object>> changes = (List<Map<String, Object>>)
+                    data(getAuth("/api/v1/me/tier", me.token())).get("recentChanges");
+
+            assertThat(changes.getFirst()).containsEntry("challengeTitle", null)
+                    .containsEntry("challengeId", ch.toString());
+        }
+
+        @Test
+        @DisplayName("계정 단위 변동은 챌린지가 없어 id·명 둘 다 null 이다")
+        void account_level_change_has_no_challenge() throws Exception {
+            Member me = member("tier-title-account");
+            insertScoreEvent(me.id(), null, "DAILY_SUCCESS", 3, 13, 0);
+
+            List<Map<String, Object>> changes = (List<Map<String, Object>>)
+                    data(getAuth("/api/v1/me/tier", me.token())).get("recentChanges");
+
+            assertThat(changes.getFirst())
+                    .containsEntry("challengeId", null)
+                    .containsEntry("challengeTitle", null);
+        }
+
+        @Test
         @DisplayName("주간 변동(weeklyDelta)은 내리지 않는다 — 계정 주간이라는 단위가 사라졌다")
         void no_weekly_delta() throws Exception {
             Member me = member("tier-noweekly");
@@ -259,6 +357,233 @@ class MyPageContractIT extends ChallengeApiSupport {
             assertThat(getAuth("/api/v1/me/reputation", me.token()).getResponse().getStatus()).isEqualTo(404);
             assertThat(getAuth("/api/v1/me/reputation/history", me.token()).getResponse().getStatus())
                     .isEqualTo(404);
+        }
+    }
+
+    // ================================================================
+
+    /**
+     * 챌린지 단위 월 캘린더(GET /challenges/{id}/calendar) — 솔로 챌린지 상세의 월 캘린더.
+     *
+     * <p>경로는 챌린지 모듈이지만 픽스처(판정·이의·아웃컴)가 전부 여기 있어 함께 둔다.
+     *
+     * <p><b>{@code /me/calendar} 에 필터를 붙이지 않은 이유</b>가 이 계약의 핵심이다. 계정 단위
+     * 캘린더의 {@code status} 는 여러 루틴을 합산한 값이라 {@code PARTIAL} 이 존재하는데,
+     * 한 챌린지로 좁히면 하루 판정 대상이 1건이라 그 값이 의미를 잃는다 — 응답 스키마 자체가 다르다.
+     */
+    @Nested
+    @DisplayName("GET /challenges/{id}/calendar — 챌린지 단위 월 캘린더")
+    class ChallengeCalendar {
+
+        @Test
+        @DisplayName("그 챌린지 판정만 나온다 — 다른 방 기록이 섞이지 않는다")
+        void scoped_to_one_challenge() throws Exception {
+            Member me = member("cc-scope");
+            UUID mine = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "SOLO");
+            UUID other = insertChallenge(me.id(), "READING", "ACTIVE", "SOLO");
+            insertDaily(mine, me.id(), 1, "SUCCESS", false);
+            insertDaily(other, me.id(), 1, "FAILED", true);
+
+            Map<String, Object> d = data(getAuth(
+                    "/api/v1/challenges/" + mine + "/calendar?month=" + thisMonth(), me.token()));
+
+            assertThat(d).containsOnlyKeys("challengeId", "month", "days")
+                    .containsEntry("challengeId", mine.toString());
+            List<Map<String, Object>> days = (List<Map<String, Object>>) d.get("days");
+            assertThat(days).singleElement().satisfies(day -> {
+                assertThat(day).containsOnlyKeys("date", "status", "verificationId", "appealable");
+                assertThat(day).containsEntry("status", "DONE").containsEntry("appealable", false);
+                assertThat(day.get("verificationId")).isNotNull();
+            });
+        }
+
+        @Test
+        @DisplayName("합산 상태값이 없다 — ALL_DONE·PARTIAL 이 나오지 않는다")
+        void no_aggregate_statuses() throws Exception {
+            Member me = member("cc-enum");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "SOLO");
+            insertDaily(ch, me.id(), 1, "SUCCESS", false);
+
+            List<Map<String, Object>> days = (List<Map<String, Object>>) data(getAuth(
+                    "/api/v1/challenges/" + ch + "/calendar?month=" + thisMonth(), me.token())).get("days");
+
+            assertThat(days).extracting(day -> day.get("status"))
+                    .doesNotContain("ALL_DONE", "PARTIAL")
+                    .allSatisfy(v -> assertThat(v).isIn("DONE", "FAILED", "FAIL_EXPECTED", "IN_PROGRESS"));
+        }
+
+        @Test
+        @DisplayName("실패 건은 기한 안이면 이의 진입이 열린다 — 캘린더에서 바로 신청한다")
+        void failed_day_is_appealable() throws Exception {
+            Member me = member("cc-appeal");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "SOLO");
+            insertDaily(ch, me.id(), 1, "FAILED", true);
+
+            List<Map<String, Object>> days = (List<Map<String, Object>>) data(getAuth(
+                    "/api/v1/challenges/" + ch + "/calendar?month=" + thisMonth(), me.token())).get("days");
+
+            assertThat(days).singleElement()
+                    .satisfies(day -> assertThat(day).containsEntry("status", "FAILED")
+                            .containsEntry("appealable", true));
+        }
+
+        @Test
+        @DisplayName("기한이 지났거나 이미 신청했으면 닫힌다")
+        void appeal_closes() throws Exception {
+            Member closed = member("cc-appeal-closed");
+            UUID c1 = insertChallenge(closed.id(), "EXERCISE", "ACTIVE", "SOLO");
+            insertDaily(c1, closed.id(), 3, "FAILED", false);   // 기한 지남
+            assertThat(firstDay(closed, c1)).containsEntry("appealable", false);
+
+            Member already = member("cc-appeal-done");
+            UUID c2 = insertChallenge(already.id(), "EXERCISE", "ACTIVE", "SOLO");
+            UUID daily = insertDaily(c2, already.id(), 1, "FAILED", true);
+            insertAppeal(already.id(), c2, daily, "SIGNAL_MISSING", 0);
+            assertThat(firstDay(already, c2)).containsEntry("appealable", false);
+        }
+
+        @Test
+        @DisplayName("이탈한 방의 내 기록도 조회된다 — 완주·이탈 기록 열람이 보장돼야 한다")
+        void left_member_can_still_read() throws Exception {
+            Member me = member("cc-left");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "SOLO");
+            insertDaily(ch, me.id(), 1, "SUCCESS", false);
+            jdbc().update("UPDATE challenge_members SET status = 'LEFT', left_type = 'LEAVE', " +
+                    "left_at = NOW(6) WHERE challenge_id = ? AND user_id = ?", bytes(ch), bytes(me.id()));
+
+            assertThat(getAuth("/api/v1/challenges/" + ch + "/calendar?month=" + thisMonth(),
+                    me.token()).getResponse().getStatus()).isEqualTo(200);
+        }
+
+        @Test
+        @DisplayName("참여한 적 없는 방은 403 — 남의 판정 이력을 날짜별로 훑을 수 없다")
+        void stranger_is_rejected() throws Exception {
+            Member owner = member("cc-owner");
+            Member stranger = member("cc-stranger");
+            UUID ch = insertChallenge(owner.id(), "EXERCISE", "ACTIVE", "SOLO");
+            insertDaily(ch, owner.id(), 1, "SUCCESS", false);
+
+            expectError(getAuth("/api/v1/challenges/" + ch + "/calendar?month=" + thisMonth(),
+                    stranger.token()), 403, "NOT_CHALLENGE_MEMBER");
+        }
+
+        @Test
+        @DisplayName("없는 챌린지는 404, 형식이 틀린 월은 400")
+        void not_found_and_bad_month() throws Exception {
+            Member me = member("cc-errors");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "SOLO");
+            insertDaily(ch, me.id(), 1, "SUCCESS", false);
+
+            expectError(getAuth("/api/v1/challenges/" + UUID.randomUUID() + "/calendar?month="
+                    + thisMonth(), me.token()), 404, "CHALLENGE_NOT_FOUND");
+            expectError(getAuth("/api/v1/challenges/" + ch + "/calendar?month=2026-13", me.token()),
+                    400, "INVALID_CALENDAR_MONTH");
+        }
+
+        @SuppressWarnings("unchecked")
+        private Map<String, Object> firstDay(Member me, UUID challengeId) throws Exception {
+            List<Map<String, Object>> days = (List<Map<String, Object>>) data(getAuth(
+                    "/api/v1/challenges/" + challengeId + "/calendar?month=" + thisMonth(),
+                    me.token())).get("days");
+            return days.getFirst();
+        }
+    }
+
+    // ================================================================
+
+    /**
+     * 점수 변동 이력 전체 보기(GET /me/tier/changes) — 내 티어 화면의 「최근 변동 → 전체 보기」.
+     *
+     * <p>{@code /me/tier/history} 와 <b>다른 API</b>다. 그쪽은 그래프 원천이라 사유·변동폭·챌린지가
+     * 없고, 그래프는 기간으로 이력은 건수로 읽어 페이징 단위 자체가 다르다.
+     *
+     * <p>마이페이지 정책 §2-5 의 「하락 사유 표기 없음」은 <b>그래프 한정</b>으로 범위가 축소됐다
+     * (2026-09-07) — 이 목록은 사유를 표기한다.
+     */
+    @Nested
+    @DisplayName("GET /me/tier/changes — 점수 변동 이력 전체 보기")
+    class TierChanges {
+
+        @Test
+        @DisplayName("항목은 최근 변동과 같은 구조다 — date·challengeId·challengeTitle·reason·delta")
+        void item_shape() throws Exception {
+            Member me = member("changes-shape");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
+            jdbc().update("UPDATE challenges SET title = ? WHERE id = ?", "하루 1만 보 걷기", bytes(ch));
+            insertScoreEvent(me.id(), ch, "DAILY_SUCCESS", 8, 18, 0);
+
+            Map<String, Object> d = data(getAuth("/api/v1/me/tier/changes", me.token()));
+            assertThat(d).containsOnlyKeys("items", "nextCursor", "retentionDays");
+            assertThat(d).containsEntry("retentionDays", 365);
+
+            List<Map<String, Object>> items = (List<Map<String, Object>>) d.get("items");
+            assertThat(items).singleElement().satisfies(i -> {
+                assertThat(i).containsOnlyKeys("date", "challengeId", "challengeTitle", "reason", "delta");
+                assertThat(i).containsEntry("reason", "CYCLE_SUCCESS")
+                        .containsEntry("delta", 8)
+                        .containsEntry("challengeTitle", "하루 1만 보 걷기");
+            });
+        }
+
+        @Test
+        @DisplayName("페이지 크기는 서버 고정 50이고 커서로 이어 읽는다")
+        void fixed_page_size_and_cursor() throws Exception {
+            Member me = member("changes-paging");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
+            for (int i = 0; i < 60; i++) insertScoreEvent(me.id(), ch, "DAILY_SUCCESS", 1, 10 + i, 60 - i);
+
+            Map<String, Object> first = data(getAuth("/api/v1/me/tier/changes", me.token()));
+            assertThat((List<?>) first.get("items")).hasSize(50);
+            String cursor = (String) first.get("nextCursor");
+            assertThat(cursor).isNotNull();
+
+            Map<String, Object> second = data(getAuth(
+                    "/api/v1/me/tier/changes?cursor=" + cursor, me.token()));
+            assertThat((List<?>) second.get("items")).hasSize(10);
+            assertThat(second.get("nextCursor")).as("마지막 페이지면 null").isNull();
+
+            // 두 페이지가 겹치거나 빠지지 않는다. 60건을 하루씩 흩어 두었으므로 날짜가 전부 다르다.
+            assertThat(concatDates(first, second)).hasSize(60).doesNotHaveDuplicates();
+        }
+
+        @Test
+        @DisplayName("보관 1년 — 그 이전 이력은 조회되지 않는다")
+        void retention_one_year() throws Exception {
+            Member me = member("changes-retention");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
+            insertScoreEvent(me.id(), ch, "DAILY_SUCCESS", 5, 15, 400);
+            insertScoreEvent(me.id(), ch, "DAILY_SUCCESS", 5, 20, 10);
+
+            assertThat((List<?>) data(getAuth("/api/v1/me/tier/changes", me.token())).get("items"))
+                    .hasSize(1);
+        }
+
+        @Test
+        @DisplayName("반영량이 0인 행은 내리지 않는다 — 화면에 「0점 변동」이 뜨면 혼란만 준다")
+        void zero_delta_is_hidden() throws Exception {
+            Member me = member("changes-zero");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
+            insertScoreEvent(me.id(), ch, "DAILY_SUCCESS", 0, 10, 0);
+
+            assertThat((List<?>) data(getAuth("/api/v1/me/tier/changes", me.token())).get("items"))
+                    .isEmpty();
+        }
+
+        @Test
+        @DisplayName("깨진 커서는 400 CURSOR_INVALID — 조용히 첫 페이지로 떨어뜨리지 않는다")
+        void broken_cursor_is_rejected() throws Exception {
+            Member me = member("changes-badcursor");
+            expectError(getAuth("/api/v1/me/tier/changes?cursor=!!!not-base64!!!", me.token()),
+                    400, "CURSOR_INVALID");
+        }
+
+        @SuppressWarnings("unchecked")
+        private List<String> concatDates(Map<String, Object> a, Map<String, Object> b) {
+            return java.util.stream.Stream.concat(
+                    ((List<Map<String, Object>>) a.get("items")).stream(),
+                    ((List<Map<String, Object>>) b.get("items")).stream())
+                    .map(i -> (String) i.get("date"))
+                    .toList();
         }
     }
 
@@ -330,7 +655,8 @@ class MyPageContractIT extends ChallengeApiSupport {
 
             Map<String, Object> d = data(getAuth("/api/v1/me/stats", me.token()));
 
-            assertThat(d).containsOnlyKeys("successRate", "totalSuccessCount", "streak", "completedCount");
+            assertThat(d).containsOnlyKeys("successRate", "totalSuccessCount", "streak",
+                    "cycles12w", "completedCount", "weeklyScoreDelta");
             assertThat((Map<String, Object>) d.get("streak")).containsOnlyKeys("current", "best");
         }
 
@@ -389,12 +715,96 @@ class MyPageContractIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("판정 이력이 없으면 성공률 0, 스트릭 0 — 빈 상태에서도 계약을 지킨다")
+        @DisplayName("판정 이력이 없으면 성공률은 null 이다 — 「기록 없음」과 「0%」는 다른 사실이다")
         void empty_state() throws Exception {
             Member me = member("stats-empty");
             Map<String, Object> d = data(getAuth("/api/v1/me/stats", me.token()));
-            assertThat(((Number) d.get("successRate")).doubleValue()).isEqualTo(0.0);
+
+            // 0.0 을 내리면 가입 직후 통계 화면이 아무것도 하지 않은 사용자에게
+            // "전부 실패했다"고 말한다. 분모가 없으면 비율 자체가 존재하지 않는다.
+            assertThat(d).containsEntry("successRate", null);
+            // 나머지는 0 이 유효한 값이다 — 성공 0건은 실제로 0건이다.
             assertThat(d).containsEntry("totalSuccessCount", 0).containsEntry("completedCount", 0);
+        }
+
+        @Test
+        @DisplayName("cycles12w 는 언제나 12칸이다 — 판정 없는 주는 NONE 으로 채운다")
+        void cycles12w_always_twelve() throws Exception {
+            Member me = member("stats-cycles-shape");
+
+            List<Map<String, Object>> cycles =
+                    (List<Map<String, Object>>) data(getAuth("/api/v1/me/stats", me.token())).get("cycles12w");
+
+            // 빈 배열을 내리면 클라이언트가 ISO 주차를 직접 계산해 12칸을 만들어야 한다.
+            // 그리드를 그리는 쪽이 아니라 값을 아는 쪽이 채운다.
+            assertThat(cycles).hasSize(12);
+            assertThat(cycles).allSatisfy(c -> {
+                assertThat(c).containsOnlyKeys("week", "result");
+                assertThat((String) c.get("week")).matches("\\d{4}-W\\d{2}");
+            });
+            assertThat(cycles).extracting(c -> c.get("result")).containsOnly("NONE");
+            assertThat(cycles).extracting(c -> (String) c.get("week"))
+                    .as("오래된 주가 앞이다 — 그리드가 왼쪽부터 그려진다").isSorted();
+        }
+
+        @Test
+        @DisplayName("그 주 판정을 전부 성공하면 SUCCESS, 섞이면 PARTIAL, 전부 실패면 FAIL")
+        void cycles12w_classifies_week() throws Exception {
+            Member allSuccess = member("stats-cycles-ok");
+            UUID c1 = insertChallenge(allSuccess.id(), "EXERCISE", "ACTIVE", "SOLO");
+            insertOutcome(allSuccess.id(), c1, 0, "SUCCESS");
+            assertThat(currentWeek(allSuccess)).isEqualTo("SUCCESS");
+
+            Member mixed = member("stats-cycles-mixed");
+            UUID c2 = insertChallenge(mixed.id(), "EXERCISE", "ACTIVE", "SOLO");
+            UUID c3 = insertChallenge(mixed.id(), "READING", "ACTIVE", "SOLO");
+            insertOutcome(mixed.id(), c2, 0, "SUCCESS");
+            insertOutcome(mixed.id(), c3, 0, "FAILED");
+            assertThat(currentWeek(mixed)).isEqualTo("PARTIAL");
+
+            Member allFail = member("stats-cycles-fail");
+            UUID c4 = insertChallenge(allFail.id(), "EXERCISE", "ACTIVE", "SOLO");
+            insertOutcome(allFail.id(), c4, 0, "FAILED");
+            assertThat(currentWeek(allFail)).isEqualTo("FAIL");
+        }
+
+        @Test
+        @DisplayName("weeklyScoreDelta 는 계정 단위 이번 주 합계다 — 챌린지별 사이클 한도를 붙이지 않는다")
+        void weekly_score_delta_is_account_sum() throws Exception {
+            Member me = member("stats-weekly");
+            UUID c1 = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "SOLO");
+            UUID c2 = insertChallenge(me.id(), "READING", "ACTIVE", "SOLO");
+            insertScoreEvent(me.id(), c1, "DAILY_SUCCESS", 20, 30, 0);
+            insertScoreEvent(me.id(), c2, "DAILY_SUCCESS", 20, 50, 0);
+            insertScoreEvent(me.id(), c1, "CONFIRMED_MISS", -5, 45, 0);
+
+            // 정책 §4.7 의 ±20 은 「챌린지별 각 사이클」 한도이지 계정 주간 한도가 아니다.
+            // 무료 동시 참여 3개 기준으로 이번 주 변동은 ±60까지 나올 수 있다.
+            assertThat(data(getAuth("/api/v1/me/stats", me.token())))
+                    .containsEntry("weeklyScoreDelta", 35);
+        }
+
+        @Test
+        @DisplayName("지난주 변동은 weeklyScoreDelta 에 들어오지 않는다")
+        void weekly_score_delta_excludes_last_week() throws Exception {
+            Member me = member("stats-weekly-prev");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "SOLO");
+            insertScoreEvent(me.id(), ch, "DAILY_SUCCESS", 12, 22, 8);
+
+            assertThat(data(getAuth("/api/v1/me/stats", me.token())))
+                    .containsEntry("weeklyScoreDelta", 0);
+        }
+
+        @Test
+        @DisplayName("판정이 전부 실패면 성공률 0.0 이다 — null 과 구분된다")
+        void all_failed_is_zero_not_null() throws Exception {
+            Member me = member("stats-allfail");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "SOLO");
+            insertOutcome(me.id(), ch, 1, "FAILED");
+            insertOutcome(me.id(), ch, 2, "FAILED");
+
+            Map<String, Object> d = data(getAuth("/api/v1/me/stats", me.token()));
+            assertThat(((Number) d.get("successRate")).doubleValue()).isEqualTo(0.0);
         }
     }
 
@@ -534,7 +944,13 @@ class MyPageContractIT extends ChallengeApiSupport {
         @DisplayName("모더레이션 거부에 따른 재제출은 잠금에서 제외된다")
         void rejection_fix_bypasses_lock() throws Exception {
             Member me = member("profile-rejected");
-            patchJsonAuth("/api/v1/users/me/profile", me.token(), body("첫번째닉", null, null));
+            // 검수가 끝나기를 기다린 뒤에 전제를 심는다. 먼저 심으면 뒤늦게 도착한 검수가
+            // nickname_status 를 APPROVED 로 덮어써, 잠긴 계정이 거부 상태가 아니게 되고
+            // 재제출이 409 PROFILE_CHANGE_LOCKED 로 막힌다.
+            awaitNicknameDecided(me.id());
+            // 잠금은 시각을 직접 심는다 — 앞선 저장을 한 번 더 거치면 그 저장이 검수를 또
+            // 발행해 같은 경합이 되살아난다. 이 테스트가 보는 것은 저장 경로가 아니라
+            // "잠긴 상태 + 거부 상태"에서의 재제출 허용이다.
             jdbc().update("UPDATE users SET profile_changed_at = DATE_SUB(NOW(3), INTERVAL 1 DAY), " +
                     "nickname_status = 'REJECTED' WHERE id = ?", bytes(me.id()));
 
@@ -546,11 +962,14 @@ class MyPageContractIT extends ChallengeApiSupport {
         @DisplayName("MODERATION_LOCKED 는 폐기됐다 — 거부 횟수만으로 수정을 제한하지 않는다")
         void no_moderation_lock() throws Exception {
             Member me = member("profile-nomodlock");
+            awaitNicknameDecided(me.id());
             jdbc().update("UPDATE users SET nickname_status = 'REJECTED' WHERE id = ?", bytes(me.id()));
             for (int i = 0; i < 4; i++) {
                 MvcResult res = patchJsonAuth("/api/v1/users/me/profile", me.token(),
                         body("재제출" + i + "번", null, null));
                 assertThat(res.getResponse().getStatus()).isEqualTo(200);
+                // 이번 저장이 발행한 검수가 끝난 뒤에 다시 거부로 돌린다 — 같은 경합이다.
+                awaitNicknameDecided(me.id());
                 jdbc().update("UPDATE users SET nickname_status = 'REJECTED' WHERE id = ?", bytes(me.id()));
             }
         }

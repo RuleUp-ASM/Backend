@@ -36,6 +36,10 @@ import java.util.UUID;
  * 제목·이미지·카테고리·기간뿐이라 설명·모드·공개범위·인원·정원·최소티어·주간횟수·방장유형을 채울 수 없다.
  * 0 이나 기본값으로 메우면 완료 카드가 "정원 0명짜리 솔로 방"처럼 거짓을 그리므로 null 로 둔다.
  *
+ * <p><b>{@code successRate} 만은 예외로 이력에서도 채워진다.</b> 완료 카드의 「최종 88%」가
+ * 그 값이며, 삭제 배치가 삭제 직전에 계산해 {@code challenge_member_history.final_success_rate}
+ * 에 적재한다. 삭제된 뒤에는 계산할 원천이 없어 <b>이미 삭제된 건은 소급이 불가능</b>하다.
+ *
  * <p>이건 드문 경우가 아니다. 삭제 배치가 매일 04:10 에 {@code status='COMPLETED'} 를 전부 지우므로
  * 완료된 방이 살아 있는 시간은 길어야 하루다 — 즉 <b>완료 탭은 사실상 전부 이력에서 읽히고,
  * 위 필드들은 항상 null 이라고 봐야 한다</b>. 그럼에도 지금 막지 않는 전제는 하나다:
@@ -116,7 +120,13 @@ public class MyChallengeQueryService {
                 "       c.category, c.mode, c.visibility, c.status, " +
                 "       c.participant_count, c.capacity, c.min_tier, c.weekly_count, " +
                 "       c.start_date, c.end_date, m.role AS my_role, c.owner_type, " +
-                "       m.left_type, m.left_at " +
+                "       m.left_type, m.left_at, " +
+                // 성공률은 판정 대비다 — progress_rate(목표 대비 진척도)와 다른 값이므로 섞지 않는다.
+                // 판정이 하나도 없으면 NULL: 비율을 만들 수 없는 상태를 0 으로 채우면
+                // 아직 아무것도 하지 않은 사용자에게 「성공률 0%」를 그리게 된다.
+                "       CAST(CASE WHEN (m.success_days + m.fail_days) = 0 THEN NULL " +
+                "                 ELSE m.success_days / (m.success_days + m.fail_days) END " +
+                "            AS DECIMAL(6,4)) AS success_rate " +
                 "FROM challenge_members m JOIN challenges c ON c.id = m.challenge_id " +
                 "WHERE m.user_id = ? AND c.deleted_at IS NULL AND " + memberAndChallenge;
     }
@@ -139,7 +149,9 @@ public class MyChallengeQueryService {
                 "       CAST(NULL AS SIGNED) AS participant_count, CAST(NULL AS SIGNED) AS capacity, " +
                 "       " + NULL_TEXT + " AS min_tier, CAST(NULL AS SIGNED) AS weekly_count, " +
                 "       ch.start_date, ch.end_date, h.final_role AS my_role, " +
-                "       " + NULL_TEXT + " AS owner_type, h.left_type, h.left_at " +
+                "       " + NULL_TEXT + " AS owner_type, h.left_type, h.left_at, " +
+                // 이력에는 퍼센트(0~100)로 적재된다 — 계약은 0~1 이라 여기서 되돌린다.
+                "       CAST(h.final_success_rate / 100 AS DECIMAL(6,4)) AS success_rate " +
                 "FROM challenge_member_history h " +
                 "JOIN challenge_history ch ON ch.challenge_id = h.challenge_id " +
                 "WHERE h.user_id = ? AND " + leftTypeCondition;
@@ -169,6 +181,7 @@ public class MyChallengeQueryService {
                 r.endDate.toString(),
                 myRole(r.myRole),
                 r.ownerType,
+                r.successRate,
                 leftTab ? leftType(r.leftType) : null,
                 leftTab && r.leftAt != null ? r.leftAt : null);
     }
@@ -226,7 +239,7 @@ public class MyChallengeQueryService {
                        String moderationImage, String category, String mode, String visibility,
                        String status, Integer participantCount, Integer capacity, String minTier,
                        Integer weeklyCount, LocalDate startDate, LocalDate endDate, String myRole,
-                       String ownerType, String leftType, String leftAt) {}
+                       String ownerType, String leftType, String leftAt, Double successRate) {}
 
     private Row mapRow(ResultSet rs) throws SQLException {
         java.sql.Timestamp leftAt = rs.getTimestamp("left_at");
@@ -243,7 +256,15 @@ public class MyChallengeQueryService {
                 intOrNull(rs, "weekly_count"),
                 rs.getDate("start_date").toLocalDate(), rs.getDate("end_date").toLocalDate(),
                 rs.getString("my_role"), rs.getString("owner_type"), rs.getString("left_type"),
-                leftAt == null ? null : leftAt.toInstant().toString());
+                leftAt == null ? null : leftAt.toInstant().toString(),
+                successRate(rs));
+    }
+
+    /** 0~1 성공률. 소수 셋째 자리까지 — 화면이 「88%」로 그리므로 그 이상의 정밀도는 의미가 없다. */
+    private static Double successRate(ResultSet rs) throws SQLException {
+        java.math.BigDecimal value = rs.getBigDecimal("success_rate");
+        if (value == null) return null;
+        return Math.round(value.doubleValue() * 1000.0) / 1000.0;
     }
 
     private static Integer intOrNull(ResultSet rs, String column) throws SQLException {

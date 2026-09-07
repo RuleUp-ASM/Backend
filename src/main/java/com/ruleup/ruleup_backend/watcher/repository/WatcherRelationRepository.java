@@ -43,6 +43,9 @@ public interface WatcherRelationRepository extends JpaRepository<WatcherRelation
     List<WatcherRelation> findByChallengeIdAndTargetUserIdAndRemovedAtIsNull(
             UUID challengeId, UUID targetUserId);
 
+    /** 슬롯 계산 — 이 챌린지에서 내가 지정한 살아 있는 관계 수. */
+    long countByChallengeIdAndTargetUserIdAndRemovedAtIsNull(UUID challengeId, UUID targetUserId);
+
     /** 루틴 종료 자동 제거 배치. */
     @Query("""
             select r from WatcherRelation r

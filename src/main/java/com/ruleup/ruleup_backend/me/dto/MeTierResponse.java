@@ -36,7 +36,7 @@ public record MeTierResponse(
         @Schema(description = "강등 안내. 브론즈면 null")
         Demotion demotion,
 
-        @Schema(description = "최근 변동 10건(최신순)")
+        @Schema(description = "최근 변동 10건(최신순). 10건을 넘는 전체 목록은 GET /me/tier/changes 다")
         List<Change> recentChanges) {
 
     @Schema(name = "MeTierPromotion")
@@ -58,5 +58,10 @@ public record MeTierResponse(
                     CYCLE_SUCCESS / CYCLE_FAIL / LEAVE / KICK_FAIL / KICK_PERMISSION /
                     CHEAT / APPEAL_RESTORE""", example = "CYCLE_SUCCESS") String reason,
             @Schema(description = "변동을 일으킨 챌린지. 계정 단위 변동이면 null") String challengeId,
+            @Schema(description = """
+                    챌린지명 — 화면이 「아침 6:30 기상 · 사이클 성공 +8」로 그린다.
+                    **완료 챌린지는 방이 하드 삭제되어 challenge_history 에서 읽으며, 그것도 없으면 null**
+                    이다. 클라이언트는 null 일 때 사유와 변동폭만 그리는 폴백이 필요하다.""",
+                    example = "아침 6:30 기상") String challengeTitle,
             @Schema(description = "변동량(양수=증가)", example = "5") long delta) {}
 }

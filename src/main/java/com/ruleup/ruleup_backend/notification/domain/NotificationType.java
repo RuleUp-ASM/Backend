@@ -38,8 +38,15 @@ public enum NotificationType {
     PERMISSION_REGRANT_REQUIRED(NotificationCategory.A, "ruleup://challenges/{target}/setup"),
     /** 부정행위 검출 통지 — 검출 1회가 곧 강퇴·영구 차단이다. */
     CHEAT_DETECTED(NotificationCategory.A, "ruleup://me/sanctions"),
-    /** 이의 처리 결과. */
-    APPEAL_RESULT(NotificationCategory.A, "ruleup://me/calendar"),
+    /**
+     * 이의 처리 결과 — <b>이의 현황</b>으로 보낸다(2026-09-07 변경).
+     *
+     * <p>계정 캘린더로 보내면 어느 이의의 결과인지 사용자가 그 달을 뒤져 다시 찾아야 한다.
+     * 이의 <b>상세</b>로 보내는 편이 낫지만 뒷받침할 API 가 없다 —
+     * {@code GET /users/me/appeals} 는 목록 전용이고 단건 조회 경로가 없다.
+     * 없는 화면을 가리키는 것은 구 {@code ruleup://verification/{id}} 가 겪은 문제라 되풀이하지 않는다.
+     */
+    APPEAL_RESULT(NotificationCategory.A, "ruleup://me/appeals"),
     /** 약관 변경 고지 — 재동의 화면으로 보낸다. */
     TERMS_UPDATED(NotificationCategory.A, "ruleup://settings/agreements"),
     /** 다른 기기 로그인으로 세션이 종료됨. 로그아웃 상태라 진입점을 두지 않는다. */
@@ -49,8 +56,13 @@ public enum NotificationType {
 
     /** 루틴 리마인더 — 08:00 · 12:00 · 19:00, 당일 판정 예정 루틴 보유자에게만. */
     ROUTINE_REMINDER(NotificationCategory.B, "ruleup://challenges/{target}", true),
-    /** 날짜별 판정 결과. */
-    VERIFICATION_RESULT(NotificationCategory.B, "ruleup://me/calendar", true),
+    /**
+     * 날짜별 판정 결과 — <b>방 상세</b>의 「오늘」 카드로 보낸다(2026-09-07 변경).
+     *
+     * <p>앱에 인증 상세 단독 화면이 없어 구 {@code ruleup://verification/{id}} 는 빈 화면으로 갔고,
+     * 계정 캘린더로 보내면 어느 방의 결과인지 사용자가 다시 찾아야 한다.
+     */
+    VERIFICATION_RESULT(NotificationCategory.B, "ruleup://challenges/{target}", true),
     /** 티어 승급·강등 확정. */
     TIER_CHANGED(NotificationCategory.B, "ruleup://me/tier"),
     /** 티어 경계 5점 이내 도달 — <b>중복 금지가 1주</b>인 유일한 예외다. */

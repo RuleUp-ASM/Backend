@@ -81,6 +81,11 @@ public class FcmPushSender implements PushSender {
                 .putAllData(push.data())
                 .setAndroidConfig(AndroidConfig.builder()
                         .setPriority(AndroidConfig.Priority.HIGH)
+                        // 채널을 지정하지 않으면 앱의 기본 채널로 떨어져 OS 설정에서 어느 채널을
+                        // 끄고 있는지 사용자도 CS 도 알 수 없다. 단일 채널이라도 명시해 둔다.
+                        .setNotification(com.google.firebase.messaging.AndroidNotification.builder()
+                                .setChannelId(AndroidNotificationChannels.DEFAULT)
+                                .build())
                         .build())
                 .setApnsConfig(ApnsConfig.builder()
                         .putHeader("apns-priority", "10")

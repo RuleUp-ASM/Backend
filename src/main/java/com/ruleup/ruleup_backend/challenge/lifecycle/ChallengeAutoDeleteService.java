@@ -105,12 +105,17 @@ public class ChallengeAutoDeleteService {
                         "ON DUPLICATE KEY UPDATE deleted_at = VALUES(deleted_at)",
                 id, c.get("title"), c.get("image_url"), c.get("category"), c.get("start_date"), c.get("end_date"));
 
+        // final_success_rate 는 진척도가 아니라 판정 대비 성공률(퍼센트)이다. 완료 카드의
+        // 「최종 88%」가 이 값이며, 방이 하드 삭제된 뒤에는 여기가 유일한 원본이라
+        // 잘못 적재하면 소급 정정이 불가능하다. 판정이 하나도 없었으면 NULL 이다 —
+        // 0% 로 채우면 아무것도 하지 않은 사람에게 전부 실패했다고 말하게 된다.
         jdbc.update("INSERT INTO challenge_member_history " +
                         "(challenge_id, user_id, final_role, left_type, left_at, final_success_rate) " +
                         "SELECT m.challenge_id, m.user_id, m.role, " +
                         "       CASE m.status WHEN 'ACTIVE' THEN 'ACTIVE_AT_DELETE' ELSE m.status END, " +
                         "       CASE WHEN m.status = 'ACTIVE' THEN NULL ELSE m.joined_at END, " +
-                        "       m.progress_rate " +
+                        "       CASE WHEN (m.success_days + m.fail_days) = 0 THEN NULL " +
+                        "            ELSE ROUND(100 * m.success_days / (m.success_days + m.fail_days), 2) END " +
                         "FROM challenge_members m WHERE m.challenge_id = ? " +
                         "ON DUPLICATE KEY UPDATE final_role = VALUES(final_role)", (Object) id);
 
