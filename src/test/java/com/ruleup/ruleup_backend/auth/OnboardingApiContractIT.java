@@ -82,6 +82,34 @@ class OnboardingApiContractIT extends AuthApiSupport {
     }
 
     // ==================================================================
+    // 0) 내 프로필 조회 — 연동된 소셜 계정
+    // ==================================================================
+
+    @Nested
+    @DisplayName("내 프로필 조회 — 연동 소셜 계정")
+    class LinkedProvider {
+
+        @Test
+        @DisplayName("가입·로그인 응답과 내 프로필이 모두 provider 를 내려준다")
+        void provider_is_exposed() throws Exception {
+            String tag = uniq("prov");
+            MvcResult signed = signup(tag, "소셜연동" + seq());
+
+            // 마이페이지 정책 §2-9 가 설정 허브의 계정 관리에 「연동된 소셜 계정 표시」를 요구한다.
+            // 로그인 시점에 앱이 아는 값이지만 재설치·기기 변경 후엔 알 수 없어 서버 값이 원본이다.
+            assertThat((String) read(signed, "$.data.user.provider")).isEqualTo("KAKAO");
+
+            String at = read(postJson("/api/v1/auth/oauth/kakao",
+                    loginBody(tag, "inst-" + tag, "dev-" + tag)), "$.data.accessToken");
+            MvcResult me = mvc.perform(get("/api/v1/users/me")
+                    .header("Authorization", "Bearer " + at)).andReturn();
+
+            // user 블록은 로그인 응답과 동일 스키마다 — 한쪽에만 넣으면 그 전제가 깨진다.
+            assertThat((String) read(me, "$.data.user.provider")).isEqualTo("KAKAO");
+        }
+    }
+
+    // ==================================================================
     // 1) 성별 4종
     // ==================================================================
 

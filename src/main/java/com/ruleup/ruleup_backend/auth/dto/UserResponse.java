@@ -12,6 +12,7 @@ import java.util.List;
  * 로그인/가입/내 프로필 응답의 user 블록 — 카카오 로그인 API 계약(2026-08-03)과 동일 스키마.
  * - nickname: 본인 화면용 — 심사 중이면 입력값, 거부면 직전 승인본(없으면 임시 닉네임)
  * - tier/score/displayTier: user_score_summaries 기준 (가입 직후 BRONZE 10)
+ * - provider: 연결된 소셜 제공자 — 마이페이지 계정 관리의 "연동된 소셜 계정" 표시용
  * - accountStatus: ACTIVE/LOCKED (BANNED는 403으로 응답 자체가 없음)
  * - lockInfo: LOCKED일 때만 { reason, unlockAt } — 처벌 도메인 확정 전까지 사유·해제일은 미정
  */
@@ -55,6 +56,13 @@ public record UserResponse(
         @Schema(description = "화면 표시용 티어. 승급 연출 등으로 실제 티어와 다를 수 있다.", example = "BRONZE")
         String displayTier,
 
+        @Schema(description = """
+                연결된 소셜 제공자. 마이페이지 설정 허브의 계정 관리가 「연동된 소셜 계정」으로 표시한다.
+                로그인 시점에 클라이언트도 아는 값이지만 재설치·기기 변경 후에는 알 수 없으므로
+                서버 값을 원본으로 둔다.""",
+                example = "KAKAO", allowableValues = {"KAKAO", "GOOGLE"})
+        String provider,
+
         @Schema(description = "선택한 관심 카테고리 코드 목록", example = "[\"EXERCISE\",\"STUDY\"]")
         List<String> interestCategories,
 
@@ -88,6 +96,7 @@ public record UserResponse(
                 user.getNicknameStatus().name(),
                 user.getProfileImageUrl(),
                 tier.name(), score, displayTier.name(),
+                user.getOauthProvider().name(),
                 user.getInterestCategories(),
                 true,                                   // 가입이 원자적이라 완료 사용자만 존재
                 user.getStatus().name(),
