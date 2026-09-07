@@ -163,6 +163,16 @@ class NotificationPipelineIT extends AuthApiSupport {
         }
 
         @Test
+        @DisplayName("이의 결과는 이의 현황으로 보낸다 — 계정 캘린더는 어느 이의인지 다시 찾게 만든다")
+        void appeal_result_opens_my_appeals() throws Exception {
+            // 이의 상세 화면으로 보내고 싶지만 뒷받침할 API 가 없다 —
+            // /users/me/appeals 는 목록 전용이고 단건 조회 경로가 없다.
+            // 없는 화면을 가리키면 VERIFICATION_RESULT 가 겪은 빈 화면 문제가 반복된다.
+            assertThat(NotificationType.APPEAL_RESULT.deeplink(null))
+                    .isEqualTo("ruleup://me/appeals");
+        }
+
+        @Test
         @DisplayName("부정행위 검출은 제재 이력으로 보낸다 — 이의 진입이 있는 화면이다")
         void cheat_detected_opens_sanctions() {
             // 방 상세로 보내면 이의를 걸 경로가 없다(공통 오픈 이슈 #18).
