@@ -3,6 +3,7 @@ package com.ruleup.ruleup_backend.auth.dto;
 import com.ruleup.ruleup_backend.score.domain.Tier;
 import com.ruleup.ruleup_backend.score.domain.UserScoreSummary;
 import com.ruleup.ruleup_backend.user.domain.NicknameStatus;
+import com.ruleup.ruleup_backend.user.domain.ProfileImageStatus;
 import com.ruleup.ruleup_backend.user.domain.User;
 import io.swagger.v3.oas.annotations.media.Schema;
 
@@ -44,6 +45,13 @@ public record UserResponse(
         @Schema(description = "프로필 사진 URL. 등록 전이거나 검수 통과 전이면 null.",
                 example = "https://cdn.ruleup.app/profile/0f7a3c1e.jpg")
         String profileImageUrl,
+
+        @Schema(description = """
+                사진 검수 상태. **미등록이면 null.** 마이페이지가 「검수 중」 뱃지를 그리는 근거다 —
+                닉네임은 nicknameStatus 로 알 수 있었는데 사진만 같은 값을 /profile/me 로 따로
+                조회해야 했다.""",
+                example = "PENDING", allowableValues = {"PENDING", "APPROVED", "REJECTED"})
+        String profileImageStatus,
 
         @Schema(description = "실제 티어. 가입 직후에는 BRONZE.", example = "BRONZE")
         String tier,
@@ -95,12 +103,24 @@ public record UserResponse(
                 selfDisplayNickname(user),
                 user.getNicknameStatus().name(),
                 user.getProfileImageUrl(),
+                profileImageStatus(user),
                 tier.name(), score, displayTier.name(),
                 user.getOauthProvider().name(),
                 user.getInterestCategories(),
                 true,                                   // 가입이 원자적이라 완료 사용자만 존재
                 user.getStatus().name(),
                 lockInfo(user));
+    }
+
+    /**
+     * 사진 검수 상태 — <b>등록한 적이 없으면 null</b> 이다.
+     *
+     * <p>저장값 {@code NONE} 을 그대로 내리지 않는 이유는 계약이다. 명세가 「미등록 시 null」로
+     * 정의하고 있고, 클라이언트가 뱃지를 그릴지 말지를 null 하나로 판단할 수 있어야 한다.
+     */
+    private static String profileImageStatus(User user) {
+        ProfileImageStatus status = user.getProfileImageStatus();
+        return (status == null || status == ProfileImageStatus.NONE) ? null : status.name();
     }
 
     /** 본인 화면용 닉네임 — REJECTED면 직전 승인본(없으면 임시 닉네임 = approvedNickname). */

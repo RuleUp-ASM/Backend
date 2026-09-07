@@ -107,6 +107,29 @@ class OnboardingApiContractIT extends AuthApiSupport {
             // user 블록은 로그인 응답과 동일 스키마다 — 한쪽에만 넣으면 그 전제가 깨진다.
             assertThat((String) read(me, "$.data.user.provider")).isEqualTo("KAKAO");
         }
+
+        @Test
+        @DisplayName("사진 검수 상태도 user 블록에 온다 — 미등록이면 null")
+        void profile_image_status_is_exposed() throws Exception {
+            String tag = uniq("imgst");
+            MvcResult signed = signup(tag, "사진상태" + seq());
+
+            // 마이페이지가 「검수 중」 뱃지를 그리려면 이 값이 필요한데, 지금은 같은 값을
+            // /profile/me 만 내리고 있어 홈 진입 직후에는 알 수 없었다.
+            assertThat((String) read(signed, "$.data.user.profileImageStatus")).isNull();
+
+            String at = read(postJson("/api/v1/auth/oauth/kakao",
+                    loginBody(tag, "inst-" + tag, "dev-" + tag)), "$.data.accessToken");
+            mvc.perform(multipart("/api/v1/users/me/profile-image")
+                    .file(new org.springframework.mock.web.MockMultipartFile(
+                            "image", "a.png", "image/png", PNG_1X1))
+                    .header("Authorization", "Bearer " + at)).andReturn();
+
+            MvcResult me = mvc.perform(get("/api/v1/users/me")
+                    .header("Authorization", "Bearer " + at)).andReturn();
+            // 등록 직후는 항상 PENDING — 검수는 커밋 후 비동기로 돈다.
+            assertThat((String) read(me, "$.data.user.profileImageStatus")).isEqualTo("PENDING");
+        }
     }
 
     // ==================================================================
