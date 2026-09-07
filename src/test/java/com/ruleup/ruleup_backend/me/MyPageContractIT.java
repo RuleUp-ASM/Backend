@@ -169,6 +169,14 @@ class MyPageContractIT extends ChallengeApiSupport {
         return read(res, "$.data");
     }
 
+    /** cycles12w 의 마지막 칸 = 이번 주. 12칸 중 가장 최근이 맨 뒤다. */
+    @SuppressWarnings("unchecked")
+    private String currentWeek(Member me) throws Exception {
+        List<Map<String, Object>> cycles =
+                (List<Map<String, Object>>) data(getAuth("/api/v1/me/stats", me.token())).get("cycles12w");
+        return (String) cycles.get(cycles.size() - 1).get("result");
+    }
+
     // ================================================================
     @Nested
     @DisplayName("GET /me/tier — 매너 온도를 전면 대체한다")
@@ -346,7 +354,8 @@ class MyPageContractIT extends ChallengeApiSupport {
 
             Map<String, Object> d = data(getAuth("/api/v1/me/stats", me.token()));
 
-            assertThat(d).containsOnlyKeys("successRate", "totalSuccessCount", "streak", "completedCount");
+            assertThat(d).containsOnlyKeys("successRate", "totalSuccessCount", "streak",
+                    "cycles12w", "completedCount", "weeklyScoreDelta");
             assertThat((Map<String, Object>) d.get("streak")).containsOnlyKeys("current", "best");
         }
 
@@ -415,6 +424,74 @@ class MyPageContractIT extends ChallengeApiSupport {
             assertThat(d).containsEntry("successRate", null);
             // 나머지는 0 이 유효한 값이다 — 성공 0건은 실제로 0건이다.
             assertThat(d).containsEntry("totalSuccessCount", 0).containsEntry("completedCount", 0);
+        }
+
+        @Test
+        @DisplayName("cycles12w 는 언제나 12칸이다 — 판정 없는 주는 NONE 으로 채운다")
+        void cycles12w_always_twelve() throws Exception {
+            Member me = member("stats-cycles-shape");
+
+            List<Map<String, Object>> cycles =
+                    (List<Map<String, Object>>) data(getAuth("/api/v1/me/stats", me.token())).get("cycles12w");
+
+            // 빈 배열을 내리면 클라이언트가 ISO 주차를 직접 계산해 12칸을 만들어야 한다.
+            // 그리드를 그리는 쪽이 아니라 값을 아는 쪽이 채운다.
+            assertThat(cycles).hasSize(12);
+            assertThat(cycles).allSatisfy(c -> {
+                assertThat(c).containsOnlyKeys("week", "result");
+                assertThat((String) c.get("week")).matches("\\d{4}-W\\d{2}");
+            });
+            assertThat(cycles).extracting(c -> c.get("result")).containsOnly("NONE");
+            assertThat(cycles).extracting(c -> (String) c.get("week"))
+                    .as("오래된 주가 앞이다 — 그리드가 왼쪽부터 그려진다").isSorted();
+        }
+
+        @Test
+        @DisplayName("그 주 판정을 전부 성공하면 SUCCESS, 섞이면 PARTIAL, 전부 실패면 FAIL")
+        void cycles12w_classifies_week() throws Exception {
+            Member allSuccess = member("stats-cycles-ok");
+            UUID c1 = insertChallenge(allSuccess.id(), "EXERCISE", "ACTIVE", "SOLO");
+            insertOutcome(allSuccess.id(), c1, 0, "SUCCESS");
+            assertThat(currentWeek(allSuccess)).isEqualTo("SUCCESS");
+
+            Member mixed = member("stats-cycles-mixed");
+            UUID c2 = insertChallenge(mixed.id(), "EXERCISE", "ACTIVE", "SOLO");
+            UUID c3 = insertChallenge(mixed.id(), "READING", "ACTIVE", "SOLO");
+            insertOutcome(mixed.id(), c2, 0, "SUCCESS");
+            insertOutcome(mixed.id(), c3, 0, "FAILED");
+            assertThat(currentWeek(mixed)).isEqualTo("PARTIAL");
+
+            Member allFail = member("stats-cycles-fail");
+            UUID c4 = insertChallenge(allFail.id(), "EXERCISE", "ACTIVE", "SOLO");
+            insertOutcome(allFail.id(), c4, 0, "FAILED");
+            assertThat(currentWeek(allFail)).isEqualTo("FAIL");
+        }
+
+        @Test
+        @DisplayName("weeklyScoreDelta 는 계정 단위 이번 주 합계다 — 챌린지별 사이클 한도를 붙이지 않는다")
+        void weekly_score_delta_is_account_sum() throws Exception {
+            Member me = member("stats-weekly");
+            UUID c1 = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "SOLO");
+            UUID c2 = insertChallenge(me.id(), "READING", "ACTIVE", "SOLO");
+            insertScoreEvent(me.id(), c1, "DAILY_SUCCESS", 20, 30, 0);
+            insertScoreEvent(me.id(), c2, "DAILY_SUCCESS", 20, 50, 0);
+            insertScoreEvent(me.id(), c1, "CONFIRMED_MISS", -5, 45, 0);
+
+            // 정책 §4.7 의 ±20 은 「챌린지별 각 사이클」 한도이지 계정 주간 한도가 아니다.
+            // 무료 동시 참여 3개 기준으로 이번 주 변동은 ±60까지 나올 수 있다.
+            assertThat(data(getAuth("/api/v1/me/stats", me.token())))
+                    .containsEntry("weeklyScoreDelta", 35);
+        }
+
+        @Test
+        @DisplayName("지난주 변동은 weeklyScoreDelta 에 들어오지 않는다")
+        void weekly_score_delta_excludes_last_week() throws Exception {
+            Member me = member("stats-weekly-prev");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "SOLO");
+            insertScoreEvent(me.id(), ch, "DAILY_SUCCESS", 12, 22, 8);
+
+            assertThat(data(getAuth("/api/v1/me/stats", me.token())))
+                    .containsEntry("weeklyScoreDelta", 0);
         }
 
         @Test
