@@ -56,10 +56,16 @@ public class MeStatsService {
                 successRate(success, failed), success, streak(byDay), completedCount(userId));
     }
 
-    /** 전체 성공률 — 방 랭킹과 동일 산식. 판정이 없으면 0(비율을 만들 수 없다). */
-    private double successRate(long success, long failed) {
+    /**
+     * 전체 성공률 — 방 랭킹과 동일 산식.
+     *
+     * <p><b>분모가 0이면 null 이다.</b> 비율을 만들 수 없는 상태를 0.0 으로 채우면 화면이
+     * 「성공률 0%」를 그리는데, 그건 아직 아무 판정도 없는 사용자에게 전부 실패했다고 말하는
+     * 것이다. 실제로 전부 실패한 계정(분모 있음)과 구분되지 않으면 두 사실이 같아져 버린다.
+     */
+    private Double successRate(long success, long failed) {
         long judged = success + failed;
-        if (judged == 0) return 0.0;
+        if (judged == 0) return null;
         return Math.round(1000.0 * success / judged) / 1000.0;
     }
 

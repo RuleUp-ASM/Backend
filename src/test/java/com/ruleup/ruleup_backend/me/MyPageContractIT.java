@@ -405,12 +405,28 @@ class MyPageContractIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("판정 이력이 없으면 성공률 0, 스트릭 0 — 빈 상태에서도 계약을 지킨다")
+        @DisplayName("판정 이력이 없으면 성공률은 null 이다 — 「기록 없음」과 「0%」는 다른 사실이다")
         void empty_state() throws Exception {
             Member me = member("stats-empty");
             Map<String, Object> d = data(getAuth("/api/v1/me/stats", me.token()));
-            assertThat(((Number) d.get("successRate")).doubleValue()).isEqualTo(0.0);
+
+            // 0.0 을 내리면 가입 직후 통계 화면이 아무것도 하지 않은 사용자에게
+            // "전부 실패했다"고 말한다. 분모가 없으면 비율 자체가 존재하지 않는다.
+            assertThat(d).containsEntry("successRate", null);
+            // 나머지는 0 이 유효한 값이다 — 성공 0건은 실제로 0건이다.
             assertThat(d).containsEntry("totalSuccessCount", 0).containsEntry("completedCount", 0);
+        }
+
+        @Test
+        @DisplayName("판정이 전부 실패면 성공률 0.0 이다 — null 과 구분된다")
+        void all_failed_is_zero_not_null() throws Exception {
+            Member me = member("stats-allfail");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "SOLO");
+            insertOutcome(me.id(), ch, 1, "FAILED");
+            insertOutcome(me.id(), ch, 2, "FAILED");
+
+            Map<String, Object> d = data(getAuth("/api/v1/me/stats", me.token()));
+            assertThat(((Number) d.get("successRate")).doubleValue()).isEqualTo(0.0);
         }
     }
 
