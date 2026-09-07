@@ -169,6 +169,11 @@ class MyPageContractIT extends ChallengeApiSupport {
         jdbc().update("DELETE FROM challenges WHERE id = ?", bytes(challengeId));
     }
 
+    /** KST 기준 이번 달 — 픽스처의 daysAgo 가 KST 달력 날짜라 월도 KST 로 맞춘다. */
+    private static String thisMonth() {
+        return java.time.YearMonth.now(java.time.ZoneId.of("Asia/Seoul")).toString();
+    }
+
     private static UUID uuid(byte[] b) {
         java.nio.ByteBuffer bb = java.nio.ByteBuffer.wrap(b);
         return new UUID(bb.getLong(), bb.getLong());
@@ -352,6 +357,135 @@ class MyPageContractIT extends ChallengeApiSupport {
             assertThat(getAuth("/api/v1/me/reputation", me.token()).getResponse().getStatus()).isEqualTo(404);
             assertThat(getAuth("/api/v1/me/reputation/history", me.token()).getResponse().getStatus())
                     .isEqualTo(404);
+        }
+    }
+
+    // ================================================================
+
+    /**
+     * 챌린지 단위 월 캘린더(GET /challenges/{id}/calendar) — 솔로 챌린지 상세의 월 캘린더.
+     *
+     * <p>경로는 챌린지 모듈이지만 픽스처(판정·이의·아웃컴)가 전부 여기 있어 함께 둔다.
+     *
+     * <p><b>{@code /me/calendar} 에 필터를 붙이지 않은 이유</b>가 이 계약의 핵심이다. 계정 단위
+     * 캘린더의 {@code status} 는 여러 루틴을 합산한 값이라 {@code PARTIAL} 이 존재하는데,
+     * 한 챌린지로 좁히면 하루 판정 대상이 1건이라 그 값이 의미를 잃는다 — 응답 스키마 자체가 다르다.
+     */
+    @Nested
+    @DisplayName("GET /challenges/{id}/calendar — 챌린지 단위 월 캘린더")
+    class ChallengeCalendar {
+
+        @Test
+        @DisplayName("그 챌린지 판정만 나온다 — 다른 방 기록이 섞이지 않는다")
+        void scoped_to_one_challenge() throws Exception {
+            Member me = member("cc-scope");
+            UUID mine = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "SOLO");
+            UUID other = insertChallenge(me.id(), "READING", "ACTIVE", "SOLO");
+            insertDaily(mine, me.id(), 1, "SUCCESS", false);
+            insertDaily(other, me.id(), 1, "FAILED", true);
+
+            Map<String, Object> d = data(getAuth(
+                    "/api/v1/challenges/" + mine + "/calendar?month=" + thisMonth(), me.token()));
+
+            assertThat(d).containsOnlyKeys("challengeId", "month", "days")
+                    .containsEntry("challengeId", mine.toString());
+            List<Map<String, Object>> days = (List<Map<String, Object>>) d.get("days");
+            assertThat(days).singleElement().satisfies(day -> {
+                assertThat(day).containsOnlyKeys("date", "status", "verificationId", "appealable");
+                assertThat(day).containsEntry("status", "DONE").containsEntry("appealable", false);
+                assertThat(day.get("verificationId")).isNotNull();
+            });
+        }
+
+        @Test
+        @DisplayName("합산 상태값이 없다 — ALL_DONE·PARTIAL 이 나오지 않는다")
+        void no_aggregate_statuses() throws Exception {
+            Member me = member("cc-enum");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "SOLO");
+            insertDaily(ch, me.id(), 1, "SUCCESS", false);
+
+            List<Map<String, Object>> days = (List<Map<String, Object>>) data(getAuth(
+                    "/api/v1/challenges/" + ch + "/calendar?month=" + thisMonth(), me.token())).get("days");
+
+            assertThat(days).extracting(day -> day.get("status"))
+                    .doesNotContain("ALL_DONE", "PARTIAL")
+                    .allSatisfy(v -> assertThat(v).isIn("DONE", "FAILED", "FAIL_EXPECTED", "IN_PROGRESS"));
+        }
+
+        @Test
+        @DisplayName("실패 건은 기한 안이면 이의 진입이 열린다 — 캘린더에서 바로 신청한다")
+        void failed_day_is_appealable() throws Exception {
+            Member me = member("cc-appeal");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "SOLO");
+            insertDaily(ch, me.id(), 1, "FAILED", true);
+
+            List<Map<String, Object>> days = (List<Map<String, Object>>) data(getAuth(
+                    "/api/v1/challenges/" + ch + "/calendar?month=" + thisMonth(), me.token())).get("days");
+
+            assertThat(days).singleElement()
+                    .satisfies(day -> assertThat(day).containsEntry("status", "FAILED")
+                            .containsEntry("appealable", true));
+        }
+
+        @Test
+        @DisplayName("기한이 지났거나 이미 신청했으면 닫힌다")
+        void appeal_closes() throws Exception {
+            Member closed = member("cc-appeal-closed");
+            UUID c1 = insertChallenge(closed.id(), "EXERCISE", "ACTIVE", "SOLO");
+            insertDaily(c1, closed.id(), 3, "FAILED", false);   // 기한 지남
+            assertThat(firstDay(closed, c1)).containsEntry("appealable", false);
+
+            Member already = member("cc-appeal-done");
+            UUID c2 = insertChallenge(already.id(), "EXERCISE", "ACTIVE", "SOLO");
+            UUID daily = insertDaily(c2, already.id(), 1, "FAILED", true);
+            insertAppeal(already.id(), c2, daily, "SIGNAL_MISSING", 0);
+            assertThat(firstDay(already, c2)).containsEntry("appealable", false);
+        }
+
+        @Test
+        @DisplayName("이탈한 방의 내 기록도 조회된다 — 완주·이탈 기록 열람이 보장돼야 한다")
+        void left_member_can_still_read() throws Exception {
+            Member me = member("cc-left");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "SOLO");
+            insertDaily(ch, me.id(), 1, "SUCCESS", false);
+            jdbc().update("UPDATE challenge_members SET status = 'LEFT', left_type = 'LEAVE', " +
+                    "left_at = NOW(6) WHERE challenge_id = ? AND user_id = ?", bytes(ch), bytes(me.id()));
+
+            assertThat(getAuth("/api/v1/challenges/" + ch + "/calendar?month=" + thisMonth(),
+                    me.token()).getResponse().getStatus()).isEqualTo(200);
+        }
+
+        @Test
+        @DisplayName("참여한 적 없는 방은 403 — 남의 판정 이력을 날짜별로 훑을 수 없다")
+        void stranger_is_rejected() throws Exception {
+            Member owner = member("cc-owner");
+            Member stranger = member("cc-stranger");
+            UUID ch = insertChallenge(owner.id(), "EXERCISE", "ACTIVE", "SOLO");
+            insertDaily(ch, owner.id(), 1, "SUCCESS", false);
+
+            expectError(getAuth("/api/v1/challenges/" + ch + "/calendar?month=" + thisMonth(),
+                    stranger.token()), 403, "NOT_CHALLENGE_MEMBER");
+        }
+
+        @Test
+        @DisplayName("없는 챌린지는 404, 형식이 틀린 월은 400")
+        void not_found_and_bad_month() throws Exception {
+            Member me = member("cc-errors");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "SOLO");
+            insertDaily(ch, me.id(), 1, "SUCCESS", false);
+
+            expectError(getAuth("/api/v1/challenges/" + UUID.randomUUID() + "/calendar?month="
+                    + thisMonth(), me.token()), 404, "CHALLENGE_NOT_FOUND");
+            expectError(getAuth("/api/v1/challenges/" + ch + "/calendar?month=2026-13", me.token()),
+                    400, "INVALID_CALENDAR_MONTH");
+        }
+
+        @SuppressWarnings("unchecked")
+        private Map<String, Object> firstDay(Member me, UUID challengeId) throws Exception {
+            List<Map<String, Object>> days = (List<Map<String, Object>>) data(getAuth(
+                    "/api/v1/challenges/" + challengeId + "/calendar?month=" + thisMonth(),
+                    me.token())).get("days");
+            return days.getFirst();
         }
     }
 

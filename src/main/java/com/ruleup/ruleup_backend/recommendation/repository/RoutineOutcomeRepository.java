@@ -24,6 +24,10 @@ public interface RoutineOutcomeRepository extends JpaRepository<RoutineOutcome, 
     /** 일자 상세: 유저의 특정 날짜 확정 아웃컴. */
     java.util.List<RoutineOutcome> findByUserIdAndTargetDate(UUID userId, java.time.LocalDate targetDate);
 
+    /** 챌린지 단위 월 캘린더: 방이 하드 삭제된 뒤에도 남는 내구성 스냅샷. */
+    java.util.List<RoutineOutcome> findByUserIdAndChallengeIdAndTargetDateBetween(
+            UUID userId, UUID challengeId, java.time.LocalDate from, java.time.LocalDate to);
+
     /** 마일스톤(STREAK): 유저의 전체 확정 아웃컴. */
     java.util.List<RoutineOutcome> findByUserId(UUID userId);
 }
