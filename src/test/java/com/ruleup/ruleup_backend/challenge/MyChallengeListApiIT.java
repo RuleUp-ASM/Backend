@@ -186,7 +186,75 @@ class MyChallengeListApiIT extends ChallengeApiSupport {
         assertThat((String) read(res, "$.data.challenges[0].mode")).isNull();
     }
 
+    /**
+     * 성공률 — API 명세 「참여중인 챌린지 조회」 {@code challenges[].successRate}(2026-09-07 신규).
+     *
+     * <p>완료 카드의 「최종 88%」가 이 값이다. <b>기간 진척도와 다른 값</b>이라 둘을 섞으면
+     * 사용자가 자기 기록을 오독한다 — 진척도는 목표 대비이고 성공률은 판정 대비다.
+     *
+     * <p>완료 건이 까다로운 이유는 원본 방이 하드 삭제되기 때문이다. 삭제 배치가 삭제 <b>직전</b>에
+     * 계산해 이력에 적재하지 않으면 값이 영영 사라지고, 이미 삭제된 건은 소급이 불가능하다.
+     */
+    @Nested
+    @DisplayName("성공률")
+    class SuccessRate {
+
+        @Test
+        @DisplayName("진행 중 방은 판정 대비 성공률이다 — 기간 진척도가 아니다")
+        void inProgressUsesJudgedRatio() throws Exception {
+            Member me = member(uniq("rate-live"));
+            UUID ch = joined(me, "ACTIVE");
+            // 성공 3 · 실패 1 → 0.75. 진척도는 목표 20일 대비 15% 라 값이 갈린다.
+            setProgress(ch, me, 3, 1, 20, "15.00");
+
+            assertThat((Double) read(list(me, null), "$.data.challenges[0].successRate"))
+                    .isEqualTo(0.75);
+        }
+
+        @Test
+        @DisplayName("판정 이력이 없으면 null 이다 — 0.0 을 내리지 않는다")
+        void noJudgementIsNull() throws Exception {
+            Member me = member(uniq("rate-none"));
+            UUID ch = joined(me, "ACTIVE");
+            setProgress(ch, me, 0, 0, 20, "0.00");
+
+            assertThat((Double) read(list(me, null), "$.data.challenges[0].successRate")).isNull();
+        }
+
+        @Test
+        @DisplayName("완료 건은 삭제 직전 적재된 최종 성공률을 읽는다")
+        void completedReadsSnapshot() throws Exception {
+            Member me = member(uniq("rate-hist"));
+            UUID ch = joined(me, "COMPLETED");
+            archiveAndDelete(ch, me, "87.50");   // 이력은 퍼센트로 적재된다
+
+            MvcResult res = list(me, "?filter=COMPLETED");
+            assertThat(idsOf(res)).contains(ch.toString());
+            assertThat((Double) read(res, "$.data.challenges[0].successRate")).isEqualTo(0.875);
+        }
+
+        @Test
+        @DisplayName("판정이 없던 방은 삭제돼도 null 이다 — 0% 로 적재하지 않는다")
+        void completedWithoutJudgementIsNull() throws Exception {
+            Member me = member(uniq("rate-hist-none"));
+            UUID ch = joined(me, "COMPLETED");
+            archiveAndDelete(ch, me, null);
+
+            assertThat((Double) read(list(me, "?filter=COMPLETED"), "$.data.challenges[0].successRate"))
+                    .isNull();
+        }
+    }
+
     // ===== 헬퍼 =====
+
+    /** 인증 sync 가 유지하는 비정규화 카운터를 직접 심는다. */
+    private void setProgress(UUID challengeId, Member me, int successDays, int failDays,
+                             int targetDays, String progressRate) {
+        jdbcTemplate.update("UPDATE challenge_members SET success_days = ?, fail_days = ?, " +
+                        "target_days = ?, progress_rate = ? WHERE challenge_id = ? AND user_id = ?",
+                successDays, failDays, targetDays, new java.math.BigDecimal(progressRate),
+                bytes(challengeId), bytes(me.id()));
+    }
 
     private MvcResult list(Member me, String query) throws Exception {
         MvcResult res = getAuth("/api/v1/challenges" + (query == null ? "" : query), me.token());
@@ -218,14 +286,20 @@ class MyChallengeListApiIT extends ChallengeApiSupport {
 
     /** 삭제 배치가 하는 일 — 이력 적재 후 방·멤버 행 제거. */
     private void archiveAndDelete(UUID challengeId, Member me) {
+        archiveAndDelete(challengeId, me, null);
+    }
+
+    /** 최종 성공률(퍼센트)까지 지정해 적재한다. 배치가 실제로 무엇을 채우는지는 라이프사이클 IT 소관. */
+    private void archiveAndDelete(UUID challengeId, Member me, String finalSuccessRatePercent) {
         jdbcTemplate.update("INSERT INTO challenge_history " +
                         "(challenge_id, title_snapshot, image_snapshot, category, start_date, end_date, deleted_at) " +
                         "VALUES (?, '삭제된 방 제목', NULL, 'EXERCISE', DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), NOW(6))",
                 bytes(challengeId));
         jdbcTemplate.update("INSERT INTO challenge_member_history " +
                         "(challenge_id, user_id, final_role, left_type, left_at, final_success_rate) " +
-                        "VALUES (?, ?, 'OWNER', 'ACTIVE_AT_DELETE', NULL, NULL)",
-                bytes(challengeId), bytes(me.id()));
+                        "VALUES (?, ?, 'OWNER', 'ACTIVE_AT_DELETE', NULL, ?)",
+                bytes(challengeId), bytes(me.id()),
+                finalSuccessRatePercent == null ? null : new java.math.BigDecimal(finalSuccessRatePercent));
         jdbcTemplate.update("DELETE FROM challenge_members WHERE challenge_id=?", bytes(challengeId));
         jdbcTemplate.update("DELETE FROM challenges WHERE id=?", bytes(challengeId));
     }

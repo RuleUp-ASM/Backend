@@ -151,6 +151,43 @@ class ChallengeLifecycleBatchIT extends ChallengeApiSupport {
         }
 
         @Test
+        @DisplayName("최종 성공률은 판정 대비로 적재된다 — 기간 진척도가 아니다")
+        void snapshotStoresJudgedSuccessRate() throws Exception {
+            Member owner = member(uniq("lc-rate"));
+            UUID id = insertChallenge(owner.id(), "EXERCISE", "COMPLETED", "SOLO");
+            insertActiveMembership(id, owner.id(), "OWNER");
+            // 성공 7 · 실패 1 → 87.50%. 진척도는 목표 20일 대비 35% 라 값이 갈린다.
+            jdbcTemplate.update("UPDATE challenge_members SET success_days = 7, fail_days = 1, " +
+                    "target_days = 20, progress_rate = 35.00 WHERE challenge_id = ?", bytes(id));
+
+            autoDeleteService.runOnce();
+
+            // 방이 하드 삭제된 뒤에는 이 값이 유일한 원본이다 — 여기서 진척도를 적재하면
+            // 완료 카드의 「최종 88%」가 영영 틀린 값이 되고 소급 정정도 불가능하다.
+            java.math.BigDecimal rate = jdbcTemplate.queryForObject(
+                    "SELECT final_success_rate FROM challenge_member_history " +
+                            "WHERE challenge_id = ? AND user_id = ?",
+                    java.math.BigDecimal.class, bytes(id), bytes(owner.id()));
+            assertThat(rate).isEqualByComparingTo("87.50");
+        }
+
+        @Test
+        @DisplayName("판정이 하나도 없던 방은 최종 성공률이 null 이다 — 0% 로 적재하지 않는다")
+        void snapshotLeavesSuccessRateNullWhenUnjudged() throws Exception {
+            Member owner = member(uniq("lc-rate-none"));
+            UUID id = insertChallenge(owner.id(), "EXERCISE", "COMPLETED", "SOLO");
+            insertActiveMembership(id, owner.id(), "OWNER");
+
+            autoDeleteService.runOnce();
+
+            java.math.BigDecimal rate = jdbcTemplate.queryForObject(
+                    "SELECT final_success_rate FROM challenge_member_history " +
+                            "WHERE challenge_id = ? AND user_id = ?",
+                    java.math.BigDecimal.class, bytes(id), bytes(owner.id()));
+            assertThat(rate).isNull();
+        }
+
+        @Test
         @DisplayName("유령방(ACTIVE 멤버 0명)도 자동 삭제 대상")
         void deleteGhostRoom() throws Exception {
             Member owner = member(uniq("lc-ghost"));

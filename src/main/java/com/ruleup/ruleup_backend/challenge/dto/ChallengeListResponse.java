@@ -91,6 +91,13 @@ public record ChallengeListResponse(
             @Schema(description = "방장 유형", example = "USER", allowableValues = {"USER", "BOT"})
             String ownerType,
 
+            @Schema(description = "해당 챌린지에서의 **내 성공률 0~1**. 판정 이력이 없으면 null "
+                    + "(0.0 을 내리지 않는다 — 「기록 없음」과 「0%」는 다른 사실이다).\n\n"
+                    + "완료 탭은 종료 시점의 **최종 성공률**이고 진행 중 탭은 현재 시점 값이다. "
+                    + "**기간 진척도와는 다른 값이다** — 진척도는 목표 대비이고 성공률은 판정 대비다.",
+                    example = "0.88")
+            Double successRate,
+
             @Schema(description = "어떻게 나갔는지. **LEFT 탭에서만** 채워지고 다른 탭에서는 null.\n\n"
                     + "⚠️ **현재 실제로 내려오는 값은 `SELF` 와 `KICK_BY_OWNER` 둘뿐이다.** 저장 컬럼이 "
                     + "`enum('LEAVE','KICK')` 이라 그 이상을 구분할 수 없다. 나머지 5종(`KICK_REPORT` · "
