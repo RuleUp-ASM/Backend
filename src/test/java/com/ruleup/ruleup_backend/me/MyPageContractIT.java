@@ -143,6 +143,22 @@ class MyPageContractIT extends ChallengeApiSupport {
         return id;
     }
 
+    /**
+     * 닉네임 검수 완료 폴링 — 최대 5초.
+     *
+     * <p>검수는 {@code AFTER_COMMIT} + {@code @Async} 라 저장 응답이 돌아온 뒤에도 잠시 더
+     * 돌고 있다. 그 사이에 테스트가 {@code nickname_status} 를 심으면 <b>뒤늦게 도착한 검수가
+     * 덮어써</b> 전제가 조용히 사라진다 — 로컬에서는 대개 이기지만 CI 처럼 느린 환경에서 진다.
+     */
+    private void awaitNicknameDecided(UUID userId) throws Exception {
+        for (int i = 0; i < 50; i++) {
+            String status = jdbc().queryForObject(
+                    "SELECT nickname_status FROM users WHERE id = ?", String.class, bytes(userId));
+            if (!"PENDING".equals(status)) return;
+            Thread.sleep(100);
+        }
+    }
+
     private static UUID uuid(byte[] b) {
         java.nio.ByteBuffer bb = java.nio.ByteBuffer.wrap(b);
         return new UUID(bb.getLong(), bb.getLong());
@@ -534,7 +550,13 @@ class MyPageContractIT extends ChallengeApiSupport {
         @DisplayName("모더레이션 거부에 따른 재제출은 잠금에서 제외된다")
         void rejection_fix_bypasses_lock() throws Exception {
             Member me = member("profile-rejected");
-            patchJsonAuth("/api/v1/users/me/profile", me.token(), body("첫번째닉", null, null));
+            // 검수가 끝나기를 기다린 뒤에 전제를 심는다. 먼저 심으면 뒤늦게 도착한 검수가
+            // nickname_status 를 APPROVED 로 덮어써, 잠긴 계정이 거부 상태가 아니게 되고
+            // 재제출이 409 PROFILE_CHANGE_LOCKED 로 막힌다.
+            awaitNicknameDecided(me.id());
+            // 잠금은 시각을 직접 심는다 — 앞선 저장을 한 번 더 거치면 그 저장이 검수를 또
+            // 발행해 같은 경합이 되살아난다. 이 테스트가 보는 것은 저장 경로가 아니라
+            // "잠긴 상태 + 거부 상태"에서의 재제출 허용이다.
             jdbc().update("UPDATE users SET profile_changed_at = DATE_SUB(NOW(3), INTERVAL 1 DAY), " +
                     "nickname_status = 'REJECTED' WHERE id = ?", bytes(me.id()));
 
@@ -546,11 +568,14 @@ class MyPageContractIT extends ChallengeApiSupport {
         @DisplayName("MODERATION_LOCKED 는 폐기됐다 — 거부 횟수만으로 수정을 제한하지 않는다")
         void no_moderation_lock() throws Exception {
             Member me = member("profile-nomodlock");
+            awaitNicknameDecided(me.id());
             jdbc().update("UPDATE users SET nickname_status = 'REJECTED' WHERE id = ?", bytes(me.id()));
             for (int i = 0; i < 4; i++) {
                 MvcResult res = patchJsonAuth("/api/v1/users/me/profile", me.token(),
                         body("재제출" + i + "번", null, null));
                 assertThat(res.getResponse().getStatus()).isEqualTo(200);
+                // 이번 저장이 발행한 검수가 끝난 뒤에 다시 거부로 돌린다 — 같은 경합이다.
+                awaitNicknameDecided(me.id());
                 jdbc().update("UPDATE users SET nickname_status = 'REJECTED' WHERE id = ?", bytes(me.id()));
             }
         }
