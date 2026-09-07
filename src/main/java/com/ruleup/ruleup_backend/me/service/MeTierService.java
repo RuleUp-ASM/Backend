@@ -4,7 +4,6 @@ import com.ruleup.ruleup_backend.challenge.service.ChallengeTitleResolver;
 import com.ruleup.ruleup_backend.me.dto.MeTierResponse;
 import com.ruleup.ruleup_backend.score.ScoreTransactionRepository;
 import com.ruleup.ruleup_backend.score.UserScoreSummaryRepository;
-import com.ruleup.ruleup_backend.score.domain.ScoreReason;
 import com.ruleup.ruleup_backend.score.domain.ScoreTransaction;
 import com.ruleup.ruleup_backend.score.domain.Tier;
 import com.ruleup.ruleup_backend.score.domain.TierBands;
@@ -37,6 +36,7 @@ public class MeTierService {
     private final UserScoreSummaryRepository summaryRepository;
     private final ScoreTransactionRepository transactionRepository;
     private final ChallengeTitleResolver challengeTitles;
+    private final ScoreChangeView changeView;
 
     public MeTierResponse tier(UUID userId) {
         // 요약이 아직 없는 계정(구 데이터)은 가입 초기값과 같은 상태로 본다 — 빈 화면 대신 브론즈 10점.
@@ -76,35 +76,7 @@ public class MeTierService {
                 transactionRepository.findRecent(userId, PageRequest.of(0, RECENT_CHANGES));
         Map<UUID, String> titles = challengeTitles.titlesOf(
                 transactions.stream().map(ScoreTransaction::getChallengeId).toList());
-        return transactions.stream().map(t -> toChange(t, titles)).toList();
+        return transactions.stream().map(t -> changeView.toChange(t, titles)).toList();
     }
 
-    /**
-     * 저장 사건 → 화면 표기. 두 축이 다르다 — 저장은 무엇이 일어났는지(일일 성공·확정 미달·보너스…),
-     * 표기는 사용자에게 뭐라고 부를지(사이클 성공·사이클 실패…)다.
-     *
-     * <p>{@code KICK_FAIL}(연속 실패 강퇴)은 여기서 나오지 않는다. 각 주의 루틴 점수에 이미
-     * 반영돼 감점 이벤트 자체가 만들어지지 않기 때문이다.
-     */
-    private ScoreReason displayReason(ScoreTransaction t) {
-        return switch (t.getReason()) {
-            case DAILY_SUCCESS, STREAK_BONUS -> ScoreReason.CYCLE_SUCCESS;
-            case CONFIRMED_MISS, STREAK_PENALTY -> ScoreReason.CYCLE_FAIL;
-            case REVERSAL -> ScoreReason.APPEAL_RESTORE;
-            case INCIDENT -> switch (t.getIncidentType()) {
-                case CHEAT_DETECTED -> ScoreReason.CHEAT;
-                case PERMISSION_KICK -> ScoreReason.KICK_PERMISSION;
-                case VOLUNTARY_LEAVE -> ScoreReason.LEAVE;
-            };
-        };
-    }
-
-    private MeTierResponse.Change toChange(ScoreTransaction t, Map<UUID, String> titles) {
-        LocalDate date = LocalDate.ofInstant(t.getCreatedAt(), KST);   // 화면은 KST 달력으로 읽는다
-        UUID challengeId = t.getChallengeId();
-        return new MeTierResponse.Change(date.toString(), displayReason(t).name(),
-                challengeId != null ? challengeId.toString() : null,
-                challengeId != null ? titles.get(challengeId) : null,
-                t.getAppliedDelta());
-    }
 }

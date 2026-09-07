@@ -9,11 +9,13 @@ import com.ruleup.ruleup_backend.me.dto.CalendarMonthResponse;
 import com.ruleup.ruleup_backend.me.dto.MeHomeResponse;
 import com.ruleup.ruleup_backend.me.dto.MeInvitationResponse;
 import com.ruleup.ruleup_backend.me.dto.MeStatsResponse;
+import com.ruleup.ruleup_backend.me.dto.MeTierChangesResponse;
 import com.ruleup.ruleup_backend.me.dto.MeTierHistoryResponse;
 import com.ruleup.ruleup_backend.me.dto.MeTierResponse;
 import com.ruleup.ruleup_backend.me.service.MeCalendarService;
 import com.ruleup.ruleup_backend.me.service.MeHomeService;
 import com.ruleup.ruleup_backend.me.service.MeStatsService;
+import com.ruleup.ruleup_backend.me.service.MeTierChangesService;
 import com.ruleup.ruleup_backend.me.service.MeTierHistoryService;
 import com.ruleup.ruleup_backend.me.service.MeTierService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -47,6 +49,7 @@ public class MeController {
     private final MeStatsService statsService;
     private final MeTierService tierService;
     private final MeTierHistoryService tierHistoryService;
+    private final MeTierChangesService tierChangesService;
     private final InvitationService invitationService;
 
     @Operation(summary = "마이 홈 일괄 조회",
@@ -112,6 +115,27 @@ public class MeController {
     @GetMapping("/tier")
     public ApiResponse<MeTierResponse> tier(@AuthenticationPrincipal String userId) {
         return ApiResponse.ok(tierService.tier(UUID.fromString(userId)));
+    }
+
+    @Operation(summary = "점수 변동 이력",
+            description = """
+                    내 티어 화면의 「최근 변동 → 전체 보기」. `GET /me/tier` 의 `recentChanges[]` 와
+                    **동일한 항목 구조**이며 10건 제한을 풀고 커서 페이징을 붙인 것이다.
+
+                    **`/me/tier/history` 와는 다른 API 다.** 그쪽은 그래프 원천(스냅샷)이라 사유·변동폭·
+                    챌린지가 없다. 그래프는 **기간**으로 읽고 이력은 **건수**로 읽어 페이징 단위가 다르다.
+
+                    페이지 크기는 **서버 고정 50**이고 커서는 불투명 문자열이다.
+                    보관은 **1년** — 그 이전 이력은 조회되지 않는다.
+
+                    마이페이지 정책 §2-5 의 「하락 사유 표기 없음」은 **그래프 한정**으로 범위가
+                    축소됐다(2026-09-07). 이 목록은 사유를 표기한다.
+                    """)
+    @ApiErrorCodes({ErrorCode.CURSOR_INVALID, ErrorCode.LOGIN_REQUIRED})
+    @GetMapping("/tier/changes")
+    public ApiResponse<MeTierChangesResponse> tierChanges(@AuthenticationPrincipal String userId,
+                                                          @RequestParam(required = false) String cursor) {
+        return ApiResponse.ok(tierChangesService.changes(UUID.fromString(userId), cursor));
     }
 
     @Operation(summary = "티어 히스토리",

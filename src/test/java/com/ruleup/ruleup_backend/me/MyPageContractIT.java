@@ -356,6 +356,104 @@ class MyPageContractIT extends ChallengeApiSupport {
     }
 
     // ================================================================
+
+    /**
+     * 점수 변동 이력 전체 보기(GET /me/tier/changes) — 내 티어 화면의 「최근 변동 → 전체 보기」.
+     *
+     * <p>{@code /me/tier/history} 와 <b>다른 API</b>다. 그쪽은 그래프 원천이라 사유·변동폭·챌린지가
+     * 없고, 그래프는 기간으로 이력은 건수로 읽어 페이징 단위 자체가 다르다.
+     *
+     * <p>마이페이지 정책 §2-5 의 「하락 사유 표기 없음」은 <b>그래프 한정</b>으로 범위가 축소됐다
+     * (2026-09-07) — 이 목록은 사유를 표기한다.
+     */
+    @Nested
+    @DisplayName("GET /me/tier/changes — 점수 변동 이력 전체 보기")
+    class TierChanges {
+
+        @Test
+        @DisplayName("항목은 최근 변동과 같은 구조다 — date·challengeId·challengeTitle·reason·delta")
+        void item_shape() throws Exception {
+            Member me = member("changes-shape");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
+            jdbc().update("UPDATE challenges SET title = ? WHERE id = ?", "하루 1만 보 걷기", bytes(ch));
+            insertScoreEvent(me.id(), ch, "DAILY_SUCCESS", 8, 18, 0);
+
+            Map<String, Object> d = data(getAuth("/api/v1/me/tier/changes", me.token()));
+            assertThat(d).containsOnlyKeys("items", "nextCursor", "retentionDays");
+            assertThat(d).containsEntry("retentionDays", 365);
+
+            List<Map<String, Object>> items = (List<Map<String, Object>>) d.get("items");
+            assertThat(items).singleElement().satisfies(i -> {
+                assertThat(i).containsOnlyKeys("date", "challengeId", "challengeTitle", "reason", "delta");
+                assertThat(i).containsEntry("reason", "CYCLE_SUCCESS")
+                        .containsEntry("delta", 8)
+                        .containsEntry("challengeTitle", "하루 1만 보 걷기");
+            });
+        }
+
+        @Test
+        @DisplayName("페이지 크기는 서버 고정 50이고 커서로 이어 읽는다")
+        void fixed_page_size_and_cursor() throws Exception {
+            Member me = member("changes-paging");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
+            for (int i = 0; i < 60; i++) insertScoreEvent(me.id(), ch, "DAILY_SUCCESS", 1, 10 + i, 60 - i);
+
+            Map<String, Object> first = data(getAuth("/api/v1/me/tier/changes", me.token()));
+            assertThat((List<?>) first.get("items")).hasSize(50);
+            String cursor = (String) first.get("nextCursor");
+            assertThat(cursor).isNotNull();
+
+            Map<String, Object> second = data(getAuth(
+                    "/api/v1/me/tier/changes?cursor=" + cursor, me.token()));
+            assertThat((List<?>) second.get("items")).hasSize(10);
+            assertThat(second.get("nextCursor")).as("마지막 페이지면 null").isNull();
+
+            // 두 페이지가 겹치거나 빠지지 않는다. 60건을 하루씩 흩어 두었으므로 날짜가 전부 다르다.
+            assertThat(concatDates(first, second)).hasSize(60).doesNotHaveDuplicates();
+        }
+
+        @Test
+        @DisplayName("보관 1년 — 그 이전 이력은 조회되지 않는다")
+        void retention_one_year() throws Exception {
+            Member me = member("changes-retention");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
+            insertScoreEvent(me.id(), ch, "DAILY_SUCCESS", 5, 15, 400);
+            insertScoreEvent(me.id(), ch, "DAILY_SUCCESS", 5, 20, 10);
+
+            assertThat((List<?>) data(getAuth("/api/v1/me/tier/changes", me.token())).get("items"))
+                    .hasSize(1);
+        }
+
+        @Test
+        @DisplayName("반영량이 0인 행은 내리지 않는다 — 화면에 「0점 변동」이 뜨면 혼란만 준다")
+        void zero_delta_is_hidden() throws Exception {
+            Member me = member("changes-zero");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
+            insertScoreEvent(me.id(), ch, "DAILY_SUCCESS", 0, 10, 0);
+
+            assertThat((List<?>) data(getAuth("/api/v1/me/tier/changes", me.token())).get("items"))
+                    .isEmpty();
+        }
+
+        @Test
+        @DisplayName("깨진 커서는 400 CURSOR_INVALID — 조용히 첫 페이지로 떨어뜨리지 않는다")
+        void broken_cursor_is_rejected() throws Exception {
+            Member me = member("changes-badcursor");
+            expectError(getAuth("/api/v1/me/tier/changes?cursor=!!!not-base64!!!", me.token()),
+                    400, "CURSOR_INVALID");
+        }
+
+        @SuppressWarnings("unchecked")
+        private List<String> concatDates(Map<String, Object> a, Map<String, Object> b) {
+            return java.util.stream.Stream.concat(
+                    ((List<Map<String, Object>>) a.get("items")).stream(),
+                    ((List<Map<String, Object>>) b.get("items")).stream())
+                    .map(i -> (String) i.get("date"))
+                    .toList();
+        }
+    }
+
+    // ================================================================
     @Nested
     @DisplayName("GET /me/tier/history — 월말 스냅샷 그래프, 1년 보관")
     class TierHistory {
