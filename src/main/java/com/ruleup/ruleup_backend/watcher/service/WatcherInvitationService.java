@@ -48,16 +48,22 @@ public class WatcherInvitationService {
     // ===== 초대 발급 =====
 
     /**
-     * 초대 발급. <b>인원 상한이 없다</b> — 구 무료 3명 한도는 폐지됐다.
+     * 초대 발급. <b>무료 슬롯 3자리가 상한</b>이다 — 화면이 「감시자 2/3」으로 그리므로 서버가
+     * 같은 숫자를 강제하지 않으면 사용자가 본 사실과 서버 상태가 갈라진다.
      *
      * <p>관계 행을 여기서 만들지 않는 이유는 <b>누가 수락할지 모르기 때문</b>이다. 관계는
      * (챌린지, 피감시자, 감시자) 3중 키인데 초대 시점에는 세 번째 값이 없다. 미리 만들면
      * 수락자 없는 PENDING 행이 쌓이고, 그건 발송 대상 조회가 매번 걸러야 하는 잡음이 된다.
+     *
+     * <p>여기서의 검사는 <b>안내</b>다 — 자리가 없는데 링크를 만들어 공유하게 두지 않으려는
+     * 것이며, 자리가 남아 있을 때 미리 받아 둔 토큰은 이 검사를 통과해 나간다. 한도를 실제로
+     * 지키는 곳은 관계 행이 생기는 {@link #accept} 다.
      */
     @Transactional
     public InvitationCreateResponse createInvitation(UUID ownerId, UUID challengeId) {
         Challenge challenge = loadOwnedChallenge(ownerId, challengeId);
         Instant now = Instant.now();
+        requireFreeSlot(challengeId, ownerId);
 
         String token = Tokens.generate("inv_");
         WatcherInvitation invitation = invitationRepository.save(
@@ -119,6 +125,10 @@ public class WatcherInvitationService {
                 .filter(r -> r.getRemovedAt() == null)
                 .ifPresent(r -> { throw new BusinessException(ErrorCode.ALREADY_WATCHER); });
 
+        // 한도를 실제로 지키는 지점이다. 발급 검사는 자리가 남아 있을 때 받아 둔 토큰을
+        // 걸러내지 못하므로, 관계 행이 생기는 여기서 다시 센다.
+        requireFreeSlot(invitation.getChallengeId(), invitation.getInviterUserId());
+
         WatcherRelation relation = relationRepository.save(WatcherRelation.accepted(
                 invitation.getChallengeId(), invitation.getInviterUserId(), watcherUserId,
                 invitation.getExpiresAt().minus(WatcherInvitation.TTL), now));
@@ -133,6 +143,19 @@ public class WatcherInvitationService {
                 (challenge != null) ? challenge.publicTitle() : null,
                 visibleNickname(invitation.getInviterUserId()),
                 now.toString());
+    }
+
+    // ===== 슬롯 =====
+
+    /**
+     * 자리가 남았는지 — 세는 대상은 <b>살아 있는 관계뿐</b>이다. 미수락 초대를 함께 세면
+     * 링크만 뿌려 둔 상태로 「3/3」이 되어 만료까지 7일을 잠기게 된다.
+     */
+    private void requireFreeSlot(UUID challengeId, UUID ownerId) {
+        long used = relationRepository
+                .countByChallengeIdAndTargetUserIdAndRemovedAtIsNull(challengeId, ownerId);
+        if (!WatcherSlots.hasRoom((int) used, false))
+            throw new BusinessException(ErrorCode.WATCHER_LIMIT_EXCEEDED);
     }
 
     // ===== 내부 =====

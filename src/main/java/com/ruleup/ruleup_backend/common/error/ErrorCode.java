@@ -261,6 +261,7 @@ public enum ErrorCode {
     INVITATION_INVALID(HttpStatus.BAD_REQUEST, "초대 링크가 올바르지 않아요."),
     INVITATION_EXPIRED(HttpStatus.GONE, "초대가 만료됐어요. 다시 요청해주세요."),
     ALREADY_WATCHER(HttpStatus.CONFLICT, "이미 이 챌린지의 감시자예요."),
+    WATCHER_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "감시자는 3명까지 지정할 수 있어요."),
     CANNOT_WATCH_SELF(HttpStatus.BAD_REQUEST, "본인은 감시자가 될 수 없어요."),
     NOT_WATCHER(HttpStatus.FORBIDDEN, "이 알림을 받은 감시자만 반응할 수 있어요."),
     NOTICE_NOT_FOUND(HttpStatus.NOT_FOUND, "알림을 찾을 수 없어요."),

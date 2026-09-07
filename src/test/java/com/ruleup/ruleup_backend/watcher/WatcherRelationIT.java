@@ -288,13 +288,15 @@ class WatcherRelationIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("감시자 인원에 상한이 없다 — 무료 3명 한도는 폐지됐다")
-        void no_watcher_limit() throws Exception {
-            Target t = target("nolimit");
-            for (int i = 0; i < 4; i++) accept(t, member(uniq("w" + i)));
+        @DisplayName("무료 감시자는 3명까지다 — 네 번째는 수락되지 않는다")
+        void free_limit_is_three() throws Exception {
+            Target t = target("limit");
+            for (int i = 0; i < 3; i++) accept(t, member(uniq("w" + i)));
 
             assertThat(relationRepository.findDispatchTargets(t.challengeId(), t.owner().id()))
-                    .hasSize(4);
+                    .hasSize(3);
+            expectError(postAuth("/api/v1/challenges/" + t.challengeId() + "/watchers/invitations",
+                    t.owner().token(), null), 409, "WATCHER_LIMIT_EXCEEDED");
         }
     }
 
@@ -480,7 +482,163 @@ class WatcherRelationIT extends ChallengeApiSupport {
             MvcResult res = getAuth("/api/v1/challenges/" + t.challengeId() + "/watchers",
                     t.owner().token());
             assertThat(res.getResponse().getStatus()).isEqualTo(200);
-            assertThat((List<?>) read(res, "$.data.items")).hasSize(1);
+            assertThat((List<?>) read(res, "$.data.watchers")).hasSize(1);
+        }
+    }
+
+    // =====================================================================
+
+    /**
+     * 감시자 목록 응답 계약 — API 명세 「감시자 목록 조회」(2026-09-07 개정).
+     *
+     * <p>서버가 {@code {"items": []}} 를 내리고 있어 앱이 목록을 항상 0명으로 그렸고
+     * 「감시자 2/3」 표기가 아예 동작하지 않았다. 확정 키는 {@code watchers} 이며
+     * {@code slots} 를 함께 내린다.
+     *
+     * <p><b>슬롯은 표기용이 아니라 실제 한도다.</b> 표기와 실제가 어긋나면 「2/3」을 보고
+     * 초대한 네 번째 감시자가 조용히 들어와 버린다. 그래서 발급과 수락 <b>양쪽</b>에서 막는다 —
+     * 발급만 막으면 미리 뿌려 둔 초대 링크로 한도를 넘길 수 있고, 관계 행은 수락 시점에야 생긴다.
+     */
+    @Nested
+    @DisplayName("감시자 목록 — watchers 키와 슬롯 한도")
+    class WatcherList {
+
+        @Test
+        @DisplayName("응답 키는 watchers 다 — 구 items 키는 존재하지 않는다")
+        void response_key_is_watchers() throws Exception {
+            Target t = target("key");
+            accept(t, member(uniq("w")));
+
+            Map<String, Object> data = read(getAuth(
+                    "/api/v1/challenges/" + t.challengeId() + "/watchers", t.owner().token()), "$.data");
+
+            assertThat(data).containsOnlyKeys("slots", "watchers");
+        }
+
+        @Test
+        @DisplayName("slots 는 {used, freeLimit, subscribed} 다 — {used, total} 이 아니다")
+        void slots_shape() throws Exception {
+            Target t = target("slots");
+            accept(t, member(uniq("w1")));
+            accept(t, member(uniq("w2")));
+
+            Map<String, Object> slots = read(getAuth(
+                    "/api/v1/challenges/" + t.challengeId() + "/watchers", t.owner().token()),
+                    "$.data.slots");
+
+            assertThat(slots).containsOnlyKeys("used", "freeLimit", "subscribed");
+            assertThat(slots).containsEntry("used", 2)
+                    .containsEntry("freeLimit", 3)
+                    .containsEntry("subscribed", false);
+        }
+
+        @Test
+        @DisplayName("항목은 명세 9필드 — 연락처는 언제나 null 이다(스키마에 자리가 없다)")
+        void item_shape() throws Exception {
+            Target t = target("shape");
+            accept(t, member(uniq("w")));
+
+            List<Map<String, Object>> watchers = read(getAuth(
+                    "/api/v1/challenges/" + t.challengeId() + "/watchers", t.owner().token()),
+                    "$.data.watchers");
+
+            assertThat(watchers).singleElement().satisfies(w -> {
+                assertThat(w).containsOnlyKeys("watcherId", "type", "channel", "status",
+                        "displayName", "contactMasked", "invitedAt", "expiresAt", "reinviteAvailableAt");
+                assertThat(w).containsEntry("type", "USER")        // 비유저 감시자는 폐지됐다
+                        .containsEntry("channel", "IN_APP")        // SMS·이메일 채널도 폐지됐다
+                        .containsEntry("status", "ACTIVE")
+                        .containsEntry("contactMasked", null)      // 연락처를 수집하지 않는다
+                        .containsEntry("expiresAt", null)          // 성립한 관계에는 만료가 없다
+                        .containsEntry("reinviteAvailableAt", null);
+                assertThat(w.get("displayName")).isNotNull();
+                assertThat(w.get("invitedAt")).isNotNull();
+            });
+        }
+
+        @Test
+        @DisplayName("미수락 초대는 INVITED 로 보인다 — 기본 목록(ACTIVE)에는 없다")
+        void invited_rows() throws Exception {
+            Target t = target("invited");
+            invite(t);   // 발급만 하고 수락하지 않는다
+
+            String url = "/api/v1/challenges/" + t.challengeId() + "/watchers";
+            assertThat((List<?>) read(getAuth(url, t.owner().token()), "$.data.watchers")).isEmpty();
+
+            List<Map<String, Object>> invited =
+                    read(getAuth(url + "?status=INVITED", t.owner().token()), "$.data.watchers");
+            assertThat(invited).singleElement().satisfies(w -> {
+                assertThat(w).containsEntry("status", "INVITED")
+                        .containsEntry("channel", null)       // 아직 전달 수단이 정해지지 않았다
+                        .containsEntry("displayName", null);  // 누가 수락할지 모른다
+                assertThat(w.get("expiresAt")).as("INVITED 는 토큰 만료를 함께 내린다").isNotNull();
+            });
+        }
+
+        @Test
+        @DisplayName("status=ALL 은 수락·미수락을 함께 내린다")
+        void status_all() throws Exception {
+            Target t = target("all");
+            accept(t, member(uniq("w")));
+            invite(t);
+
+            List<Map<String, Object>> all = read(getAuth(
+                    "/api/v1/challenges/" + t.challengeId() + "/watchers?status=ALL",
+                    t.owner().token()), "$.data.watchers");
+
+            assertThat(all).extracting(w -> w.get("status"))
+                    .containsExactlyInAnyOrder("ACTIVE", "INVITED");
+        }
+
+        @Test
+        @DisplayName("used 는 실제 감시자 수다 — 뿌려 둔 초대가 자리를 잠그지 않는다")
+        void outstanding_invitation_does_not_consume_slot() throws Exception {
+            Target t = target("consume");
+            accept(t, member(uniq("w")));
+            invite(t);
+            invite(t);
+
+            // 초대가 자리를 먹으면 아무도 수락하지 않은 채 「3/3」이 되어 7일 동안 잠긴다.
+            Integer used = read(getAuth("/api/v1/challenges/" + t.challengeId() + "/watchers",
+                    t.owner().token()), "$.data.slots.used");
+            assertThat(used).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("슬롯이 찬 뒤의 초대 발급은 409 다")
+        void invitation_blocked_when_full() throws Exception {
+            Target t = target("full");
+            accept(t, member(uniq("w1")));
+            accept(t, member(uniq("w2")));
+            accept(t, member(uniq("w3")));
+
+            expectError(postAuth("/api/v1/challenges/" + t.challengeId() + "/watchers/invitations",
+                    t.owner().token(), null), 409, "WATCHER_LIMIT_EXCEEDED");
+        }
+
+        @Test
+        @DisplayName("미리 받아 둔 초대로도 한도를 넘길 수 없다 — 진짜 관문은 수락 시점이다")
+        void accept_blocked_when_full() throws Exception {
+            Target t = target("acceptfull");
+            // 자리가 텅 빈 상태에서 네 장을 미리 받아 둔다 — 발급 검사만으로는 여기서 걸리지 않는다.
+            String spare = invite(t);
+            accept(t, member(uniq("w1")));
+            accept(t, member(uniq("w2")));
+            accept(t, member(uniq("w3")));
+
+            expectError(postAuth("/api/v1/watchers/invitations/" + spare + "/accept",
+                    member(uniq("w4")).token(), null), 409, "WATCHER_LIMIT_EXCEEDED");
+        }
+
+        @Test
+        @DisplayName("만료된 초대는 목록에서 사라진다 — 죽은 링크를 감시자처럼 보여주지 않는다")
+        void expired_invitation_disappears() throws Exception {
+            Target t = target("expfree");
+            invite(t);
+            expireInvitations(t.challengeId(), "INTERVAL 8 DAY");
+
+            assertThat((List<?>) read(getAuth("/api/v1/challenges/" + t.challengeId()
+                    + "/watchers?status=INVITED", t.owner().token()), "$.data.watchers")).isEmpty();
         }
     }
 
