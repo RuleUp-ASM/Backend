@@ -159,6 +159,16 @@ class MyPageContractIT extends ChallengeApiSupport {
         }
     }
 
+    /** 삭제 배치가 하는 일 중 이 화면에 필요한 부분 — 제목 스냅샷 적재 후 방 행 제거. */
+    private void archiveAndDeleteChallenge(UUID challengeId, String titleSnapshot) {
+        jdbc().update("INSERT INTO challenge_history " +
+                        "(challenge_id, title_snapshot, image_snapshot, category, start_date, end_date, deleted_at) " +
+                        "SELECT id, ?, image_url, category, start_date, end_date, NOW(6) FROM challenges WHERE id = ?",
+                titleSnapshot, bytes(challengeId));
+        jdbc().update("DELETE FROM challenge_members WHERE challenge_id = ?", bytes(challengeId));
+        jdbc().update("DELETE FROM challenges WHERE id = ?", bytes(challengeId));
+    }
+
     private static UUID uuid(byte[] b) {
         java.nio.ByteBuffer bb = java.nio.ByteBuffer.wrap(b);
         return new UUID(bb.getLong(), bb.getLong());
@@ -266,6 +276,65 @@ class MyPageContractIT extends ChallengeApiSupport {
                     .containsEntry("delta", -50)
                     .containsEntry("challengeId", ch.toString());
             assertThat(changes.getFirst().get("date")).asString().matches("\\d{4}-\\d{2}-\\d{2}");
+        }
+
+        @Test
+        @DisplayName("변동 항목에 챌린지명이 함께 온다 — id 만으로는 사용자가 읽을 수 없다")
+        void recent_changes_carry_title() throws Exception {
+            Member me = member("tier-title");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
+            jdbc().update("UPDATE challenges SET title = ? WHERE id = ?", "아침 6:30 기상", bytes(ch));
+            insertScoreEvent(me.id(), ch, "DAILY_SUCCESS", 8, 18, 0);
+
+            List<Map<String, Object>> changes = (List<Map<String, Object>>)
+                    data(getAuth("/api/v1/me/tier", me.token())).get("recentChanges");
+
+            // 화면은 「아침 6:30 기상 · 사이클 성공 +8」로 그린다.
+            // 항목마다 방 상세를 조회하게 만들 수는 없다.
+            assertThat(changes.getFirst()).containsEntry("challengeTitle", "아침 6:30 기상");
+        }
+
+        @Test
+        @DisplayName("삭제된 방의 챌린지명은 이력에서 읽는다")
+        void recent_changes_title_from_history() throws Exception {
+            Member me = member("tier-title-hist");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "COMPLETED", "GROUP");
+            insertScoreEvent(me.id(), ch, "DAILY_SUCCESS", 8, 18, 0);
+            archiveAndDeleteChallenge(ch, "완료된 방");
+
+            List<Map<String, Object>> changes = (List<Map<String, Object>>)
+                    data(getAuth("/api/v1/me/tier", me.token())).get("recentChanges");
+
+            assertThat(changes.getFirst()).containsEntry("challengeTitle", "완료된 방");
+        }
+
+        @Test
+        @DisplayName("이력에도 없으면 null 이다 — 클라이언트는 사유만 그린다")
+        void recent_changes_title_null_when_unknown() throws Exception {
+            Member me = member("tier-title-null");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
+            insertScoreEvent(me.id(), ch, "DAILY_SUCCESS", 8, 18, 0);
+            jdbc().update("DELETE FROM challenges WHERE id = ?", bytes(ch));
+
+            List<Map<String, Object>> changes = (List<Map<String, Object>>)
+                    data(getAuth("/api/v1/me/tier", me.token())).get("recentChanges");
+
+            assertThat(changes.getFirst()).containsEntry("challengeTitle", null)
+                    .containsEntry("challengeId", ch.toString());
+        }
+
+        @Test
+        @DisplayName("계정 단위 변동은 챌린지가 없어 id·명 둘 다 null 이다")
+        void account_level_change_has_no_challenge() throws Exception {
+            Member me = member("tier-title-account");
+            insertScoreEvent(me.id(), null, "DAILY_SUCCESS", 3, 13, 0);
+
+            List<Map<String, Object>> changes = (List<Map<String, Object>>)
+                    data(getAuth("/api/v1/me/tier", me.token())).get("recentChanges");
+
+            assertThat(changes.getFirst())
+                    .containsEntry("challengeId", null)
+                    .containsEntry("challengeTitle", null);
         }
 
         @Test
