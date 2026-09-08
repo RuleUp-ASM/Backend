@@ -63,10 +63,15 @@ class NotificationPublishIT {
         queue.reset();
     }
 
+    /** {@code nickname} 은 VARCHAR(12) 이고 스위트가 DB 를 공유한다 — 짧고 겹치지 않아야 한다. */
+    private static String nickname() {
+        return "%s%s".formatted("p", Long.toString(System.nanoTime(), 36));
+    }
+
     private UUID newUser() {
         String tag = "pub" + System.nanoTime() + SEQ.incrementAndGet();
         return userRepository.save(User.create(OAuthProvider.KAKAO, "sub-" + tag,
-                tag + "@example.com", "닉" + SEQ.get(), null, List.of())).getId();
+                tag + "@example.com", nickname(), null, List.of())).getId();
     }
 
     private NotificationEvent event(UUID userId, NotificationType type) {

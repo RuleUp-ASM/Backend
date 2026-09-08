@@ -78,6 +78,9 @@ class NotificationSqsQueueIT {
                 () -> LOCALSTACK.getEndpointOverride(LocalStackContainer.Service.SQS).toString());
         registry.add("app.notification.queue.access-key", LOCALSTACK::getAccessKey);
         registry.add("app.notification.queue.secret-key", LOCALSTACK::getSecretKey);
+        // 컨슈머를 켜지 않는다. 이 스위트는 **무엇이 큐에 들어갔는가**만 보는데, 컨슈머가 돌면
+        // 검증하기 전에 메시지를 집어 삼킨다. 수신 쪽은 NotificationConsumerIT 가 맡는다.
+        registry.add("app.notification.queue.consumer-enabled", () -> "false");
     }
 
     @Autowired NotificationPublisher publisher;
