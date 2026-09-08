@@ -75,6 +75,9 @@ dependencies {
 	// 프로필·챌린지·이의 증빙 이미지 저장(app.upload.storage=s3). Fargate 의 로컬 디스크는
 	// 임시 저장소라 배포마다 업로드본이 사라진다 — stg 부터는 S3 가 원본을 들고 있어야 한다.
 	implementation 'software.amazon.awssdk:s3'
+	// 알림 푸시 대기열(SQS 표준 큐). 적재는 도메인 트랜잭션이 책임지고, 이 큐는 **푸시만**
+	// 나른다 — 전송에 실패해도 고지는 이미 성립해 있다(알림 공통 3절).
+	implementation 'software.amazon.awssdk:sqs'
 
 	// Firebase Admin SDK — 고스트(무음) 푸시 전송(FCM). 자격증명(서비스 계정)이 있을 때만 활성화되며
 	// (app.fcm.enabled), 없으면 LoggingPushSender 스텁으로 폴백해 로컬/CI 기동에 영향 없음.
