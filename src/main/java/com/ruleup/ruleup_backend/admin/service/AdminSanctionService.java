@@ -8,6 +8,7 @@ import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.outbox.OutboxDispatcher;
 import com.ruleup.ruleup_backend.common.outbox.OutboxService;
 import com.ruleup.ruleup_backend.notification.NotificationEvent;
+import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.NotificationPublisher;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.sanction.SanctionRepository;
@@ -22,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -130,7 +132,9 @@ public class AdminSanctionService {
         // publish 는 이 트랜잭션에 합류해 발행 의사만 적는다 — 해제가 롤백되면 고지도 함께 사라진다.
         notificationPublisher.publish(NotificationEvent.of(
                 sanction.getUserId(), NotificationType.ACCOUNT_SANCTION,
-                "제재가 해제됐어요", "재검토 결과 제재가 해제됐어요. 다시 이용하실 수 있어요."));
+                "제재가 해제됐어요", "재검토 결과 제재가 해제됐어요. 다시 이용하실 수 있어요.",
+                // 집행 고지와 해제 고지가 같은 제재 id 를 쓰므로 접두어로 가른다.
+                Map.of(NotificationParams.EVENT_KEY, "revoke:" + sanctionId)));
     }
 
     /**
@@ -150,7 +154,9 @@ public class AdminSanctionService {
                 noticeTitle(type),
                 // 본문에 민감정보를 담지 않는다 — 상세는 앱 안에서 본다.
                 endsAt == null ? "자세한 내용은 마이페이지에서 확인해주세요."
-                        : "해제 예정일까지 일부 기능을 이용할 수 없어요. 자세한 내용은 마이페이지에서 확인해주세요."));
+                        : "해제 예정일까지 일부 기능을 이용할 수 없어요. 자세한 내용은 마이페이지에서 확인해주세요.",
+                // 제재 id 가 이 집행을 유일하게 가리킨다. 해제 고지는 revoke: 접두어로 갈린다.
+                Map.of(NotificationParams.EVENT_KEY, sanction.getId().toString())));
 
         outboxService.enqueue(SanctionLeaveListener.OUTBOX_TYPE,
                 new SanctionLeaveListener.Payload(target.getId(), sanction.getReasonText()),

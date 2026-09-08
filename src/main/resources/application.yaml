@@ -182,6 +182,21 @@ app:
       # presigned GET 수명. 짧을수록 유출 창이 작지만, 너무 짧으면 목록을 스크롤하는 동안 만료된다.
       presign-ttl-seconds: ${IMAGE_S3_PRESIGN_TTL_SECONDS:300}
 
+  # 알림 푸시 대기열 — SQS 표준 큐.
+  #  · url 을 비우면 큐 구현이 만들어지지 않고 **푸시가 나가지 않는다.** 적재는 정상이므로
+  #    알림 센터와 법적 고지는 그대로 동작한다(공통 3절이 푸시 유실을 허용한다).
+  #  · FIFO 를 쓰지 않는다. 그룹당 처리량 제한이 있고, 알림 센터가 id 정렬이라 화면 순서는
+  #    이미 보장된다 — 트레이 순서가 몇 초 섞이는 것은 수용한다.
+  #  · 자격증명은 기본 provider 체인(ECS 태스크 역할)이다. access-key/secret-key 는
+  #    LocalStack 으로 띄울 때만 채운다.
+  notification:
+    queue:
+      url: ${NOTIFICATION_QUEUE_URL:}
+      region: ${NOTIFICATION_QUEUE_REGION:}
+      endpoint: ${NOTIFICATION_QUEUE_ENDPOINT:}
+      access-key: ${NOTIFICATION_QUEUE_ACCESS_KEY:}
+      secret-key: ${NOTIFICATION_QUEUE_SECRET_KEY:}
+
   # 감시자(§11.4). 연락처 암호화 키는 prod 필수(Secrets Manager), 로컬은 미설정 시 임시 키로 동작.
   watcher:
     contact-secret: ${WATCHER_CONTACT_SECRET:}

@@ -359,7 +359,7 @@ class WatcherRelationIT extends ChallengeApiSupport {
 
             confirmFailure(t, UUID.randomUUID());
 
-            var inbox = notificationRepository.findInbox(watcher.id(), null, null, Limit.unlimited());
+            var inbox = notificationRepository.findByUserIdOrderByIdDesc(watcher.id());
             assertThat(inbox).singleElement().satisfies(n -> {
                 assertThat(n.getType()).isEqualTo(NotificationType.PENALTY_FAILURE_SHARED.name());
                 assertThat(n.getDeeplink())
@@ -662,7 +662,7 @@ class WatcherRelationIT extends ChallengeApiSupport {
             assertThat((String) read(res, "$.data.reaction")).isEqualTo("CHEER");
             assertThat((String) read(res, "$.data.reactorNickname")).isNotBlank();
 
-            assertThat(notificationRepository.findInbox(t.owner().id(), null, null, Limit.unlimited()))
+            assertThat(notificationRepository.findByUserIdOrderByIdDesc(t.owner().id()))
                     .anyMatch(n -> NotificationType.WATCHER_REACTION.name().equals(n.getType()));
         }
 
@@ -757,7 +757,7 @@ class WatcherRelationIT extends ChallengeApiSupport {
 
             batch.notifyExpiredInvitations();
 
-            assertThat(notificationRepository.findInbox(t.owner().id(), null, null, Limit.unlimited()))
+            assertThat(notificationRepository.findByUserIdOrderByIdDesc(t.owner().id()))
                     .anyMatch(n -> NotificationType.WATCHER_INVITATION_EXPIRED.name().equals(n.getType()));
         }
 
@@ -771,7 +771,7 @@ class WatcherRelationIT extends ChallengeApiSupport {
             batch.notifyExpiredInvitations();
             batch.notifyExpiredInvitations();
 
-            long count = notificationRepository.findInbox(t.owner().id(), null, null, Limit.unlimited())
+            long count = notificationRepository.findByUserIdOrderByIdDesc(t.owner().id())
                     .stream()
                     .filter(n -> NotificationType.WATCHER_INVITATION_EXPIRED.name().equals(n.getType()))
                     .count();

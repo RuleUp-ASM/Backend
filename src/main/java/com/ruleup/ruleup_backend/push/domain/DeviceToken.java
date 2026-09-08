@@ -42,6 +42,13 @@ public class DeviceToken extends AssignedIdEntity {
     @Column(name = "platform", nullable = false)
     private DevicePlatform platform;
 
+    /**
+     * 발송 대상 여부. FCM 이 {@code UNREGISTERED}·{@code INVALID_ARGUMENT} 를 주면 0 으로 내린다.
+     * <b>행을 지우지 않는 이유</b>는 CS 대응 근거를 남기기 위해서다.
+     */
+    @Column(name = "isActive", nullable = false)
+    private boolean active = true;
+
     @Column(name = "lastSeenAt", nullable = false)
     private Instant lastSeenAt;
 
@@ -55,6 +62,7 @@ public class DeviceToken extends AssignedIdEntity {
         t.userId = userId;
         t.token = token;
         t.platform = platform;
+        t.active = true;
         t.lastSeenAt = now;
         return t;
     }
@@ -63,6 +71,8 @@ public class DeviceToken extends AssignedIdEntity {
     public void reassign(UUID userId, DevicePlatform platform, Instant at) {
         this.userId = userId;
         this.platform = platform;
+        // 앱이 다시 토큰을 올렸다는 것은 살아 있다는 뜻이다 — 비활성 처리된 기기를 되살린다.
+        this.active = true;
         this.lastSeenAt = at;
     }
 }

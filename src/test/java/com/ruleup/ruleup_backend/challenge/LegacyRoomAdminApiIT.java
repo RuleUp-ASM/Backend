@@ -98,11 +98,12 @@ class LegacyRoomAdminApiIT extends ChallengeApiSupport {
                 Integer.class, bytes(challengeId), bytes(target.id()));
         assertThat(waitDays).isEqualTo(7);
 
-        // 강퇴 확정은 필수(A) — 야간에도 즉시 나가고 끌 수 없다.
-        // 아웃박스를 거치지만 커밋 직후 즉시 흘리므로 응답 시점에는 이미 적재돼 있다.
+        // 강퇴 확정 고지는 판정과 같은 트랜잭션에서 적재되므로 응답 시점에 이미 있다.
+        // 계정 그룹이라 푸시는 토글로 끌 수 있지만 적재는 무엇으로도 막히지 않는다(절대 규칙 1).
         MvcResult notifications = getAuth("/api/v1/notifications", target.token());
         assertThat((String) read(notifications, "$.data.items[0].type")).isEqualTo("CHALLENGE_KICKED");
-        assertThat((String) read(notifications, "$.data.items[0].category")).isEqualTo("A");
+        assertThat((String) read(notifications, "$.data.items[0].deeplink"))
+                .isEqualTo("ruleup://me/sanctions");
     }
 
     // ===== 헬퍼 — ChallengeJoinGateIT 에서 함께 옮겨 왔다 =====

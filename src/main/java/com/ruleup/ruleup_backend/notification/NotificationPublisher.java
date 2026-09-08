@@ -1,186 +1,137 @@
 package com.ruleup.ruleup_backend.notification;
 
-import com.ruleup.ruleup_backend.common.outbox.OutboxDispatcher;
-import com.ruleup.ruleup_backend.common.outbox.OutboxService;
-import com.ruleup.ruleup_backend.notification.domain.*;
-import com.ruleup.ruleup_backend.report.BlockService;
+import com.ruleup.ruleup_backend.notification.domain.Notification;
+import com.ruleup.ruleup_backend.notification.domain.NotificationType;
+import com.ruleup.ruleup_backend.notification.queue.NotificationMessage;
+import com.ruleup.ruleup_backend.notification.queue.NotificationQueue;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 /**
- * 알림 발행 — <b>적재 → 분기 → 발송</b> 3단계의 앞 두 단계.
+ * 알림 발행 — <b>적재 → 커밋 → enqueue</b>.
  *
- * <h4>순서가 계약이다</h4>
- * 적재가 모든 필터보다 먼저다. 토글·중복·야간은 <b>푸시만 막을 뿐 적재를 막지 않는다</b>.
- * 유일하게 적재 자체를 막는 것은 차단이다 — 그것도 마스킹한 알림을 대신 보내는 게 아니라
- * 아예 만들지 않는다.
+ * <h4>적재가 곧 고지 성립이고, 도메인 커밋과 원자적이다</h4>
+ * 발행부의 트랜잭션에 합류해 {@code notifications} 에 직접 INSERT 한다. 판정이 커밋됐으면 고지도
+ * 커밋된 것이므로 <b>적재 누락이라는 실패 모드가 없다</b>. 아웃박스를 걷어낸 이유가 이것이다 —
+ * 그 구조는 「릴레이 5회 실패 = 적재 누락」이라는 실패 모드를 스스로 만들고 그것을 알람으로
+ * 감시하는 형태였다.
  *
- * <h4>왜 아웃박스인가</h4>
- * 적재를 도메인 트랜잭션 안에 넣으면 알림 실패가 제재를 롤백시킨다. 그렇다고 {@code REQUIRES_NEW}
- * 로 먼저 커밋해 버리면 반대 방향이 깨진다 — <b>제재가 롤백됐는데 고지만 남는다</b>. 두 방향을
- * 동시에 막는 방법은 하나뿐이다: 도메인 커밋과 같은 트랜잭션에 <b>발행 의사만</b> 적어 두고
- * ({@code publish}), 실제 적재·발송은 커밋 이후 디스패처가 한다({@code deliver}).
+ * <h4>적재 경로에 조건 분기가 하나도 없다</h4>
+ * 토글·음소거·야간·억제는 전부 <b>푸시만</b> 막고 컨슈머가 발송 직전에 평가한다. 차단도 여기서
+ * 거르지 않는다 — 차단은 감시자 초대 요청을 막는 <b>관계 생성 게이트</b>라(공통 2절) 관계가
+ * 없으면 알림도 발생하지 않는다.
  *
- * <p>{@code deliver} 안에서 푸시를 직접 보내지 않는 것도 같은 이유다. FCM 호출이 적재 트랜잭션
- * 안에 있으면 <b>커밋되지 않은 알림의 푸시가 먼저 나가는</b> 창이 생긴다. 적재 행을 남기고
- * {@code notification_deliveries.sent_at} 이 채워지길 기다리는 쪽으로 넘긴다.
+ * <h4>enqueue 는 커밋 후다 — dual write 를 알고 간다</h4>
+ * 커밋과 enqueue 사이에서 죽으면 그 알림은 푸시가 안 나간다. 적재는 이미 끝났으므로 절대 규칙 1은
+ * 지켜지고, 공통 3절이 푸시 유실을 허용한다. 반대로 커밋 <b>전에</b> 보내면 롤백된 알림의 푸시가
+ * 잠금화면에 떠 있는 상태가 되고 그건 되돌릴 방법이 없다.
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class NotificationPublisher {
 
-    /** 아웃박스 라우팅 키. 핸들러와 이 값 하나로 묶인다. */
-    public static final String OUTBOX_TYPE = "NOTIFICATION";
+    /** SQS 메시지 하나에 담는 알림 수. 100건 ≈ 40KB 로 256KB 한도에 여유가 있다. */
+    private static final int BATCH_SIZE = 100;
 
     private final NotificationRepository notificationRepository;
-    private final NotificationDeliveryRepository deliveryRepository;
-    private final NotificationSettingRepository settingRepository;
-    private final NotificationMuteRepository muteRepository;
-    private final NotificationDedupRepository dedupRepository;
-    private final BlockService blockService;
-    private final OutboxService outboxService;
-    private final OutboxDispatcher outboxDispatcher;
-    private final NotificationPushDispatcher pushDispatcher;
+    private final NotificationQueue queue;
 
     /**
-     * 발행 진입점 — <b>도메인 트랜잭션에 합류해 발행 의사만 적는다.</b> 알림함 적재도 푸시도
-     * 여기서는 일어나지 않는다. 도메인이 롤백되면 이 행도 함께 사라진다.
-     */
-    public void publish(NotificationEvent event) {
-        outboxService.enqueue(OUTBOX_TYPE, event, null);
-        // 커밋 직후 한 번 흘려 달라는 신호. 보장은 스윕이 하고 이건 지연만 줄인다.
-        outboxDispatcher.requestFlush();
-    }
-
-    /**
-     * 실제 적재·분기 — 아웃박스 디스패처가 <b>도메인 커밋 이후에</b> 부른다.
-     * 반환값은 적재된 알림이며, 차단으로 생성하지 않았으면 empty 다.
-     */
-    @Transactional
-    public Optional<Notification> deliver(NotificationEvent event) {
-        Instant now = Instant.now();
-
-        // ① 차단 필터는 생성 단계다. 적재 후 가리는 방식은 쓰지 않는다 — 알림함에 남아 있으면
-        //    "차단했는데 알림이 온다"는 인지가 그대로 발생한다.
-        if (isBlocked(event)) {
-            log.debug("차단 관계라 알림을 생성하지 않는다. type={} user={}", event.type(), event.userId());
-            return Optional.empty();
-        }
-
-        // ② 적재 먼저 커밋 — 이 시점에 고지가 성립한다.
-        Notification notification = notificationRepository.save(Notification.of(
-                event.userId(), event.type(), event.title(), event.body(), event.targetKey(),
-                event.resolvedDeeplink(), now));
-
-        // ③ 분기 — 여기부터는 푸시 얘기이므로 실패해도 고지는 유효하다.
-        NotificationDelivery delivery = deliveryRepository.save(decide(event, notification, now));
-        // 보낼 대상이면 커밋 직후 밀어 준다. 보류·생략분은 sentAt 이 이미 차 있어 대상이 아니다.
-        if (delivery.isPending()) pushDispatcher.sendAfterCommit(delivery.getId());
-        return Optional.of(notification);
-    }
-
-    private boolean isBlocked(NotificationEvent event) {
-        return event.actorId() != null
-                && blockService.isUserBlocked(event.userId(), event.actorId());
-    }
-
-    /**
-     * 분류별 발송 판정. 분기 순서가 계약이다 —
-     * A는 즉시, B는 토글 → 음소거 → 중복 → 야간, C는 동의 → 발송 창.
-     */
-    private NotificationDelivery decide(NotificationEvent event, Notification notification, Instant now) {
-        NotificationType type = event.type();
-
-        return switch (type.category()) {
-            // 시각 무관 즉시 발송. 야간 보류의 유일한 예외이며 중복 제어도 적용하지 않는다.
-            case A -> sendNow(notification, now);
-
-            case B -> {
-                if (!isEnabled(event)) yield suppress(notification, now,
-                        NotificationDelivery.SuppressedReason.TOGGLE_OFF);
-                if (isMuted(event)) yield suppress(notification, now,
-                        NotificationDelivery.SuppressedReason.MUTED);
-                if (!claimDedup(event, now)) yield suppress(notification, now,
-                        NotificationDelivery.SuppressedReason.DEDUP);
-                // 야간이면 푸시만 미룬다. 알림함에는 이미 적재돼 있다.
-                yield NotificationWindow.isNight(now)
-                        ? NotificationDelivery.scheduled(notification.getId(),
-                                NotificationWindow.nextMorning(now))
-                        : sendNow(notification, now);
-            }
-
-            case C -> {
-                if (!isEnabled(event)) yield suppress(notification, now,
-                        NotificationDelivery.SuppressedReason.TOGGLE_OFF);
-                // 야간 광고는 미루지 않고 보내지 않는다 — 큐에 쌓아 두면 경계 계산이
-                // 틀렸을 때 그대로 정보통신망법 위반이 된다.
-                if (!NotificationWindow.isMarketingAllowed(now)) yield suppress(notification, now,
-                        NotificationDelivery.SuppressedReason.NIGHT_MARKETING);
-                if (!claimDedup(event, now)) yield suppress(notification, now,
-                        NotificationDelivery.SuppressedReason.DEDUP);
-                yield sendNow(notification, now);
-            }
-        };
-    }
-
-    /**
-     * 지금 보낼 대상으로 <b>예약</b>한다 — 여기서 FCM 을 부르지 않는다.
+     * 알림 1건 발행. <b>발행부의 트랜잭션 안에서</b> 적재하고, 커밋 후 큐에 넣는다.
      *
-     * <p>{@code sentAt} 이 null 인 채로 커밋되고, 커밋 직후 {@link NotificationPushDispatcher} 가
-     * 즉시 집어 보낸다. 그 콜백이 유실돼도 {@link NotificationBatch} 의 보정 배치가 같은 행을
-     * 다시 집으므로 <b>고지가 사라지지 않는다</b>.
+     * @return 적재된 행. 같은 멱등키로 이미 적재돼 있으면 empty 다.
      */
-    private NotificationDelivery sendNow(Notification notification, Instant now) {
-        return NotificationDelivery.scheduled(notification.getId(), now);
-    }
-
-    private NotificationDelivery suppress(Notification notification, Instant now,
-                                          NotificationDelivery.SuppressedReason reason) {
-        return NotificationDelivery.suppressed(notification.getId(), now, reason);
-    }
-
-    /** 행이 없으면 기본 ON — 신규 타입 추가 시 전원 백필이 필요 없다. */
-    private boolean isEnabled(NotificationEvent event) {
-        return settingRepository
-                .findById(new NotificationSetting.Key(event.userId(), event.type().name()))
-                .map(NotificationSetting::isEnabled)
-                .orElse(true);
-    }
-
-    /** 유형별 토글과 <b>AND</b> 로 결합한다. 챌린지 컨텍스트가 없는 타입은 음소거 대상이 아니다. */
-    private boolean isMuted(NotificationEvent event) {
-        if (!event.type().isMuteable() || event.challengeId() == null) return false;
-        return muteRepository
-                .findById(new NotificationMute.Key(event.userId(), event.challengeId()))
-                .isPresent();
+    public Optional<Notification> publish(NotificationEvent event) {
+        List<Notification> stored = publishAll(List.of(event));
+        return stored.isEmpty() ? Optional.empty() : Optional.of(stored.getFirst());
     }
 
     /**
-     * 중복 제어 — 윈도우 밖일 때만 갱신하고, <b>갱신에 성공한 요청만</b> 발송한다.
-     * 행을 잠그고 읽어 경합에서도 두 번 나가지 않게 한다.
+     * 여러 건 발행 — 챌린지 스코프 팬아웃처럼 수신자가 N명일 때 쓴다. 배치 INSERT 후 묶음으로
+     * enqueue 하므로 SQS 호출이 100건에 한 번이다.
      */
-    private boolean claimDedup(NotificationEvent event, Instant now) {
-        var window = event.type().dedupWindow();
-        if (window == null) return true;                       // 필수(A) — 적용하지 않는다
+    public List<Notification> publishAll(List<NotificationEvent> events) {
+        Instant now = Instant.now();
+        List<Notification> stored = new ArrayList<>(events.size());
 
-        String targetKey = NotificationDedup.normalize(event.targetKey());
-        var existing = dedupRepository.findWithLockByUserIdAndTypeAndTargetKey(
-                event.userId(), event.type().name(), targetKey);
-
-        if (existing.isEmpty()) {
-            dedupRepository.save(NotificationDedup.of(
-                    event.userId(), event.type().name(), targetKey, now));
-            return true;
+        for (NotificationEvent event : events) {
+            Notification row = store(event, now);
+            if (row != null) stored.add(row);
         }
-        NotificationDedup dedup = existing.get();
-        if (dedup.getLastSentAt().plus(window).isAfter(now)) return false;   // 윈도우 안 — 생략
-        dedup.touch(now);
-        return true;
+        if (stored.isEmpty()) return List.of();
+
+        // 푸시 대상만 큐로. 공지는 pushable=false 라 적재만 되고 알림 센터에만 남는다.
+        List<NotificationMessage> messages = stored.stream()
+                .filter(n -> NotificationType.find(n.getType())
+                        .map(NotificationType::isPushable).orElse(false))
+                .map(NotificationMessage::from)
+                .toList();
+        if (!messages.isEmpty()) enqueueAfterCommit(messages);
+
+        return stored;
+    }
+
+    /**
+     * 적재 1건. 멱등키가 이미 있으면 <b>조용히 건너뛴다</b> — 발행 재시도이지 오류가 아니다.
+     *
+     * <p>겹침을 예외로 잡지 않고 <b>먼저 조회해서</b> 거른다. 적재가 도메인 트랜잭션 안이라,
+     * 제약 위반이 flush 에서 터지면 영속성 컨텍스트가 죽어 <b>강퇴 판정까지 롤백된다</b>.
+     * 진짜 경합(같은 키가 동시에 두 번)은 {@code uq_notifications_dedup} 이 끝까지 막고,
+     * 이 조회는 흔한 재시도 경로가 예외로 가지 않게 하는 장치다.
+     *
+     * <p>키가 없는 발행은 경고만 남기고 적재한다. 절대 규칙 1이 멱등 보호보다 위다.
+     */
+    private Notification store(NotificationEvent event, Instant now) {
+        String dedupKey = event.dedupKey();
+        if (dedupKey == null) {
+            log.warn("알림 멱등키 없음 — 발행 재시도가 중복 적재될 수 있다. type={} user={}",
+                    event.type(), event.userId());
+        } else if (notificationRepository.existsByDedupKey(dedupKey)) {
+            log.debug("같은 멱등키로 이미 적재돼 있다. key={}", dedupKey);
+            return null;
+        }
+        return notificationRepository.save(Notification.of(
+                event.userId(), event.type(), event.title(), event.body(), event.challengeId(),
+                event.resolvedDeeplink(), dedupKey, event.suppressKey(), now));
+    }
+
+    /**
+     * 커밋 이후 큐로. 트랜잭션이 없으면(배치·잡) 즉시 보낸다.
+     *
+     * <p>여기서 터져도 도메인으로 올리지 않는다. 적재는 이미 끝났고 푸시 유실은 허용된다.
+     */
+    private void enqueueAfterCommit(List<NotificationMessage> messages) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            safeEnqueue(messages);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                safeEnqueue(messages);
+            }
+        });
+    }
+
+    private void safeEnqueue(List<NotificationMessage> messages) {
+        for (int from = 0; from < messages.size(); from += BATCH_SIZE) {
+            List<NotificationMessage> chunk =
+                    messages.subList(from, Math.min(from + BATCH_SIZE, messages.size()));
+            try {
+                queue.enqueue(chunk);
+            } catch (RuntimeException e) {
+                log.warn("알림 큐 투입 실패 — 적재는 유효하므로 푸시만 잃는다. count={} err={}",
+                        chunk.size(), e.toString());
+            }
+        }
     }
 }

@@ -14,6 +14,7 @@ import com.ruleup.ruleup_backend.moderation.UserModerationRequested;
 import com.ruleup.ruleup_backend.moderation.domain.ModerationRequest;
 import com.ruleup.ruleup_backend.moderation.domain.ModerationTarget;
 import com.ruleup.ruleup_backend.notification.NotificationEvent;
+import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.oauth.OAuthClient;
 import com.ruleup.ruleup_backend.oauth.OAuthClientResolver;
@@ -39,6 +40,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
 import java.time.Instant;
+import java.util.Map;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
@@ -339,7 +341,10 @@ public class AuthService {
             notificationPublisher.publish(NotificationEvent.of(user.getId(),
                     NotificationType.MODERATION_REJECTED,
                     "닉네임을 변경해주세요",
-                    "쓰시던 닉네임을 다른 분이 사용 중이라 임시 닉네임으로 시작했어요. 프로필에서 새 닉네임을 정해주세요."));
+                    "쓰시던 닉네임을 다른 분이 사용 중이라 임시 닉네임으로 시작했어요. 프로필에서 새 닉네임을 정해주세요.",
+                    // 복원은 계정당 여러 번 일어날 수 있어 복원 시각을 멱등키에 넣는다.
+                    Map.of(NotificationParams.TARGET_KEY, "nickname",
+                            NotificationParams.EVENT_KEY, "restore:" + Instant.now().toEpochMilli())));
         }
 
         user.restore(req.installationId(), req.deviceId());   // 탈퇴 직전 상태로 되돌린다

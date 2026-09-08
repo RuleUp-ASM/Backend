@@ -6,6 +6,9 @@ import com.ruleup.ruleup_backend.admin.domain.AdminAuditLog;
 import com.ruleup.ruleup_backend.admin.repository.AdminAuditLogRepository;
 import com.ruleup.ruleup_backend.challenge.ChallengeApiSupport;
 import com.ruleup.ruleup_backend.notification.NotificationRepository;
+import com.ruleup.ruleup_backend.notification.announcement.AnnouncementFanoutJob;
+import com.ruleup.ruleup_backend.notification.domain.NotificationTab;
+import com.ruleup.ruleup_backend.notification.domain.NotificationToggleGroup;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.sanction.SanctionRepository;
 import com.ruleup.ruleup_backend.sanction.domain.SanctionTrack;
@@ -61,6 +64,7 @@ class AdminBackofficeIT extends ChallengeApiSupport {
     @Autowired SanctionRepository sanctionRepository;
     @Autowired AdminAuditLogRepository auditLogRepository;
     @Autowired NotificationRepository notificationRepository;
+    @Autowired AnnouncementFanoutJob announcementFanoutJob;
 
     private MockMvc mvc;
 
@@ -291,8 +295,11 @@ class AdminBackofficeIT extends ChallengeApiSupport {
                     .singleElement()
                     .satisfies(s -> assertThat(s.getNotifiedAt())
                             .as("null 이면 가드레일 위반이다").isNotNull());
-            assertThat(notificationRepository.findInbox(target.id(), null, null, Limit.unlimited()))
+            assertThat(notificationRepository.findByUserIdOrderByIdDesc(target.id()))
                     .anyMatch(n -> NotificationType.ACCOUNT_SANCTION.name().equals(n.getType()));
+            // 발행부가 멱등키를 채웠는지 — 없으면 UNIQUE 가 무력해져 재시도가 두 줄로 쌓인다.
+            assertThat(notificationRepository.findByUserIdOrderByIdDesc(target.id()))
+                    .allSatisfy(n -> assertThat(n.getDedupKey()).isNotNull());
             // 감사 쿼리 자체(notified_at IS NULL 인 직권 제재)는 운영에서 전역으로 도는 것이지만,
             // 여기서는 대상 유저로 좁힌다 — 공유 DB 라 다른 테스트가 게이트 검증용으로 만든
             // 제재(고지 경로를 타지 않는다)까지 전역 카운트에 섞인다.
@@ -509,9 +516,30 @@ class AdminBackofficeIT extends ChallengeApiSupport {
                     "body", "02:00~03:00 점검이 있어요."));
             assertThat(res.getResponse().getStatus()).isEqualTo(200);
 
-            assertThat(notificationRepository.findInbox(reader.id(), null, null, Limit.unlimited()))
-                    .anyMatch(n -> NotificationType.TERMS_UPDATED.name().equals(n.getType())
-                            || "A".equals(n.getCategory()));
+            // 요청은 공지 원본만 저장하고 즉시 응답한다 — 2만 행 INSERT 를 요청-응답 안에서
+            // 하면 커넥션을 오래 잡고 실패 시 전부 롤백된다. 적재는 팬아웃 잡의 몫이다.
+            assertThat((String) read(res, "$.data.announcementId")).isNotNull();
+            assertThat(notificationRepository.findByUserIdOrderByIdDesc(reader.id()))
+                    .as("아직 팬아웃 전이다").noneMatch(
+                            n -> NotificationType.ANNOUNCEMENT.name().equals(n.getType()));
+
+            announcementFanoutJob.fanOutPending();
+
+            assertThat(notificationRepository.findByUserIdOrderByIdDesc(reader.id()))
+                    .filteredOn(n -> NotificationType.ANNOUNCEMENT.name().equals(n.getType()))
+                    .singleElement()
+                    .satisfies(n -> {
+                        // 공지는 공지 탭에만 쌓이고 푸시가 나가지 않는다.
+                        assertThat(n.tabEnum()).isEqualTo(NotificationTab.ANNOUNCEMENT);
+                        assertThat(n.toggleGroupEnum()).isEqualTo(NotificationToggleGroup.NONE);
+                        assertThat(n.getTitle()).isEqualTo("점검 안내");
+                    });
+
+            // 두 번 돌려도 한 줄뿐이다 — dedup_key UNIQUE 가 재개 시 중복 적재를 막는다.
+            announcementFanoutJob.fanOutPending();
+            assertThat(notificationRepository.findByUserIdOrderByIdDesc(reader.id()))
+                    .filteredOn(n -> NotificationType.ANNOUNCEMENT.name().equals(n.getType()))
+                    .hasSize(1);
         }
 
         @Test
