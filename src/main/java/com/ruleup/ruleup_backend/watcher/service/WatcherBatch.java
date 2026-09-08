@@ -4,6 +4,7 @@ import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.notification.NotificationEvent;
+import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.NotificationPublisher;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.watcher.domain.WatcherInvitation;
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.List;
 import java.util.UUID;
 
@@ -84,7 +86,10 @@ public class WatcherBatch {
                     NotificationType.WATCHER_INVITATION_EXPIRED,
                     "감시자 초대가 만료됐어요",
                     "보내신 감시자 초대 링크가 7일이 지나 만료됐어요. 필요하면 다시 초대해주세요.",
-                    invitation.getChallengeId()));
+                    invitation.getChallengeId(),
+                    // 초대 id 가 곧 사건이다. 멀티 태스크가 같은 만료 건을 집어도 한 번만 쌓인다.
+                    Map.of(NotificationParams.CHALLENGE_ID, invitation.getChallengeId().toString(),
+                            NotificationParams.WATCHER_ID, invitation.getId().toString())));
             invitation.markExpiryNotified(now);   // 중복 발송 방지
         }
         log.info("감시자 초대 만료 알림 — {}건", expired.size());

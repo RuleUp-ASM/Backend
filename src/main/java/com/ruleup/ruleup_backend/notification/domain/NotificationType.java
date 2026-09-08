@@ -243,6 +243,14 @@ public enum NotificationType {
         return suppressInterval;
     }
 
+    /**
+     * 치환 전 원본 템플릿. 기동 검증이 치환자 이름을 확인하는 데 쓴다 — 렌더된 결과에는
+     * 자리가 남아 있지 않아 오타를 볼 수 없다.
+     */
+    public String deeplinkTemplate() {
+        return deeplinkTemplate;
+    }
+
     // ===== 키 =====
 
     /**

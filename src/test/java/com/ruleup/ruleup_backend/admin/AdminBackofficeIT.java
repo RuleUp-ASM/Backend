@@ -294,6 +294,9 @@ class AdminBackofficeIT extends ChallengeApiSupport {
                             .as("null 이면 가드레일 위반이다").isNotNull());
             assertThat(notificationRepository.findByUserIdOrderByIdDesc(target.id()))
                     .anyMatch(n -> NotificationType.ACCOUNT_SANCTION.name().equals(n.getType()));
+            // 발행부가 멱등키를 채웠는지 — 없으면 UNIQUE 가 무력해져 재시도가 두 줄로 쌓인다.
+            assertThat(notificationRepository.findByUserIdOrderByIdDesc(target.id()))
+                    .allSatisfy(n -> assertThat(n.getDedupKey()).isNotNull());
             // 감사 쿼리 자체(notified_at IS NULL 인 직권 제재)는 운영에서 전역으로 도는 것이지만,
             // 여기서는 대상 유저로 좁힌다 — 공유 DB 라 다른 테스트가 게이트 검증용으로 만든
             // 제재(고지 경로를 타지 않는다)까지 전역 카운트에 섞인다.

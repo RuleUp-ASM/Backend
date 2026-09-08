@@ -48,25 +48,6 @@ public record NotificationEvent(
         return new NotificationEvent(userId, type, title, body, challengeId, params, null);
     }
 
-    /**
-     * 파라미터 없는 발행 — <b>과도기 경로</b>다. 키가 만들어지지 않아 멱등 보호를 받지 못하고,
-     * 발행 시점에 경고 로그가 남는다. 각 도메인의 발행 지점이 파라미터를 채우면 사라진다.
-     *
-     * @deprecated 타입이 요구하는 {@code params} 를 채운 {@link #of(UUID, NotificationType,
-     *             String, String, Map)} 를 쓸 것.
-     */
-    @Deprecated(forRemoval = true)
-    public static NotificationEvent of(UUID userId, NotificationType type, String title, String body) {
-        return new NotificationEvent(userId, type, title, body, null, Map.of(), null);
-    }
-
-    /** @deprecated 파라미터를 채운 {@link #forChallenge} 를 쓸 것. */
-    @Deprecated(forRemoval = true)
-    public static NotificationEvent forChallenge(UUID userId, NotificationType type, String title,
-                                                 String body, UUID challengeId) {
-        return new NotificationEvent(userId, type, title, body, challengeId, Map.of(), null);
-    }
-
     public NotificationEvent withDeeplink(String deeplink) {
         return new NotificationEvent(userId, type, title, body, challengeId, params, deeplink);
     }

@@ -381,6 +381,11 @@ class SessionDeviceFlowIT {
                     .stream()
                     .anyMatch(n -> NotificationType.DEVICE_LOGGED_OUT.name().equals(n.getType()));
             assertThat(notified).isTrue();
+
+            // 발행부가 멱등키를 채웠는지 — 없으면 UNIQUE 가 무력해져 재시도가 두 줄로 쌓인다.
+            assertThat(notificationRepository.findByUserIdOrderByIdDesc(user.getId()))
+                    .filteredOn(n -> NotificationType.DEVICE_LOGGED_OUT.name().equals(n.getType()))
+                    .allSatisfy(n -> assertThat(n.getDedupKey()).isNotNull());
         }
 
         @Test

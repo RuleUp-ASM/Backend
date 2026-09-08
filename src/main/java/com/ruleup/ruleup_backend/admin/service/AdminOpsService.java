@@ -11,6 +11,7 @@ import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.notification.NotificationEvent;
+import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.NotificationPublisher;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.sanction.SanctionRepository;
@@ -26,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.ByteBuffer;
 import java.time.Instant;
+import java.util.Map;
 import java.util.List;
 import java.util.UUID;
 
@@ -196,8 +198,14 @@ public class AdminOpsService {
         List<UUID> recipients = jdbc.query(
                 "SELECT id FROM users WHERE status <> 'WITHDRAWN' AND deleted_at IS NULL",
                 (rs, row) -> uuid(rs.getBytes(1)));
-        recipients.forEach(userId -> notificationPublisher.publish(NotificationEvent.of(
-                userId, NotificationType.TERMS_UPDATED, request.title(), request.body())));
+        // 공지 1건이 유저 수만큼 팬아웃되므로 멱등키에 공지 식별자를 넣는다 — 재요청이
+        // 같은 공지를 두 번 쌓지 않게 하는 것은 이 키뿐이다.
+        String noticeKey = "ops-notice:" + Instant.now().toEpochMilli();
+        notificationPublisher.publishAll(recipients.stream()
+                .map(userId -> NotificationEvent.of(userId, NotificationType.TERMS_UPDATED,
+                        request.title(), request.body(),
+                        Map.of(NotificationParams.EVENT_KEY, noticeKey)))
+                .toList());
 
         return new AdminDtos.NoticeResponse(recipients.size(), Instant.now().toString());
     }

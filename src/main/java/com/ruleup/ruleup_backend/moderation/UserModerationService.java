@@ -5,6 +5,7 @@ import com.ruleup.ruleup_backend.moderation.domain.ModerationRequestStatus;
 import com.ruleup.ruleup_backend.moderation.domain.ModerationTarget;
 import com.ruleup.ruleup_backend.notification.NotificationPublisher;
 import com.ruleup.ruleup_backend.notification.NotificationEvent;
+import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.user.domain.User;
 import com.ruleup.ruleup_backend.user.UserRepository;
@@ -15,6 +16,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.UUID;
+import java.time.Instant;
+import java.util.Map;
 
 /**
  * 가입/변경 이후 닉네임·프로필 사진을 LLM으로 검수하고 그 결과를 DB에 반영한다.
@@ -69,7 +72,11 @@ public class UserModerationService {
                             NotificationType.MODERATION_REJECTED,
                             "닉네임을 바꿔주세요",
                             "회원님의 닉네임이 커뮤니티 기준에 맞지 않아 다른 사용자에게는 임시 닉네임으로 표시됩니다. "
-                                    + "닉네임을 변경하면 다시 노출됩니다."));
+                                    + "닉네임을 변경하면 다시 노출됩니다.",
+                            // 바꾼 닉네임이 또 거부될 수 있으므로 대상만으로는 키가 되지 않는다.
+                            Map.of(NotificationParams.TARGET_KEY, "nickname",
+                                    NotificationParams.EVENT_KEY,
+                                    userId + ":nickname:" + Instant.now().toEpochMilli())));
                 }
                 case UNAVAILABLE -> log.info("닉네임 검수 보류(PENDING 유지) userId={}", userId);
             }
@@ -92,7 +99,10 @@ public class UserModerationService {
                             NotificationType.MODERATION_REJECTED,
                             "프로필 사진을 바꿔주세요",
                             "회원님의 프로필 사진이 커뮤니티 기준에 맞지 않아 다른 사용자에게는 숨겨집니다. "
-                                    + "사진을 변경하면 다시 노출됩니다."));
+                                    + "사진을 변경하면 다시 노출됩니다.",
+                            Map.of(NotificationParams.TARGET_KEY, "profile_image",
+                                    NotificationParams.EVENT_KEY,
+                                    userId + ":profile_image:" + Instant.now().toEpochMilli())));
                 }
                 case UNAVAILABLE -> log.info("사진 검수 보류(PENDING 유지) userId={}", userId);
             }

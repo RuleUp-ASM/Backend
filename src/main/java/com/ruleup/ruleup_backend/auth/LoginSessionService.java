@@ -8,6 +8,7 @@ import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.web.CountryResolver;
 import com.ruleup.ruleup_backend.notification.NotificationPublisher;
 import com.ruleup.ruleup_backend.notification.NotificationEvent;
+import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.oauth.OAuthUserInfo;
 import com.ruleup.ruleup_backend.score.UserScoreSummaryRepository;
@@ -21,6 +22,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -67,7 +69,9 @@ public class LoginSessionService {
             notificationPublisher.publish(NotificationEvent.of(user.getId(),
                     NotificationType.DEVICE_LOGGED_OUT,
                     "다른 기기에서 로그인됨",
-                    "새 기기에서 로그인되어 기존 기기의 세션이 종료됐어요. 본인이 아니라면 계정 보안을 확인해주세요."));
+                    "새 기기에서 로그인되어 기존 기기의 세션이 종료됐어요. 본인이 아니라면 계정 보안을 확인해주세요.",
+                    // 새로 로그인한 기기 id 가 이 사건을 유일하게 가리킨다.
+                    Map.of(NotificationParams.EVENT_KEY, req.deviceId())));
         }
 
         // ===== 설치 인계 — uq_users_active_installation_id: 하나의 설치는 한 활성 계정에만 연결 =====

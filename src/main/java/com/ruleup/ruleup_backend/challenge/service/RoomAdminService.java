@@ -19,6 +19,7 @@ import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.notification.NotificationPublisher;
 import com.ruleup.ruleup_backend.notification.NotificationEvent;
+import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
@@ -27,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -79,8 +81,11 @@ public class RoomAdminService {
         challengeRepository.decrementParticipantCount(challengeId);
         counterRepository.decrement(targetUserId);   // 동시 참여 3개 카운터도 함께 정리
         eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "KICK"));
+        // 같은 방에서 재입장 후 다시 강퇴될 수 있으므로 강퇴 시각까지 키에 넣는다.
         notificationPublisher.publish(NotificationEvent.forChallenge(targetUserId,
-                NotificationType.CHALLENGE_KICKED, "챌린지에서 내보내졌어요", normalized, challengeId));
+                NotificationType.CHALLENGE_KICKED, "챌린지에서 내보내졌어요", normalized, challengeId,
+                Map.of(NotificationParams.EVENT_KEY,
+                        challengeId + ":" + rejoinAt.toEpochMilli())));
         return new RoomAdminDtos.KickResponse(true, targetUserId.toString(), rejoinAt.toString());
     }
 
