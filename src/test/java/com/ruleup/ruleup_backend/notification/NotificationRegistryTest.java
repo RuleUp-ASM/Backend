@@ -17,7 +17,6 @@ import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * 알림 레지스트리 계약 — 백엔드 테크 스펙 5절, 공통 8절.
@@ -349,11 +348,18 @@ class NotificationRegistryTest {
         }
 
         @Test
-        @DisplayName("키 파라미터가 비어 있으면 발행을 거부한다 — 조용히 빈 키를 만들면 멱등이 무너진다")
-        void missingParamIsRejected() {
-            assertThatThrownBy(() -> NotificationType.APPEAL_RESULT.dedupKey(user, Map.of()))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining(NotificationParams.APPEAL_ID);
+        @DisplayName("키 파라미터가 비면 키가 없다 — 예외를 던지면 알림 버그가 도메인 판정을 롤백시킨다")
+        void missingParamYieldsNoKey() {
+            assertThat(NotificationType.APPEAL_RESULT.dedupKey(user, Map.of())).isNull();
+            assertThat(NotificationType.MARKETING.suppressKey(Map.of())).isNull();
+        }
+
+        @Test
+        @DisplayName("빈 값을 조용히 이어 붙이지 않는다 — 다른 사건이 같은 키를 가지면 적재가 삼켜진다")
+        void blankValueNeverBecomesPartOfAKey() {
+            Map<String, String> blank = params();
+            blank.put(NotificationParams.APPEAL_ID, "  ");
+            assertThat(NotificationType.APPEAL_RESULT.dedupKey(user, blank)).isNull();
         }
 
         @Test

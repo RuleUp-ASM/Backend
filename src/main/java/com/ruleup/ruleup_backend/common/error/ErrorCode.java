@@ -200,8 +200,10 @@ public enum ErrorCode {
 
     // ===== 알림 =====
     /** 필수(A) 타입의 토글을 끄려 함 — 토글 자체가 미노출이므로 발생하면 클라이언트 버그다. */
-    NOTIFICATION_TYPE_NOT_TOGGLABLE(HttpStatus.BAD_REQUEST, "이 알림은 끌 수 없어요."),
+    // 설정 모델이 마스터 + 그룹 3종으로 바뀌면서 「끌 수 없는 알림」이라는 상태가 사라졌다.
+    NOTIFICATION_GROUP_INVALID(HttpStatus.BAD_REQUEST, "바꿀 수 없는 설정이에요."),
     NOTIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "알림을 찾을 수 없습니다."),
+    CHALLENGE_NOT_JOINED(HttpStatus.BAD_REQUEST, "참여 중인 챌린지만 설정할 수 있어요."),
     INVALID_SETTING_KEY(HttpStatus.BAD_REQUEST, "알림 설정 항목이 올바르지 않습니다."),
 
     // ===== 인증 sync (§3.1) =====

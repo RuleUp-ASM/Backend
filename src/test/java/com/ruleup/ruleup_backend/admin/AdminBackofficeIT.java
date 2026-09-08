@@ -6,6 +6,7 @@ import com.ruleup.ruleup_backend.admin.domain.AdminAuditLog;
 import com.ruleup.ruleup_backend.admin.repository.AdminAuditLogRepository;
 import com.ruleup.ruleup_backend.challenge.ChallengeApiSupport;
 import com.ruleup.ruleup_backend.notification.NotificationRepository;
+import com.ruleup.ruleup_backend.notification.domain.NotificationToggleGroup;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.sanction.SanctionRepository;
 import com.ruleup.ruleup_backend.sanction.domain.SanctionTrack;
@@ -291,7 +292,7 @@ class AdminBackofficeIT extends ChallengeApiSupport {
                     .singleElement()
                     .satisfies(s -> assertThat(s.getNotifiedAt())
                             .as("null 이면 가드레일 위반이다").isNotNull());
-            assertThat(notificationRepository.findInbox(target.id(), null, null, Limit.unlimited()))
+            assertThat(notificationRepository.findByUserIdOrderByIdDesc(target.id()))
                     .anyMatch(n -> NotificationType.ACCOUNT_SANCTION.name().equals(n.getType()));
             // 감사 쿼리 자체(notified_at IS NULL 인 직권 제재)는 운영에서 전역으로 도는 것이지만,
             // 여기서는 대상 유저로 좁힌다 — 공유 DB 라 다른 테스트가 게이트 검증용으로 만든
@@ -509,9 +510,9 @@ class AdminBackofficeIT extends ChallengeApiSupport {
                     "body", "02:00~03:00 점검이 있어요."));
             assertThat(res.getResponse().getStatus()).isEqualTo(200);
 
-            assertThat(notificationRepository.findInbox(reader.id(), null, null, Limit.unlimited()))
+            assertThat(notificationRepository.findByUserIdOrderByIdDesc(reader.id()))
                     .anyMatch(n -> NotificationType.TERMS_UPDATED.name().equals(n.getType())
-                            || "A".equals(n.getCategory()));
+                            || n.toggleGroupEnum() == NotificationToggleGroup.ACCOUNT);
         }
 
         @Test

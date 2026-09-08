@@ -4,6 +4,7 @@ import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
 import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.NotificationPublisher;
+import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.routine.service.RoutineCatalog;
 import com.ruleup.ruleup_backend.user.UserRepository;
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Map;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -78,16 +80,19 @@ public class WatcherNoticeService {
 
             // 통지에 담는 것은 3개 필드뿐이다 — 감시자는 방 멤버가 아니므로 방 상세·랭킹·
             // 멤버 진입점을 주지 않으며 템플릿 복제 진입점도 노출하지 않는다.
-            notificationPublisher.publish(new NotificationEvent(
+            // challengeId 를 비워 둔다 — 카운터 귀속 전용 컬럼인데 감시자의 「내 챌린지」 목록에
+            // 그 방이 없어 카운터가 뜰 자리가 없다(공통 #19).
+            notificationPublisher.publish(NotificationEvent.of(
                     relation.getWatcherUserId(),
                     NotificationType.PENALTY_FAILURE_SHARED,
                     "감시 알림",
                     failedNickname + "님이 [" + challengeTitle + "]의 " + routineName
                             + " 약속을 지키지 못했어요.",
-                    notice.getId().toString(),
-                    null,                     // 방 음소거 대상이 아니다 — 감시자는 그 방의 멤버가 아니다
-                    failedUserId,             // 감시자가 이 사람을 차단했으면 알림이 생성되지 않는다
-                    null));
+                    Map.of(NotificationParams.EVENT_KEY, notice.getId().toString(),
+                            NotificationParams.NOTICE_ID, notice.getId().toString(),
+                            NotificationParams.CHALLENGE_ID, relation.getChallengeId().toString(),
+                            NotificationParams.ROUTINE_ID, routineName,
+                            NotificationParams.TARGET_USER_ID, failedUserId.toString())));
         }
     }
 

@@ -246,28 +246,34 @@ public enum NotificationType {
     // ===== 키 =====
 
     /**
-     * 발행 멱등 키 — {@code {TYPE}:{userId}:{식별자}}. <b>전 타입이 가진다.</b>
+     * 발행 멱등 키 — {@code {TYPE}:{userId}:{식별자}}. 전 타입이 선언하고 있다.
      *
-     * <p>파라미터가 비어 있으면 예외다. 빈 값을 조용히 이어 붙이면 서로 다른 사건이 같은 키를
-     * 갖게 되고, UNIQUE 가 뒤 사건의 적재를 통째로 삼킨다 — 절대 규칙 1 위반이 조용히 일어난다.
+     * <p><b>파라미터가 하나라도 비면 null 을 준다 — 예외를 던지지 않는다.</b> 적재가 도메인
+     * 트랜잭션 안에 있으므로 여기서 던지면 알림 파라미터 누락이 강퇴 판정을 롤백시킨다(4-1).
+     * 키가 없으면 멱등 보호만 잃고 적재는 그대로 되므로 절대 규칙 1 은 지켜진다.
+     * 발행부의 실수는 발행 시점 경고 로그로 드러난다.
+     *
+     * <p>빈 값을 조용히 이어 붙이지 않는 것도 같은 이유다 — 서로 다른 사건이 같은 키를 갖게 되면
+     * UNIQUE 가 뒤 사건의 <b>적재 자체를</b> 삼켜 규칙 1 위반이 조용히 일어난다.
      */
     public String dedupKey(UUID userId, Map<String, String> params) {
-        return name() + ":" + userId + ":" + join(dedupParams, params);
+        String id = join(dedupParams, params);
+        return id == null ? null : name() + ":" + userId + ":" + id;
     }
 
     /** 인터벌 억제 키 — {@code {TYPE}:{식별자}}. 억제를 쓰지 않는 타입은 <b>null</b> 이다. */
     public String suppressKey(Map<String, String> params) {
         if (suppressParams == null) return null;
-        return name() + ":" + join(suppressParams, params);
+        String id = join(suppressParams, params);
+        return id == null ? null : name() + ":" + id;
     }
 
+    /** 선언한 파라미터를 순서대로 잇는다. 하나라도 비면 null. */
     private String join(String[] keys, Map<String, String> params) {
         StringBuilder sb = new StringBuilder();
         for (String key : keys) {
             String value = (params == null) ? null : params.get(key);
-            if (value == null || value.isBlank())
-                throw new IllegalArgumentException(
-                        "알림 키 파라미터 누락: type=" + name() + " param=" + key);
+            if (value == null || value.isBlank()) return null;
             if (!sb.isEmpty()) sb.append(':');
             sb.append(value);
         }
@@ -304,54 +310,4 @@ public enum NotificationType {
         return Arrays.stream(values()).filter(t -> t.name().equals(raw)).findFirst();
     }
 
-    // ===== 구 파이프라인 호환 =====
-    // 아래 넷은 A/B/C 분류를 쓰는 현행 발송 경로가 남아 있는 동안만 유효하다. 토글 그룹 기반
-    // 판정으로 갈아탈 때(스택 02) 함께 사라진다. 지금 값은 재설계 이전 동작을 그대로 보존한다.
-
-    /** @deprecated 토글 그룹으로 대체된다. */
-    @Deprecated(forRemoval = true)
-    public NotificationCategory category() {
-        return switch (this) {
-            case VERIFICATION_RESULT, CONSECUTIVE_FAILURE_WARNING, CHALLENGE_LIFECYCLE,
-                 WATCHER_INVITATION_EXPIRED, TIER_CHANGED, TIER_BOUNDARY_NEAR,
-                 PENALTY_FAILURE_SHARED, WATCHER_REACTION, ROUTINE_REMINDER ->
-                    NotificationCategory.B;
-            case MARKETING -> NotificationCategory.C;
-            default -> NotificationCategory.A;
-        };
-    }
-
-    /** @deprecated 마스터·그룹 토글로 대체된다. */
-    @Deprecated(forRemoval = true)
-    public boolean isTogglable() {
-        return category() != NotificationCategory.A;
-    }
-
-    /** @deprecated 음소거는 {@code challenge_id} 유무로 판정한다. */
-    @Deprecated(forRemoval = true)
-    public boolean isMuteable() {
-        return switch (this) {
-            case ROUTINE_REMINDER, VERIFICATION_RESULT, CONSECUTIVE_FAILURE_WARNING,
-                 CHALLENGE_LIFECYCLE, PENALTY_FAILURE_SHARED -> true;
-            default -> false;
-        };
-    }
-
-    /** @deprecated {@link #suppressInterval()} 로 대체된다. */
-    @Deprecated(forRemoval = true)
-    public Duration dedupWindow() {
-        if (category() == NotificationCategory.A) return null;
-        return this == TIER_BOUNDARY_NEAR ? Duration.ofDays(7) : Duration.ofHours(24);
-    }
-
-    /** @deprecated {@link #deeplink(Map)} 로 대체된다. 단일 치환자만 다룬다. */
-    @Deprecated(forRemoval = true)
-    public String deeplink(String targetKey) {
-        if (deeplinkTemplate == null) return null;
-        int open = deeplinkTemplate.indexOf('{');
-        if (open < 0) return deeplinkTemplate;
-        int close = deeplinkTemplate.indexOf('}', open);
-        if (targetKey == null || targetKey.isBlank()) return null;
-        return deeplinkTemplate.substring(0, open) + targetKey + deeplinkTemplate.substring(close + 1);
-    }
 }

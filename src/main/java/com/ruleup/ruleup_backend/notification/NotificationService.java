@@ -2,10 +2,16 @@ package com.ruleup.ruleup_backend.notification;
 
 import com.ruleup.ruleup_backend.agreement.AgreementService;
 import com.ruleup.ruleup_backend.agreement.domain.AgreementType;
+import com.ruleup.ruleup_backend.challenge.domain.MemberStatus;
+import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.config.AppProperties;
-import com.ruleup.ruleup_backend.notification.domain.*;
+import com.ruleup.ruleup_backend.notification.domain.Notification;
+import com.ruleup.ruleup_backend.notification.domain.NotificationMute;
+import com.ruleup.ruleup_backend.notification.domain.NotificationTab;
+import com.ruleup.ruleup_backend.notification.domain.NotificationToggleGroup;
+import com.ruleup.ruleup_backend.notification.domain.UserNotificationSetting;
 import com.ruleup.ruleup_backend.notification.dto.NotificationResponse;
 import com.ruleup.ruleup_backend.notification.dto.NotificationSettingDtos;
 import com.ruleup.ruleup_backend.user.UserRepository;
@@ -15,190 +21,221 @@ import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.*;
+import java.util.Base64;
+import java.util.List;
+import java.util.UUID;
 
 /**
- * 알림함 조회·삭제와 설정 — 발송 파이프라인은 {@link NotificationPublisher} 가 담당한다.
+ * 알림 센터 조회와 설정 — 발행은 {@link NotificationPublisher}, 발송은 컨슈머가 맡는다.
  */
 @Service
 @RequiredArgsConstructor
 public class NotificationService {
 
-    /** 보관 6개월. 이 기간을 넘긴 건은 정리 배치가 지우고 목록에도 나오지 않는다. */
+    /** 보관 6개월. 파기 배치가 지우고 목록에도 나오지 않는다. */
     public static final Duration RETENTION = Duration.ofDays(180);
 
-    private static final int MAX_PAGE_SIZE = 50;
-    private static final int DEFAULT_PAGE_SIZE = 20;
+    /**
+     * <b>서버 고정 50.</b> 요청 파라미터로 받지 않는다 — 미읽음 카운터 상한이 {@code 99+} 라
+     * 클라이언트는 최대 2페이지만 읽으면 되고, 크기를 협상할 이유가 없다.
+     */
+    private static final int PAGE_SIZE = 50;
 
     private final NotificationRepository repository;
     private final NotificationSettingRepository settingRepository;
     private final NotificationMuteRepository muteRepository;
+    private final ChallengeMemberRepository challengeMemberRepository;
     private final AgreementService agreementService;
-    private final AppProperties props;
     private final UserRepository userRepository;
+    private final AppProperties props;
 
-    // ===== 알림함 =====
+    // ===== 알림 센터 =====
 
     /**
-     * 커서 페이징. 커서는 {@code createdAt|id} 복합값이다 — 같은 밀리초에 여러 건이 적재되는
-     * 00시 판정 피크에서 단일 id 커서를 쓰면 페이지 경계 항목이 빠지거나 겹친다.
+     * 알림 센터 목록. 커서는 <b>base64(id) 불투명 문자열</b>이며 클라이언트는 해석하지 않는다.
+     *
+     * <p>서버는 미읽음을 세지 않는다. 읽음 지점 id 하나만 내리고, 레드닷·챌린지별 카운터·개별
+     * 미읽음 표시는 클라이언트가 <b>목록에서의 위치</b>로 계산한다.
      */
     @Transactional(readOnly = true)
-    public NotificationResponse list(UUID userId, String cursor, Integer requestedSize) {
-        int size = (requestedSize == null) ? DEFAULT_PAGE_SIZE
-                : Math.max(1, Math.min(requestedSize, MAX_PAGE_SIZE));
-        Cursor c = Cursor.parse(cursor);
+    public NotificationResponse list(UUID userId, String rawTab, String rawCursor) {
+        NotificationTab tab = tabOf(rawTab);
+        UUID cursor = Cursor.decode(rawCursor);
 
         // 한 건 더 읽어 다음 페이지 유무를 판단한다.
-        List<Notification> rows = repository.findInbox(userId, c.at(), c.id(), Limit.of(size + 1));
-        boolean hasNext = rows.size() > size;
-        List<Notification> page = hasNext ? rows.subList(0, size) : rows;
+        List<Notification> rows = repository.findInbox(userId, tab.code(), cursor,
+                Limit.of(PAGE_SIZE + 1));
+        boolean hasNext = rows.size() > PAGE_SIZE;
+        List<Notification> page = hasNext ? rows.subList(0, PAGE_SIZE) : rows;
 
         List<NotificationResponse.Item> items = page.stream()
                 .map(n -> new NotificationResponse.Item(
-                        n.getId().toString(), n.getCategory(), n.getType(), n.getTitle(),
-                        n.getBody(), n.getDeeplink(), n.isRead(), n.getCreatedAt().toString()))
+                        n.getId().toString(), n.getType(), n.getTitle(), n.getBody(),
+                        n.getDeeplink(),
+                        n.getChallengeId() == null ? null : n.getChallengeId().toString(),
+                        n.getCreatedAt().toString()))
                 .toList();
 
-        String next = hasNext && !page.isEmpty()
-                ? Cursor.encode(page.getLast()) : null;
-        return new NotificationResponse(items, unread(userId), (int) RETENTION.toDays(), next);
+        UUID lastRead = settingRepository.findById(userId)
+                .map(s -> s.readCursor(tab)).orElse(null);
+
+        return new NotificationResponse(items,
+                hasNext ? Cursor.encode(page.getLast().getId()) : null,
+                (int) RETENTION.toDays(),
+                lastRead == null ? null : lastRead.toString());
     }
 
+    /**
+     * 진입 시 그 시점 목록 전체를 읽음 처리한다. 개별 읽음 API 는 없다.
+     *
+     * <p><b>클라이언트가 보낸 id 로만 갱신한다.</b> 현재 시각으로 갱신하면 조회와 갱신 사이에
+     * 적재된 알림이 화면에 뜬 적 없이 읽음 처리돼 레드닷이 영영 뜨지 않는다 — 00시 판정 배치나
+     * 08:00 큐 소진 구간에서 실제로 생기는 경로다.
+     */
     @Transactional
-    public NotificationResponse.ReadResponse markRead(UUID userId, UUID notificationId) {
-        find(userId, notificationId).markRead(Instant.now());
-        repository.flush();
-        return new NotificationResponse.ReadResponse(true, unread(userId));
-    }
+    public void markRead(UUID userId, NotificationSettingDtos.ReadRequest request) {
+        if (request == null || request.lastNotificationId() == null)
+            throw new BusinessException(ErrorCode.INVALID_REQUEST);
 
-    @Transactional
-    public NotificationResponse.ReadAllResponse markAllRead(UUID userId) {
-        Instant now = Instant.now();
-        List<Notification> all = repository.findInbox(userId, null, null, Limit.unlimited());
-        long changed = all.stream().filter(n -> !n.isRead()).peek(n -> n.markRead(now)).count();
-        repository.flush();
-        return new NotificationResponse.ReadAllResponse(changed, unread(userId));
-    }
-
-    /** 소프트 삭제 — 목록에서만 빠지고 <b>고지 기록 자체는 남는다</b>. */
-    @Transactional
-    public NotificationResponse.DeleteResponse delete(UUID userId, UUID notificationId) {
-        find(userId, notificationId).delete(Instant.now());
-        return new NotificationResponse.DeleteResponse(true);
-    }
-
-    private Notification find(UUID userId, UUID notificationId) {
-        return repository.findByIdAndUserIdAndDeletedAtIsNull(notificationId, userId)
+        UUID notificationId = parseUuid(request.lastNotificationId());
+        Notification target = repository.findByIdAndUserId(notificationId, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOTIFICATION_NOT_FOUND));
-    }
 
-    private long unread(UUID userId) {
-        return repository.countByUserIdAndReadAtIsNullAndDeletedAtIsNull(userId);
+        // 탭은 알림 자신이 안다 — 클라이언트가 보낸 탭과 어긋나면 커서가 엉뚱한 쪽으로 움직인다.
+        settings(userId, Instant.now()).advanceReadCursor(
+                target.tabEnum(), notificationId, Instant.now());
     }
 
     // ===== 설정 =====
 
-    /** 필수(A) 타입은 응답에 넣지 않는다 — 존재를 인지시키지 않는 것이 정책이다. */
     @Transactional(readOnly = true)
     public NotificationSettingDtos.Response settings(UUID userId) {
-        Map<String, Boolean> stored = new HashMap<>();
-        settingRepository.findByUserId(userId)
-                .forEach(s -> stored.put(s.getType(), s.isEnabled()));
-
-        List<NotificationSettingDtos.TypeToggle> types = Arrays.stream(NotificationType.values())
-                .filter(t -> t.category() == NotificationCategory.B)
-                .map(t -> new NotificationSettingDtos.TypeToggle(
-                        t.name(), stored.getOrDefault(t.name(), true)))   // 행이 없으면 기본 ON
-                .toList();
-
-        List<String> muted = muteRepository.findByUserId(userId).stream()
-                .map(m -> m.getChallengeId().toString()).toList();
-
-        return new NotificationSettingDtos.Response(types, muted,
-                agreementService.hasIndividualConsent(userId, AgreementType.MARKETING));
+        UserNotificationSetting s = settingRepository.findById(userId)
+                .orElseGet(() -> UserNotificationSetting.defaults(userId, Instant.now()));
+        return toResponse(userId, s);
     }
 
     /**
-     * 설정 변경. 마케팅(C)은 <b>약관 동의 상태까지 같은 트랜잭션에서 갱신</b>한다 —
-     * 알림 설정과 동의 이력이 어긋나면 어느 쪽이 진짜인지 알 수 없게 된다.
+     * 마스터·그룹 부분 수정. 받는 키는 {@code pushEnabled} 와 {@code groups} 의 세 키뿐이고
+     * 그 외는 400 이다.
+     *
+     * <p>마케팅 그룹만 부수효과가 있다 — 약관의 수신 동의 상태를 <b>같은 트랜잭션에서</b>
+     * 갱신한다. 설정과 동의 이력이 어긋나면 어느 쪽이 진짜인지 알 수 없게 된다.
      */
     @Transactional
-    public NotificationSettingDtos.Response patchSettings(UUID userId,
-                                                          NotificationSettingDtos.PatchRequest request) {
+    public NotificationSettingDtos.PatchResponse patchSettings(
+            UUID userId, NotificationSettingDtos.PatchRequest request) {
         if (request == null) throw new BusinessException(ErrorCode.INVALID_REQUEST);
+        request.rejectUnknownKeys();
+
         Instant now = Instant.now();
+        UserNotificationSetting s = settings(userId, now);
 
-        if (request.types() != null) {
-            for (NotificationSettingDtos.TypeToggle toggle : request.types()) {
-                NotificationType type = NotificationType.find(toggle.type())
-                        .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_REQUEST));
-                // 필수(A)는 끌 수 없다. 정상 경로에선 토글 자체가 미노출이므로 여기 오면 버그다.
-                if (!type.isTogglable())
-                    throw new BusinessException(ErrorCode.NOTIFICATION_TYPE_NOT_TOGGLABLE);
-                settingRepository.findById(new NotificationSetting.Key(userId, type.name()))
-                        .ifPresentOrElse(
-                                s -> s.apply(toggle.enabled(), now),
-                                () -> settingRepository.save(
-                                        NotificationSetting.of(userId, type, toggle.enabled(), now)));
+        if (request.pushEnabled() != null) s.applyMaster(request.pushEnabled(), now);
+
+        Instant marketingSyncedAt = null;
+        if (request.groups() != null) {
+            NotificationSettingDtos.GroupPatch g = request.groups();
+            if (g.account() != null) s.applyGroup(NotificationToggleGroup.ACCOUNT, g.account(), now);
+            if (g.challenge() != null)
+                s.applyGroup(NotificationToggleGroup.CHALLENGE, g.challenge(), now);
+            if (g.marketing() != null) {
+                s.applyGroup(NotificationToggleGroup.MARKETING, g.marketing(), now);
+                syncMarketingConsent(userId, g.marketing(), now);
+                marketingSyncedAt = now;
             }
         }
-
-        if (request.mutedChallengeIds() != null) replaceMutes(userId, request.mutedChallengeIds(), now);
-
-        if (request.marketing() != null) {
-            User user = userRepository.findByIdAndDeletedAtIsNull(userId)
-                    .orElseThrow(() -> new BusinessException(ErrorCode.LOGIN_REQUIRED));
-            agreementService.record(user, AgreementType.MARKETING, request.marketing(),
-                    props.client().termsVersions().marketing(), now);
-        }
-        return settings(userId);
+        return new NotificationSettingDtos.PatchResponse(toResponse(userId, s),
+                marketingSyncedAt == null ? null : marketingSyncedAt.toString());
     }
 
-    /** 음소거는 전체 교체다 — 부분 갱신으로 두면 해제가 누락됐는지 클라이언트가 알 수 없다. */
-    private void replaceMutes(UUID userId, List<String> challengeIds, Instant now) {
-        muteRepository.deleteAll(muteRepository.findByUserId(userId));
-        muteRepository.flush();
-        for (String raw : challengeIds) {
-            try {
-                muteRepository.save(NotificationMute.of(userId, UUID.fromString(raw), now));
-            } catch (IllegalArgumentException e) {
-                throw new BusinessException(ErrorCode.INVALID_REQUEST);
-            }
-        }
-    }
+    /** 음소거 등록 — <b>참여 중인 챌린지만</b>. 멱등이다. */
+    @Transactional
+    public void mute(UUID userId, UUID challengeId) {
+        boolean joined = challengeMemberRepository.findByChallengeIdAndUserId(challengeId, userId)
+                .filter(m -> m.getStatus() == MemberStatus.ACTIVE)
+                .isPresent();
+        if (!joined) throw new BusinessException(ErrorCode.CHALLENGE_NOT_JOINED);
 
-    // ===== 커서 =====
+        NotificationMute.Key key = new NotificationMute.Key(userId, challengeId);
+        if (muteRepository.existsById(key)) return;
+        muteRepository.save(NotificationMute.of(userId, challengeId, Instant.now()));
+    }
 
     /**
-     * {@code createdAt(epochMilli):id} 복합 커서를 base64url 로 감싼 불투명 문자열.
-     *
-     * <p>구분자를 날것으로 노출하면 클라이언트마다 URL 인코딩을 다르게 처리해 조용히 깨진다.
-     * 감싸 두면 쿼리스트링에 그대로 실을 수 있고, 형식이 바뀌어도 클라이언트가 영향을 받지 않는다.
+     * 음소거 해제 — 멱등이며 <b>참여 여부를 따지지 않는다</b>. 탈퇴한 방의 음소거를 못 지우면
+     * 목록에 영영 남는다.
      */
-    private record Cursor(Instant at, UUID id) {
+    @Transactional
+    public void unmute(UUID userId, UUID challengeId) {
+        muteRepository.deleteById(new NotificationMute.Key(userId, challengeId));
+    }
 
-        private static final java.util.Base64.Encoder ENC = java.util.Base64.getUrlEncoder().withoutPadding();
-        private static final java.util.Base64.Decoder DEC = java.util.Base64.getUrlDecoder();
+    // ===== 내부 =====
 
-        static Cursor parse(String raw) {
-            if (raw == null || raw.isBlank()) return new Cursor(null, null);
+    /** 설정 행을 확보한다 — 없으면 기본값으로 만들어 저장한다. */
+    private UserNotificationSetting settings(UUID userId, Instant now) {
+        return settingRepository.findById(userId).orElseGet(() ->
+                settingRepository.save(UserNotificationSetting.defaults(userId, now)));
+    }
+
+    private NotificationSettingDtos.Response toResponse(UUID userId, UserNotificationSetting s) {
+        List<String> muted = muteRepository.findByUserIdOrderByMutedAtAsc(userId).stream()
+                .map(m -> m.getChallengeId().toString()).toList();
+        return new NotificationSettingDtos.Response(
+                s.isPushEnabled(),
+                new NotificationSettingDtos.Groups(s.isGroupAccount(), s.isGroupChallenge(),
+                        s.isGroupMarketing()),
+                muted);
+    }
+
+    private void syncMarketingConsent(UUID userId, boolean agreed, Instant now) {
+        User user = userRepository.findByIdAndDeletedAtIsNull(userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.LOGIN_REQUIRED));
+        agreementService.record(user, AgreementType.MARKETING, agreed,
+                props.client().termsVersions().marketing(), now);
+    }
+
+    private static NotificationTab tabOf(String raw) {
+        if (raw == null || raw.isBlank()) return NotificationTab.NOTIFICATION;
+        return NotificationTab.find(raw)
+                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_REQUEST));
+    }
+
+    private static UUID parseUuid(String raw) {
+        try {
+            return UUID.fromString(raw);
+        } catch (IllegalArgumentException e) {
+            throw new BusinessException(ErrorCode.NOTIFICATION_NOT_FOUND);
+        }
+    }
+
+    /**
+     * 커서 — 알림 id 를 base64url 로 감싼 <b>불투명 문자열</b>이다.
+     *
+     * <p>id 하나로 충분한 이유는 UUIDv7 이기 때문이다. 상위 48비트가 밀리초 타임스탬프라
+     * id 순서가 곧 시간 순서이고, 00시 배치가 같은 밀리초에 수만 행을 넣어도 동점이 없다.
+     * 구 {@code createdAt|id} 복합 커서는 인덱스에 밀어넣을 수 없어 버렸다.
+     */
+    private static final class Cursor {
+
+        private static final Base64.Encoder ENC = Base64.getUrlEncoder().withoutPadding();
+        private static final Base64.Decoder DEC = Base64.getUrlDecoder();
+
+        static UUID decode(String raw) {
+            if (raw == null || raw.isBlank()) return null;
             try {
-                String decoded = new String(DEC.decode(raw), java.nio.charset.StandardCharsets.UTF_8);
-                int sep = decoded.indexOf(':');
-                if (sep < 0) throw new IllegalArgumentException("구분자 없음");
-                return new Cursor(Instant.ofEpochMilli(Long.parseLong(decoded.substring(0, sep))),
-                        UUID.fromString(decoded.substring(sep + 1)));
+                return UUID.fromString(new String(DEC.decode(raw), StandardCharsets.UTF_8));
             } catch (RuntimeException e) {
                 throw new BusinessException(ErrorCode.CURSOR_INVALID);
             }
         }
 
-        static String encode(Notification last) {
-            String raw = last.getCreatedAt().toEpochMilli() + ":" + last.getId();
-            return ENC.encodeToString(raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        static String encode(UUID id) {
+            return ENC.encodeToString(id.toString().getBytes(StandardCharsets.UTF_8));
         }
     }
 }

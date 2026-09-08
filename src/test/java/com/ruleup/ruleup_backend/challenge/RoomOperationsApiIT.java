@@ -152,21 +152,18 @@ class RoomOperationsApiIT extends ChallengeApiSupport {
     }
 
     @Test
-    @DisplayName("알림 설정은 유형별 토글로 저장되고 같은 계약으로 조회된다")
+    @DisplayName("알림 설정은 마스터·그룹으로 저장되고 같은 계약으로 조회된다")
     void notificationSettingsPatch() throws Exception {
         Member member = member(uniq("settings"));
         MvcResult patched = patchJsonAuth("/api/v1/users/me/notification-settings", member.token(),
-                Map.of("types", java.util.List.of(
-                        Map.of("type", "ROUTINE_REMINDER", "enabled", false))));
+                Map.of("groups", Map.of("challenge", false)));
         assertThat(patched.getResponse().getStatus()).isEqualTo(200);
 
         MvcResult fetched = getAuth("/api/v1/users/me/notification-settings", member.token());
-        java.util.List<Map<String, Object>> types = read(fetched, "$.data.types");
-        assertThat(types).filteredOn(t -> "ROUTINE_REMINDER".equals(t.get("type")))
-                .singleElement().satisfies(t -> assertThat(t.get("enabled")).isEqualTo(false));
+        assertThat((Boolean) read(fetched, "$.data.groups.challenge")).isFalse();
         // 건드리지 않은 항목은 기본 ON 그대로다 — 행이 없으면 ON 으로 해석한다.
-        assertThat(types).filteredOn(t -> "TIER_CHANGED".equals(t.get("type")))
-                .singleElement().satisfies(t -> assertThat(t.get("enabled")).isEqualTo(true));
+        assertThat((Boolean) read(fetched, "$.data.groups.account")).isTrue();
+        assertThat((Boolean) read(fetched, "$.data.pushEnabled")).isTrue();
     }
 
     private MvcResult postJson(String url, String token, Map<String, ?> body) throws Exception {
