@@ -152,6 +152,12 @@ public final class AdminDtos {
             @Schema(requiredMode = Schema.RequiredMode.REQUIRED) String body,
             String confirmationToken) {}
 
-    @Schema(name = "AdminNoticeResponse")
-    public record NoticeResponse(int recipientCount, String publishedAt) {}
+    @Schema(name = "AdminNoticeResponse", description = """
+            공지 원본만 저장하고 즉시 응답한다. **적재는 팬아웃 잡이 청크 단위로** 한다 —
+            2만 행 INSERT 를 요청-응답 안에서 하면 커넥션을 오래 잡고 실패 시 전부 롤백된다.""")
+    public record NoticeResponse(
+            @Schema(description = "공지 id. 팬아웃 진행은 announcements 행에 남는다") String announcementId,
+            @Schema(description = "**예상** 수신자 수 — 실제 적재 수는 팬아웃이 끝나야 확정된다")
+            int recipientCount,
+            String publishedAt) {}
 }

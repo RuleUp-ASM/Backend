@@ -44,6 +44,12 @@ public interface VerificationDailyRepository extends JpaRepository<VerificationD
     /** 캘린더 당일 보강: 유저의 특정 날짜 인증 행(RoutineOutcome 지연분 보완). */
     List<VerificationDaily> findByUserIdAndTargetDate(UUID userId, LocalDate targetDate);
 
+    /**
+     * 여러 유저의 같은 날짜 행 — 루틴 리마인더가 <b>한 번에</b> 읽는다.
+     * 건당 조회하면 6만 멤버십에서 N+1 이 난다.
+     */
+    List<VerificationDaily> findByUserIdInAndTargetDate(List<UUID> userIds, LocalDate targetDate);
+
     /** 점수 정산: 한 사이클(7일 구간) 안의 내 판정 전부. 확정 여부는 읽는 쪽이 가린다. */
     List<VerificationDaily> findByUserIdAndChallengeIdAndTargetDateBetween(
             UUID userId, UUID challengeId, LocalDate from, LocalDate to);

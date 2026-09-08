@@ -6,6 +6,8 @@ import com.ruleup.ruleup_backend.admin.domain.AdminAuditLog;
 import com.ruleup.ruleup_backend.admin.repository.AdminAuditLogRepository;
 import com.ruleup.ruleup_backend.challenge.ChallengeApiSupport;
 import com.ruleup.ruleup_backend.notification.NotificationRepository;
+import com.ruleup.ruleup_backend.notification.announcement.AnnouncementFanoutJob;
+import com.ruleup.ruleup_backend.notification.domain.NotificationTab;
 import com.ruleup.ruleup_backend.notification.domain.NotificationToggleGroup;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.sanction.SanctionRepository;
@@ -62,6 +64,7 @@ class AdminBackofficeIT extends ChallengeApiSupport {
     @Autowired SanctionRepository sanctionRepository;
     @Autowired AdminAuditLogRepository auditLogRepository;
     @Autowired NotificationRepository notificationRepository;
+    @Autowired AnnouncementFanoutJob announcementFanoutJob;
 
     private MockMvc mvc;
 
@@ -513,9 +516,30 @@ class AdminBackofficeIT extends ChallengeApiSupport {
                     "body", "02:00~03:00 점검이 있어요."));
             assertThat(res.getResponse().getStatus()).isEqualTo(200);
 
+            // 요청은 공지 원본만 저장하고 즉시 응답한다 — 2만 행 INSERT 를 요청-응답 안에서
+            // 하면 커넥션을 오래 잡고 실패 시 전부 롤백된다. 적재는 팬아웃 잡의 몫이다.
+            assertThat((String) read(res, "$.data.announcementId")).isNotNull();
             assertThat(notificationRepository.findByUserIdOrderByIdDesc(reader.id()))
-                    .anyMatch(n -> NotificationType.TERMS_UPDATED.name().equals(n.getType())
-                            || n.toggleGroupEnum() == NotificationToggleGroup.ACCOUNT);
+                    .as("아직 팬아웃 전이다").noneMatch(
+                            n -> NotificationType.ANNOUNCEMENT.name().equals(n.getType()));
+
+            announcementFanoutJob.fanOutPending();
+
+            assertThat(notificationRepository.findByUserIdOrderByIdDesc(reader.id()))
+                    .filteredOn(n -> NotificationType.ANNOUNCEMENT.name().equals(n.getType()))
+                    .singleElement()
+                    .satisfies(n -> {
+                        // 공지는 공지 탭에만 쌓이고 푸시가 나가지 않는다.
+                        assertThat(n.tabEnum()).isEqualTo(NotificationTab.ANNOUNCEMENT);
+                        assertThat(n.toggleGroupEnum()).isEqualTo(NotificationToggleGroup.NONE);
+                        assertThat(n.getTitle()).isEqualTo("점검 안내");
+                    });
+
+            // 두 번 돌려도 한 줄뿐이다 — dedup_key UNIQUE 가 재개 시 중복 적재를 막는다.
+            announcementFanoutJob.fanOutPending();
+            assertThat(notificationRepository.findByUserIdOrderByIdDesc(reader.id()))
+                    .filteredOn(n -> NotificationType.ANNOUNCEMENT.name().equals(n.getType()))
+                    .hasSize(1);
         }
 
         @Test

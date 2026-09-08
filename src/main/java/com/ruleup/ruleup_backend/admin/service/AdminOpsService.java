@@ -10,9 +10,9 @@ import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
-import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
-import com.ruleup.ruleup_backend.notification.NotificationPublisher;
+import com.ruleup.ruleup_backend.notification.announcement.Announcement;
+import com.ruleup.ruleup_backend.notification.announcement.AnnouncementRepository;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.sanction.SanctionRepository;
 import com.ruleup.ruleup_backend.sanction.domain.Sanction;
@@ -48,7 +48,7 @@ public class AdminOpsService {
     private final ChallengeMemberRepository memberRepository;
     private final AdminAuditService auditService;
     private final ConfirmationTokens confirmationTokens;
-    private final NotificationPublisher notificationPublisher;
+    private final AnnouncementRepository announcementRepository;
     private final JdbcTemplate jdbc;
 
     // ===== 유저 통합 뷰 =====
@@ -179,7 +179,16 @@ public class AdminOpsService {
 
     // ===== 운영 공지 =====
 
-    /** 점검·장애·약관·종료 공지. <b>필수(A) 알림</b>으로 나가므로 끌 수 없고 야간에도 즉시 발송된다. */
+    /**
+     * 점검·장애·약관·종료 공지 — <b>공지 원본만 저장하고 즉시 응답한다</b>.
+     *
+     * <p>전체 공지 1건이 약 2만 행으로 팬아웃되므로 그 INSERT 를 요청 트랜잭션 안에 둘 수 없다.
+     * 실제 적재는 {@link com.ruleup.ruleup_backend.notification.announcement.AnnouncementFanoutJob}
+     * 이 청크 단위로 한다.
+     *
+     * <p>공지는 알림 센터의 <b>공지 탭에만</b> 쌓이고 푸시가 나가지 않는다({@code pushable=false}).
+     * 이 속성을 운영 토글로 두지 않는 이유는 하나다 — 누가 켜면 2만 명에게 푸시가 나간다.
+     */
     @Transactional
     public AdminDtos.NoticeResponse publishNotice(UUID operatorId, AdminDtos.NoticeRequest request) {
         if (request == null || isBlank(request.title()) || isBlank(request.body()))
@@ -190,24 +199,23 @@ public class AdminOpsService {
                 AdminAction.OPS_NOTICE.name(), "-", payload)) {
             throw BusinessException.confirmationRequired(
                     confirmationTokens.issue(operatorId, AdminAction.OPS_NOTICE.name(), "-", payload),
-                    new AdminDtos.NoticeResponse(0, null));
+                    new AdminDtos.NoticeResponse(null, 0, null));
         }
 
         auditService.allowed(operatorId, AdminAction.OPS_NOTICE, null, null, payload);
 
-        List<UUID> recipients = jdbc.query(
-                "SELECT id FROM users WHERE status <> 'WITHDRAWN' AND deleted_at IS NULL",
-                (rs, row) -> uuid(rs.getBytes(1)));
-        // 공지 1건이 유저 수만큼 팬아웃되므로 멱등키에 공지 식별자를 넣는다 — 재요청이
-        // 같은 공지를 두 번 쌓지 않게 하는 것은 이 키뿐이다.
-        String noticeKey = "ops-notice:" + Instant.now().toEpochMilli();
-        notificationPublisher.publishAll(recipients.stream()
-                .map(userId -> NotificationEvent.of(userId, NotificationType.TERMS_UPDATED,
-                        request.title(), request.body(),
-                        Map.of(NotificationParams.EVENT_KEY, noticeKey)))
-                .toList());
+        Instant now = Instant.now();
+        Announcement announcement = announcementRepository.save(
+                Announcement.of(request.title(), request.body(), operatorId, now));
 
-        return new AdminDtos.NoticeResponse(recipients.size(), Instant.now().toString());
+        // 예상 수신자 수만 세어 돌려준다. 실제 적재 수는 팬아웃이 끝나야 확정되며
+        // announcements.recipient_count 에 남는다.
+        Integer audience = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM users WHERE status <> 'WITHDRAWN' AND deleted_at IS NULL",
+                Integer.class);
+
+        return new AdminDtos.NoticeResponse(announcement.getId().toString(),
+                audience == null ? 0 : audience, now.toString());
     }
 
     // ===== 내부 =====
