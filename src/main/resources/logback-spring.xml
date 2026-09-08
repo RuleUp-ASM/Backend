@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  발송 로그만 **날것의 JSON 한 줄**로 내보낸다.
+
+  CloudWatch 메트릭 필터의 JSON 문법($.evt = "push.result")은 로그 이벤트 전체가 유효한
+  JSON 이어야 동작한다. 기본 패턴은 앞에 시각·레벨·스레드·로거를 붙이므로 파싱이 실패하고,
+  그러면 야간 0건 알람이 **조용히 아무것도 잡지 못한 채** 초록불로 남는다 — 스펙이 이번
+  재설계의 유일한 실질 리스크로 지목한 바로 그 상태다.
+
+  나머지 로그는 스프링 부트 기본 설정을 그대로 쓴다.
+-->
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+
+    <appender name="PUSH_JSON" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%msg%n</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- additivity=false — 루트로도 흘리면 같은 줄이 접두어 붙은 채 한 번 더 나가 카운트가 두 배가 된다. -->
+    <logger name="notification.push" level="INFO" additivity="false">
+        <appender-ref ref="PUSH_JSON"/>
+    </logger>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+</configuration>

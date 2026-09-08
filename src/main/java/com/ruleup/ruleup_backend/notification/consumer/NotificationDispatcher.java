@@ -3,6 +3,8 @@ package com.ruleup.ruleup_backend.notification.consumer;
 import com.ruleup.ruleup_backend.notification.NotificationMuteRepository;
 import com.ruleup.ruleup_backend.notification.NotificationRepository;
 import com.ruleup.ruleup_backend.notification.NotificationSettingRepository;
+import com.ruleup.ruleup_backend.notification.NotificationWindow;
+import com.ruleup.ruleup_backend.notification.domain.NotificationToggleGroup;
 import com.ruleup.ruleup_backend.notification.domain.NotificationTab;
 import com.ruleup.ruleup_backend.notification.domain.UserNotificationSetting;
 import com.ruleup.ruleup_backend.notification.queue.NotificationMessage;
@@ -76,7 +78,7 @@ public class NotificationDispatcher {
                 continue;
             }
             if (!decision.shouldSend()) {
-                logResult(message, "SUPPRESSED", decision.suppressedReason(), null);
+                logResult(message, "SUPPRESSED", decision.suppressedReason(), null, now);
                 outcomes.add(DispatchOutcome.suppressed(message.id(), decision.suppressedReason()));
                 continue;
             }
@@ -166,12 +168,12 @@ public class NotificationDispatcher {
             deadTokens.addAll(result.deadTokens());
 
             if (result.success()) {
-                logResult(message, "SUCCESS", null, null);
+                logResult(message, "SUCCESS", null, null, now);
                 // 억제 대상 타입만 찍는다.
                 if (message.suppressKey() != null) stamp.add(message.id());
                 outcomes.set(i, DispatchOutcome.sent(message.id()));
             } else {
-                logResult(message, "FAILED", null, result.errorCode());
+                logResult(message, "FAILED", null, result.errorCode(), now);
                 outcomes.set(i, result.retryable()
                         ? DispatchOutcome.retryable(message.id(), result.errorCode())
                         : DispatchOutcome.failed(message.id(), result.errorCode()));
@@ -192,14 +194,27 @@ public class NotificationDispatcher {
                 + "\"type\":\"{}\",\"at\":\"{}\"}", m.id(), m.userId(), m.type(), now);
     }
 
+    /**
+     * 발송 결과 1줄.
+     *
+     * <p>{@code nightPush} 와 {@code outsideMarketingWindow} 는 <b>알람이 존재할 수 있게</b>
+     * 하려고 서버가 직접 계산해 싣는다. 메트릭 필터는 시간 조건을 표현하지 못하므로,
+     * 「KST 21~08 에 SUCCESS 가 있었나」를 로그 밖에서 물을 방법이 없다.
+     * 이 두 값이 {@code true} 인 SUCCESS 는 <b>단 1건도 나오면 안 되는</b> 상태다.
+     */
     private void logResult(NotificationMessage m, String result, SuppressedReason reason,
-                           String errorCode) {
+                           String errorCode, Instant at) {
         PUSH_LOG.info("{\"evt\":\"push.result\",\"notificationId\":\"{}\",\"userId\":\"{}\","
-                        + "\"type\":\"{}\",\"result\":\"{}\",\"suppressedReason\":\"{}\","
-                        + "\"errorCode\":\"{}\",\"at\":\"{}\"}",
-                m.id(), m.userId(), m.type(), result,
+                        + "\"type\":\"{}\",\"toggleGroup\":\"{}\",\"result\":\"{}\","
+                        + "\"suppressedReason\":\"{}\",\"errorCode\":\"{}\","
+                        + "\"nightPush\":{},\"outsideMarketingWindow\":{},\"at\":\"{}\"}",
+                m.id(), m.userId(), m.type(), m.toggleGroup(), result,
                 reason == null ? "" : reason.name(),
-                errorCode == null ? "" : errorCode, Instant.now());
+                errorCode == null ? "" : errorCode,
+                NotificationWindow.isNight(at),
+                m.toggleGroup() == NotificationToggleGroup.MARKETING
+                        && !DispatchDecision.decideMarketingWindow(at),
+                at);
     }
 
     /** 컨슈머가 SQS 메시지를 지울지 정하는 데 필요한 것만 담는다. */
