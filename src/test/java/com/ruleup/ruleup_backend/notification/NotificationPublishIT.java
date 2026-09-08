@@ -102,6 +102,12 @@ class NotificationPublishIT {
             assertThat(applicationContext.getBeanNamesForType(
                     software.amazon.awssdk.services.sqs.SqsClient.class))
                     .as("큐 URL 이 비면 AWS SDK 를 건드리지 않는다").isEmpty();
+
+            // 컨슈머도 같은 조건이어야 한다. 조건이 어긋나면 이 빈만 살아나 SqsClient 를
+            // 못 찾고 컨텍스트가 죽는다 — 실제로 그렇게 CI 가 두 번 깨졌다.
+            assertThat(applicationContext.getBeanNamesForType(
+                    com.ruleup.ruleup_backend.notification.consumer.NotificationConsumer.class))
+                    .as("프로듀서와 컨슈머는 같은 조건으로 배선된다").isEmpty();
         }
     }
 

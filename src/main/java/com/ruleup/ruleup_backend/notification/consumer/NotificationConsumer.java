@@ -7,7 +7,7 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.ChangeMessageVisibilityRequest;
@@ -38,7 +38,9 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 @Component
-@ConditionalOnProperty(name = "app.notification.queue.url")
+// 프로듀서 설정과 **같은 조건**이어야 한다. @ConditionalOnProperty 는 빈 문자열도 존재로 보므로,
+// 그걸 쓰면 큐가 없는 환경에서 이 빈만 살아나 SqsClient 를 못 찾고 컨텍스트가 죽는다.
+@ConditionalOnExpression("!'${app.notification.queue.url:}'.trim().isEmpty()")
 public class NotificationConsumer {
 
     /** 롱 폴링 — 빈 응답 비용을 줄인다. */
