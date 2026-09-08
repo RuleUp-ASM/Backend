@@ -2,147 +2,356 @@ package com.ruleup.ruleup_backend.notification.domain;
 
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
+
+import static com.ruleup.ruleup_backend.notification.domain.NotificationParams.*;
 
 /**
- * 알림 타입 레지스트리 <b>21종</b> — 알림 및 알림함 기능 스펙 6-1 #3·#4·#14.
+ * 알림 타입 레지스트리 <b>22종</b> — 백엔드 테크 스펙 5절, 공통 8절.
  *
- * <p>타입마다 분류·딥링크·중복 제어 주기·토글 가능 여부를 선언한다. <b>분기를 if 문으로 흩뿌리지
- * 않고 레지스트리 조회 한 번으로 끝내는 것</b>이 확장성의 핵심이다 — 페이지2에서 공지·댓글
- * 알림 5종을 합류시킬 때 여기 항목만 추가하면 된다.
+ * <h4>테이블이 아니라 코드 enum이다</h4>
+ * {@code notification_types} 레지스트리 테이블은 2026-09-08 제거됐다. 타입 코드 · 토글 그룹 ·
+ * 딥링크 · {@code pushable} · 억제 인터벌 · 탭이 전부 여기 불변 값으로 있다.
+ * <b>대가를 알고 간다</b> — 인터벌의 무배포 변경이 불가능해지고 타입별 킬 스위치가 없어진다.
+ * 다만 컨슈머 정지가 더 강한 대체 수단이다: 적재는 계속되고 푸시만 멈추므로 절대 규칙 1을
+ * 지키면서 전면 차단이 된다.
  *
- * <p>DB 컬럼은 ENUM 이 아니라 VARCHAR 다. 타입 추가에 DDL 이 필요 없게 하기 위함이라,
- * <b>모르는 값이 들어와도 조회가 깨지지 않아야 한다</b>({@link #find} 가 Optional 을 준다).
+ * <h4>두 종류의 키는 층이 다르다</h4>
+ * <ul>
+ *   <li>{@link #dedupKey} — <b>1회성 멱등.</b> UNIQUE 가 INSERT 단계에서 막는다. 전 타입이 가진다.
+ *   <li>{@link #suppressKey} — <b>반복성 억제.</b> 같은 키가 여러 행에 반복해 붙고, 발송 단계에서
+ *       {@code pushed_at} 조회로 판정한다. <b>6종만</b> 쓴다.
+ * </ul>
+ * 하나로 합칠 수 없다. UNIQUE 로 억제까지 하면 두 번째 알림이 <b>알림 센터에도 안 들어가서</b>
+ * 절대 규칙 1(모든 알림은 예외 없이 적재된다)을 어긴다.
  *
- * <h4>딥링크</h4>
- * {@code {target}} 은 발행 시점의 {@code targetKey} 로 치환된다. 감시자 통지가 방이 아니라
- * 수신 관리 화면으로 가는 것은 의도된 것이다 — 감시자에게 방 상세·랭킹·멤버 진입점을 주지 않는다.
+ * <h4>타입 코드는 구현 이름 기준이다</h4>
+ * {@code notifications.type} 이 적재된 값이라 개명은 데이터 마이그레이션이다(공통 8절).
  */
 public enum NotificationType {
 
-    // ===== A · 필수 11종 — 시각 무관 즉시 발송, 토글 불가, 중복 제어 없음 =====
+    // ===== 계정 그룹 11종 =====
 
-    /** 강퇴 확정. 사유와 근거는 제재 이력에서 본다 — 이미 나간 방으로 보낼 수 없다. */
-    CHALLENGE_KICKED(NotificationCategory.A, "ruleup://me/sanctions"),
-    /** 계정 잠금·해제. */
-    ACCOUNT_SANCTION(NotificationCategory.A, "ruleup://me/sanctions"),
-    /** 휴면 사전 고지 — 30일 7일 전·1일 전. */
-    DORMANCY_NOTICE(NotificationCategory.A, "ruleup://home"),
-    /** 1년 미활동 탈퇴 고지 — 30일 전. */
-    INACTIVITY_WITHDRAWAL(NotificationCategory.A, "ruleup://home"),
-    /** 모더레이션 거부(닉네임·프로필 사진) — 수정 UI 로 바로 진입해야 한다. */
-    MODERATION_REJECTED(NotificationCategory.A, "ruleup://profile/edit"),
-    /** 챌린지 이미지 삭제 — 방 수정 화면으로 진입한다. */
-    CHALLENGE_IMAGE_REMOVED(NotificationCategory.A, "ruleup://challenges/{target}/edit"),
-    /** 권한 재허용 요청 — 인증 설정 화면으로 바로 보낸다. 2사이클 내 미해소면 강퇴다. */
-    PERMISSION_REGRANT_REQUIRED(NotificationCategory.A, "ruleup://challenges/{target}/setup"),
-    /** 부정행위 검출 통지 — 검출 1회가 곧 강퇴·영구 차단이다. */
-    CHEAT_DETECTED(NotificationCategory.A, "ruleup://me/sanctions"),
+    /** 강퇴 확정. 이미 나간 방으로 보낼 수 없어 제재 이력으로 보낸다. */
+    CHALLENGE_KICKED(NotificationToggleGroup.ACCOUNT, "ruleup://me/sanctions",
+            new String[]{EVENT_KEY}),
+
+    /** 계정 잠금·정지. 사유와 해제일은 제재 이력이 소유한다. */
+    ACCOUNT_SANCTION(NotificationToggleGroup.ACCOUNT, "ruleup://me/sanctions",
+            new String[]{EVENT_KEY}),
+
+    /** 휴면 전환 예고. */
+    DORMANCY_NOTICE(NotificationToggleGroup.ACCOUNT, "ruleup://home",
+            new String[]{EVENT_KEY}),
+
+    /** 장기 미접속 탈퇴 예고. */
+    INACTIVE_WITHDRAWAL_NOTICE(NotificationToggleGroup.ACCOUNT, "ruleup://home",
+            new String[]{EVENT_KEY}),
+
     /**
-     * 이의 처리 결과 — <b>이의 현황</b>으로 보낸다(2026-09-07 변경).
+     * 심사 거부 — 닉네임·프로필 사진은 같은 편집 화면이라 한 타입으로 충분하다.
+     * 챌린지 제목·설명 거부만 진입점이 달라 발행부가 딥링크를 재정의한다.
      *
-     * <p>계정 캘린더로 보내면 어느 이의의 결과인지 사용자가 그 달을 뒤져 다시 찾아야 한다.
-     * 이의 <b>상세</b>로 보내는 편이 낫지만 뒷받침할 API 가 없다 —
-     * {@code GET /users/me/appeals} 는 목록 전용이고 단건 조회 경로가 없다.
-     * 없는 화면을 가리키는 것은 구 {@code ruleup://verification/{id}} 가 겪은 문제라 되풀이하지 않는다.
+     * <p>키에 {@code event_key} 를 함께 넣는다. {@code target_key}(=nickname) 하나로 두면
+     * UNIQUE 가 <b>평생</b> 두 번째 거부를 막아 재제출 후 거부가 알림함에 들어가지 않는다.
      */
-    APPEAL_RESULT(NotificationCategory.A, "ruleup://me/appeals"),
-    /** 약관 변경 고지 — 재동의 화면으로 보낸다. */
-    TERMS_UPDATED(NotificationCategory.A, "ruleup://settings/agreements"),
-    /** 다른 기기 로그인으로 세션이 종료됨. 로그아웃 상태라 진입점을 두지 않는다. */
-    DEVICE_LOGGED_OUT(NotificationCategory.A, null),
+    MODERATION_REJECTED(NotificationToggleGroup.ACCOUNT, "ruleup://profile/edit",
+            new String[]{TARGET_KEY, EVENT_KEY}),
 
-    // ===== B · 기능 9종 — 토글·음소거·중복 제어·야간 보류 대상 =====
+    /** 챌린지 대표 이미지 삭제. 같은 방에서 재발할 수 있어 {@code event_key} 를 함께 넣는다. */
+    CHALLENGE_IMAGE_REMOVED(NotificationToggleGroup.ACCOUNT,
+            "ruleup://challenges/{challenge_id}/edit",
+            new String[]{CHALLENGE_ID, EVENT_KEY}),
 
-    /** 루틴 리마인더 — 08:00 · 12:00 · 19:00, 당일 판정 예정 루틴 보유자에게만. */
-    ROUTINE_REMINDER(NotificationCategory.B, "ruleup://challenges/{target}", true),
     /**
-     * 날짜별 판정 결과 — <b>방 상세</b>의 「오늘」 카드로 보낸다(2026-09-07 변경).
+     * 인증 권한 재허용 요청 — <b>방별</b> 인증 권한이라 딥링크가 방 설정이다(공통 8절 정정).
      *
-     * <p>앱에 인증 상세 단독 화면이 없어 구 {@code ruleup://verification/{id}} 는 빈 화면으로 갔고,
-     * 계정 캘린더로 보내면 어느 방의 결과인지 사용자가 다시 찾아야 한다.
+     * <p>억제 키에 {@code challenge_id} 를 넣은 것이 핵심이다(9/8 변경). 유저 단위 24h 로 두면
+     * <b>2개 방에서 권한이 막힌 유저가 한쪽 알림만 받고 다른 방은 2사이클 내 미해소로 강퇴</b>된다.
      */
-    VERIFICATION_RESULT(NotificationCategory.B, "ruleup://challenges/{target}", true),
-    /** 티어 승급·강등 확정. */
-    TIER_CHANGED(NotificationCategory.B, "ruleup://me/tier"),
-    /** 티어 경계 5점 이내 도달 — <b>중복 금지가 1주</b>인 유일한 예외다. */
-    TIER_BOUNDARY_NEAR(NotificationCategory.B, "ruleup://me/tier", false, Duration.ofDays(7)),
-    /** 연속 실패 경고 — 2사이클 시점. 3사이클이면 강퇴다. */
-    CONSECUTIVE_FAILURE_WARNING(NotificationCategory.B, "ruleup://challenges/{target}", true),
-    /** 챌린지 시작·종료. */
-    CHALLENGE_LIFECYCLE(NotificationCategory.B, "ruleup://challenges/{target}", true),
+    PERMISSION_REGRANT_REQUIRED(NotificationToggleGroup.ACCOUNT,
+            "ruleup://challenges/{challenge_id}/setup",
+            new String[]{EVENT_KEY},
+            new String[]{PERMISSION, CHALLENGE_ID}, Duration.ofHours(24)),
+
     /**
-     * 패널티 실패 공유 — 감시자에게 가는 통지.
-     * 방 상세가 아니라 수신 관리 화면으로 보낸다. 감시자는 방 멤버가 아니다.
+     * 부정행위 검출 — 검출 1회가 곧 강퇴·영구 차단이다.
+     *
+     * <p>확정값은 {@code ruleup://me/cheat-history} 지만 받침할 화면·API 가 없어 아직
+     * {@code me/sanctions} 를 보낸다(공통 #18). 없는 화면을 가리키는 것이 잘못된 화면을
+     * 가리키는 것보다 나쁘다 — 구 {@code verification/{id}} 가 빈 화면으로 갔던 그 문제다.
      */
-    PENALTY_FAILURE_SHARED(NotificationCategory.B, "ruleup://watching/notices/{target}", true),
-    /** 감시자 초대 만료 — <b>생성자에게만</b> 간다. 감시자 후보는 아직 동의하지 않은 외부인이다. */
-    WATCHER_INVITATION_EXPIRED(NotificationCategory.B, "ruleup://challenges/{target}/watchers"),
-    /** 응원·놀림 반응 — 실패 당사자 1명에게만. 감시자 닉네임을 공개한다. */
-    WATCHER_REACTION(NotificationCategory.B, "ruleup://me/calendar"),
+    CHEAT_DETECTED(NotificationToggleGroup.ACCOUNT, "ruleup://me/sanctions",
+            new String[]{EVENT_KEY}),
 
-    // ===== C · 마케팅 1종 =====
+    /**
+     * 이의 처리 결과. 이의 <b>상세</b>로 보내는 편이 낫지만 단건 조회 API 가 없어 현황 목록으로 간다.
+     */
+    APPEAL_RESULT(NotificationToggleGroup.ACCOUNT, "ruleup://me/appeals",
+            new String[]{APPEAL_ID}),
 
-    /** 마케팅·이벤트. 페이지1은 수신 측 규칙만 구현하며 캠페인 발송 도구는 백오피스 소관이다. */
-    MARKETING(NotificationCategory.C, null);
+    /** 약관 개정. 개별 약관 상세로 보내면 나머지 재동의 항목을 놓치므로 동의 목록으로 보낸다. */
+    TERMS_UPDATED(NotificationToggleGroup.ACCOUNT, "ruleup://settings/agreements",
+            new String[]{EVENT_KEY}),
 
-    private final NotificationCategory category;
+    /**
+     * 기기 로그아웃 — <b>딥링크 없음</b>. 이 알림을 받는 순간 그 기기는 로그아웃 상태라
+     * 어디로 보내도 로그인 벽에 막힌다. 탭하면 클라이언트가 알림함으로 폴백한다.
+     */
+    DEVICE_LOGGED_OUT(NotificationToggleGroup.ACCOUNT, null,
+            new String[]{EVENT_KEY}),
+
+    // ===== 챌린지 그룹 8종 =====
+
+    /** 인증 판정 결과 — 방 상세의 「오늘」 카드. 앱에 인증 상세 단독 화면이 없다. */
+    VERIFICATION_RESULT(NotificationToggleGroup.CHALLENGE, "ruleup://challenges/{challenge_id}",
+            new String[]{VERIFICATION_ID}),
+
+    /**
+     * 연속 실패 경고 — 강퇴 직전 고지다.
+     *
+     * <p>인터벌은 스펙에서 미정으로 남아 있던 유일한 값이며 <b>24시간으로 확정</b>했다(2026-09-08).
+     * 다른 억제 타입의 기본값과 같고, 같은 루틴의 경고가 하루에 두 번 이상 울릴 이유가 없다.
+     */
+    CONSECUTIVE_FAILURE_WARNING(NotificationToggleGroup.CHALLENGE,
+            "ruleup://challenges/{challenge_id}",
+            new String[]{EVENT_KEY},
+            new String[]{CHALLENGE_ID, ROUTINE_ID}, Duration.ofHours(24)),
+
+    /** 챌린지 시작·종료. 진입점이 같아 한 타입이고 {@code phase} 로 가른다. */
+    CHALLENGE_LIFECYCLE(NotificationToggleGroup.CHALLENGE, "ruleup://challenges/{challenge_id}",
+            new String[]{CHALLENGE_ID, PHASE}),
+
+    /** 감시자 초대 만료 — 초대를 보낸 생성자에게 간다. */
+    WATCHER_INVITATION_EXPIRED(NotificationToggleGroup.CHALLENGE,
+            "ruleup://challenges/{challenge_id}/watchers",
+            new String[]{CHALLENGE_ID, WATCHER_ID}),
+
+    /**
+     * 매너 온도 티어 변동. <b>키에 {@code challenge_id} 를 넣으면 안 된다</b> — 유저 단위 점수라
+     * 넣으면 3개 방 참여자가 같은 승급 알림을 3번 받는다.
+     *
+     * <p>{@code direction} 하나로 두면 UNIQUE 가 평생 두 번째 승급을 막으므로
+     * {@code event_key}(티어 변동 이력 id)를 함께 넣는다.
+     */
+    TIER_CHANGED(NotificationToggleGroup.CHALLENGE, "ruleup://me/tier",
+            new String[]{DIRECTION, EVENT_KEY}),
+
+    /** 티어 경계 근접 — <b>1주</b> 억제. 억제 키에도 {@code challenge_id} 를 넣지 않는다. */
+    TIER_BOUNDARY_NEAR(NotificationToggleGroup.CHALLENGE, "ruleup://me/tier",
+            new String[]{EVENT_KEY},
+            new String[]{DIRECTION}, Duration.ofDays(7)),
+
+    /**
+     * 감시자에게 가는 실패 통지 — <b>수신자가 방 멤버가 아니다</b>. 그래서 방 상세가 아니라
+     * 수신 관리 화면으로 보내고, {@code notifications.challenge_id} 도 NULL 로 둔다
+     * (감시자의 「내 챌린지」 목록에 그 방이 없어 카운터가 뜰 자리가 없다).
+     */
+    PENALTY_FAILURE_SHARED(NotificationToggleGroup.CHALLENGE, "ruleup://watching/notices/{notice_id}",
+            new String[]{EVENT_KEY},
+            new String[]{CHALLENGE_ID, ROUTINE_ID, TARGET_USER_ID}, Duration.ofHours(24)),
+
+    /** 감시자가 남긴 응원 반응 — 수신자는 감시자가 아니라 <b>실패 당사자</b>다. */
+    WATCHER_REACTION(NotificationToggleGroup.CHALLENGE, "ruleup://me/calendar",
+            new String[]{EVENT_KEY},
+            new String[]{CHALLENGE_ID, SENDER_ID}, Duration.ofHours(24)),
+
+    // ===== 그룹 없음 2종 =====
+
+    /**
+     * 루틴 리마인더 — 08:00 · 12:00 · 19:00 KST. <b>그룹 토글이 없다</b>(상시).
+     *
+     * <p>키에 슬롯이 있어 억제가 불필요하다. 멀티 태스크 중복 실행은 이 UNIQUE 하나로 막으며
+     * ShedLock 이 필요 없는 이유다.
+     */
+    ROUTINE_REMINDER(NotificationToggleGroup.NONE, "ruleup://challenges/{challenge_id}",
+            new String[]{DATE, SLOT}),
+
+    /**
+     * 운영자 공지 — <b>{@code pushable = false}</b>. 적재는 되지만 큐에 들어가지 않아
+     * 알림 센터에만 남는다.
+     *
+     * <p>이 속성을 운영 토글로 두지 않는 이유는 하나다: 누가 켜면 공지가 2만 명에게 푸시로 나간다.
+     */
+    ANNOUNCEMENT(NotificationToggleGroup.NONE, NotificationTab.ANNOUNCEMENT, false, null,
+            new String[]{ANNOUNCEMENT_ID}, null, null),
+
+    // ===== 마케팅 1종 =====
+
+    /**
+     * 광고성 프로모션 — 수신 동의자에게 08~21시에만. 딥링크는 캠페인이 발행 시 재정의한다.
+     *
+     * <p>인터벌은 캠페인별이라고 스펙이 적었으나 캠페인 레지스트리가 아직 없다. 억제 키가
+     * {@code campaign_id} 라 <b>새 캠페인은 이전 캠페인에 막히지 않으므로</b>, 여기 24시간은
+     * 한 캠페인 안의 중복 발송만 막는다.
+     */
+    MARKETING(NotificationToggleGroup.MARKETING, null,
+            new String[]{EVENT_KEY},
+            new String[]{CAMPAIGN_ID}, Duration.ofHours(24));
+
+    private final NotificationToggleGroup toggleGroup;
+    private final NotificationTab tab;
+    private final boolean pushable;
     private final String deeplinkTemplate;
-    /** 챌린지별 음소거 대상인지 — 챌린지 컨텍스트가 있는 기능 알림만 해당된다. */
-    private final boolean muteable;
-    private final Duration dedupWindow;
+    private final String[] dedupParams;
+    private final String[] suppressParams;
+    private final Duration suppressInterval;
 
-    NotificationType(NotificationCategory category, String deeplinkTemplate) {
-        this(category, deeplinkTemplate, false, null);
+    NotificationType(NotificationToggleGroup toggleGroup, String deeplinkTemplate,
+                     String[] dedupParams) {
+        this(toggleGroup, NotificationTab.NOTIFICATION, true, deeplinkTemplate,
+                dedupParams, null, null);
     }
 
-    NotificationType(NotificationCategory category, String deeplinkTemplate, boolean muteable) {
-        this(category, deeplinkTemplate, muteable, null);
+    NotificationType(NotificationToggleGroup toggleGroup, String deeplinkTemplate,
+                     String[] dedupParams, String[] suppressParams, Duration suppressInterval) {
+        this(toggleGroup, NotificationTab.NOTIFICATION, true, deeplinkTemplate,
+                dedupParams, suppressParams, suppressInterval);
     }
 
-    NotificationType(NotificationCategory category, String deeplinkTemplate, boolean muteable,
-                     Duration dedupWindow) {
-        this.category = category;
+    NotificationType(NotificationToggleGroup toggleGroup, NotificationTab tab, boolean pushable,
+                     String deeplinkTemplate, String[] dedupParams,
+                     String[] suppressParams, Duration suppressInterval) {
+        this.toggleGroup = toggleGroup;
+        this.tab = tab;
+        this.pushable = pushable;
         this.deeplinkTemplate = deeplinkTemplate;
-        this.muteable = muteable;
-        // A 는 중복 제어를 적용하지 않는다 — 고지 의무가 있는 알림을 서버가 삼키면 안 된다.
-        // 기본 24시간. 티어 경계만 1주로 덮어쓴다. enum 생성자는 자기 클래스의 static 필드를
-        // 참조할 수 없어 상수로 빼지 않고 여기 둔다.
-        this.dedupWindow = (category == NotificationCategory.A)
-                ? null : (dedupWindow != null ? dedupWindow : Duration.ofHours(24));
+        this.dedupParams = dedupParams;
+        this.suppressParams = suppressParams;
+        this.suppressInterval = suppressInterval;
     }
 
-    public NotificationCategory category() {
-        return category;
+    // ===== 레지스트리 속성 =====
+
+    public NotificationToggleGroup toggleGroup() {
+        return toggleGroup;
     }
 
-    /** 설정 화면에 토글을 노출하고 끌 수 있는지. 필수(A)는 <b>컴포넌트 자체를 렌더링하지 않는다</b>. */
-    public boolean isTogglable() {
-        return category != NotificationCategory.A;
+    public NotificationTab tab() {
+        return tab;
     }
 
-    public boolean isMuteable() {
-        return muteable;
+    /** 큐에 넣을지. <b>공지만 false</b> 다. */
+    public boolean isPushable() {
+        return pushable;
     }
 
-    /** null 이면 중복 제어를 적용하지 않는다(필수 알림). */
-    public Duration dedupWindow() {
-        return dedupWindow;
+    /** null 이면 인터벌 억제를 적용하지 않는다 — 22종 중 6종만 값이 있다. */
+    public Duration suppressInterval() {
+        return suppressInterval;
     }
 
-    /** {@code {target}} 을 치환한 진입 경로. 대상이 필요한데 없으면 링크를 주지 않는다. */
-    public String deeplink(String targetKey) {
+    // ===== 키 =====
+
+    /**
+     * 발행 멱등 키 — {@code {TYPE}:{userId}:{식별자}}. <b>전 타입이 가진다.</b>
+     *
+     * <p>파라미터가 비어 있으면 예외다. 빈 값을 조용히 이어 붙이면 서로 다른 사건이 같은 키를
+     * 갖게 되고, UNIQUE 가 뒤 사건의 적재를 통째로 삼킨다 — 절대 규칙 1 위반이 조용히 일어난다.
+     */
+    public String dedupKey(UUID userId, Map<String, String> params) {
+        return name() + ":" + userId + ":" + join(dedupParams, params);
+    }
+
+    /** 인터벌 억제 키 — {@code {TYPE}:{식별자}}. 억제를 쓰지 않는 타입은 <b>null</b> 이다. */
+    public String suppressKey(Map<String, String> params) {
+        if (suppressParams == null) return null;
+        return name() + ":" + join(suppressParams, params);
+    }
+
+    private String join(String[] keys, Map<String, String> params) {
+        StringBuilder sb = new StringBuilder();
+        for (String key : keys) {
+            String value = (params == null) ? null : params.get(key);
+            if (value == null || value.isBlank())
+                throw new IllegalArgumentException(
+                        "알림 키 파라미터 누락: type=" + name() + " param=" + key);
+            if (!sb.isEmpty()) sb.append(':');
+            sb.append(value);
+        }
+        return sb.toString();
+    }
+
+    // ===== 딥링크 =====
+
+    /**
+     * {@code {param}} 을 치환한 진입 경로. 필요한 값이 없으면 <b>링크를 주지 않는다</b> —
+     * 깨진 경로로 보내느니 클라이언트가 알림함으로 폴백하는 편이 낫다.
+     */
+    public String deeplink(Map<String, String> params) {
         if (deeplinkTemplate == null) return null;
-        if (!deeplinkTemplate.contains("{target}")) return deeplinkTemplate;
-        return (targetKey == null || targetKey.isBlank())
-                ? null : deeplinkTemplate.replace("{target}", targetKey);
+        String result = deeplinkTemplate;
+        int open;
+        while ((open = result.indexOf('{')) >= 0) {
+            int close = result.indexOf('}', open);
+            if (close < 0) return null;
+            String key = result.substring(open + 1, close);
+            String value = (params == null) ? null : params.get(key);
+            if (value == null || value.isBlank()) return null;
+            result = result.substring(0, open) + value + result.substring(close + 1);
+        }
+        return result;
     }
 
     /**
-     * DB 에 저장된 문자열을 타입으로. <b>모르는 값이면 empty</b> 다 —
-     * 타입 추가가 DDL 없이 가능해야 하므로, 롤백 후 남은 행 때문에 알림함이 깨지면 안 된다.
+     * DB 에 저장된 문자열을 타입으로. <b>모르는 값이면 empty</b> 다 — 타입 추가가 DDL 없이
+     * 가능해야 하므로, 롤백 후 남은 행 때문에 알림함이 깨지면 안 된다.
      */
     public static Optional<NotificationType> find(String raw) {
+        if (raw == null) return Optional.empty();
         return Arrays.stream(values()).filter(t -> t.name().equals(raw)).findFirst();
+    }
+
+    // ===== 구 파이프라인 호환 =====
+    // 아래 넷은 A/B/C 분류를 쓰는 현행 발송 경로가 남아 있는 동안만 유효하다. 토글 그룹 기반
+    // 판정으로 갈아탈 때(스택 02) 함께 사라진다. 지금 값은 재설계 이전 동작을 그대로 보존한다.
+
+    /** @deprecated 토글 그룹으로 대체된다. */
+    @Deprecated(forRemoval = true)
+    public NotificationCategory category() {
+        return switch (this) {
+            case VERIFICATION_RESULT, CONSECUTIVE_FAILURE_WARNING, CHALLENGE_LIFECYCLE,
+                 WATCHER_INVITATION_EXPIRED, TIER_CHANGED, TIER_BOUNDARY_NEAR,
+                 PENALTY_FAILURE_SHARED, WATCHER_REACTION, ROUTINE_REMINDER ->
+                    NotificationCategory.B;
+            case MARKETING -> NotificationCategory.C;
+            default -> NotificationCategory.A;
+        };
+    }
+
+    /** @deprecated 마스터·그룹 토글로 대체된다. */
+    @Deprecated(forRemoval = true)
+    public boolean isTogglable() {
+        return category() != NotificationCategory.A;
+    }
+
+    /** @deprecated 음소거는 {@code challenge_id} 유무로 판정한다. */
+    @Deprecated(forRemoval = true)
+    public boolean isMuteable() {
+        return switch (this) {
+            case ROUTINE_REMINDER, VERIFICATION_RESULT, CONSECUTIVE_FAILURE_WARNING,
+                 CHALLENGE_LIFECYCLE, PENALTY_FAILURE_SHARED -> true;
+            default -> false;
+        };
+    }
+
+    /** @deprecated {@link #suppressInterval()} 로 대체된다. */
+    @Deprecated(forRemoval = true)
+    public Duration dedupWindow() {
+        if (category() == NotificationCategory.A) return null;
+        return this == TIER_BOUNDARY_NEAR ? Duration.ofDays(7) : Duration.ofHours(24);
+    }
+
+    /** @deprecated {@link #deeplink(Map)} 로 대체된다. 단일 치환자만 다룬다. */
+    @Deprecated(forRemoval = true)
+    public String deeplink(String targetKey) {
+        if (deeplinkTemplate == null) return null;
+        int open = deeplinkTemplate.indexOf('{');
+        if (open < 0) return deeplinkTemplate;
+        int close = deeplinkTemplate.indexOf('}', open);
+        if (targetKey == null || targetKey.isBlank()) return null;
+        return deeplinkTemplate.substring(0, open) + targetKey + deeplinkTemplate.substring(close + 1);
     }
 }
