@@ -112,6 +112,13 @@ app:
   dev-tokens:
     secret: ${DEV_TOKEN_SECRET:}
 
+  # 시연·개발 확인용 요청 로그(devlog 패키지). 요청 한 건을 콘솔에 한 덩어리로 찍는다.
+  # 임시 코드다 — 필요 없어지면 끄지 말고 devlog 패키지와 이 블록을 함께 지운다.
+  request-log:
+    enabled: ${APP_REQUEST_LOG_ENABLED:true}
+    body: ${APP_REQUEST_LOG_BODY:true}      # 요청·응답 본문까지 찍을지
+    max-body: ${APP_REQUEST_LOG_MAX_BODY:2000}   # 본문 잘라내는 길이(자)
+
   # 시스템 자원 지표 샘플러(SystemMetricsSampler, 개발기간 관찰용). test 프로파일에선 비활성.
   observability:
     metrics:
