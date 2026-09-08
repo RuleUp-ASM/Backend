@@ -51,6 +51,7 @@ class NotificationPublishIT {
     @Autowired UserRepository userRepository;
     @Autowired TransactionTemplate txTemplate;
     @Autowired JdbcTemplate jdbc;
+    @Autowired org.springframework.context.ApplicationContext applicationContext;
     @Autowired NotificationTestQueue.Recording queue;
 
     private NotificationTestQueue.Recording spy() {
@@ -80,6 +81,23 @@ class NotificationPublishIT {
     private List<Notification> inbox(UUID userId) {
         return notificationRepository.findAll().stream()
                 .filter(n -> n.getUserId().equals(userId)).toList();
+    }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("큐 설정이 없을 때")
+    class WithoutQueueConfig {
+
+        @Test
+        @DisplayName("SQS 클라이언트를 아예 만들지 않는다 — 리전 없는 환경에서 컨텍스트가 죽으면 안 된다")
+        void noSqsClientWhenUrlIsBlank() {
+            // yaml 의 ${NOTIFICATION_QUEUE_URL:} 기본값은 **빈 문자열**이라 속성 자체는 존재한다.
+            // @ConditionalOnProperty 로 걸면 그것도 존재로 보고 클라이언트를 만들려다,
+            // 리전을 못 찾는 CI·로컬에서 기동이 통째로 실패한다.
+            assertThat(applicationContext.getBeanNamesForType(
+                    software.amazon.awssdk.services.sqs.SqsClient.class))
+                    .as("큐 URL 이 비면 AWS SDK 를 건드리지 않는다").isEmpty();
+        }
     }
 
     // =====================================================================
