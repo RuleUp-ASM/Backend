@@ -57,9 +57,25 @@ class AdminConsoleAuthIT extends ChallengeApiSupport {
     }
 
     private MvcResult login(String passcode) throws Exception {
+        return loginWith("passcode", passcode);
+    }
+
+    private MvcResult loginWith(String field, String value) throws Exception {
         return mvc.perform(post("/api/v1/admin/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(OM.writeValueAsString(Map.of("passcode", passcode)))).andReturn();
+                .content(OM.writeValueAsString(Map.of(field, value)))).andReturn();
+    }
+
+    @Test
+    @DisplayName("본문 키는 password 도 passcode 도 된다 — 이미 배포된 화면을 고치게 하지 않는다")
+    void accepts_both_field_names() throws Exception {
+        assertThat(loginWith("password", "console-test-pass").getResponse().getStatus())
+                .as("콘솔이 보내는 이름").isEqualTo(200);
+        assertThat(loginWith("passcode", "console-test-pass").getResponse().getStatus())
+                .as("서버가 계약으로 잡았던 이름").isEqualTo(200);
+
+        // 키만 맞고 값이 틀리면 그대로 401 이다 — 둘 다 받는 것이 검증을 무르게 하지 않는다.
+        expectError(loginWith("password", "nope"), 401, "INVALID_PASSCODE");
     }
 
     @Test
