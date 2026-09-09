@@ -26,13 +26,28 @@ public class AdminAuthController {
 
     private final AdminAuthService service;
 
-    @Schema(name = "AdminLoginRequest")
-    public record LoginRequest(
-            @Schema(requiredMode = Schema.RequiredMode.REQUIRED) String passcode) {}
+    /**
+     * 진입 요청 — 필드가 둘이지만 <b>보내는 값은 하나</b>다.
+     *
+     * <p>서버는 {@code passcode} 로 계약을 잡았고 콘솔은 {@code password} 로 보내고 있었다.
+     * 어느 한쪽 이름이 더 옳아서가 아니라, <b>이미 배포된 화면을 고치게 만들 이유가 없어서</b>
+     * 둘 다 받는다. 스펙이 고정한 것은 필드명이 아니라 「비밀번호 하나만 받는다」와
+     * 에러 코드 {@code INVALID_PASSCODE} 다.
+     */
+    @Schema(name = "AdminLoginRequest", description = "`password` 와 `passcode` 중 아무 이름으로나 보내면 된다")
+    public record LoginRequest(String password, String passcode) {
+
+        /** 둘 중 채워진 값. 둘 다 오면 {@code password} 를 쓴다(콘솔이 보내는 이름이다). */
+        public String value() {
+            return (password != null && !password.isBlank()) ? password : passcode;
+        }
+    }
 
     @Operation(summary = "콘솔 로그인", description = """
             **비밀번호 하나만 받는다.** 값은 서버 env 에만 두며 프론트 env 에 넣으면 번들에 실려
             접근 통제가 성립하지 않는다.
+
+            본문 키는 `password` · `passcode` 아무 쪽이나 된다 — 둘 다 받는다.
 
             성공하면 **설정된 운영자 계정의 액세스 토큰**을 준다 — 비밀번호에는 신원이 없지만
             감사 로그는 조작자를 남겨야 하기 때문이다. 이후 모든 요청은 이 토큰을 그대로 쓴다.
@@ -46,7 +61,7 @@ public class AdminAuthController {
     @PostMapping("/login")
     public ApiResponse<AdminAuthService.Session> login(@RequestBody LoginRequest request,
                                                        HttpServletRequest servletRequest) {
-        return ApiResponse.ok(service.login(request == null ? null : request.passcode(),
+        return ApiResponse.ok(service.login(request == null ? null : request.value(),
                 clientKey(servletRequest)));
     }
 
