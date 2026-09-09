@@ -14,6 +14,10 @@ public class AdminWebConfig implements WebMvcConfigurer {
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(adminAccessInterceptor).addPathPatterns("/api/v1/admin/**");
+        registry.addInterceptor(adminAccessInterceptor)
+                .addPathPatterns("/api/v1/admin/**")
+                // 진입 로그인만 뺀다 — 토큰을 받으러 오는 경로에 토큰을 요구할 수 없다.
+                // 그 경로의 거부는 AdminAuthService 가 직접 감사 로그에 남긴다.
+                .excludePathPatterns("/api/v1/admin/auth/login");
     }
 }

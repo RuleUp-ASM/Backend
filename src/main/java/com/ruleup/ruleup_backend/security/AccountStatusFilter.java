@@ -70,7 +70,10 @@ public class AccountStatusFilter extends OncePerRequestFilter {
             "DELETE /api/v1/users/me",
             "GET /api/v1/users/me/sanctions",
             "GET /api/v1/notifications",
-            "GET /api/v1/users/me/agreements");
+            "GET /api/v1/users/me/agreements",
+            // 잠금 중 허용 행위는 열람과 CS 문의뿐이다(운영자 제재 정책 § 5.3). 제재 재검토가
+            // 이 채널로 들어오므로 — 제재가 이 경로를 막으면 다툴 방법 자체가 사라진다.
+            "POST /api/v1/inquiries");
 
     /**
      * 탈퇴 계정에도 남겨 두는 경로 — <b>여기만</b> 열고 나머지는 전부 막는다.

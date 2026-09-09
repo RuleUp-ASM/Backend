@@ -106,7 +106,8 @@ class AdminBackofficeIT extends ChallengeApiSupport {
                 .as("확인 토큰 없이는 실행되지 않는다").isEqualTo(428);
 
         Map<String, Object> confirmed = new java.util.LinkedHashMap<>(body);
-        confirmed.put("confirmationToken", read(preview, "$.error.confirmationToken"));
+        // 토큰은 봉투 안에 있다 — 재제시 문구를 클라이언트가 만들지 않게 서버가 함께 준다.
+        confirmed.put("confirmationToken", read(preview, "$.error.confirmation.token"));
         return postAuth(url, token, confirmed);
     }
 
@@ -209,7 +210,7 @@ class AdminBackofficeIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("428 응답에 대상·사유·기간을 재제시한다 — 무엇을 확인하는지 보여줘야 한다")
+        @DisplayName("428 응답에 대상·집행 내용·기간을 재제시한다 — 문구를 서버가 만든다")
         void preview_shows_what_is_confirmed() throws Exception {
             Member op = operator("preview");
             Member target = member(uniq("t"));
@@ -217,9 +218,31 @@ class AdminBackofficeIT extends ChallengeApiSupport {
             MvcResult res = postAuth("/api/v1/admin/users/" + target.id() + "/sanctions",
                     op.token(), sanctionBody("LOCK"));
 
-            assertThat((String) read(res, "$.error.confirmationToken")).isNotBlank();
-            assertThat((String) read(res, "$.error.preview.targetNickname")).isNotBlank();
-            assertThat((String) read(res, "$.error.preview.type")).isEqualTo("LOCK");
+            assertThat((String) read(res, "$.error.confirmation.token")).isNotBlank();
+            assertThat((String) read(res, "$.error.confirmation.expiresAt")).isNotBlank();
+            assertThat((String) read(res, "$.error.confirmation.targetLabel")).isNotBlank();
+            assertThat((String) read(res, "$.error.confirmation.actionLabel"))
+                    .as("클라이언트가 조립하지 않고 그대로 띄우는 문장이다").isEqualTo("로그인 정지 · 1개월");
+            assertThat((String) read(res, "$.error.confirmation.effectiveUntil"))
+                    .as("null 이면 영구다 — 1개월 잠금은 값이 있어야 한다").isNotBlank();
+        }
+
+        @Test
+        @DisplayName("permanent 를 바꾸면 토큰이 무효다 — 1개월로 확인받고 영구를 집행할 수 없다")
+        void permanent_flag_is_part_of_the_fingerprint() throws Exception {
+            Member op = operator("permflag");
+            Member target = member(uniq("t"));
+
+            MvcResult preview = postAuth("/api/v1/admin/users/" + target.id() + "/sanctions",
+                    op.token(), sanctionBody("LOCK"));
+            String tokenForOneMonth = read(preview, "$.error.confirmation.token");
+
+            Map<String, Object> permanent = sanctionBody("LOCK");
+            permanent.put("permanent", true);
+            permanent.put("confirmationToken", tokenForOneMonth);
+
+            expectError(postAuth("/api/v1/admin/users/" + target.id() + "/sanctions",
+                    op.token(), permanent), 428, "CONFIRMATION_REQUIRED");
         }
 
         @Test
@@ -231,7 +254,7 @@ class AdminBackofficeIT extends ChallengeApiSupport {
 
             MvcResult preview = postAuth("/api/v1/admin/users/" + first.id() + "/sanctions",
                     op.token(), sanctionBody("LOCK"));
-            String stolen = read(preview, "$.error.confirmationToken");
+            String stolen = read(preview, "$.error.confirmation.token");
 
             Map<String, Object> body = sanctionBody("LOCK");
             body.put("confirmationToken", stolen);
@@ -251,7 +274,10 @@ class AdminBackofficeIT extends ChallengeApiSupport {
                     op.token(), Map.of("reasonText", "반복 위반으로 폐쇄합니다."));
 
             expectError(res, 428, "CONFIRMATION_REQUIRED");
-            assertThat((Integer) read(res, "$.error.preview.affectedMemberCount")).isEqualTo(1);
+            // sideEffects 가 "영향 인원 수를 먼저 응답"을 겸한다 — 별도 미리보기 경로를 두지 않는다.
+            assertThat((String) read(res, "$.error.confirmation.sideEffects[0].label"))
+                    .isEqualTo("참여자 자동 탈퇴");
+            assertThat((Integer) read(res, "$.error.confirmation.sideEffects[0].count")).isEqualTo(1);
         }
     }
 
@@ -373,7 +399,9 @@ class AdminBackofficeIT extends ChallengeApiSupport {
 
             MvcResult res = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
                     .delete("/api/v1/admin/users/" + target.id() + "/sanctions/" + sanctionId)
-                    .header("Authorization", "Bearer " + op.token())).andReturn();
+                    .header("Authorization", "Bearer " + op.token())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(OM.writeValueAsString(Map.of("reasonText", "재검토 인용 — 오탐으로 확인됨")))).andReturn();
             assertThat(res.getResponse().getStatus()).isEqualTo(200);
 
             assertThat(userRepository.findById(target.id()).orElseThrow().getStatus())
@@ -387,19 +415,36 @@ class AdminBackofficeIT extends ChallengeApiSupport {
     class Review {
 
         @Test
-        @DisplayName("검토 큐는 대상 단위로 묶어 내린다 — 판단 속도를 위해서다")
+        @DisplayName("대상 단위 큐는 같은 대상의 신고를 묶어 내린다 — 판단 속도를 위해서다")
         void queue_is_grouped_by_target() throws Exception {
             Member op = operator("queue");
             Member target = member(uniq("t"));
             insertReport(member(uniq("r1")).id(), target.id());
             insertReport(member(uniq("r2")).id(), target.id());
 
-            MvcResult res = getAuth("/api/v1/admin/reports", op.token());
+            MvcResult res = getAuth("/api/v1/admin/reports/targets", op.token());
             List<Map<String, Object>> groups = read(res, "$.data.items");
 
             assertThat(groups).filteredOn(g -> target.id().toString().equals(g.get("targetId")))
                     .singleElement()
                     .satisfies(g -> assertThat(g.get("reportCount")).isEqualTo(2));
+        }
+
+        @Test
+        @DisplayName("건별 큐는 커서와 총 건수를 함께 내린다 — 처리 기한 필드는 없다")
+        void queue_is_cursor_paged() throws Exception {
+            Member op = operator("cursor");
+            Member target = member(uniq("t"));
+            insertReport(member(uniq("r1")).id(), target.id());
+            insertReport(member(uniq("r2")).id(), target.id());
+
+            MvcResult res = mvc.perform(get("/api/v1/admin/reports?status=PENDING&size=1")
+                    .header("Authorization", "Bearer " + op.token())).andReturn();
+
+            assertThat((List<?>) read(res, "$.data.items")).hasSize(1);
+            assertThat((String) read(res, "$.data.nextCursor"))
+                    .as("다음 페이지가 있으면 커서를 준다").isNotBlank();
+            assertThat(((Number) read(res, "$.data.totalCount")).longValue()).isGreaterThanOrEqualTo(2);
         }
 
         @Test
@@ -436,11 +481,11 @@ class AdminBackofficeIT extends ChallengeApiSupport {
             UUID reportId = insertReport(member(uniq("r")).id(), member(uniq("t")).id());
 
             MvcResult first = postAuth("/api/v1/admin/reports/" + reportId + "/resolve",
-                    op.token(), Map.of("resolution", "NO_ACTION"));
+                    op.token(), Map.of("decision", "NO_ACTION"));
             assertThat(first.getResponse().getStatus()).isEqualTo(200);
 
             expectError(postAuth("/api/v1/admin/reports/" + reportId + "/resolve",
-                    op.token(), Map.of("resolution", "NO_ACTION")), 409, "REVIEW_ALREADY_RESOLVED");
+                    op.token(), Map.of("decision", "NO_ACTION")), 409, "REVIEW_ALREADY_RESOLVED");
         }
 
         @Test
@@ -455,7 +500,7 @@ class AdminBackofficeIT extends ChallengeApiSupport {
                     bytes(reporter.id()), bytes(target.id()));
 
             postAuth("/api/v1/admin/reports/" + reportId + "/resolve",
-                    op.token(), Map.of("resolution", "NO_ACTION"));
+                    op.token(), Map.of("decision", "NO_ACTION"));
 
             assertThat(jdbcTemplate.queryForObject(
                     "SELECT COUNT(*) FROM user_blocks WHERE blocker_id=? AND target_type='USER' "

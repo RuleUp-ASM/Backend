@@ -11,8 +11,8 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * 해당 코드가 아니면 필드 자체가 직렬화되지 않는다.
  *  - rejoinAvailableAt      : JOIN_BLOCKED + REJOIN_COOLDOWN — 재입장 가능 시각
  *  - nextChangeAvailableAt  : SETTING_CHANGE_LIMIT — 다음 변경 가능 시각(다음 달 1일 00:00 KST)
- *  - confirmationToken/preview : CONFIRMATION_REQUIRED — 2단계 확인. 무엇을 확인하는지(preview)와
- *    그 확인에 한해 유효한 토큰을 함께 내려, 클라가 재확인 화면을 그대로 띄울 수 있게 한다
+ *  - confirmation           : CONFIRMATION_REQUIRED — 2단계 확인 봉투. **서버가 계산한 재제시 문구**와
+ *    그 확인에 한해 유효한 토큰이 함께 들어 있어, 클라가 문구를 조립하지 않고 그대로 띄운다
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @io.swagger.v3.oas.annotations.media.Schema(description = "에러 상세. 분기는 code 로 하고, message 는 사용자에게 그대로 보여줄 수 있다.")
@@ -36,19 +36,17 @@ public record ErrorResponse(
         String nextChangeAvailableAt,
 
         @io.swagger.v3.oas.annotations.media.Schema(
-                description = "이 요청에 한해 유효한 확인 토큰 — CONFIRMATION_REQUIRED 일 때만 실린다.")
-        String confirmationToken,
-
-        @io.swagger.v3.oas.annotations.media.Schema(
-                description = "재확인 화면에 보여줄 요약(대상·사유·기간·영향 인원 등)")
-        Object preview) {
+                description = """
+                        2단계 확인 봉투 — CONFIRMATION_REQUIRED 일 때만 실린다.
+                        토큰 · 만료 · 대상 · 집행 내용 · 해제 예정 · 부수 효과가 함께 들어 있다.""")
+        Confirmation confirmation) {
 
     public static ErrorResponse of(ErrorCode errorCode) {
-        return new ErrorResponse(errorCode.name(), errorCode.getMessage(), null, null, null, null, null);
+        return new ErrorResponse(errorCode.name(), errorCode.getMessage(), null, null, null, null);
     }
 
     public static ErrorResponse of(ErrorCode errorCode, String reason) {
-        return new ErrorResponse(errorCode.name(), errorCode.getMessage(), reason, null, null, null, null);
+        return new ErrorResponse(errorCode.name(), errorCode.getMessage(), reason, null, null, null);
     }
 
     /**
@@ -60,6 +58,6 @@ public record ErrorResponse(
         ErrorCode code = e.getErrorCode();
         return new ErrorResponse(code.name(), e.getUserMessage(),
                 e.getDetail(), e.getRejoinAvailableAt(), e.getNextChangeAvailableAt(),
-                e.getConfirmationToken(), e.getPreview());
+                e.getConfirmation());
     }
 }

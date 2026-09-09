@@ -107,6 +107,13 @@ app:
     base-url: ${APP_LINK_BASE_URL:https://android.ruleup.co.kr}
     scheme: ${APP_LINK_SCHEME:ruleup}
 
+  # 운영자 콘솔(백오피스) 진입. **비밀번호는 서버에만 둔다** — 프론트 env 에 넣으면 번들에 실려
+  # 접근 통제가 성립하지 않는다. 비어 있으면 로그인 자체가 불가능하다(미설정 = 비활성).
+  # operator-id 는 비워 두면 서버가 운영자 롤(users.role='OPERATOR') 계정을 찾아 쓴다.
+  admin:
+    passcode: ${ADMIN_PASSCODE:}
+    operator-id: ${ADMIN_OPERATOR_ID:}
+
   # 개발용 토큰 발급. 시크릿이 비어 있으면 헤더가 무엇이든 404 라, 미설정이 곧 비활성이다.
   # prod 프로필에서는 빈 자체가 등록되지 않는다(@Profile("!prod")).
   dev-tokens:

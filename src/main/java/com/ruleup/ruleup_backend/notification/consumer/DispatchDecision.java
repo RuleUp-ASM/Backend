@@ -83,7 +83,7 @@ public record DispatchDecision(boolean shouldSend, boolean deferred, SuppressedR
     private static boolean isWithinSuppressInterval(NotificationMessage message,
                                                     DispatchInputs in, Instant now) {
         String key = message.suppressKey();
-        if (key == null) return false;   // 22종 중 16종 — 억제를 쓰지 않는다
+        if (key == null) return false;   // 23종 중 17종 — 억제를 쓰지 않는다
 
         Duration interval = NotificationType.find(message.type())
                 .map(NotificationType::suppressInterval).orElse(null);

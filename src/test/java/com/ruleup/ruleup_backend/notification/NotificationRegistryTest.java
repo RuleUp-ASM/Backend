@@ -22,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 알림 레지스트리 계약 — 백엔드 테크 스펙 5절, 공통 8절.
  *
  * <p>레지스트리는 <b>테이블이 아니라 코드 enum</b>이다(9/8 결정). 배포 없이 바꿀 수 없다는 뜻이라,
- * 값이 맞는지 지켜 주는 것은 이 테스트뿐이다. 그래서 22종 전부를 이름으로 못 박는다 —
+ * 값이 맞는지 지켜 주는 것은 이 테스트뿐이다. 그래서 23종 전부를 이름으로 못 박는다 —
  * 「전부 순회해서 null 아님」 같은 헐거운 검사는 오타 하나를 그대로 통과시킨다.
  *
  * <p>스프링을 띄우지 않는다. 레지스트리는 순수 함수 집합이고, 컨테이너를 붙이면 이 계약이
@@ -35,14 +35,15 @@ class NotificationRegistryTest {
     class Types {
 
         @Test
-        @DisplayName("22종이며 이름이 스펙 표와 정확히 일치한다")
-        void twentyTwoTypes() {
+        @DisplayName("23종이며 이름이 스펙 표와 정확히 일치한다")
+        void twentyThreeTypes() {
             assertThat(Arrays.stream(NotificationType.values()).map(Enum::name))
                     .containsExactlyInAnyOrder(
                             "CHALLENGE_KICKED", "ACCOUNT_SANCTION", "DORMANCY_NOTICE",
                             "INACTIVE_WITHDRAWAL_NOTICE", "MODERATION_REJECTED",
                             "CHALLENGE_IMAGE_REMOVED", "PERMISSION_REGRANT_REQUIRED",
-                            "CHEAT_DETECTED", "APPEAL_RESULT", "TERMS_UPDATED", "DEVICE_LOGGED_OUT",
+                            "CHEAT_DETECTED", "APPEAL_RESULT", "TERMS_UPDATED",
+                            "DEVICE_LOGGED_OUT", "CS_ANSWERED",
                             "VERIFICATION_RESULT", "CONSECUTIVE_FAILURE_WARNING",
                             "CHALLENGE_LIFECYCLE", "WATCHER_INVITATION_EXPIRED", "TIER_CHANGED",
                             "TIER_BOUNDARY_NEAR", "PENALTY_FAILURE_SHARED", "WATCHER_REACTION",
@@ -64,7 +65,7 @@ class NotificationRegistryTest {
     class ToggleGroups {
 
         @Test
-        @DisplayName("계정 11종")
+        @DisplayName("계정 12종")
         void account() {
             assertThat(byGroup(NotificationToggleGroup.ACCOUNT)).containsExactlyInAnyOrder(
                     NotificationType.CHALLENGE_KICKED, NotificationType.ACCOUNT_SANCTION,
@@ -72,7 +73,7 @@ class NotificationRegistryTest {
                     NotificationType.MODERATION_REJECTED, NotificationType.CHALLENGE_IMAGE_REMOVED,
                     NotificationType.PERMISSION_REGRANT_REQUIRED, NotificationType.CHEAT_DETECTED,
                     NotificationType.APPEAL_RESULT, NotificationType.TERMS_UPDATED,
-                    NotificationType.DEVICE_LOGGED_OUT);
+                    NotificationType.DEVICE_LOGGED_OUT, NotificationType.CS_ANSWERED);
         }
 
         @Test
@@ -422,6 +423,7 @@ class NotificationRegistryTest {
         p.put(NotificationParams.VERIFICATION_ID, "v-12");
         p.put(NotificationParams.TARGET_KEY, "nickname");
         p.put(NotificationParams.ANNOUNCEMENT_ID, "an-3");
+        p.put(NotificationParams.INQUIRY_ID, "iq-8");
         p.put(NotificationParams.CAMPAIGN_ID, "cp-1");
         p.put(NotificationParams.DATE, "2026-09-08");
         p.put(NotificationParams.SLOT, "MORNING");

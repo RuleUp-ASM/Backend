@@ -280,6 +280,22 @@ public enum ErrorCode {
     SANCTION_ALREADY_ACTIVE(HttpStatus.CONFLICT, "이미 같은 수준의 제재가 진행 중이에요."),
     REVIEW_ALREADY_RESOLVED(HttpStatus.CONFLICT, "다른 운영자가 먼저 처리했어요."),
     APPEAL_ALREADY_USED(HttpStatus.CONFLICT, "재검토를 이미 사용했어요."),
+    /** 운영자 콘솔 진입 인증 — 비밀번호 하나만 받는다(공통 5-2-1 B). */
+    INVALID_PASSCODE(HttpStatus.UNAUTHORIZED, "비밀번호가 맞지 않아요."),
+    TOO_MANY_ATTEMPTS(HttpStatus.TOO_MANY_REQUESTS, "시도가 너무 많아요. 잠시 후 다시 시도해주세요."),
+    /** 이상탐지 신호를 이미 다른 운영자가 검토했다. */
+    ANOMALY_NOT_FOUND(HttpStatus.NOT_FOUND, "이상탐지 신호를 찾을 수 없어요."),
+    ANNOUNCEMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "공지를 찾을 수 없어요."),
+    /** 이미 팬아웃된 공지는 회수되지 않는다 — 취소는 대기 중인 공지에만 의미가 있다. */
+    ANNOUNCEMENT_ALREADY_SENT(HttpStatus.CONFLICT, "이미 발송된 공지는 취소할 수 없어요."),
+
+    // ===== CS 문의 (앱 운영 정책 § 5) =====
+    INQUIRY_NOT_FOUND(HttpStatus.NOT_FOUND, "문의 내역을 찾을 수 없어요."),
+    INQUIRY_BODY_LENGTH(HttpStatus.BAD_REQUEST, "문의 내용은 10자 이상 1,000자 이하로 적어주세요."),
+    INQUIRY_IMAGE_LIMIT(HttpStatus.BAD_REQUEST, "사진은 3장까지 첨부할 수 있어요."),
+    INQUIRY_DAILY_LIMIT(HttpStatus.TOO_MANY_REQUESTS, "문의는 하루에 3건까지 보낼 수 있어요. 내일 다시 시도해주세요."),
+    /** 답변 등록이 곧 종결이라 재등록 경로가 없다(§ 5.4). */
+    ALREADY_ANSWERED(HttpStatus.CONFLICT, "이미 답변이 등록된 문의예요."),
 
     // ===== 공통 =====
     TOO_MANY_REQUESTS(HttpStatus.TOO_MANY_REQUESTS, "요청이 너무 많습니다. 잠시 후 다시 시도해주세요."),

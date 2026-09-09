@@ -9,7 +9,7 @@ import java.util.UUID;
 import static com.ruleup.ruleup_backend.notification.domain.NotificationParams.*;
 
 /**
- * 알림 타입 레지스트리 <b>22종</b> — 백엔드 테크 스펙 5절, 공통 8절.
+ * 알림 타입 레지스트리 <b>23종</b> — 백엔드 테크 스펙 5절, 공통 8절.
  *
  * <h4>테이블이 아니라 코드 enum이다</h4>
  * {@code notification_types} 레지스트리 테이블은 2026-09-08 제거됐다. 타입 코드 · 토글 그룹 ·
@@ -32,7 +32,7 @@ import static com.ruleup.ruleup_backend.notification.domain.NotificationParams.*
  */
 public enum NotificationType {
 
-    // ===== 계정 그룹 11종 =====
+    // ===== 계정 그룹 12종 =====
 
     /** 강퇴 확정. 이미 나간 방으로 보낼 수 없어 제재 이력으로 보낸다. */
     CHALLENGE_KICKED(NotificationToggleGroup.ACCOUNT, "ruleup://me/sanctions",
@@ -102,6 +102,18 @@ public enum NotificationType {
      */
     DEVICE_LOGGED_OUT(NotificationToggleGroup.ACCOUNT, null,
             new String[]{EVENT_KEY}),
+
+    /**
+     * CS 답변 등록 — 앱 운영 정책 § 5.5(분류 일반 · 토글 계정 · 중복 인터벌 없음).
+     *
+     * <p>억제 인터벌을 두지 않는다. 문의 하나에 답변은 하나뿐이고({@code inquiry_id} 가 곧
+     * 멱등 키다) 여러 건을 접수한 사람은 <b>건마다 답을 받아야</b> 어느 문의가 처리됐는지 안다.
+     *
+     * <p>알림 정책 § 4 표에는 아직 이 행이 없다 — 앱 운영 정책의 미결 사항이 「CS 답변 행 추가
+     * 필요」로 남겨 둔 그 값이며, 여기 속성은 그 제안값 그대로다.
+     */
+    CS_ANSWERED(NotificationToggleGroup.ACCOUNT, "ruleup://me/inquiries/{inquiry_id}",
+            new String[]{INQUIRY_ID}),
 
     // ===== 챌린지 그룹 8종 =====
 
@@ -238,7 +250,7 @@ public enum NotificationType {
         return pushable;
     }
 
-    /** null 이면 인터벌 억제를 적용하지 않는다 — 22종 중 6종만 값이 있다. */
+    /** null 이면 인터벌 억제를 적용하지 않는다 — 23종 중 6종만 값이 있다. */
     public Duration suppressInterval() {
         return suppressInterval;
     }

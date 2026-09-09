@@ -122,7 +122,7 @@ public class NotificationDispatcher {
 
     /**
      * 억제 이력 — 억제 키가 있는 메시지가 하나도 없으면 조회 자체를 하지 않는다.
-     * 22종 중 6종만 키를 쓰므로 보통 이 쿼리는 나가지 않는다.
+     * 23종 중 6종만 키를 쓰므로 보통 이 쿼리는 나가지 않는다.
      */
     private Map<UUID, Map<String, Instant>> loadSuppressHistory(List<NotificationMessage> messages,
                                                                 List<UUID> userIds, Instant now) {
