@@ -43,6 +43,8 @@ public final class NotificationParams {
     /** 심사 거부 대상(nickname · profile_image · challenge_title …). */
     public static final String TARGET_KEY = "target_key";
     public static final String ANNOUNCEMENT_ID = "announcement_id";
+    /** CS 문의 id — 답변 통지의 진입점이자 멱등 키다. */
+    public static final String INQUIRY_ID = "inquiry_id";
     public static final String CAMPAIGN_ID = "campaign_id";
     /** 리마인더 대상 일자(KST, ISO-8601). */
     public static final String DATE = "date";

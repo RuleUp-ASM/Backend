@@ -36,12 +36,19 @@ public class ConfirmationTokens {
 
     private final AppProperties props;
 
+    /**
+     * 발급 결과 — 토큰과 <b>실제 만료 시각</b>이다. 만료를 따로 계산하면 토큰 안의 값과 응답의
+     * 값이 미세하게 어긋나고, 그 차이는 만료 직전 재호출에서 설명할 수 없는 428 로 나타난다.
+     */
+    public record Issued(String token, Instant expiresAt) {}
+
     /** 이 요청에 한해 유효한 확인 토큰. */
-    public String issue(UUID operatorId, String action, String targetId, String payload) {
-        long expiresAt = Instant.now().plus(TTL).toEpochMilli();
-        String body = expiresAt + SEP + fingerprint(operatorId, action, targetId, payload);
-        return Base64.getUrlEncoder().withoutPadding()
+    public Issued issue(UUID operatorId, String action, String targetId, String payload) {
+        Instant expiresAt = Instant.now().plus(TTL);
+        String body = expiresAt.toEpochMilli() + SEP + fingerprint(operatorId, action, targetId, payload);
+        String token = Base64.getUrlEncoder().withoutPadding()
                 .encodeToString((body + SEP + sign(body)).getBytes(StandardCharsets.UTF_8));
+        return new Issued(token, expiresAt);
     }
 
     /** 위조·만료·다른 요청의 토큰이면 false. */

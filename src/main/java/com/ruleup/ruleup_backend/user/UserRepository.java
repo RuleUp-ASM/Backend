@@ -16,6 +16,14 @@ import java.util.UUID;
  */
 public interface UserRepository extends JpaRepository<User, UUID> {
 
+    /**
+     * 운영자 롤 계정 하나 — 콘솔 진입 세션의 주인이 된다(백오피스 공통 5-2-1 B).
+     *
+     * <p>id 순으로 첫 건을 쓴다. UUID v7 이라 <b>가장 먼저 부여된 계정</b>이며, 롤이 하나뿐인
+     * 지금은 사실상 유일한 계정이다.
+     */
+    Optional<User> findFirstByRoleAndDeletedAtIsNullOrderByIdAsc(UserRole role);
+
     Optional<User> findByOauthProviderAndOauthSubject(OAuthProvider provider, String oauthSubject);
 
     Optional<User> findByIdAndDeletedAtIsNull(UUID id);

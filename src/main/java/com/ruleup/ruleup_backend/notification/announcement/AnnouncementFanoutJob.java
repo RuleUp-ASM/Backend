@@ -62,7 +62,7 @@ public class AnnouncementFanoutJob {
     @Scheduled(fixedDelay = 10_000L)
     public int fanOutPending() {
         List<Announcement> pending = announcementRepository
-                .findByFannedOutAtIsNullOrderByIdAsc(Limit.of(MAX_ANNOUNCEMENTS));
+                .findPending(Instant.now(), Limit.of(MAX_ANNOUNCEMENTS));
 
         int total = 0;
         for (Announcement announcement : pending) total += fanOut(announcement);
@@ -101,11 +101,20 @@ public class AnnouncementFanoutJob {
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public int storeChunk(Announcement announcement, List<UUID> recipients) {
+        // 공지 타입에는 기본 딥링크가 없다 — 갈 곳이 사안마다 다르다. 발행 시 지정한 값이
+        // 있으면 그것을 쓰고, 없으면 링크 없이 알림함에 머문다.
+        String deeplink = announcement.getDeepLink();
+
         return publisher.publishAll(recipients.stream()
-                .map(userId -> NotificationEvent.of(userId, NotificationType.ANNOUNCEMENT,
-                        announcement.getTitle(), announcement.getBody(),
-                        Map.of(NotificationParams.ANNOUNCEMENT_ID,
-                                announcement.getId().toString())))
+                .map(userId -> {
+                    NotificationEvent event = NotificationEvent.of(userId,
+                            NotificationType.ANNOUNCEMENT,
+                            announcement.getTitle(), announcement.getBody(),
+                            Map.of(NotificationParams.ANNOUNCEMENT_ID,
+                                    announcement.getId().toString()));
+                    return (deeplink == null || deeplink.isBlank())
+                            ? event : event.withDeeplink(deeplink);
+                })
                 .toList()).size();
     }
 

@@ -57,6 +57,9 @@ public class AdminAccessInterceptor implements HandlerInterceptor {
      */
     private AdminAction actionOf(HttpServletRequest request) {
         String path = request.getRequestURI();
+        if (path.contains("/auth/")) return AdminAction.ADMIN_LOGIN;
+        if (path.contains("/dashboard")) return AdminAction.DASHBOARD_VIEW;
+        if (path.contains("/inquiries")) return AdminAction.INQUIRY_QUEUE_VIEW;
         if (path.contains("/sanctions")) return AdminAction.SANCTION_APPLY;
         if (path.contains("/close")) return AdminAction.CHALLENGE_CLOSE;
         if (path.contains("/resolve")) return AdminAction.REPORT_RESOLVE;
@@ -64,6 +67,7 @@ public class AdminAccessInterceptor implements HandlerInterceptor {
         if (path.contains("/outage-relief")) return AdminAction.OUTAGE_RELIEF;
         if (path.contains("/notices")) return AdminAction.OPS_NOTICE;
         if (path.contains("/reports")) return AdminAction.REPORT_QUEUE_VIEW;
+        if (path.contains("/challenges")) return AdminAction.CHALLENGE_VIEW;
         return AdminAction.USER_VIEW;
     }
 

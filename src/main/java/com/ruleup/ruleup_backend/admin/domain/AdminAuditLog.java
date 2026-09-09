@@ -29,7 +29,11 @@ public class AdminAuditLog extends AssignedIdEntity {
 
     public enum Result { ALLOWED, DENIED }
 
-    public enum TargetType { USER, CHALLENGE, REPORT }
+    /**
+     * 조작 대상의 종류. 값이 늘어도 컬럼은 그대로다 — 대상별 테이블을 두지 않는 이유는
+     * 「이 유저에게 가해진 조작 전부」를 한 인덱스로 읽기 위해서다.
+     */
+    public enum TargetType { USER, CHALLENGE, REPORT, INQUIRY, ANOMALY, ANNOUNCEMENT }
 
     @Id
     @JdbcTypeCode(SqlTypes.BINARY)

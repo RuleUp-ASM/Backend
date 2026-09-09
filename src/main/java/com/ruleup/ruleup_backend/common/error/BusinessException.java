@@ -17,10 +17,11 @@ public class BusinessException extends RuntimeException {
     private final String rejoinAvailableAt;
     /** 선택: SETTING_CHANGE_LIMIT 일 때의 다음 변경 가능 시각(ISO). 없으면 null. */
     private final String nextChangeAvailableAt;
-    /** 선택: CONFIRMATION_REQUIRED 일 때의 확인 토큰. 없으면 null. */
-    private final String confirmationToken;
-    /** 선택: CONFIRMATION_REQUIRED 일 때 재확인 화면에 보여줄 요약. 없으면 null. */
-    private final Object preview;
+    /**
+     * 선택: CONFIRMATION_REQUIRED 일 때의 재확인 봉투 — 토큰과 <b>서버가 계산한 재제시 문구</b>가
+     * 함께 들어 있다. 클라이언트가 문구를 조립하지 않는 것이 2단계 확인의 핵심이다.
+     */
+    private final Confirmation confirmation;
     /**
      * 선택: 이 상황에 맞게 채워 넣은 사용자 문구. 없으면 {@link ErrorCode#getMessage()} 를 그대로 쓴다.
      *
@@ -44,16 +45,16 @@ public class BusinessException extends RuntimeException {
 
     private BusinessException(ErrorCode errorCode, String detail,
                               String rejoinAvailableAt, String nextChangeAvailableAt) {
-        this(errorCode, detail, rejoinAvailableAt, nextChangeAvailableAt, null, null);
+        this(errorCode, detail, rejoinAvailableAt, nextChangeAvailableAt, (Confirmation) null);
     }
 
     private BusinessException(ErrorCode errorCode, String detail, String rejoinAvailableAt,
-                              String nextChangeAvailableAt, String confirmationToken, Object preview) {
-        this(errorCode, detail, rejoinAvailableAt, nextChangeAvailableAt, confirmationToken, preview, null);
+                              String nextChangeAvailableAt, Confirmation confirmation) {
+        this(errorCode, detail, rejoinAvailableAt, nextChangeAvailableAt, confirmation, null);
     }
 
     private BusinessException(ErrorCode errorCode, String detail, String rejoinAvailableAt,
-                              String nextChangeAvailableAt, String confirmationToken, Object preview,
+                              String nextChangeAvailableAt, Confirmation confirmation,
                               String userMessage) {
         super((userMessage != null) ? userMessage : errorCode.getMessage());
         this.userMessage = userMessage;
@@ -61,8 +62,7 @@ public class BusinessException extends RuntimeException {
         this.detail = detail;
         this.rejoinAvailableAt = rejoinAvailableAt;
         this.nextChangeAvailableAt = nextChangeAvailableAt;
-        this.confirmationToken = confirmationToken;
-        this.preview = preview;
+        this.confirmation = confirmation;
     }
 
     /**
@@ -70,7 +70,7 @@ public class BusinessException extends RuntimeException {
      * 예: LOGIN_FAILED 는 PKCE 누락일 수도, 인가코드 만료일 수도 있는데 사용자가 할 일은 서로 다르다.
      */
     public static BusinessException withMessage(ErrorCode errorCode, String reason, String userMessage) {
-        return new BusinessException(errorCode, reason, null, null, null, null, userMessage);
+        return new BusinessException(errorCode, reason, null, null, null, userMessage);
     }
 
     /** 실제로 내려보낼 사용자 문구 — 채워 넣은 게 있으면 그것, 없으면 ErrorCode 기본 문구. */
@@ -79,12 +79,11 @@ public class BusinessException extends RuntimeException {
     }
 
     /**
-     * 2단계 확인 요구 — 무엇을 확인하는지(preview)와 그 확인에 한해 유효한 토큰을 함께 던진다.
+     * 2단계 확인 요구 — <b>서버가 계산한 재확인 요약</b>과 그 확인에 한해 유효한 토큰을 함께 던진다.
      * 토큰 없이 실행을 시도하면 항상 여기서 멈추므로, 클라이언트 모달을 우회해도 집행되지 않는다.
      */
-    public static BusinessException confirmationRequired(String confirmationToken, Object preview) {
-        return new BusinessException(ErrorCode.CONFIRMATION_REQUIRED, null, null, null,
-                confirmationToken, preview);
+    public static BusinessException confirmationRequired(Confirmation confirmation) {
+        return new BusinessException(ErrorCode.CONFIRMATION_REQUIRED, null, null, null, confirmation);
     }
 
     /**

@@ -18,16 +18,16 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class NotificationRegistryValidatorTest {
 
     @Test
-    @DisplayName("현재 레지스트리 22종은 전부 검증을 통과한다")
+    @DisplayName("현재 레지스트리 23종은 전부 검증을 통과한다")
     void currentRegistryIsValid() {
         assertThatCode(() -> new NotificationRegistryValidator().validate())
                 .doesNotThrowAnyException();
     }
 
     @Test
-    @DisplayName("22종 전부를 실제로 렌더해 본다 — 개수를 세어 누락을 막는다")
+    @DisplayName("23종 전부를 실제로 렌더해 본다 — 개수를 세어 누락을 막는다")
     void everyTypeIsRendered() {
-        assertThat(new NotificationRegistryValidator().validate()).isEqualTo(22);
+        assertThat(new NotificationRegistryValidator().validate()).isEqualTo(23);
     }
 
     @Test

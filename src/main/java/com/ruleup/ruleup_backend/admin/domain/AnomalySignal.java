@@ -55,6 +55,13 @@ public class AnomalySignal extends AssignedIdEntity {
     @Column(name = "reviewer_id")
     private UUID reviewerId;
 
+    /**
+     * 검토 메모. 검토했다는 사실만 남기면 <b>다음 운영자가 왜 넘겼는지 알 수 없다</b> —
+     * 같은 유저의 신호가 다시 올라왔을 때 판단이 처음부터 반복된다.
+     */
+    @Column(name = "review_note", length = 500)
+    private String reviewNote;
+
     public static AnomalySignal of(SignalType type, UUID targetUserId, int score, Instant at) {
         AnomalySignal s = new AnomalySignal();
         s.id = UuidGenerator.generate();
@@ -65,8 +72,13 @@ public class AnomalySignal extends AssignedIdEntity {
         return s;
     }
 
-    public void review(UUID reviewerId, Instant at) {
+    public void review(UUID reviewerId, String note, Instant at) {
         this.reviewerId = reviewerId;
+        this.reviewNote = note;
         this.reviewedAt = at;
+    }
+
+    public boolean isReviewed() {
+        return reviewedAt != null;
     }
 }

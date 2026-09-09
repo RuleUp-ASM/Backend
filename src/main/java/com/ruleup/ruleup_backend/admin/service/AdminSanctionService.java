@@ -4,6 +4,7 @@ import com.ruleup.ruleup_backend.admin.domain.AdminAction;
 import com.ruleup.ruleup_backend.admin.domain.AdminAuditLog;
 import com.ruleup.ruleup_backend.admin.dto.AdminDtos;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
+import com.ruleup.ruleup_backend.common.error.Confirmation;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.outbox.OutboxDispatcher;
 import com.ruleup.ruleup_backend.common.outbox.OutboxService;
@@ -23,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -52,6 +54,7 @@ public class AdminSanctionService {
     private static final Duration LOCK_DURATION = Duration.ofDays(30);
 
     private final SanctionService sanctionService;
+    private final AdminReviewService reviewService;
     private final SanctionRepository sanctionRepository;
     private final UserRepository userRepository;
     private final AdminAuditService auditService;
@@ -59,6 +62,7 @@ public class AdminSanctionService {
     private final NotificationPublisher notificationPublisher;
     private final OutboxService outboxService;
     private final OutboxDispatcher outboxDispatcher;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
 
     @Transactional
     public AdminDtos.SanctionResponse apply(UUID operatorId, UUID targetUserId,
@@ -67,7 +71,9 @@ public class AdminSanctionService {
                 || isBlank(request.reasonText()))
             throw new BusinessException(ErrorCode.INVALID_REQUEST);   // 사유는 필수다
 
-        SanctionType type = parse(SanctionType.class, request.type());
+        // 수단은 3종 + permanent 플래그다(운영자 제재 정책 § 5.4 — 영구 정지를 별도 종류로 두지
+        // 않는다). LOCK + permanent 는 저장 시 BAN 으로 접힌다 — 게이트가 읽는 값이 그것이다.
+        SanctionType type = permanentOf(request, parse(SanctionType.class, request.type()));
         SanctionReason reasonCode = parse(SanctionReason.class, request.reasonCode());
         SanctionSource source = isBlank(request.source())
                 ? SanctionSource.DIRECT : parse(SanctionSource.class, request.source());
@@ -77,15 +83,22 @@ public class AdminSanctionService {
         Instant endsAt = type.isPermanent() ? null : Instant.now().plus(LOCK_DURATION);
 
         // ① 2단계 확인 — 대상·내용에 묶인 토큰이라 다른 요청의 토큰은 통하지 않는다.
+        //    재제시 문구는 **서버가 만든다**. 클라이언트가 조립하면 확인한 문장과 집행할 내용이
+        //    어긋날 수 있고, 어긋난 채로 받은 확인은 확인이 아니다.
         String payload = payloadOf(request);
         if (!confirmationTokens.verify(request.confirmationToken(), operatorId,
                 AdminAction.SANCTION_APPLY.name(), targetUserId.toString(), payload)) {
-            throw BusinessException.confirmationRequired(
-                    confirmationTokens.issue(operatorId, AdminAction.SANCTION_APPLY.name(),
-                            targetUserId.toString(), payload),
-                    new AdminDtos.SanctionPreview(targetUserId.toString(),
-                            target.visibleNicknameTo(null), type.name(), reasonCode.name(),
-                            request.reasonText(), endsAt == null ? null : endsAt.toString()));
+            ConfirmationTokens.Issued issued = confirmationTokens.issue(operatorId,
+                    AdminAction.SANCTION_APPLY.name(), targetUserId.toString(), payload);
+            throw BusinessException.confirmationRequired(Confirmation.of(
+                    issued.token(), issued.expiresAt(),
+                    target.visibleNicknameTo(null), actionLabel(type),
+                    endsAt,
+                    List.of(new Confirmation.SideEffect("전 챌린지 자동 탈퇴",
+                                    activeChallengeCount(targetUserId), true),
+                            new Confirmation.SideEffect("근거 신고 종결",
+                                    request.resolveReportIds() == null ? 0
+                                            : request.resolveReportIds().size(), false))));
         }
 
         // 같은 수준의 제재가 이미 진행 중이면 겹쳐 걸지 않는다.
@@ -108,26 +121,44 @@ public class AdminSanctionService {
         sanction.markNotified(Instant.now());
         enqueueSideEffects(sanction, target, type);
 
+        // ⑦ 근거 신고를 함께 종결한다. 제재해 놓고 신고가 미검토로 남으면 다음 운영자가
+        //    같은 사안을 처음부터 다시 판단한다.
+        int resolved = reviewService.resolveAsSanctioned(operatorId, request.resolveReportIds(),
+                "계정 제재: " + request.reasonText());
+
         return new AdminDtos.SanctionResponse(
                 sanction.getId().toString(), targetUserId.toString(), type.name(),
+                type.isPermanent(),
                 userRepository.findById(targetUserId).orElseThrow().getStatus().name(),
                 sanction.getStartsAt().toString(),
                 sanction.getEndsAt() == null ? null : sanction.getEndsAt().toString(),
-                sanction.getNotifiedAt().toString());
+                sanction.getNotifiedAt().toString(),
+                resolved);
     }
 
-    /** 재검토 인용 해제 — 원본을 지우지 않고 {@code revokedAt} 만 채운다. */
+    /**
+     * 재검토 인용 해제 — 원본을 지우지 않고 {@code revokedAt} 만 채운다.
+     *
+     * <p><b>해제 사유도 감사 로그에 남긴다.</b> 제재를 건 근거만 남고 푼 근거가 없으면 재검토
+     * 대응에서 절반의 이야기만 할 수 있다.
+     */
     @Transactional
-    public void revoke(UUID operatorId, UUID targetUserId, UUID sanctionId) {
+    public AdminDtos.SanctionItem revoke(UUID operatorId, UUID targetUserId, UUID sanctionId,
+                                         AdminDtos.RevokeRequest request) {
+        String reasonText = (request == null || isBlank(request.reasonText()))
+                ? null : request.reasonText().trim();
+        if (reasonText == null) throw new BusinessException(ErrorCode.INVALID_REQUEST);
+
         Sanction sanction = sanctionRepository.findById(sanctionId)
                 .filter(s -> s.getUserId().equals(targetUserId))
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
         if (sanction.getRevokedAt() != null)
-            throw new BusinessException(ErrorCode.REVIEW_ALREADY_RESOLVED);
+            throw new BusinessException(ErrorCode.APPEAL_ALREADY_USED);
 
         auditService.allowed(operatorId, AdminAction.SANCTION_REVOKE,
-                AdminAuditLog.TargetType.USER, targetUserId, sanctionId.toString());
+                AdminAuditLog.TargetType.USER, targetUserId, sanctionId + "|" + reasonText);
         sanctionService.revoke(sanctionId, Instant.now());
+        sanction.markAppealUsed();
 
         // publish 는 이 트랜잭션에 합류해 발행 의사만 적는다 — 해제가 롤백되면 고지도 함께 사라진다.
         notificationPublisher.publish(NotificationEvent.of(
@@ -135,6 +166,47 @@ public class AdminSanctionService {
                 "제재가 해제됐어요", "재검토 결과 제재가 해제됐어요. 다시 이용하실 수 있어요.",
                 // 집행 고지와 해제 고지가 같은 제재 id 를 쓰므로 접두어로 가른다.
                 Map.of(NotificationParams.EVENT_KEY, "revoke:" + sanctionId)));
+
+        return com.ruleup.ruleup_backend.admin.service.AdminSanctionItems.of(sanction,
+                userRepository.findById(targetUserId).map(u -> u.visibleNicknameTo(null)).orElse(null),
+                Instant.now());
+    }
+
+    /**
+     * 요청의 {@code permanent} 를 저장 값으로 접는다.
+     *
+     * <p>정책은 수단을 3종으로 두고 영구 여부를 플래그로 다루지만, 게이트가 읽는 값은
+     * {@code sanctions.type} 하나다. 두 표기를 여기서 한 번만 맞춰 두면 게이트·마이페이지·
+     * 콘솔이 각자 「LOCK 인데 endsAt 이 null 이면 영구」 같은 판정을 반복하지 않아도 된다.
+     */
+    private SanctionType permanentOf(AdminDtos.SanctionRequest request, SanctionType type) {
+        if (!Boolean.TRUE.equals(request.permanent())) return type;
+        if (type == SanctionType.FEATURE_SUSPENSION)
+            throw new BusinessException(ErrorCode.INVALID_REQUEST);   // 영구 기능 정지는 정책에 없다
+        return SanctionType.BAN;
+    }
+
+    private String actionLabel(SanctionType type) {
+        return switch (type) {
+            case BAN -> "로그인 정지 · 영구";
+            case LOCK -> "로그인 정지 · 1개월";
+            case FEATURE_SUSPENSION -> "기능 정지 · 1개월";
+        };
+    }
+
+    /** 428 의 「영향 인원」에 해당하는 값 — 이 제재로 나가게 될 방의 수다. */
+    private int activeChallengeCount(UUID userId) {
+        Integer count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM challenge_members WHERE user_id = ? AND status = 'ACTIVE'",
+                Integer.class, bytes(userId));
+        return count == null ? 0 : count;
+    }
+
+    private static byte[] bytes(UUID id) {
+        java.nio.ByteBuffer bb = java.nio.ByteBuffer.allocate(16);
+        bb.putLong(id.getMostSignificantBits());
+        bb.putLong(id.getLeastSignificantBits());
+        return bb.array();
     }
 
     /**
@@ -172,10 +244,16 @@ public class AdminSanctionService {
         };
     }
 
-    /** 확인 지문의 입력 — 대상·내용이 바뀌면 토큰이 무효가 된다. */
+    /**
+     * 확인 지문의 입력 — 대상·내용이 바뀌면 토큰이 무효가 된다.
+     *
+     * <p>{@code permanent} 를 반드시 넣는다. 빠뜨리면 <b>1개월 잠금으로 확인받고 영구 정지를
+     * 집행</b>하는 경로가 열린다 — 2단계 확인이 막으려던 바로 그 사고다.
+     */
     private String payloadOf(AdminDtos.SanctionRequest r) {
-        return String.join("|", nullToEmpty(r.type()), nullToEmpty(r.featureCode()),
-                nullToEmpty(r.reasonCode()), nullToEmpty(r.reasonText()), nullToEmpty(r.source()));
+        return String.join("|", nullToEmpty(r.type()), String.valueOf(Boolean.TRUE.equals(r.permanent())),
+                nullToEmpty(r.featureCode()), nullToEmpty(r.reasonCode()),
+                nullToEmpty(r.reasonText()), nullToEmpty(r.source()));
     }
 
     private <T extends Enum<T>> T parse(Class<T> type, String raw) {

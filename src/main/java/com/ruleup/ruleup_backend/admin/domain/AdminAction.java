@@ -17,6 +17,29 @@ public enum AdminAction {
     CHALLENGE_CLOSE,
     USER_VIEW,
     ANOMALY_VIEW,
+    /** 이상탐지 신호 검토 종료 — 제재로 승격하는 경로가 아니라 "봤다"는 기록이다. */
+    ANOMALY_REVIEW,
     OUTAGE_RELIEF,
-    OPS_NOTICE
+    OPS_NOTICE,
+    /** 발행 대기 중인 공지 취소. 이미 적재된 공지는 회수되지 않는다. */
+    OPS_NOTICE_CANCEL,
+
+    // ===== CS =====
+    INQUIRY_QUEUE_VIEW,
+    /**
+     * 문의 상세 열람 — <b>개인정보 열람</b>이다. 본문에 계정·기기 정보와 유저가 직접 쓴 사연이
+     * 담기므로 신고 스냅샷과 같은 취급을 하고, 목록 조회와 섞지 않는다.
+     */
+    INQUIRY_VIEW,
+    INQUIRY_ANSWER,
+    /** 분류 변경 — 유저에게 노출하지 않는 조작이라 기록이 유일한 흔적이다. */
+    INQUIRY_RECLASSIFY,
+
+    // ===== 조회 전용 =====
+    /** 대시보드 — 가드레일 지표를 본 시각이 남아야 "언제부터 알고 있었나"를 답할 수 있다. */
+    DASHBOARD_VIEW,
+    SANCTION_LIST_VIEW,
+    CHALLENGE_VIEW,
+    /** 콘솔 진입 인증 시도. 실패는 DENIED 로 남아 무차별 대입의 흔적이 된다. */
+    ADMIN_LOGIN
 }
