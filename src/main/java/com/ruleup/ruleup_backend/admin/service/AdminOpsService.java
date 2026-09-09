@@ -394,8 +394,11 @@ public class AdminOpsService {
                 ? Announcement.Kind.MAINTENANCE : parseKind(request.kind());
         Instant scheduledAt = isBlank(request.scheduledAt()) ? null : parseInstant(request.scheduledAt());
 
+        // 팬아웃 잡과 같은 조건이어야 한다 — 예상 수신자와 실제 적재 수가 어긋나면
+        // 「공지가 덜 나갔다」는 오해가 매번 생긴다.
         Integer audience = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM users WHERE status <> 'WITHDRAWN' AND deleted_at IS NULL",
+                "SELECT COUNT(*) FROM users WHERE status <> 'WITHDRAWN' AND deleted_at IS NULL"
+                        + " AND role = 'MEMBER'",
                 Integer.class);
         int recipients = audience == null ? 0 : audience;
 

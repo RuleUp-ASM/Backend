@@ -63,10 +63,10 @@ class AdminConsoleAuthIT extends ChallengeApiSupport {
     }
 
     @Test
-    @DisplayName("비밀번호가 맞으면 운영자 계정의 토큰을 준다 — 그 토큰으로 백오피스가 열린다")
-    void login_issues_operator_token() throws Exception {
-        Member op = member(uniq("console"));
-        jdbcTemplate.update("UPDATE users SET role = 'OPERATOR' WHERE id = ?", bytes(op.id()));
+    @DisplayName("비밀번호만 맞으면 들어간다 — 운영자 계정을 미리 만들어 둘 필요가 없다")
+    void password_alone_opens_the_console() throws Exception {
+        // 운영자 롤 계정을 아무도 만들지 않은 상태에서 시작한다.
+        jdbcTemplate.update("UPDATE users SET role = 'MEMBER' WHERE role = 'OPERATOR'");
 
         MvcResult res = login("console-test-pass");
         assertThat(res.getResponse().getStatus()).isEqualTo(200);
@@ -79,6 +79,32 @@ class AdminConsoleAuthIT extends ChallengeApiSupport {
         assertThat(mvc.perform(get("/api/v1/admin/dashboard/summary")
                 .header("Authorization", "Bearer " + token)).andReturn()
                 .getResponse().getStatus()).isEqualTo(200);
+    }
+
+    @Test
+    @DisplayName("콘솔 계정은 한 번만 만들어진다 — 로그인할 때마다 늘어나지 않는다")
+    void console_account_is_created_once() throws Exception {
+        jdbcTemplate.update("UPDATE users SET role = 'MEMBER' WHERE role = 'OPERATOR'");
+
+        String first = read(login("console-test-pass"), "$.data.operatorId");
+        String second = read(login("console-test-pass"), "$.data.operatorId");
+
+        assertThat(second).isEqualTo(first);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM users WHERE role = 'OPERATOR'", Integer.class)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("콘솔 계정은 회원이 아니다 — 공지 수신자와 회원 수에서 빠진다")
+    void console_account_is_not_a_member() throws Exception {
+        jdbcTemplate.update("UPDATE users SET role = 'MEMBER' WHERE role = 'OPERATOR'");
+        String operatorId = read(login("console-test-pass"), "$.data.operatorId");
+
+        // 팬아웃 수신자 조건(role='MEMBER')에 걸리지 않는다 — 안 읽는 알림함에 공지가 쌓이면
+        // recipient_count 가 매번 실제와 어긋난다.
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM users WHERE id = ? AND role = 'MEMBER'",
+                Integer.class, bytes(java.util.UUID.fromString(operatorId)))).isZero();
     }
 
     @Test
