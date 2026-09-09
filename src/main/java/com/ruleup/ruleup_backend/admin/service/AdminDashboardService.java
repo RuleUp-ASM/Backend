@@ -171,12 +171,16 @@ public class AdminDashboardService {
                 anomalyRepository.countByDetectedAtBetween(from, to));
     }
 
+    /** 운영자 콘솔 계정은 회원이 아니다 — 회원 수 지표에서 뺀다. */
     private AdminDtos.Members members(Instant from, Instant to) {
         return new AdminDtos.Members(
-                count("SELECT COUNT(*) FROM users WHERE status <> 'WITHDRAWN' AND deleted_at IS NULL"),
-                count("SELECT COUNT(*) FROM users WHERE status = 'ACTIVE' AND deleted_at IS NULL"),
-                count("SELECT COUNT(*) FROM users WHERE status = 'SUSPENDED'"),
-                count("SELECT COUNT(*) FROM users WHERE created_at BETWEEN ? AND ?", ts(from), ts(to)));
+                count("SELECT COUNT(*) FROM users WHERE status <> 'WITHDRAWN' AND deleted_at IS NULL"
+                        + " AND role = 'MEMBER'"),
+                count("SELECT COUNT(*) FROM users WHERE status = 'ACTIVE' AND deleted_at IS NULL"
+                        + " AND role = 'MEMBER'"),
+                count("SELECT COUNT(*) FROM users WHERE status = 'SUSPENDED' AND role = 'MEMBER'"),
+                count("SELECT COUNT(*) FROM users WHERE created_at BETWEEN ? AND ? AND role = 'MEMBER'",
+                        ts(from), ts(to)));
     }
 
     private AdminDtos.Challenges challenges(Instant from, Instant to) {

@@ -7,16 +7,19 @@ import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.config.AppProperties;
 import com.ruleup.ruleup_backend.security.JwtProvider;
 import com.ruleup.ruleup_backend.user.UserRepository;
+import com.ruleup.ruleup_backend.user.domain.OAuthProvider;
 import com.ruleup.ruleup_backend.user.domain.User;
 import com.ruleup.ruleup_backend.user.domain.UserRole;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -46,6 +49,14 @@ public class AdminAuthService {
     private static final int MAX_ATTEMPTS = 10;
     private static final Duration WINDOW = Duration.ofMinutes(10);
 
+    /**
+     * 콘솔 계정의 소셜 신원 — <b>고정값이라 두 번 만들어지지 않는다</b>
+     * ({@code uq_users_oauth_identity}). 실제 소셜 계정과 겹칠 수 없는 subject 를 쓴다.
+     */
+    private static final OAuthProvider CONSOLE_PROVIDER = OAuthProvider.KAKAO;
+    private static final String CONSOLE_SUBJECT = "ruleup-admin-console";
+    private static final String CONSOLE_NICKNAME = "운영자";
+
     private final AdminProperties adminProperties;
     private final AppProperties appProperties;
     private final JwtProvider jwtProvider;
@@ -61,7 +72,11 @@ public class AdminAuthService {
     /**
      * 진입 인증. <b>실패는 전부 감사 로그에 남는다</b> — 거부 급증이 우회 시도의 신호이므로,
      * 막고 끝내지 않고 기록한다.
+     *
+     * <p>트랜잭션을 여는 이유는 첫 로그인에서 콘솔 계정을 만들 수 있기 때문이다. 감사 기록은
+     * {@code REQUIRES_NEW} 라 이 트랜잭션이 뒤집혀도 시도 흔적은 남는다.
      */
+    @Transactional
     public Session login(String passcode, String clientKey) {
         if (exceeded(clientKey)) {
             auditService.denied(null, AdminAction.ADMIN_LOGIN, "rate-limited");
@@ -99,11 +114,23 @@ public class AdminAuthService {
     }
 
     /**
-     * 세션의 주인이 될 계정. 설정에 id 가 있으면 그것을, 없으면 <b>운영자 롤 계정</b>을 찾는다.
+     * 세션의 주인이 될 계정. 설정에 id 가 있으면 그것을, 없으면 운영자 롤 계정을 찾고,
+     * <b>그마저 없으면 서버가 만든다.</b>
      *
-     * <p>자동 탐색을 두는 이유는 설정과 DB 가 어긋나는 실패를 없애기 위해서다 — 롤을 다른
-     * 계정으로 옮겨도 로그인은 계속 동작하고, <b>롤 부여라는 운영 결정 하나만</b> 유지하면 된다.
-     * 롤이 여럿이면 가장 먼저 부여된 계정을 쓴다(UUID v7 이라 id 순이 곧 시간순이다).
+     * <h4>왜 계정이 필요한가 — 로그인 때문이 아니다</h4>
+     * 비밀번호만으로 문은 열 수 있다. 계정이 필요한 곳은 <b>문을 열고 난 뒤</b>다.
+     * <ul>
+     *   <li>{@code outage_reliefs.operator_id} 는 {@code NOT NULL} 이고 {@code users.id} 에
+     *       <b>FK 가 걸려 있다</b> — 계정 행이 없으면 장애 구제가 INSERT 자체를 못 한다</li>
+     *   <li>감사 로그와 {@code sanctions.operator_id} 는 FK 가 없어 아무 값이나 들어가지만,
+     *       가리키는 계정이 없는 id 는 「누가 집행했나」에 답하지 못한다 —
+     *       조작 이력 추적이 이 모듈의 존재 이유다</li>
+     * </ul>
+     *
+     * <h4>그래서 사람이 만들지 않는다</h4>
+     * 스테이징 RDS 는 사설망에 있어 손으로 넣을 자리가 없고, 배포마다 계정을 먼저 만들라는
+     * 요구는 <b>설정과 DB 가 어긋나는 실패</b>를 하나 더 만든다. 첫 로그인 때 서버가 만들고,
+     * 그 뒤로는 같은 계정을 계속 쓴다.
      */
     private User operator() {
         if (adminProperties.hasOperatorId()) {
@@ -117,10 +144,43 @@ public class AdminAuthService {
                     });
         }
         return userRepository.findFirstByRoleAndDeletedAtIsNullOrderByIdAsc(UserRole.OPERATOR)
-                .orElseThrow(() -> {
-                    log.error("운영자 롤 계정이 없다. users.role = 'OPERATOR' 인 계정을 먼저 만든다.");
-                    return new BusinessException(ErrorCode.INVALID_PASSCODE);
-                });
+                .orElseGet(this::provisionConsoleAccount);
+    }
+
+    /**
+     * 콘솔 전용 운영자 계정을 만든다. <b>소셜 신원이 고정</b>({@code uq_users_oauth_identity})이라
+     * 두 번 만들어지지 않는다 — 동시 로그인이 겹치면 한쪽이 제약에 걸리고, 재시도가 찾아 쓴다.
+     *
+     * <p>이 계정은 앱을 쓰지 않는다. 그래서 점수 요약도 동의 이력도 만들지 않고,
+     * <b>공지 팬아웃과 회원 수 집계에서도 빠진다</b>(role 로 거른다) — 운영자는 회원이 아니다.
+     */
+    private User provisionConsoleAccount() {
+        User existing = userRepository
+                .findByOauthProviderAndOauthSubject(CONSOLE_PROVIDER, CONSOLE_SUBJECT).orElse(null);
+        if (existing != null) {
+            // 롤만 빠진 상태로 남아 있을 수 있다(수동으로 되돌렸다든지). 이름은 건드리지 않는다.
+            if (!existing.isOperator()) existing.grantRole(UserRole.OPERATOR);
+            return existing;
+        }
+
+        User operator = User.create(CONSOLE_PROVIDER, CONSOLE_SUBJECT, null,
+                consoleNickname(), null, List.of());
+        operator.approveNickname();     // 심사 대상이 아니다 — 타인에게 노출될 자리가 없다
+        operator.grantRole(UserRole.OPERATOR);
+
+        User saved = userRepository.save(operator);
+        log.warn("운영자 콘솔 계정을 새로 만들었다. operatorId={}", saved.getId());
+        return saved;
+    }
+
+    /** 닉네임은 12자 제한에 UNIQUE 다. 이미 쓰이고 있으면 접미사를 붙여 피한다. */
+    private String consoleNickname() {
+        if (!userRepository.isNicknameTaken(CONSOLE_NICKNAME, null)) return CONSOLE_NICKNAME;
+        for (int i = 0; i < 20; i++) {
+            String candidate = CONSOLE_NICKNAME + (int) (Math.random() * 10_000);
+            if (!userRepository.isNicknameTaken(candidate, null)) return candidate;
+        }
+        throw new IllegalStateException("운영자 콘솔 계정의 닉네임을 정하지 못했다");
     }
 
     private UUID parseOperatorId() {

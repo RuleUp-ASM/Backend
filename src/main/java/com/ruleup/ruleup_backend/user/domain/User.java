@@ -380,6 +380,12 @@ public class User extends AssignedIdEntity {
 
     public boolean isOperator() { return role == UserRole.OPERATOR; }
 
+    /**
+     * 롤 부여 — <b>앱에서 바꾸는 경로는 없다</b>. 부여는 운영 결정이라 운영자 콘솔이 자기
+     * 계정을 만들 때와 DB 를 직접 고칠 때 말고는 호출되지 않는다.
+     */
+    public void grantRole(UserRole role) { this.role = role; }
+
     public boolean isWithdrawn() { return status == UserStatus.WITHDRAWN; }
     public boolean isSuspended() { return status == UserStatus.SUSPENDED; }
 

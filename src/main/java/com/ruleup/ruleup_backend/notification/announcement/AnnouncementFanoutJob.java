@@ -88,7 +88,9 @@ public class AnnouncementFanoutJob {
      * 구간을 다시 읽지 않는다. 탈퇴자는 제외한다 — 나간 사람에게 보낼 공지가 없다.
      */
     private List<UUID> nextRecipients(UUID cursor) {
+        // 운영자 콘솔 계정은 앱을 쓰지 않는다 — 공지를 받을 알림함이 없는 것과 같다.
         String sql = "SELECT id FROM users WHERE status <> 'WITHDRAWN' AND deleted_at IS NULL"
+                + " AND role = 'MEMBER'"
                 + (cursor == null ? "" : " AND id > ?")
                 + " ORDER BY id LIMIT " + CHUNK;
         return cursor == null
