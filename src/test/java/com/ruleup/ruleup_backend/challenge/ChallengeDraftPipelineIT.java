@@ -90,7 +90,7 @@ class ChallengeDraftPipelineIT extends ChallengeApiSupport {
                     "GPS_PRESENCE", "[\"ACCESS_FINE_LOCATION\",\"ACCESS_BACKGROUND_LOCATION\"]");
             insertAutoTemplate(WALK_TEMPLATE, "매일 만보 걷기", "걷기 습관", "EXERCISE",
                     "{\"steps\":{\"default\":10000,\"unit\":\"보\",\"min\":1000,\"max\":50000}}",
-                    "HEALTH", "[\"ACTIVITY_RECOGNITION\"]");
+                    "HEALTH", "[\"android.permission.health.READ_STEPS\"]");
             fixtures = true;
         }
     }

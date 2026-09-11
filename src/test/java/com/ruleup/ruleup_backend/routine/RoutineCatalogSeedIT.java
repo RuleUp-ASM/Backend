@@ -44,6 +44,23 @@ class RoutineCatalogSeedIT {
             "HEALTH", Set.of("steps", "distance_km"),
             "SLEEP", Set.of("bedtime_before", "sleep_hours"));
 
+    /**
+     * verificationMethod → 그 판정기가 실제로 읽는 신호에 필요한 권한(V39).
+     *
+     * <p>여기 없는 토큰이 시드에 들어가면 사용자는 아무 데도 쓰이지 않는 권한 다이얼로그를 하나 더 본다.
+     * 실제로 움직임 루틴이 Health Connect 걸음·거리와 함께 {@code ACTIVITY_RECOGNITION} 을 요구하고 있었고,
+     * 안드로이드에는 그 권한으로 읽는 코드가 없었다.
+     */
+    private static final Map<String, Set<String>> ALLOWED_PERMISSIONS = Map.of(
+            "GPS_PRESENCE", Set.of("ACCESS_FINE_LOCATION", "ACCESS_BACKGROUND_LOCATION"),
+            "GPS_AVOID", Set.of("ACCESS_FINE_LOCATION", "ACCESS_BACKGROUND_LOCATION"),
+            "SCREEN_TIME_MAX", Set.of("PACKAGE_USAGE_STATS"),
+            "SCREEN_TIME_MIN", Set.of("PACKAGE_USAGE_STATS"),
+            "WAKE", Set.of("PACKAGE_USAGE_STATS"),
+            "HEALTH", Set.of("android.permission.health.READ_STEPS",
+                             "android.permission.health.READ_DISTANCE"),
+            "SLEEP", Set.of("android.permission.health.READ_SLEEP"));
+
     @Autowired RoutineTemplateRepository templateRepository;
 
     private List<RoutineTemplate> seeded() {
@@ -83,6 +100,23 @@ class RoutineCatalogSeedIT {
                     .withFailMessage("%s 의 목표값 키 %s 가 %s 판정기와 맞지 않는다",
                             t.getName(), keys, t.getVerificationMethod())
                     .isNotEmpty()
+                    .allMatch(allowed::contains);
+        }
+    }
+
+    @Test
+    @Transactional(readOnly = true)
+    @DisplayName("필요 권한은 그 판정기가 실제로 읽는 신호의 권한뿐이다")
+    void permissionsMatchEvaluator() {
+        for (RoutineTemplate t : seeded()) {
+            Set<String> allowed = ALLOWED_PERMISSIONS.get(t.getVerificationMethod());
+            assertThat(allowed)
+                    .withFailMessage("판정기가 모르는 verificationMethod: %s (%s)",
+                            t.getVerificationMethod(), t.getName())
+                    .isNotNull();
+            assertThat(t.getAutoRequiredPermissions())
+                    .withFailMessage("%s 가 %s 판정에 쓰이지 않는 권한을 요구한다: %s",
+                            t.getName(), t.getVerificationMethod(), t.getAutoRequiredPermissions())
                     .allMatch(allowed::contains);
         }
     }
