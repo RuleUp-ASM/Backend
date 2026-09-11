@@ -18,6 +18,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.util.AntPathMatcher;
 import org.springframework.web.filter.OncePerRequestFilter;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -60,20 +61,29 @@ public class AccountStatusFilter extends OncePerRequestFilter {
             Set.of(HttpMethod.GET.name(), HttpMethod.HEAD.name(), HttpMethod.OPTIONS.name());
 
     /**
-     * 제재 중에도 반드시 열려야 하는 경로.
+     * 제재 중에도 반드시 열려야 하는 경로. {@code *} 는 경로 한 조각(id)에 맞는다.
      *
      * <p>앞의 둘은 갇힘 방지다 — 세션을 못 끊거나 계정을 못 지우면 사용자가 빠져나올 수 없다.
-     * 뒤의 셋은 상황 인지다 — 제재 사유·해제일과 고지를 볼 수 없으면 왜 막혔는지 알 수 없다.
+     * 나머지는 상황 인지다 — 제재 사유·해제일과 고지를 볼 수 없으면 왜 막혔는지 알 수 없다.
      */
     private static final Set<String> ALWAYS_ALLOWED = Set.of(
             "POST /api/v1/auth/logout",
             "DELETE /api/v1/users/me",
             "GET /api/v1/users/me/sanctions",
             "GET /api/v1/notifications",
+            // 알림함을 열 수 있는데 읽음 처리가 막히면 레드닷이 영영 남는다. LOCK 은 GET 만 통과시키므로
+            // 읽기 규칙에 기대지 않고 여기 둔다(QA NOTI-02 / SAN-06).
+            "PUT /api/v1/notifications/read",
             "GET /api/v1/users/me/agreements",
             // 잠금 중 허용 행위는 열람과 CS 문의뿐이다(운영자 제재 정책 § 5.3). 제재 재검토가
             // 이 채널로 들어오므로 — 제재가 이 경로를 막으면 다툴 방법 자체가 사라진다.
-            "POST /api/v1/inquiries");
+            "POST /api/v1/inquiries",
+            // 접수만 되고 답변을 못 보면 재검토 채널이 반쪽이다. LOCK 은 읽기 규칙으로도 통과하지만
+            // BAN 은 조회까지 막으므로 명시해 둔다.
+            "GET /api/v1/inquiries",
+            "GET /api/v1/inquiries/*");
+
+    private static final AntPathMatcher PATHS = new AntPathMatcher();
 
     /**
      * 탈퇴 계정에도 남겨 두는 경로 — <b>여기만</b> 열고 나머지는 전부 막는다.
@@ -153,7 +163,8 @@ public class AccountStatusFilter extends OncePerRequestFilter {
     }
 
     private boolean isAlwaysAllowed(HttpServletRequest request) {
-        return ALWAYS_ALLOWED.contains(request.getMethod() + " " + request.getRequestURI());
+        String key = request.getMethod() + " " + request.getRequestURI();
+        return ALWAYS_ALLOWED.stream().anyMatch(pattern -> PATHS.match(pattern, key));
     }
 
     private boolean isAllowedWhenWithdrawn(HttpServletRequest request) {

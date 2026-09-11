@@ -33,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 
 /**
  * 계정 상태와 제재 게이트 — 온보딩 테크 스펙 5-6 · 부록 A, 백오피스 공통 5-3.
@@ -202,6 +203,22 @@ class SanctionGateIT extends AuthApiSupport {
             // 동의 상태는 잠금 여부와 관계없이 유지된다.
             assertThat(getAuth("/api/v1/users/me/agreements", a.accessToken()).getResponse().getStatus())
                     .isEqualTo(200);
+        }
+
+        @Test
+        @DisplayName("잠금 상태에서도 알림 읽음 처리는 열린다 — 막히면 레드닷이 영영 남는다")
+        void lock_allows_mark_read() throws Exception {
+            Account a = join("읽음처리");
+            impose(a.userId(), SanctionType.LOCK, null, Instant.now().plus(Duration.ofDays(30)));
+
+            // PUT 이라 LOCK 의 열람 규칙으로는 통과하지 못한다. 게이트를 지나 서비스까지 닿았는지만 본다 —
+            // 없는 id 라 404 가 나야 정상이고, 403 ACCOUNT_LOCKED 면 화이트리스트가 빠진 것이다.
+            MvcResult res = mvc.perform(put("/api/v1/notifications/read")
+                    .header("Authorization", "Bearer " + a.accessToken())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(OM.writeValueAsString(Map.of("lastNotificationId", UUID.randomUUID().toString()))))
+                    .andReturn();
+            expectError(res, 404, "NOTIFICATION_NOT_FOUND");
         }
 
         @Test
