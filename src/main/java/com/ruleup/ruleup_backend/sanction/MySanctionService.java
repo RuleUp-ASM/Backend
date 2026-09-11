@@ -81,8 +81,8 @@ public class MySanctionService {
     }
 
     /**
-     * 자동 제재 = 챌린지 강퇴. {@code rejoin_available_at} 이 null 이면 <b>영구 차단</b>이다 —
-     * 부정행위 검출은 해당 챌린지 영구 차단이라 재입장 시각이 없다.
+     * 자동 제재 = 챌린지 강퇴. 부정행위 검출은 해당 챌린지 <b>영구 차단</b>이라 재입장 시각이 없다.
+     * 영구 여부는 {@code rejoin_banned} 로 본다 — 재입장 시각이 비어 있다는 것만으로는 판단할 수 없다.
      */
     private List<MySanctionsResponse.AutoItem> autoTrack(UUID userId) {
         List<ChallengeMember> kicked = challengeMemberRepository
@@ -101,7 +101,7 @@ public class MySanctionService {
                         m.getChallengeId().toString(),
                         titles.getOrDefault(m.getChallengeId(), null),
                         m.getKickReason(),
-                        m.getRejoinAvailableAt() == null,
+                        m.isRejoinBanned(),
                         m.getRejoinAvailableAt() == null ? null : m.getRejoinAvailableAt().toString(),
                         m.getLeftAt() == null ? null : m.getLeftAt().toString()))
                 .toList();

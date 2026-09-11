@@ -23,7 +23,7 @@ public final class InvitationDtos {
 
             @Schema(description = "수락이 막힌 이유. 수락 API 의 error.reason 과 같은 enum 이다. 가능하면 null.",
                     example = "TIER_GATE",
-                    allowableValues = {"ALREADY_JOINED", "CHALLENGE_COMPLETED", "REJOIN_COOLDOWN",
+                    allowableValues = {"ALREADY_JOINED", "CHALLENGE_COMPLETED", "BANNED", "REJOIN_COOLDOWN",
                             "FREE_LIMIT", "FULL", "TIER_GATE"})
             String blockReason,
 

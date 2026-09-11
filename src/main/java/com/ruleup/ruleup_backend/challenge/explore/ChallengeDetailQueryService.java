@@ -130,6 +130,8 @@ public class ChallengeDetailQueryService {
         if (isOwner || (myMembership != null && myMembership.isActive())) return JoinBlockReason.ALREADY_JOINED;
         if (c.isGroup() && "PRIVATE".equals(c.getVisibility())) return JoinBlockReason.PRIVATE_INVITE_ONLY;
         if (myMembership != null) {
+            // 가입 게이트와 같은 순서 — 영구 차단이 재입장 대기보다 먼저다(ChallengeMemberService.join ③).
+            if (myMembership.isRejoinBanned()) return JoinBlockReason.BANNED;
             Instant availableAt = myMembership.getRejoinAvailableAt();
             if (availableAt != null && Instant.now().isBefore(availableAt))
                 return JoinBlockReason.REJOIN_COOLDOWN;

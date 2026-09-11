@@ -119,8 +119,11 @@ public class ChallengeMemberService {
         if (!invited && c.isGroup() && "PRIVATE".equals(c.getVisibility()))
             throw blocked(JoinBlockReason.PRIVATE_INVITE_ONLY);
 
-        // ③ 재입장 대기 — 자진 탈퇴 1주 / 강퇴 배수. 사유별 예외(영구 차단)는 없다.
+        // ③ 영구 차단 → 재입장 대기. 부정행위 검출 강퇴만 영구 차단이고(방 내부 5-6) 대기 시각이 없다 —
+        //    백오프로 치환하면 치팅으로 쫓겨난 사용자가 1주 뒤 그대로 돌아온다.
+        //    나머지(자진 탈퇴 1주 / 연속 실패·권한 미허용 강퇴 배수)는 대기 시각으로 판정한다.
         if (existing != null) {
+            if (existing.isRejoinBanned()) throw blocked(JoinBlockReason.BANNED);
             Instant availableAt = existing.getRejoinAvailableAt();
             if (availableAt != null && now.isBefore(availableAt))
                 throw new BusinessException(ErrorCode.JOIN_BLOCKED,
@@ -184,6 +187,7 @@ public class ChallengeMemberService {
         if (existing != null && existing.isActive()) return JoinBlockReason.ALREADY_JOINED;
         if (!invited && c.isGroup() && "PRIVATE".equals(c.getVisibility()))
             return JoinBlockReason.PRIVATE_INVITE_ONLY;
+        if (existing != null && existing.isRejoinBanned()) return JoinBlockReason.BANNED;
         if (existing != null && existing.getRejoinAvailableAt() != null
                 && Instant.now().isBefore(existing.getRejoinAvailableAt()))
             return JoinBlockReason.REJOIN_COOLDOWN;

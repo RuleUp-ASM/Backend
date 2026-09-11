@@ -328,6 +328,71 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
         }
 
         @Test
+        @DisplayName("부정행위 검출 강퇴 → BANNED 영구 차단. 대기 시각이 없고 시간이 흘러도 풀리지 않는다")
+        void cheatKickBansRejoinPermanently() throws Exception {
+            Member owner = member(uniq("cheat-owner"));
+            Member cheater = member(uniq("cheat-user"));
+            UUID challengeId = openGroup(owner.id());
+            join(cheater.token(), challengeId);
+
+            var roomAdmin = wac.getBean(com.ruleup.ruleup_backend.challenge.service.RoomAdminService.class);
+            roomAdmin.kickForCheat(challengeId, cheater.id());
+            roomAdmin.kickForCheat(challengeId, cheater.id());   // 같은 신호 재전송 — 멱등이어야 한다
+
+            MvcResult blocked = join(cheater.token(), challengeId);
+            expectBlocked(blocked, "BANNED");
+            // 사유는 설명하지 않는다 — 언제 풀리는지도 없다.
+            assertThat(blocked.getResponse().getContentAsString()).doesNotContain("rejoinAvailableAt");
+
+            // 백오프 강퇴라면 여기서 풀린다. 영구 차단은 대기 시각과 무관해야 한다.
+            jdbcTemplate.update("UPDATE challenge_members SET rejoin_available_at = DATE_SUB(NOW(6), INTERVAL 1 HOUR) "
+                    + "WHERE challenge_id = ? AND user_id = ?", bytes(challengeId), bytes(cheater.id()));
+            expectBlocked(join(cheater.token(), challengeId), "BANNED");
+
+            // 초대 링크 미리보기도 같은 사유를 내린다 — 판정 순서가 어긋나면 클라 안내가 갈라진다.
+            var challenge = wac.getBean(com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository.class)
+                    .findById(challengeId).orElseThrow();
+            assertThat(wac.getBean(com.ruleup.ruleup_backend.challenge.service.ChallengeMemberService.class)
+                    .previewBlockReason(cheater.id(), challenge, true))
+                    .isEqualTo(com.ruleup.ruleup_backend.challenge.domain.JoinBlockReason.BANNED);
+            // 상세 화면도 같은 사유 — 대기 시각은 비워 둔다.
+            MvcResult detail = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                    .get("/api/v1/challenges/" + challengeId).header("Authorization", "Bearer " + cheater.token()))
+                    .andReturn();
+            assertThat((String) read(detail, "$.data.joinBlockReason")).isEqualTo("BANNED");
+            assertThat((Object) read(detail, "$.data.rejoinAvailableAt")).isNull();
+
+            // 동시 참여 한도에서 빠진다 — 쫓겨난 방이 3개 슬롯을 잡아먹으면 안 된다.
+            Integer count = jdbcTemplate.queryForObject(
+                    "SELECT active_join_count FROM user_challenge_counters WHERE user_id = ?",
+                    Integer.class, bytes(cheater.id()));
+            assertThat(count).isZero();
+
+            // 제재 이력에는 영구로 찍힌다.
+            MvcResult sanctions = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                    .get("/api/v1/users/me/sanctions").header("Authorization", "Bearer " + cheater.token())).andReturn();
+            assertThat((String) read(sanctions, "$.data.auto[0].reasonCode")).isEqualTo("CHEAT_DETECTED");
+            assertThat((Boolean) read(sanctions, "$.data.auto[0].permanent")).isTrue();
+        }
+
+        @Test
+        @DisplayName("검출 전에 스스로 나갔어도 영구 차단 — 탈퇴 1주 대기로 우회되지 않는다")
+        void cheatAfterLeaveStillBans() throws Exception {
+            Member owner = member(uniq("cheat-left-owner"));
+            Member cheater = member(uniq("cheat-left-user"));
+            UUID challengeId = openGroup(owner.id());
+            join(cheater.token(), challengeId);
+            leave(cheater.token(), challengeId);
+
+            wac.getBean(com.ruleup.ruleup_backend.challenge.service.RoomAdminService.class)
+                    .kickForCheat(challengeId, cheater.id());
+            jdbcTemplate.update("UPDATE challenge_members SET rejoin_available_at = DATE_SUB(NOW(6), INTERVAL 1 HOUR) "
+                    + "WHERE challenge_id = ? AND user_id = ?", bytes(challengeId), bytes(cheater.id()));
+
+            expectBlocked(join(cheater.token(), challengeId), "BANNED");
+        }
+
+        @Test
         @DisplayName("1주가 지나면 같은 방에 다시 들어갈 수 있다 (구 '재참여 영구 불가' 폐기)")
         void rejoinAfterCooldown() throws Exception {
             Member owner = member(uniq("rejoin-owner"));
