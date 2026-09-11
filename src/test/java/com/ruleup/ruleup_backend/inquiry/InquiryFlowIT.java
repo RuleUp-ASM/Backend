@@ -188,6 +188,23 @@ class InquiryFlowIT extends ChallengeApiSupport {
         }
 
         @Test
+        @DisplayName("영구 정지돼도 내 문의 내역과 상세는 열린다 — 접수만 되고 답변을 못 보면 재검토 채널이 반쪽이다")
+        void banned_account_can_read_own_inquiries() throws Exception {
+            Member user = member(uniq("banned"));
+            String inquiryId = submit(user, "REPORT_SANCTION");
+            ban(user.id());
+
+            // BAN 은 조회까지 막으므로 LOCK 의 열람 규칙에 기댈 수 없다 — 화이트리스트가 따로 열어야 한다.
+            expectError(getAuth("/api/v1/users/me", user.token()), 403, "ACCOUNT_BANNED");
+
+            MvcResult list = getAuth("/api/v1/inquiries", user.token());
+            assertThat(list.getResponse().getStatus()).isEqualTo(200);
+            assertThat((List<?>) read(list, "$.data.items")).hasSize(1);
+            assertThat(getAuth("/api/v1/inquiries/" + inquiryId, user.token()).getResponse().getStatus())
+                    .isEqualTo(200);
+        }
+
+        @Test
         @DisplayName("남의 문의는 404 — 소유자가 아니면 없는 것과 같다")
         void other_users_inquiry_is_404() throws Exception {
             Member owner = member(uniq("owner"));

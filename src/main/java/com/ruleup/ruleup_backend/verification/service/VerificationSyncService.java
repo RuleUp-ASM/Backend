@@ -279,7 +279,9 @@ public class VerificationSyncService {
         VerificationMethod method = config.primaryMethod();
         MethodEvaluator evaluator = evaluators.get(method);
         if (evaluator == null) {
-            // 아직 미구현 method(이번 단계 WAKE만) → 평가 보류, PENDING 유지
+            // 방어 분기 — 인증 방식 6종(GPS_PRESENCE·GPS_DISTANCE·HEALTH·SCREEN_TIME·SLEEP·WAKE)은 전부
+            // evaluator 가 있고 수동은 SELF_CHECK 로 접힌다(VerificationConfigFactory). 새 방식을 enum 에만
+            // 먼저 추가한 경우 여기로 떨어진다 → 평가 보류, PENDING 유지
             return (daily.getStatus() != null) ? daily.getStatus() : VerificationStatus.PENDING;
         }
 

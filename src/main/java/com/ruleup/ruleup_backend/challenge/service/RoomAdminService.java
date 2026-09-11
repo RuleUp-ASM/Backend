@@ -89,6 +89,45 @@ public class RoomAdminService {
         return new RoomAdminDtos.KickResponse(true, targetUserId.toString(), rejoinAt.toString());
     }
 
+    /** 부정행위 검출 강퇴의 {@code kick_reason}. 제재 이력의 {@code reasonCode} 로 그대로 나간다. */
+    public static final String CHEAT_KICK_REASON = "CHEAT_DETECTED";
+
+    /**
+     * 부정행위 검출 강퇴 — 방 내부 테크 스펙 5-6. 강퇴 3종 중 <b>유일하게 백오프가 아니라 해당 챌린지
+     * 영구 차단</b>이다. 판정(이상패턴 탐지 확정)은 인증 모듈 몫이고 여기는 집행만 한다 — 방장을 거치지 않는다.
+     *
+     * <p>멱등이다 — 같은 신호가 다시 와도 이미 영구 차단이면 아무것도 하지 않는다.
+     * 검출 전에 스스로 나간 멤버도 차단 표시는 남긴다 — 탈퇴 1주 대기로 끝나면 치팅 후 먼저 나가는 것이 우회로가 된다.
+     */
+    @Transactional
+    public void kickForCheat(UUID challengeId, UUID targetUserId) {
+        // 락 순서는 전 경로에서 사용자 행 → 챌린지 행으로 고정한다(가입·탈퇴와 동일 — 데드락 방지).
+        counterRepository.ensureRow(targetUserId);
+        counterRepository.lockCount(targetUserId);
+        Challenge challenge = locked(challengeId);
+        ChallengeMember target = memberRepository.findByChallengeIdAndUserId(challengeId, targetUserId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TARGET_NOT_MEMBER));
+        if (target.isRejoinBanned()) return;
+        if (!target.isActive()) {
+            target.banFromRejoin();
+            return;
+        }
+        Instant now = Instant.now();
+        // 방장이 쫓겨나면 탈퇴와 같이 봇방장 체제로 넘어간다 — 방장 없는 방이 되면 안 된다.
+        if (target.isOwner()) challenge.convertToBotOwner(now);
+        target.kickPermanently(CHEAT_KICK_REASON, now);
+        // decrementParticipantCount 는 clearAutomatically 라 bumpVersion 을 반드시 앞에서 부른다.
+        challenge.bumpVersion();
+        challengeRepository.decrementParticipantCount(challengeId);
+        counterRepository.decrement(targetUserId);
+        eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "KICK"));
+        // 영구 차단이라 같은 방에서 두 번 강퇴될 일이 없다 — 방 id 만으로 멱등 키가 된다.
+        notificationPublisher.publish(NotificationEvent.forChallenge(targetUserId,
+                NotificationType.CHALLENGE_KICKED, "챌린지에서 내보내졌어요",
+                "이 챌린지에는 다시 참여할 수 없어요.", challengeId,
+                Map.of(NotificationParams.EVENT_KEY, challengeId + ":cheat")));
+    }
+
     @Transactional
     public RoomAdminDtos.TransferResponse transfer(UUID ownerId, UUID challengeId, UUID targetUserId) {
         Challenge challenge = locked(challengeId);

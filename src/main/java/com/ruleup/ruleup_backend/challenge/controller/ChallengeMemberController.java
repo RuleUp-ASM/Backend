@@ -43,10 +43,12 @@ public class ChallengeMemberController {
                     2. `ALREADY_JOINED` — 이미 이 방의 멤버
                     3. `PRIVATE_INVITE_ONLY` — 비공개 방. **초대 링크로만** 들어올 수 있다
                        (`POST /api/v1/challenges/invitations/{token}/accept`)
-                    4. `REJOIN_COOLDOWN` — 나갔거나 강퇴돼 대기 중. `error.rejoinAvailableAt` 에 가능 시각이 실린다
-                    5. `FREE_LIMIT` — 동시에 참여할 수 있는 방 개수 초과
-                    6. `FULL` — 정원 마감
-                    7. `TIER_GATE` — 표시 티어가 방의 최소 티어 미만
+                    4. `BANNED` — 부정행위 검출로 강퇴돼 이 방에 영구히 들어올 수 없다. 대기 시각이 없고
+                       사유는 설명하지 않는다(`error.rejoinAvailableAt` 없음)
+                    5. `REJOIN_COOLDOWN` — 나갔거나 강퇴돼 대기 중. `error.rejoinAvailableAt` 에 가능 시각이 실린다
+                    6. `FREE_LIMIT` — 동시에 참여할 수 있는 방 개수 초과
+                    7. `FULL` — 정원 마감
+                    8. `TIER_GATE` — 표시 티어가 방의 최소 티어 미만
 
                     **기기 권한은 서버가 검사하지 않는다.** 응답의 `requiredPermissions`(자동 인증 방에서만 채워짐)를
                     보고 클라이언트가 가입 전에 확보한다 — 권한이 없는 채로 가입되면 첫날부터 실패가 쌓인다.

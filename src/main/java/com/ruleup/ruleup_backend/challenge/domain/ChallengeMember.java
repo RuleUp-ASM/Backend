@@ -168,9 +168,16 @@ public class ChallengeMember extends AssignedIdEntity {
     @Column(name = "kick_count", nullable = false)
     private int kickCount;
 
-    /** 재입장 가능 시각 — 자진 탈퇴 1주 / 강퇴 배수. 영구 차단은 없으므로 이 값 하나로 전부 표현된다. */
+    /** 재입장 가능 시각 — 자진 탈퇴 1주 / 강퇴 배수. 영구 차단은 {@link #rejoinBanned} 가 따로 든다. */
     @Column(name = "rejoin_available_at")
     private Instant rejoinAvailableAt;
+
+    /**
+     * 이 챌린지 영구 차단 — 부정행위 검출 강퇴만 켠다(방 내부 테크 스펙 5-6). 백오프 대상이 아니라
+     * {@link #rejoinAvailableAt} 은 비어 있고, 재입장으로도 풀리지 않는다.
+     */
+    @Column(name = "rejoin_banned", nullable = false)
+    private boolean rejoinBanned;
 
     private static ChallengeMember of(UUID challengeId, UUID userId, MemberRole role, MemberStatus status) {
         ChallengeMember m = new ChallengeMember();
@@ -213,7 +220,7 @@ public class ChallengeMember extends AssignedIdEntity {
         this.rejoinAvailableAt = rejoinAt;
     }
 
-    /** 강퇴. 사유(신고 누적·연속 실패·방장 재량·부정행위)와 무관하게 배수 백오프가 동일 적용된다(정책 §10.2). */
+    /** 강퇴 — 배수 백오프(연속 실패·권한 미허용·방장 재량, 정책 §10.2). 부정행위는 {@link #kickPermanently}. */
     public void kick(String reason, Instant at, Instant rejoinAt) {
         this.status = MemberStatus.REMOVED;
         this.leftType = "KICK";
@@ -221,6 +228,19 @@ public class ChallengeMember extends AssignedIdEntity {
         this.kickReason = reason;
         this.kickCount++;
         this.rejoinAvailableAt = rejoinAt;
+    }
+
+    /** 부정행위 검출 강퇴 — 백오프 없이 이 챌린지 영구 차단(방 내부 테크 스펙 5-6). */
+    public void kickPermanently(String reason, Instant at) {
+        kick(reason, at, null);
+        this.role = MemberRole.MEMBER;      // 방장이었다면 봇방장 전환 — 역할은 내려놓는다
+        this.rejoinBanned = true;
+    }
+
+    /** 이미 나간 멤버에게 뒤늦게 확정된 부정행위 — 멤버십은 그대로 두고 재입장만 영구히 막는다. */
+    public void banFromRejoin() {
+        this.rejoinAvailableAt = null;
+        this.rejoinBanned = true;
     }
 
     /** 대기 기간이 끝난 뒤 재입장(자진 탈퇴·강퇴 공통). kickCount 는 배수 계산 근거라 남긴다. */
