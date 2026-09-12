@@ -2,6 +2,8 @@ package com.ruleup.ruleup_backend.me;
 
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
 import com.ruleup.ruleup_backend.challenge.ChallengeApiSupport;
+import com.ruleup.ruleup_backend.moderation.ContentModerationClient;
+import com.ruleup.ruleup_backend.moderation.ModerationResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -10,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -21,6 +24,9 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 
 /**
@@ -50,11 +56,25 @@ class MyPageContractIT extends ChallengeApiSupport {
     @Autowired WebApplicationContext wac;
     @Autowired JdbcTemplate jdbcTemplate;
 
+    /**
+     * 검수를 <b>보류(UNAVAILABLE)</b>로 고정한다 — 이 클래스가 지키는 것은 응답 계약이지 심사 결과가 아니다.
+     *
+     * <p>닉네임을 바꾸면 재심사가 시작되고 그때 상태는 {@code PENDING} 이어야 하는데, 검수는
+     * {@code @Async @TransactionalEventListener(AFTER_COMMIT)} 로 커밋 직후 별도 스레드에서 돈다.
+     * 테스트 fake 가 <b>APPROVED</b> 를 돌려주므로 승인이 단언보다 먼저 도착하면 값이 뒤집힌다 —
+     * 부하가 걸린 CI 에서만 드러나는 경쟁이다.
+     */
+    @MockitoBean ContentModerationClient moderationClient;
+
     private MockMvc mvc;
 
     @BeforeEach
     void setUp() {
         mvc = MockMvcBuilders.webAppContextSetup(wac).apply(springSecurity()).build();
+        when(moderationClient.moderateNickname(anyString())).thenReturn(ModerationResult.UNAVAILABLE);
+        when(moderationClient.moderateImage(anyString())).thenReturn(ModerationResult.UNAVAILABLE);
+        when(moderationClient.moderateImageBytes(any(), anyString()))
+                .thenReturn(ModerationResult.UNAVAILABLE);
     }
 
     @Override protected MockMvc mvc() { return mvc; }
