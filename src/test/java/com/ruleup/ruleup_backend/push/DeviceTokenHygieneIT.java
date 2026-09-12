@@ -15,7 +15,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -39,6 +44,14 @@ class DeviceTokenHygieneIT {
     @Autowired DeviceTokenService deviceTokenService;
     @Autowired DeviceTokenRepository deviceTokenRepository;
     @Autowired UserRepository userRepository;
+    @Autowired JdbcTemplate jdbc;
+
+    private static byte[] bytes(UUID u) {
+        ByteBuffer bb = ByteBuffer.allocate(16);
+        bb.putLong(u.getMostSignificantBits());
+        bb.putLong(u.getLeastSignificantBits());
+        return bb.array();
+    }
 
     private UUID newUser() {
         String tag = "dt" + System.nanoTime() + SEQ.incrementAndGet();
@@ -185,6 +198,90 @@ class DeviceTokenHygieneIT {
             assertThatThrownBy(() -> deviceTokenService.register(userId, "   ",
                     DevicePlatform.ANDROID))
                     .isInstanceOf(BusinessException.class);
+        }
+    }
+
+    // =====================================================================
+    /**
+     * 이미 쌓여 있던 중복 활성분 정리(V41).
+     *
+     * <p>단일 활성 기기 정책은 <b>등록 경로</b>에만 있다. V36 이 {@code isActive} 를 DEFAULT 1 로
+     * 붙이면서 그 전에 쌓인 행이 전부 활성으로 켜졌으므로, 기기를 바꾼 적 있는 사용자는 마이그레이션
+     * 없이는 옛 토큰이 활성으로 남는다 — 등록을 다시 하기 전까지 알림이 두 기기에 간다.
+     *
+     * <p>픽스처를 <b>서비스를 거치지 않고</b> 직접 심는 이유가 그것이다. 등록 경로로 만들면
+     * {@code deactivateOthers} 가 이미 정리해 버려 마이그레이션이 할 일이 남지 않는다.
+     *
+     * <p>마이그레이션은 컨테이너가 뜰 때 이미 돌았다. 그래서 그 파일의 SQL 을 <b>그대로 읽어</b>
+     * 실행한다 — 문장을 테스트에 복사해 두면 파일이 바뀔 때 테스트만 옛 문장을 검증하게 된다.
+     */
+    @Nested
+    @DisplayName("쌓여 있던 중복 활성 정리(V41)")
+    class DuplicateActiveBackfill {
+
+        private void seedActive(UUID userId, String token, Instant at) {
+            jdbc.update("INSERT INTO DeviceToken " +
+                            "(id, userId, token, platform, isActive, lastSeenAt, createdAt) " +
+                            "VALUES (?, ?, ?, 'ANDROID', 1, ?, ?)",
+                    bytes(UUID.randomUUID()), bytes(userId), token,
+                    Timestamp.from(at), Timestamp.from(at));
+        }
+
+        private void runMigration() throws Exception {
+            String sql;
+            try (var in = getClass()
+                    .getResourceAsStream("/db/migration/V41__device_token_single_active.sql")) {
+                sql = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            }
+            jdbc.execute(sql);
+        }
+
+        @Test
+        @DisplayName("유저마다 가장 최근 토큰 하나만 남긴다 — V36 이 켜 둔 과거분을 정리한다")
+        void keepsOnlyNewestPerUser() throws Exception {
+            UUID userId = newUser();
+            String oldest = token("bf-old");
+            String middle = token("bf-mid");
+            String newest = token("bf-new");
+            Instant base = Instant.now().minusSeconds(3_600);
+            seedActive(userId, oldest, base);
+            seedActive(userId, middle, base.plusSeconds(600));
+            seedActive(userId, newest, base.plusSeconds(1_200));
+
+            runMigration();
+
+            assertThat(row(newest).isActive()).as("가장 최근에 쓰인 기기는 살아남는다").isTrue();
+            assertThat(row(middle).isActive()).isFalse();
+            assertThat(row(oldest).isActive()).isFalse();
+        }
+
+        @Test
+        @DisplayName("내린 행을 지우지는 않는다 — CS 가 언제 빠졌는지 볼 자리가 남아야 한다")
+        void deactivatesWithoutDeleting() throws Exception {
+            UUID userId = newUser();
+            String stale = token("bf-keep-old");
+            String live = token("bf-keep-new");
+            Instant base = Instant.now().minusSeconds(3_600);
+            seedActive(userId, stale, base);
+            seedActive(userId, live, base.plusSeconds(600));
+
+            runMigration();
+
+            assertThat(deviceTokenRepository.findByToken(stale))
+                    .as("행 자체는 남는다").isPresent();
+            assertThat(row(stale).isActive()).isFalse();
+        }
+
+        @Test
+        @DisplayName("활성이 하나뿐인 유저는 건드리지 않는다")
+        void singleActiveIsUntouched() throws Exception {
+            UUID userId = newUser();
+            String only = token("bf-single");
+            seedActive(userId, only, Instant.now().minusSeconds(60));
+
+            runMigration();
+
+            assertThat(row(only).isActive()).isTrue();
         }
     }
 }
