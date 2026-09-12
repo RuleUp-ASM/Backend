@@ -90,8 +90,7 @@ public class NotificationDispatcher {
                 continue;
             }
             logAttempt(message, now);
-            toSend.add(new PushRequest(message,
-                    tokens.getOrDefault(message.userId(), List.of())));
+            toSend.add(new PushRequest(message, tokensFor(message, tokens)));
             sending.put(message.id(), message);
             outcomes.add(null);   // 전송 결과를 받아 채운다
         }
@@ -146,6 +145,16 @@ public class NotificationDispatcher {
                 .filter(UserAgreementState::isAgreed)
                 .map(UserAgreementState::getUserId)
                 .collect(Collectors.toSet());
+    }
+
+    /**
+     * 이 알림을 보낼 토큰. 대상이 지정돼 있으면 <b>그 토큰 하나만</b> 쓰고 활성 여부를 보지 않는다 —
+     * 기기 로그아웃 고지는 방금 내려간 그 기기로 가야 하고, 그 토큰은 이미 비활성이다.
+     */
+    private static List<String> tokensFor(NotificationMessage message,
+                                          Map<UUID, List<String>> tokens) {
+        if (message.targetToken() != null) return List.of(message.targetToken());
+        return tokens.getOrDefault(message.userId(), List.of());
     }
 
     /** {@code (userId, token)} 행을 유저별로 접는다. 쿼리는 묶음당 한 번뿐이다. */

@@ -76,19 +76,20 @@ public class NotificationPublisher {
     public List<Notification> publishAll(List<NotificationEvent> events) {
         Instant now = Instant.now();
         List<Notification> stored = new ArrayList<>(events.size());
+        List<NotificationMessage> messages = new ArrayList<>(events.size());
 
+        // 적재된 행과 그것을 낸 이벤트의 짝을 유지한다. 행만 모아 두면 대상 토큰처럼
+        // **적재되지 않는** 전달 힌트를 큐로 넘길 방법이 없다.
         for (NotificationEvent event : events) {
             Notification row = store(event, now);
-            if (row != null) stored.add(row);
+            if (row == null) continue;
+            stored.add(row);
+            // 푸시 대상만 큐로. 공지는 pushable=false 라 적재만 되고 알림 센터에만 남는다.
+            if (NotificationType.find(row.getType())
+                    .map(NotificationType::isPushable).orElse(false)) {
+                messages.add(NotificationMessage.from(row, event.targetToken()));
+            }
         }
-        if (stored.isEmpty()) return List.of();
-
-        // 푸시 대상만 큐로. 공지는 pushable=false 라 적재만 되고 알림 센터에만 남는다.
-        List<NotificationMessage> messages = stored.stream()
-                .filter(n -> NotificationType.find(n.getType())
-                        .map(NotificationType::isPushable).orElse(false))
-                .map(NotificationMessage::from)
-                .toList();
         if (!messages.isEmpty()) enqueueAfterCommit(messages);
 
         return stored;

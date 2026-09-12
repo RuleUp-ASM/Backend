@@ -77,7 +77,11 @@ public record DispatchDecision(boolean shouldSend, boolean deferred, SuppressedR
             return suppressed(SuppressedReason.INTERVAL);
 
         // ⑨ 활성 기기 — 가장 마지막이다. 앞 게이트에 걸리면 그 사유가 기록돼야 한다.
-        if (!in.hasActiveDevice()) return suppressed(SuppressedReason.NO_DEVICE);
+        //    대상 토큰이 지정된 알림은 이 게이트를 건너뛴다. 기기 로그아웃 고지는 <b>방금 내려간
+        //    그 기기</b>로 가야 하는데, 그 토큰은 이미 비활성이라 여기서는 「활성 기기 없음」으로
+        //    읽힌다 — 게이트를 그대로 두면 고지가 영영 닿지 못한다.
+        if (message.targetToken() == null && !in.hasActiveDevice())
+            return suppressed(SuppressedReason.NO_DEVICE);
 
         return send();
     }

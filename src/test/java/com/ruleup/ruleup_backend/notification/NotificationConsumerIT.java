@@ -317,6 +317,27 @@ class NotificationConsumerIT {
         }
 
         @Test
+        @DisplayName("대상 토큰이 지정되면 비활성 토큰으로도 보낸다 — 로그아웃 고지는 그 기기로 간다")
+        void targetedSendUsesGivenToken() {
+            pushSender.reset();
+            UUID userId = userWithDevice();
+            String previous = deviceTokenRepository.findByUserId(userId).getFirst().getToken();
+            // 새 기기 등록으로 이전 토큰이 내려간 상태를 만든다.
+            // @Modifying 쿼리라 활성 트랜잭션이 필요하다 — 이 IT 의 다른 쓰기와 같은 방식.
+            txTemplate.executeWithoutResult(t ->
+                    deviceTokenRepository.deactivate(List.of(previous), Instant.now()));
+
+            Notification n = store(userId, NotificationType.DEVICE_LOGGED_OUT,
+                    Map.of(NotificationParams.EVENT_KEY, "lo" + SEQ.incrementAndGet()));
+
+            var outcomes = dispatcher.dispatch(
+                    List.of(NotificationMessage.from(n, previous)), kstAt(12));
+
+            assertThat(outcomes.getFirst().sent()).as("활성 기기가 없어도 나간다").isTrue();
+            assertThat(pushSender.sent.getFirst().tokens()).containsExactly(previous);
+        }
+
+        @Test
         @DisplayName("활성 기기가 없으면 전송기까지 가지 않는다 — 판정에서 걸린다")
         void noDeviceNeverReachesSender() {
             pushSender.reset();

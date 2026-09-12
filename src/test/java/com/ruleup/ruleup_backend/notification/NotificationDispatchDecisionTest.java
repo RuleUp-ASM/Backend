@@ -386,6 +386,32 @@ class NotificationDispatchDecisionTest {
         }
 
         @Test
+        @DisplayName("대상 토큰이 지정되면 활성 기기가 없어도 보낸다 — 방금 내려간 그 기기로 가야 한다")
+        void targetedMessageBypassesDeviceGate() {
+            NotificationType type = NotificationType.DEVICE_LOGGED_OUT;
+            NotificationMessage targeted = new NotificationMessage(NEWER, USER, type.name(),
+                    type.toggleGroup(), null, NotificationTab.NOTIFICATION, "제목", "본문",
+                    null, null, "tok-old");
+
+            assertThat(DispatchDecision.decide(targeted, allow().withHasDevice(false), kst(12, 0))
+                    .shouldSend()).as("그 토큰이 곧 목적지다").isTrue();
+        }
+
+        @Test
+        @DisplayName("대상 토큰이 있어도 앞 게이트는 그대로다 — 마스터가 꺼져 있으면 막힌다")
+        void targetedMessageStillObeysEarlierGates() {
+            UserNotificationSetting off = UserNotificationSetting.defaults(USER, kst(12, 0));
+            off.applyMaster(false, kst(12, 0));
+            NotificationType type = NotificationType.DEVICE_LOGGED_OUT;
+            NotificationMessage targeted = new NotificationMessage(NEWER, USER, type.name(),
+                    type.toggleGroup(), null, NotificationTab.NOTIFICATION, "제목", "본문",
+                    null, null, "tok-old");
+
+            assertThat(DispatchDecision.decide(targeted, allow().withSettings(off), kst(12, 0))
+                    .suppressedReason()).isEqualTo(SuppressedReason.MASTER_OFF);
+        }
+
+        @Test
         @DisplayName("기기 판정이 가장 마지막이다 — 앞 게이트에 걸리면 그 사유가 기록된다")
         void deviceGateIsLast() {
             UserNotificationSetting s = UserNotificationSetting.defaults(USER, kst(12, 0));
