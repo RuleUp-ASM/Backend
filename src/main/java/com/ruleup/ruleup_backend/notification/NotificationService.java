@@ -65,9 +65,10 @@ public class NotificationService {
         NotificationTab tab = tabOf(rawTab);
         UUID cursor = Cursor.decode(rawCursor);
 
-        // 한 건 더 읽어 다음 페이지 유무를 판단한다.
+        // 한 건 더 읽어 다음 페이지 유무를 판단한다. 보관 기간 밖은 파기 배치가 아직 못 지웠더라도
+        // 내려보내지 않는다 — 응답의 retentionDays 와 실제 목록이 어긋나면 안 된다.
         List<Notification> rows = repository.findInbox(userId, tab.code(), cursor,
-                Limit.of(PAGE_SIZE + 1));
+                Instant.now().minus(RETENTION), Limit.of(PAGE_SIZE + 1));
         boolean hasNext = rows.size() > PAGE_SIZE;
         List<Notification> page = hasNext ? rows.subList(0, PAGE_SIZE) : rows;
 

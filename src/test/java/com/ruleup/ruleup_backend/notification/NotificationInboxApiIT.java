@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -49,6 +50,7 @@ class NotificationInboxApiIT extends AuthApiSupport {
     @Autowired WebApplicationContext wac;
     @Autowired NotificationPublisher publisher;
     @Autowired TransactionTemplate txTemplate;
+    @Autowired JdbcTemplate jdbc;
 
     private MockMvc mvc;
 
@@ -86,6 +88,22 @@ class NotificationInboxApiIT extends AuthApiSupport {
                 .header("Authorization", "Bearer " + at)).andReturn();
     }
 
+    /**
+     * 보관 기간 밖으로 밀어낸다. SQL 안에서 상대 계산을 하는 이유는 {@code created_at} 이
+     * DATETIME(3) 이라 자바에서 Instant 를 넣으면 JVM 시간대 해석이 끼어들기 때문이다.
+     */
+    private void backdate(UUID userId, int days) {
+        jdbc.update("UPDATE notifications SET created_at = DATE_SUB(created_at, INTERVAL ? DAY)"
+                + " WHERE user_id = ?", days, bytes(userId));
+    }
+
+    private static byte[] bytes(UUID u) {
+        java.nio.ByteBuffer bb = java.nio.ByteBuffer.allocate(16);
+        bb.putLong(u.getMostSignificantBits());
+        bb.putLong(u.getLeastSignificantBits());
+        return bb.array();
+    }
+
     private MvcResult markRead(String at, String tab, String lastId) throws Exception {
         Map<String, Object> body = (tab == null)
                 ? Map.of("lastNotificationId", lastId)
@@ -115,6 +133,19 @@ class NotificationInboxApiIT extends AuthApiSupport {
             assertThat(this_(res, "$.data.items[0].type")).isEqualTo("APPEAL_RESULT");
             assertThat(this_(res, "$.data.items[0].deeplink")).isEqualTo("ruleup://me/appeals");
             assertThat((Integer) read(res, "$.data.retentionDays")).isEqualTo(180);
+        }
+
+        @Test
+        @DisplayName("보관 기간이 지난 알림은 내려가지 않는다 — 파기가 밀려도 다시 보이면 안 된다")
+        void retentionBoundaryHidesExpiredRows() throws Exception {
+            Account a = join("보관");
+            store(a.userId(), NotificationType.APPEAL_RESULT, "old" + seq());
+            backdate(a.userId(), 200);                     // 보관 180일을 넘긴다
+            store(a.userId(), NotificationType.APPEAL_RESULT, "fresh" + seq());
+
+            List<String> ids = read(list(a.accessToken(), ""), "$.data.items[*].id");
+
+            assertThat(ids).as("경계 밖 한 건은 빠지고 최근 한 건만 남는다").hasSize(1);
         }
 
         @Test

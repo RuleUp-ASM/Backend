@@ -20,17 +20,26 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
      * <p>정렬 키가 {@code id} 하나인 것이 핵심이다. 커서가 base64(id) 라 {@code created_at} 으로
      * 정렬하면 커서 조건을 인덱스에 밀어넣을 수 없고, 00시 판정 배치가 같은 밀리초에 수만 행을
      * 넣으면 <b>페이지 경계에서 항목이 중복되거나 사라진다</b>. UUIDv7 이라 동점 자체가 없다.
+     *
+     * <p>{@code since} 는 <b>보관 기간 경계</b>다. 파기 배치가 밀리거나 상한에 걸려 적체가 생겨도
+     * 6개월 지난 고지가 화면에 다시 나타나면 안 된다 — 응답의 {@code retentionDays} 와 실제로
+     * 보이는 목록이 어긋나는 순간 「지웠다더니 남아 있다」는 문의가 된다.
+     *
+     * <p>이 조건은 인덱스의 잔여 필터다. 정렬이 {@code id} 내림차순이고 UUIDv7 이라 최신부터
+     * 읽으므로, 경계 밖 행은 항상 꼬리에 몰려 있어 한 페이지를 채우는 비용이 늘지 않는다.
      */
     @Query("""
             select n from Notification n
              where n.userId = :userId
                and n.tab = :tab
+               and n.createdAt >= :since
                and (:cursorId is null or n.id < :cursorId)
              order by n.id desc
             """)
     List<Notification> findInbox(@Param("userId") UUID userId,
                                  @Param("tab") byte tab,
                                  @Param("cursorId") UUID cursorId,
+                                 @Param("since") Instant since,
                                  Limit limit);
 
     /** 탭 구분 없이 한 유저의 전부 — 파기·검증 경로용. 화면 조회는 {@link #findInbox} 를 쓴다. */
