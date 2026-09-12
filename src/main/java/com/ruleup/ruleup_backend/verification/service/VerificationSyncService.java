@@ -8,6 +8,10 @@ import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
 import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
+import com.ruleup.ruleup_backend.notification.NotificationEvent;
+import com.ruleup.ruleup_backend.notification.NotificationPublisher;
+import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
+import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.verification.domain.*;
 import com.ruleup.ruleup_backend.verification.config.VerificationProperties;
 import com.ruleup.ruleup_backend.verification.dto.SyncRequest;
@@ -70,6 +74,7 @@ public class VerificationSyncService {
     private final VerificationMemberSetup memberSetup;
     private final VerificationConfigFactory configFactory;
     private final VerificationProgressService progressService;
+    private final NotificationPublisher notificationPublisher;
     private final ApplicationEventPublisher eventPublisher;
     private final com.ruleup.ruleup_backend.user.UserRepository userRepository;
     private final com.ruleup.ruleup_backend.common.web.CountryResolver countryResolver;
@@ -86,6 +91,7 @@ public class VerificationSyncService {
                                    VerificationMemberSetup memberSetup,
                                    VerificationConfigFactory configFactory,
                                    VerificationProgressService progressService,
+                                   NotificationPublisher notificationPublisher,
                                    ApplicationEventPublisher eventPublisher,
                                    com.ruleup.ruleup_backend.user.UserRepository userRepository,
                                    com.ruleup.ruleup_backend.common.web.CountryResolver countryResolver,
@@ -101,6 +107,7 @@ public class VerificationSyncService {
         this.memberSetup = memberSetup;
         this.configFactory = configFactory;
         this.progressService = progressService;
+        this.notificationPublisher = notificationPublisher;
         this.eventPublisher = eventPublisher;
         this.userRepository = userRepository;
         this.countryResolver = countryResolver;
@@ -329,6 +336,20 @@ public class VerificationSyncService {
             daily.recordResult(outcome.status(), contributing, null, verifiedAt);
             if (config.isFrequency() && outcome.status() == VerificationStatus.SUCCESS) {
                 member.incrementPeriodCompleted();   // 빈도형: 주기 완료 +1 (미확정 상태에서 첫 SUCCESS 전이 1회)
+            }
+            if (outcome.status() == VerificationStatus.SUCCESS) {
+                // 즉시 확정된 성공은 확정 배치를 거치지 않는다 — finalizeDue 는 미확정 건만 집어가고
+                // finalizeOne 은 초입에서 isTerminal() 로 되돌아간다. 그래서 성공 고지를 여기서
+                // 하지 않으면 「성공한 날」만 알림이 없는 비대칭이 생긴다(실패는 확정 배치가 고지한다).
+                // 같은 날을 여러 번 sync 해도 verification_id 멱등 키가 두 번째 적재를 막는다.
+                notificationPublisher.publish(NotificationEvent.forChallenge(member.getUserId(),
+                        NotificationType.VERIFICATION_RESULT,
+                        "인증이 완료됐어요",
+                        "오늘 몫을 채웠어요. 진행률에 반영됐어요.",
+                        member.getChallengeId(),
+                        Map.of(NotificationParams.VERIFICATION_ID, daily.getId().toString(),
+                                NotificationParams.CHALLENGE_ID,
+                                member.getChallengeId().toString())));
             }
         }
         return daily.getStatus();

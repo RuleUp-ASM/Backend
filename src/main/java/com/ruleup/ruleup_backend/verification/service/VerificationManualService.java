@@ -7,6 +7,10 @@ import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
+import com.ruleup.ruleup_backend.notification.NotificationEvent;
+import com.ruleup.ruleup_backend.notification.NotificationPublisher;
+import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
+import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.verification.domain.VerificationConfig;
 import com.ruleup.ruleup_backend.verification.domain.VerificationDaily;
 import com.ruleup.ruleup_backend.verification.domain.VerificationMethod;
@@ -53,6 +57,7 @@ public class VerificationManualService {
     private final VerificationMemberSetup memberSetup;
     private final VerificationProgressService progressService;
     private final StreakService streakService;
+    private final NotificationPublisher notificationPublisher;
     private final ApplicationEventPublisher eventPublisher;
 
     // ===== POST /api/v1/challenges/{challengeId}/verifications =====
@@ -101,6 +106,17 @@ public class VerificationManualService {
         daily.acknowledge(now);   // 본인이 직접 체크한 결과라 확인할 모달이 없다
         progressService.updateAfterSync(member, VerificationStatus.SUCCESS, now);
         eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "MANUAL_SUCCESS"));
+
+        // 수동 체크 성공도 판정 결과다. 확정 배치는 미확정 건만 집어가고 즉시 확정된 건은
+        // finalizeOne 초입의 isTerminal() 에서 걸러지므로, 여기서 고지하지 않으면 성공한 날은
+        // 알림이 영영 없다. verification_id 가 멱등 키라 취소 후 다시 체크해도 한 번만 적재된다.
+        notificationPublisher.publish(NotificationEvent.forChallenge(userId,
+                NotificationType.VERIFICATION_RESULT,
+                "인증이 완료됐어요",
+                "오늘 몫을 체크했어요. 진행률에 반영됐어요.",
+                challengeId,
+                Map.of(NotificationParams.VERIFICATION_ID, daily.getId().toString(),
+                        NotificationParams.CHALLENGE_ID, challengeId.toString())));
 
         return new ManualVerificationResponse(
                 daily.getId().toString(), targetDate.toString(), "DONE",
