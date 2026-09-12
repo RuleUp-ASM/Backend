@@ -1,10 +1,13 @@
 package com.ruleup.ruleup_backend.user;
 import com.ruleup.ruleup_backend.user.domain.*;
 
+import org.springframework.data.domain.Limit;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -74,4 +77,23 @@ public interface UserRepository extends JpaRepository<User, UUID> {
             limit 1
             """)
     Optional<User> findWithdrawnHolderOfInstallation(@Param("installationId") String installationId);
+
+    /**
+     * 오래 들어오지 않은 회원 — 휴면·장기 미접속 고지 대상.
+     *
+     * <p><b>휴면은 상태가 아니다</b>({@link UserStatus} 참조). {@code last_active_at} 으로 계산하고
+     * 로그인하면 저절로 풀리므로, 여기서도 상태를 보지 않고 마지막 활동 시각만 본다.
+     *
+     * <p>운영자 콘솔 계정은 앱을 쓰지 않아 늘 조용하다 — 제외하지 않으면 매일 고지 대상이 된다.
+     * 오래된 순으로 주는 이유는 상한에 걸렸을 때 <b>가장 급한 사람부터</b> 처리하기 위해서다.
+     */
+    @Query("""
+            select u from User u
+            where u.status = com.ruleup.ruleup_backend.user.domain.UserStatus.ACTIVE
+              and u.deletedAt is null
+              and u.role = com.ruleup.ruleup_backend.user.domain.UserRole.MEMBER
+              and u.lastActiveAt < :threshold
+            order by u.lastActiveAt asc
+            """)
+    List<User> findInactiveSince(@Param("threshold") Instant threshold, Limit limit);
 }
