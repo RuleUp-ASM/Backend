@@ -7,7 +7,9 @@ import com.ruleup.ruleup_backend.agreement.UserAgreementEventRepository;
 import com.ruleup.ruleup_backend.agreement.domain.AgreementType;
 import com.ruleup.ruleup_backend.agreement.domain.UserAgreementEvent;
 import com.ruleup.ruleup_backend.config.AppProperties;
+import com.ruleup.ruleup_backend.moderation.ContentModerationClient;
 import com.ruleup.ruleup_backend.moderation.ModerationRequestRepository;
+import com.ruleup.ruleup_backend.moderation.ModerationResult;
 import com.ruleup.ruleup_backend.moderation.domain.ModerationRequest;
 import com.ruleup.ruleup_backend.moderation.domain.ModerationRequestStatus;
 import com.ruleup.ruleup_backend.moderation.domain.ModerationTarget;
@@ -30,6 +32,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
@@ -45,6 +48,9 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
@@ -81,11 +87,29 @@ class SignupFlowIT {
     @Autowired ModerationRequestRepository moderationRequestRepository;
     @Autowired UserScoreSummaryRepository scoreSummaryRepository;
 
+    /**
+     * 검수를 <b>보류(UNAVAILABLE)</b>로 고정한다 — 이 클래스의 관심사는 가입 계약이지 심사 결과가 아니다.
+     *
+     * <p>고정하지 않으면 가입 응답과 DB 단언 사이에 <b>경쟁</b>이 생긴다. 검수는
+     * {@code @Async @TransactionalEventListener(AFTER_COMMIT)} 로 커밋 직후 별도 스레드에서 돌고,
+     * 테스트 프로필의 fake 는 금칙어가 아닌 닉네임을 <b>APPROVED</b> 로 판정한다. 승인이 단언보다
+     * 먼저 도착하면 {@code approveNickname()} 이 {@code approvedNickname} 을 신청값으로 덮어써
+     * 「임시 승인 닉네임은 8자리」 단언이 깨진다 — CI 처럼 느린 환경에서 간헐적으로 터진다.
+     *
+     * <p>보류는 아무것도 바꾸지 않는 분기라(PENDING 유지) 가입 직후 상태가 결정적으로 남는다.
+     * 승인이 실제로 필요한 테스트는 {@code approveNickname()} 을 직접 호출해 만든다.
+     */
+    @MockitoBean ContentModerationClient moderationClient;
+
     private MockMvc mvc;
 
     @BeforeEach
     void setUp() {
         mvc = MockMvcBuilders.webAppContextSetup(wac).apply(springSecurity()).build();
+        when(moderationClient.moderateNickname(anyString())).thenReturn(ModerationResult.UNAVAILABLE);
+        when(moderationClient.moderateImage(anyString())).thenReturn(ModerationResult.UNAVAILABLE);
+        when(moderationClient.moderateImageBytes(any(), anyString()))
+                .thenReturn(ModerationResult.UNAVAILABLE);
     }
 
     // ==================================================================
