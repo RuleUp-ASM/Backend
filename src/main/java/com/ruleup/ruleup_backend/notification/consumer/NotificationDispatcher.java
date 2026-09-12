@@ -1,5 +1,8 @@
 package com.ruleup.ruleup_backend.notification.consumer;
 
+import com.ruleup.ruleup_backend.agreement.UserAgreementStateRepository;
+import com.ruleup.ruleup_backend.agreement.domain.AgreementType;
+import com.ruleup.ruleup_backend.agreement.domain.UserAgreementState;
 import com.ruleup.ruleup_backend.notification.NotificationMuteRepository;
 import com.ruleup.ruleup_backend.notification.NotificationRepository;
 import com.ruleup.ruleup_backend.notification.NotificationSettingRepository;
@@ -52,6 +55,7 @@ public class NotificationDispatcher {
     private final NotificationSettingRepository settingRepository;
     private final NotificationMuteRepository muteRepository;
     private final DeviceTokenRepository deviceTokenRepository;
+    private final UserAgreementStateRepository agreementStateRepository;
     private final BulkPushSender pushSender;
 
     /**
@@ -63,7 +67,10 @@ public class NotificationDispatcher {
     public List<DispatchOutcome> dispatch(List<NotificationMessage> messages, Instant now) {
         if (messages.isEmpty()) return List.of();
 
-        Map<UUID, DispatchInputs> inputs = loadInputs(messages, now);
+        List<UUID> userIds = messages.stream().map(NotificationMessage::userId).distinct().toList();
+        // 토큰을 묶음으로 한 번에 읽는다. 이 맵이 발송 대상 토큰이자 「활성 기기 있음」의 근거다.
+        Map<UUID, List<String>> tokens = loadTokens(userIds);
+        Map<UUID, DispatchInputs> inputs = loadInputs(messages, userIds, tokens, now);
 
         List<DispatchOutcome> outcomes = new ArrayList<>(messages.size());
         List<PushRequest> toSend = new ArrayList<>();
@@ -83,7 +90,7 @@ public class NotificationDispatcher {
                 continue;
             }
             logAttempt(message, now);
-            toSend.add(new PushRequest(message, tokensOf(message.userId())));
+            toSend.add(new PushRequest(message, tokensFor(message, tokens)));
             sending.put(message.id(), message);
             outcomes.add(null);   // 전송 결과를 받아 채운다
         }
@@ -94,9 +101,9 @@ public class NotificationDispatcher {
 
     // ===== 묶음 조회 =====
 
-    private Map<UUID, DispatchInputs> loadInputs(List<NotificationMessage> messages, Instant now) {
-        List<UUID> userIds = messages.stream().map(NotificationMessage::userId).distinct().toList();
-
+    private Map<UUID, DispatchInputs> loadInputs(List<NotificationMessage> messages,
+                                                 List<UUID> userIds,
+                                                 Map<UUID, List<String>> tokens, Instant now) {
         Map<UUID, UserNotificationSetting> settings = settingRepository.findByUserIdIn(userIds)
                 .stream().collect(Collectors.toMap(UserNotificationSetting::getUserId, s -> s));
 
@@ -104,9 +111,8 @@ public class NotificationDispatcher {
         muteRepository.findByUserIdIn(userIds).forEach(m -> mutes
                 .computeIfAbsent(m.getUserId(), k -> new HashSet<>()).add(m.getChallengeId()));
 
-        Set<UUID> withDevice = new HashSet<>(deviceTokenRepository.findUserIdsWithActiveToken(userIds));
-
         Map<UUID, Map<String, Instant>> lastPushed = loadSuppressHistory(messages, userIds, now);
+        Set<UUID> marketingConsented = loadMarketingConsent(messages, userIds);
 
         Map<UUID, DispatchInputs> inputs = new HashMap<>();
         for (UUID userId : userIds) {
@@ -115,9 +121,49 @@ public class NotificationDispatcher {
                     settings.getOrDefault(userId, UserNotificationSetting.defaults(userId, now)),
                     mutes.getOrDefault(userId, Set.of()),
                     lastPushed.getOrDefault(userId, Map.of()),
-                    withDevice.contains(userId)));
+                    !tokens.getOrDefault(userId, List.of()).isEmpty(),
+                    // 동의는 <b>있어야</b> 보낸다. 행이 없으면 한 번도 동의한 적 없다는 뜻이다.
+                    marketingConsented.contains(userId)));
         }
         return inputs;
+    }
+
+    /**
+     * 마케팅 수신 동의 — <b>묶음에 마케팅이 하나도 없으면 조회 자체를 하지 않는다</b>.
+     * 23종 중 1종뿐이라 이 쿼리는 보통 나가지 않는다(억제 이력과 같은 이유).
+     *
+     * <p>설정의 {@code groupMarketing} 이 아니라 <b>약관 동의 상태</b>를 본다. 설정 행은 없을 수
+     * 있고 없으면 ON 으로 해석되는데, 가입 때 마케팅을 거부한 사람이 바로 그 상태다.
+     */
+    private Set<UUID> loadMarketingConsent(List<NotificationMessage> messages, List<UUID> userIds) {
+        boolean anyMarketing = messages.stream()
+                .anyMatch(m -> m.toggleGroup() == NotificationToggleGroup.MARKETING);
+        if (!anyMarketing) return Set.of();
+
+        return agreementStateRepository
+                .findByUserIdInAndAgreementType(userIds, AgreementType.MARKETING).stream()
+                .filter(UserAgreementState::isAgreed)
+                .map(UserAgreementState::getUserId)
+                .collect(Collectors.toSet());
+    }
+
+    /**
+     * 이 알림을 보낼 토큰. 대상이 지정돼 있으면 <b>그 토큰 하나만</b> 쓰고 활성 여부를 보지 않는다 —
+     * 기기 로그아웃 고지는 방금 내려간 그 기기로 가야 하고, 그 토큰은 이미 비활성이다.
+     */
+    private static List<String> tokensFor(NotificationMessage message,
+                                          Map<UUID, List<String>> tokens) {
+        if (message.targetToken() != null) return List.of(message.targetToken());
+        return tokens.getOrDefault(message.userId(), List.of());
+    }
+
+    /** {@code (userId, token)} 행을 유저별로 접는다. 쿼리는 묶음당 한 번뿐이다. */
+    private Map<UUID, List<String>> loadTokens(List<UUID> userIds) {
+        Map<UUID, List<String>> byUser = new HashMap<>();
+        for (Object[] row : deviceTokenRepository.findActiveTokensByUserIds(userIds)) {
+            byUser.computeIfAbsent((UUID) row[0], k -> new ArrayList<>()).add((String) row[1]);
+        }
+        return byUser;
     }
 
     /**
@@ -139,10 +185,6 @@ public class NotificationDispatcher {
                     .put((String) row[1], (Instant) row[2]);
         }
         return byUser;
-    }
-
-    private List<String> tokensOf(UUID userId) {
-        return deviceTokenRepository.findActiveTokens(userId);
     }
 
     // ===== 전송 결과 반영 =====

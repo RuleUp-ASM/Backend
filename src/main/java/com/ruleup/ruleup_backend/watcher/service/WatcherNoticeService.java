@@ -65,6 +65,7 @@ public class WatcherNoticeService {
         Challenge challenge = challengeQuery.findChallenge(challengeId).orElse(null);
         String challengeTitle = (challenge != null) ? challenge.publicTitle() : "챌린지";
         String routineName = routineNameOf(challenge);
+        String routineId = routineIdOf(challenge, challengeId);
         String failedNickname = userRepository.findById(failedUserId)
                 .map(u -> u.visibleNicknameTo(null)).orElse("회원");
 
@@ -91,14 +92,31 @@ public class WatcherNoticeService {
                     Map.of(NotificationParams.EVENT_KEY, notice.getId().toString(),
                             NotificationParams.NOTICE_ID, notice.getId().toString(),
                             NotificationParams.CHALLENGE_ID, relation.getChallengeId().toString(),
-                            NotificationParams.ROUTINE_ID, routineName,
+                            // 키에는 이름이 아니라 id 다 — 아래 routineIdOf 참조.
+                            NotificationParams.ROUTINE_ID, routineId,
                             NotificationParams.TARGET_USER_ID, failedUserId.toString())));
         }
     }
 
+    /** 화면에 보이는 이름. 문구용이며 <b>키에는 쓰지 않는다</b>. */
     private String routineNameOf(Challenge challenge) {
         if (challenge == null || challenge.getTemplateId() == null) return "루틴";
         return routineCatalog.findById(challenge.getTemplateId())
                 .map(t -> t.getName()).orElse("루틴");
+    }
+
+    /**
+     * 억제 키에 들어갈 루틴 <b>식별자</b>.
+     *
+     * <p>여기에 이름을 넣으면 두 가지가 깨진다. 루틴 이름이 바뀌는 순간 억제 키가 달라져
+     * <b>24시간 억제가 풀리고</b>, 반대로 이름이 같은 서로 다른 루틴은 같은 키로 묶인다.
+     * 이름은 표시용이고 키는 식별용이라 섞으면 안 된다.
+     *
+     * <p>템플릿이 없는 커스텀 루틴은 챌린지 id 로 대신한다 — 억제 단위가 방 하나로 좁아질 뿐,
+     * 키가 비어 발행이 통째로 막히는 것보다 낫다(연속 실패 경고와 같은 규약).
+     */
+    private String routineIdOf(Challenge challenge, UUID challengeId) {
+        if (challenge == null || challenge.getTemplateId() == null) return challengeId.toString();
+        return challenge.getTemplateId().toString();
     }
 }

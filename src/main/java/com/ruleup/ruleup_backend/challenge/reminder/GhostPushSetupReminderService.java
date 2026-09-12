@@ -4,6 +4,10 @@ import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
+import com.ruleup.ruleup_backend.notification.NotificationEvent;
+import com.ruleup.ruleup_backend.notification.NotificationPublisher;
+import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
+import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.push.PushSender;
 import com.ruleup.ruleup_backend.push.SilentPush;
 import com.ruleup.ruleup_backend.routine.domain.SelectedMethod;
@@ -17,6 +21,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 /**
  * 셋업 미완료(권한 없음) 멤버에게 고스트(무음) 푸시로 재설정을 유도하는 배치.
@@ -43,6 +49,7 @@ public class GhostPushSetupReminderService {
     private final ChallengeMemberRepository memberRepository;
     private final ChallengeRepository challengeRepository;
     private final PushSender pushSender;
+    private final NotificationPublisher notificationPublisher;
 
     /** 1시간마다: 셋업 미완료(권한 없음) AUTO 멤버를 깨우는 무음 푸시를 보낸다. */
     @Scheduled(fixedDelay = 3_600_000L)
@@ -62,11 +69,38 @@ public class GhostPushSetupReminderService {
                 continue;
             }
             pushSender.sendSilent(m.getUserId(), SilentPush.setupRequired(c.getId().toString()));
+            notifyPermissionRegrant(m.getUserId(), c);
             m.markGhostPushed(now);   // 쿨다운 기준 갱신(같은 트랜잭션에서 선점 락 유지 중)
             sent++;
         }
         if (sent > 0) {
             log.info("셋업 미완료 멤버 고스트 푸시 {}건 발송(대상 선점 {}건)", sent, claimed.size());
         }
+    }
+
+    /**
+     * 권한 재허용 요청 고지 — 무음 푸시만으로는 <b>기록이 남지 않는다</b>.
+     *
+     * <p>고스트 푸시는 앱을 깨우기만 한다. 앱을 열지 않은 사용자에게는 아무 흔적도 없고,
+     * 그 사이 자동 인증은 계속 skip 되다가 2사이클 미해소로 강퇴된다 — 「아무 안내도 못 받았다」가
+     * 되는 경로다. 알림함에 남겨야 나중에라도 무엇을 해야 하는지 볼 수 있다.
+     *
+     * <p>억제 키가 {@code (permission, challenge_id)} 라 <b>방마다 따로</b> 울린다. 유저 단위로
+     * 묶으면 두 방에서 권한이 막힌 사람이 한쪽 고지만 받고 다른 방은 조용히 강퇴된다.
+     */
+    private void notifyPermissionRegrant(UUID userId, Challenge c) {
+        List<String> required = c.getVerificationConfig().requiredPermissions();
+        // 템플릿이 권한을 적어 두지 않았으면 신호 종류로 대신한다 — 키가 비면 발행이 통째로 막힌다.
+        String permission = (required != null && !required.isEmpty())
+                ? required.getFirst()
+                : String.valueOf(c.getVerificationConfig().signalSource());
+
+        notificationPublisher.publish(NotificationEvent.of(userId,
+                NotificationType.PERMISSION_REGRANT_REQUIRED,
+                "인증 권한을 다시 허용해주세요",
+                "권한이 없어 자동 인증이 기록되지 않고 있어요. 방 설정에서 다시 허용해주세요.",
+                Map.of(NotificationParams.EVENT_KEY, c.getId() + ":" + permission,
+                        NotificationParams.CHALLENGE_ID, c.getId().toString(),
+                        NotificationParams.PERMISSION, permission)));
     }
 }

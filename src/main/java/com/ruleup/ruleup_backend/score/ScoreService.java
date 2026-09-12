@@ -12,6 +12,13 @@ import com.ruleup.ruleup_backend.score.domain.IncidentType;
 import com.ruleup.ruleup_backend.score.domain.ScoreCorrection;
 import com.ruleup.ruleup_backend.score.domain.ScoreLedgerReason;
 import com.ruleup.ruleup_backend.score.domain.ScoreTransaction;
+import com.ruleup.ruleup_backend.notification.NotificationEvent;
+import com.ruleup.ruleup_backend.notification.NotificationPublisher;
+import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
+import com.ruleup.ruleup_backend.notification.domain.NotificationType;
+import com.ruleup.ruleup_backend.score.domain.StreakWarning;
+import com.ruleup.ruleup_backend.score.domain.Tier;
+import com.ruleup.ruleup_backend.score.domain.TierNotice;
 import com.ruleup.ruleup_backend.score.domain.TierPoints;
 import com.ruleup.ruleup_backend.score.domain.UserScoreSummary;
 import com.ruleup.ruleup_backend.verification.domain.VerifiedVia;
@@ -26,6 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -64,6 +72,7 @@ public class ScoreService {
      */
     private static final VerifiedVia UNSCORED_VIA = VerifiedVia.MANUAL;
 
+    private final NotificationPublisher notificationPublisher;
     private final UserScoreSummaryRepository summaryRepository;
     private final CycleScoreStateRepository cycleRepository;
     private final ChallengeStreakRepository streakRepository;
@@ -131,8 +140,36 @@ public class ScoreService {
                 applyRoutine(summary, cycle, streakDelta, reason,
                         "streak:%s:%d".formatted(challengeId, cycleNo));
             }
+            // 경고는 연속 기록을 실제로 올린 이 자리에서만 낸다 — alreadyApplied 가 이미 멱등을
+            // 보장하므로 마감이 재실행돼도 두 번 울리지 않는다.
+            if (StreakWarning.shouldWarn(result, streak.getFailureStreak())) {
+                notifyConsecutiveFailure(userId, challengeId, cycleNo);
+            }
         }
         cycle.close(result, Instant.now());
+    }
+
+    /**
+     * 연속 실패 경고 — <b>강퇴 직전 고지</b>다(2사이클 경고 · 3사이클 강퇴).
+     *
+     * <p>억제 키가 {@code (challenge_id, routine_id)} 라 루틴 id 가 필요하다. 이름을 넣으면
+     * 이름이 바뀔 때 억제가 풀리고 같은 루틴이 다른 것으로 읽힌다 — id 여야 한다.
+     * 챌린지에 템플릿이 없으면(커스텀 루틴) 챌린지 id 로 대신한다: 억제 단위가 방 하나로
+     * 좁아질 뿐 키가 비어 발행이 통째로 막히는 것보다 낫다.
+     */
+    private void notifyConsecutiveFailure(UUID userId, UUID challengeId, int cycleNo) {
+        Long templateId = challengeRepository.findById(challengeId)
+                .map(Challenge::getTemplateId).orElse(null);
+        String routineId = (templateId != null) ? templateId.toString() : challengeId.toString();
+
+        notificationPublisher.publish(NotificationEvent.forChallenge(userId,
+                NotificationType.CONSECUTIVE_FAILURE_WARNING,
+                "연속으로 인증을 놓치고 있어요",
+                "한 번 더 놓치면 이 챌린지에서 나가게 돼요. 다음 사이클은 꼭 채워보세요.",
+                challengeId,
+                Map.of(NotificationParams.EVENT_KEY, challengeId + ":" + cycleNo,
+                        NotificationParams.CHALLENGE_ID, challengeId.toString(),
+                        NotificationParams.ROUTINE_ID, routineId)));
     }
 
     /** 연속 성공 보너스 또는 연속 실패 추가 감점. 부분 달성은 추가 점수가 없다. */
@@ -168,8 +205,11 @@ public class ScoreService {
         // rawCumulative·limitedCumulative 를 0으로 넣어 사이클 상태를 건드리지 않고 계정 범위만 적용한다.
         CycleLimit.Result result = applyAccountRangeOnly(deduction, summary.getTotalScore());
 
+        Tier before = summary.getDisplayTier();
         summary.applyScore(result.scoreAfter());
-        ledgerRepository.save(ScoreTransaction.incident(userId, challengeId, type, result, key));
+        ScoreTransaction tx = ledgerRepository.save(
+                ScoreTransaction.incident(userId, challengeId, type, result, key));
+        notifyTier(summary, before, tx.getId());
     }
 
     /**
@@ -222,9 +262,11 @@ public class ScoreService {
         CycleLimit.Result result = CycleLimit.apply(rawDelta, rawBefore, cycle.getLimitedCumulative(),
                 summary.getTotalScore());
         cycle.applyLimit(result);
+        Tier before = summary.getDisplayTier();
         summary.applyScore(result.scoreAfter());
-        ledgerRepository.save(ScoreTransaction.reversal(userId, challengeId, cycleNo, result,
-                "correction:%s:1".formatted(originalEventId)));
+        ScoreTransaction tx = ledgerRepository.save(ScoreTransaction.reversal(userId, challengeId,
+                cycleNo, result, "correction:%s:1".formatted(originalEventId)));
+        notifyTier(summary, before, tx.getId());
         log.info("점수 소급 정정: user={} challenge={} cycle={} raw={}", userId, challengeId, cycleNo, rawDelta);
     }
 
@@ -238,9 +280,40 @@ public class ScoreService {
         CycleLimit.Result result = CycleLimit.apply(rawDelta, cycle.getRawCumulative(),
                 cycle.getLimitedCumulative(), summary.getTotalScore());
         cycle.applyLimit(result);
+        Tier before = summary.getDisplayTier();
         summary.applyScore(result.scoreAfter());
-        ledgerRepository.save(ScoreTransaction.routine(summary.getUserId(), cycle.getChallengeId(),
-                cycle.getCycleNo(), reason, result, idempotencyKey));
+        ScoreTransaction tx = ledgerRepository.save(ScoreTransaction.routine(summary.getUserId(),
+                cycle.getChallengeId(), cycle.getCycleNo(), reason, result, idempotencyKey));
+        notifyTier(summary, before, tx.getId());
+    }
+
+    /**
+     * 티어 고지 — <b>표시 티어</b>가 바뀌었거나 경계가 코앞일 때만.
+     *
+     * <p>멱등키에 방향만 넣으면 UNIQUE 가 <b>평생 두 번째 승급을 막는다</b>. 그래서 이 변동을
+     * 일으킨 원장 행의 id 를 함께 넣는다 — 티어 변동 이력이 따로 없고 원장이 그 역할이라
+     * (마이페이지 티어 변동 이력도 이 원장을 읽는다) 변동 1건에 정확히 id 하나가 대응한다.
+     *
+     * <p>챌린지 id 는 싣지 않는다. 점수는 <b>계정 단위</b>라 방을 붙이면 3개 방에 참여한 사람이
+     * 같은 승급 고지를 3번 받는다.
+     */
+    private void notifyTier(UserScoreSummary summary, Tier before, UUID eventId) {
+        TierNotice notice = TierNotice.of(before, summary.getDisplayTier(), summary.getTotalScore());
+        if (notice.isNone()) return;
+
+        boolean up = TierNotice.UP.equals(notice.direction());
+        boolean changed = notice.kind() == TierNotice.Kind.CHANGED;
+
+        notificationPublisher.publish(NotificationEvent.of(summary.getUserId(),
+                changed ? NotificationType.TIER_CHANGED : NotificationType.TIER_BOUNDARY_NEAR,
+                changed
+                        ? (up ? "티어가 올랐어요" : "티어가 내려갔어요")
+                        : (up ? "다음 티어가 코앞이에요" : "티어가 내려갈 수 있어요"),
+                changed
+                        ? (up ? "축하해요! 새 티어로 올라섰어요." : "점수가 내려가 티어가 조정됐어요.")
+                        : (up ? "조금만 더 쌓으면 다음 티어예요." : "점수가 조금만 더 내려가면 티어가 조정돼요."),
+                Map.of(NotificationParams.DIRECTION, notice.direction(),
+                        NotificationParams.EVENT_KEY, eventId.toString())));
     }
 
     private UserScoreSummary lockSummary(UUID userId) {

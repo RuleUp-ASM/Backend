@@ -12,7 +12,8 @@ import java.util.UUID;
 /**
  * 발송 판정 — 공통 10절. <b>설정·중복·야간은 전부 발송 직전에 평가한다.</b>
  *
- * <p>순서가 계약이다: 읽음 → 야간 → 마스터 → 그룹 → 음소거 → 마케팅 창 → 인터벌 억제 → 활성 기기.
+ * <p>순서가 계약이다: 읽음 → 야간 → 마스터 → 그룹 → 음소거 → 마케팅 동의 → 마케팅 창 →
+ * 인터벌 억제 → 활성 기기.
  * 야간이 마스터보다 앞인 것이 특히 중요하다 — 야간에 버리면 유저가 08:00 전에 토글을 다시 켜도
  * 그 알림은 되살아나지 않는다. <b>야간에 걸린 알림은 버리지 않고 미룬다.</b>
  *
@@ -59,18 +60,28 @@ public record DispatchDecision(boolean shouldSend, boolean deferred, SuppressedR
         if (message.challengeId() != null && in.mutedChallengeIds().contains(message.challengeId()))
             return suppressed(SuppressedReason.MUTED);
 
-        // ⑥ 마케팅 발송 창 — 야간 게이트가 먼저 잡으므로 정상 경로에서는 걸리지 않는다.
+        // ⑥ 마케팅 수신 동의 — <b>설정 토글과 별개의 게이트</b>다. 가입 때 거부하면 설정 행이
+        //    아예 없고, 행이 없으면 ④ 그룹 토글은 ON 으로 해석된다. 그래서 토글만 보면
+        //    미동의자에게 광고가 나간다. 원본은 약관 동의 상태다.
+        if (group == NotificationToggleGroup.MARKETING && !in.marketingConsent())
+            return suppressed(SuppressedReason.MARKETING_CONSENT_OFF);
+
+        // ⑦ 마케팅 발송 창 — 야간 게이트가 먼저 잡으므로 정상 경로에서는 걸리지 않는다.
         //    시계 오차·경계 계산이 틀렸을 때를 막는 최후 방어이며, 이 값이 로그에 찍히면
         //    발송 경로를 즉시 차단해야 한다.
         if (group == NotificationToggleGroup.MARKETING && !decideMarketingWindow(now))
             return suppressed(SuppressedReason.MARKETING_WINDOW);
 
-        // ⑦ 인터벌 억제 — 기준은 pushed_at(발송 성공 시각)이다.
+        // ⑧ 인터벌 억제 — 기준은 pushed_at(발송 성공 시각)이다.
         if (isWithinSuppressInterval(message, in, now))
             return suppressed(SuppressedReason.INTERVAL);
 
-        // ⑧ 활성 기기 — 가장 마지막이다. 앞 게이트에 걸리면 그 사유가 기록돼야 한다.
-        if (!in.hasActiveDevice()) return suppressed(SuppressedReason.NO_DEVICE);
+        // ⑨ 활성 기기 — 가장 마지막이다. 앞 게이트에 걸리면 그 사유가 기록돼야 한다.
+        //    대상 토큰이 지정된 알림은 이 게이트를 건너뛴다. 기기 로그아웃 고지는 <b>방금 내려간
+        //    그 기기</b>로 가야 하는데, 그 토큰은 이미 비활성이라 여기서는 「활성 기기 없음」으로
+        //    읽힌다 — 게이트를 그대로 두면 고지가 영영 닿지 못한다.
+        if (message.targetToken() == null && !in.hasActiveDevice())
+            return suppressed(SuppressedReason.NO_DEVICE);
 
         return send();
     }

@@ -42,6 +42,13 @@ public enum ErrorCode {
     // ===== 기기 정보 (deviceInfo) (4.1 / 4.3) =====
     /** reason 으로 MISSING_DEVICE_ID / MISSING_DEVICE_INFO / MALFORMED_DEVICE_INFO 를 구분해 내려준다. */
     INVALID_DEVICE_INFO(HttpStatus.BAD_REQUEST, "기기 정보를 확인하지 못했어요. 앱을 다시 실행한 뒤 시도해주세요."),
+    /**
+     * FCM 등록 토큰이 형식에 맞지 않는다 — 알림 공통 스펙이 정의한 코드다.
+     *
+     * <p>공백만 막으면 개행이 섞였거나 컬럼(512)을 넘는 값이 그대로 저장되고, 그 토큰은 발송
+     * 단계에서야 조용히 실패한다. 등록 시점에 거절하는 편이 원인을 훨씬 빨리 드러낸다.
+     */
+    INVALID_DEVICE_TOKEN(HttpStatus.BAD_REQUEST, "기기 알림 설정을 확인하지 못했어요. 앱을 다시 실행한 뒤 시도해주세요."),
 
     // ===== 닉네임 / 카테고리 / 약관 / 온보딩 (4.3 / 4.6 / 4.9) =====
     NICKNAME_FORMAT_INVALID(HttpStatus.BAD_REQUEST, "닉네임 형식이 올바르지 않습니다."),
@@ -288,6 +295,19 @@ public enum ErrorCode {
     ANNOUNCEMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "공지를 찾을 수 없어요."),
     /** 이미 팬아웃된 공지는 회수되지 않는다 — 취소는 대기 중인 공지에만 의미가 있다. */
     ANNOUNCEMENT_ALREADY_SENT(HttpStatus.CONFLICT, "이미 발송된 공지는 취소할 수 없어요."),
+    /**
+     * 공지 원본은 컬럼(제목 100 · 본문 500 · 딥링크 200)을 넘길 수 없다.
+     *
+     * <p>전용 코드를 둔 이유는 <b>순서</b> 때문이다. 길이 초과를 저장 단계까지 끌고 가면 운영자는
+     * 2단계 확인을 마친 뒤에야 500 을 보고, 무엇이 왜 틀렸는지 알 수 없다.
+     */
+    ANNOUNCEMENT_TITLE_LENGTH(HttpStatus.BAD_REQUEST, "공지 제목은 100자를 넘을 수 없어요."),
+    ANNOUNCEMENT_BODY_LENGTH(HttpStatus.BAD_REQUEST, "공지 내용은 500자를 넘을 수 없어요."),
+    /**
+     * 딥링크는 전부 {@code ruleup://} 커스텀 스킴이다(공통 8절). 검증하지 않으면 외부 URL 이
+     * 약 2만 명의 알림함에 그대로 팬아웃된다 — 되돌릴 수 없는 발송이다.
+     */
+    ANNOUNCEMENT_DEEPLINK_INVALID(HttpStatus.BAD_REQUEST, "공지 링크는 앱 안의 화면만 가리킬 수 있어요."),
 
     // ===== CS 문의 (앱 운영 정책 § 5) =====
     INQUIRY_NOT_FOUND(HttpStatus.NOT_FOUND, "문의 내역을 찾을 수 없어요."),

@@ -1,6 +1,9 @@
 package com.ruleup.ruleup_backend.notification;
 
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
+import com.ruleup.ruleup_backend.agreement.UserAgreementStateRepository;
+import com.ruleup.ruleup_backend.agreement.domain.AgreementType;
+import com.ruleup.ruleup_backend.agreement.domain.UserAgreementState;
 import com.ruleup.ruleup_backend.notification.consumer.NotificationDispatcher;
 import com.ruleup.ruleup_backend.notification.consumer.SuppressedReason;
 import com.ruleup.ruleup_backend.notification.domain.Notification;
@@ -57,6 +60,8 @@ class NotificationConsumerIT {
     @Autowired UserRepository userRepository;
     @Autowired TransactionTemplate txTemplate;
     @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
+    @Autowired NotificationTestQueue.RecordingPushSender pushSender;
+    @Autowired UserAgreementStateRepository agreementStateRepository;
 
     /**
      * 음소거 행은 챌린지에 FK 가 걸려 있어 실재하는 방이 필요하다 — 그래야 「탈퇴한 방의
@@ -290,10 +295,136 @@ class NotificationConsumerIT {
         }
 
         @Test
+        @DisplayName("여러 유저의 토큰을 묶음으로 해결한다 — 알림마다 다시 물으면 08:00 묶음이 밀린다")
+        void resolvesTokensForWholeBatch() {
+            pushSender.reset();
+            UUID first = userWithDevice();
+            UUID second = userWithDevice();
+            String firstToken = deviceTokenRepository.findByUserId(first).getFirst().getToken();
+            String secondToken = deviceTokenRepository.findByUserId(second).getFirst().getToken();
+
+            Notification a = store(first, NotificationType.ACCOUNT_SANCTION,
+                    Map.of(NotificationParams.EVENT_KEY, "tk1" + SEQ.incrementAndGet()));
+            Notification b = store(second, NotificationType.ACCOUNT_SANCTION,
+                    Map.of(NotificationParams.EVENT_KEY, "tk2" + SEQ.incrementAndGet()));
+
+            dispatcher.dispatch(List.of(messageOf(a), messageOf(b)), kstAt(12));
+
+            assertThat(pushSender.sent).hasSize(2);
+            assertThat(pushSender.sent.get(0).tokens())
+                    .as("각 알림이 자기 유저의 토큰을 들고 간다").containsExactly(firstToken);
+            assertThat(pushSender.sent.get(1).tokens()).containsExactly(secondToken);
+        }
+
+        @Test
+        @DisplayName("대상 토큰이 지정되면 비활성 토큰으로도 보낸다 — 로그아웃 고지는 그 기기로 간다")
+        void targetedSendUsesGivenToken() {
+            pushSender.reset();
+            UUID userId = userWithDevice();
+            String previous = deviceTokenRepository.findByUserId(userId).getFirst().getToken();
+            // 새 기기 등록으로 이전 토큰이 내려간 상태를 만든다.
+            // @Modifying 쿼리라 활성 트랜잭션이 필요하다 — 이 IT 의 다른 쓰기와 같은 방식.
+            txTemplate.executeWithoutResult(t ->
+                    deviceTokenRepository.deactivate(List.of(previous), Instant.now()));
+
+            Notification n = store(userId, NotificationType.DEVICE_LOGGED_OUT,
+                    Map.of(NotificationParams.EVENT_KEY, "lo" + SEQ.incrementAndGet()));
+
+            var outcomes = dispatcher.dispatch(
+                    List.of(NotificationMessage.from(n, previous)), kstAt(12));
+
+            assertThat(outcomes.getFirst().sent()).as("활성 기기가 없어도 나간다").isTrue();
+            assertThat(pushSender.sent.getFirst().tokens()).containsExactly(previous);
+        }
+
+        @Test
+        @DisplayName("활성 기기가 없으면 전송기까지 가지 않는다 — 판정에서 걸린다")
+        void noDeviceNeverReachesSender() {
+            pushSender.reset();
+            UUID userId = newUser();   // 기기 없음
+            Notification n = store(userId, NotificationType.ACCOUNT_SANCTION,
+                    Map.of(NotificationParams.EVENT_KEY, "nd" + SEQ.incrementAndGet()));
+
+            var outcomes = dispatcher.dispatch(List.of(messageOf(n)), kstAt(12));
+
+            assertThat(outcomes.getFirst().suppressedReason()).isEqualTo(SuppressedReason.NO_DEVICE);
+            assertThat(pushSender.sent).isEmpty();
+        }
+
+        @Test
         @DisplayName("빈 묶음은 아무 조회도 하지 않는다")
         void emptyBatch() {
             assertThat(dispatcher.dispatch(List.of(), kstAt(12))).isEmpty();
         }
+    }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("마케팅 수신 동의 — 약관 상태가 원본이다")
+    class MarketingConsent {
+
+        @Test
+        @DisplayName("동의 행이 없으면 막힌다 — 가입 때 거부하면 설정 행도 없어 토글은 ON 으로 읽힌다")
+        void noAgreementRowBlocks() {
+            // 약관 행을 만들지 않는다. 설정 행도 없으므로 그룹 토글은 ON 으로 해석된다 —
+            // 토글만 보던 구 판정이 바로 이 사람에게 광고를 보냈다.
+            UUID userId = userWithDevice();
+            Notification n = store(userId, NotificationType.MARKETING, marketingParams());
+
+            var outcomes = dispatcher.dispatch(List.of(messageOf(n)), kstAt(12));
+
+            assertThat(outcomes.getFirst().suppressedReason())
+                    .isEqualTo(SuppressedReason.MARKETING_CONSENT_OFF);
+        }
+
+        @Test
+        @DisplayName("동의했으면 나간다")
+        void consentedSends() {
+            UUID userId = userWithDevice();
+            consent(userId, true);
+            Notification n = store(userId, NotificationType.MARKETING, marketingParams());
+
+            var outcomes = dispatcher.dispatch(List.of(messageOf(n)), kstAt(12));
+
+            assertThat(outcomes.getFirst().sent()).isTrue();
+        }
+
+        @Test
+        @DisplayName("동의 후 철회했으면 막힌다 — agreed=false 는 미동의와 같다")
+        void revokedBlocks() {
+            UUID userId = userWithDevice();
+            consent(userId, false);
+            Notification n = store(userId, NotificationType.MARKETING, marketingParams());
+
+            var outcomes = dispatcher.dispatch(List.of(messageOf(n)), kstAt(12));
+
+            assertThat(outcomes.getFirst().suppressedReason())
+                    .isEqualTo(SuppressedReason.MARKETING_CONSENT_OFF);
+        }
+
+        @Test
+        @DisplayName("미동의자의 제재 고지는 그대로 나간다 — 동의 게이트는 마케팅에만 적용된다")
+        void otherGroupsUnaffected() {
+            UUID userId = userWithDevice();   // 마케팅 미동의
+            Notification n = store(userId, NotificationType.ACCOUNT_SANCTION,
+                    Map.of(NotificationParams.EVENT_KEY, "mc" + SEQ.incrementAndGet()));
+
+            var outcomes = dispatcher.dispatch(List.of(messageOf(n)), kstAt(12));
+
+            assertThat(outcomes.getFirst().sent()).isTrue();
+        }
+    }
+
+    private void consent(UUID userId, boolean agreed) {
+        txTemplate.executeWithoutResult(t -> agreementStateRepository.save(
+                UserAgreementState.of(userId, AgreementType.MARKETING, agreed, "1.0",
+                        Instant.now())));
+    }
+
+    /** 마케팅은 멱등키가 {@code event_key}, 억제키가 {@code campaign_id} 다. */
+    private static Map<String, String> marketingParams() {
+        String key = "mk" + SEQ.incrementAndGet() + System.nanoTime();
+        return Map.of(NotificationParams.EVENT_KEY, key, NotificationParams.CAMPAIGN_ID, key);
     }
 
     private Notification reload(Notification n) {

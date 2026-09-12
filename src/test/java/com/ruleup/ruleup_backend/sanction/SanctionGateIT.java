@@ -213,10 +213,14 @@ class SanctionGateIT extends AuthApiSupport {
 
             // PUT 이라 LOCK 의 열람 규칙으로는 통과하지 못한다. 게이트를 지나 서비스까지 닿았는지만 본다 —
             // 없는 id 라 404 가 나야 정상이고, 403 ACCOUNT_LOCKED 면 화이트리스트가 빠진 것이다.
+            // tab 은 명세상 필수라 함께 보낸다. 빼면 400 에서 멈춰 「게이트를 지났는가」를 못 본다 —
+            // 이 테스트가 보려는 것은 읽음 요청의 형식이 아니라 잠금 화이트리스트다.
             MvcResult res = mvc.perform(put("/api/v1/notifications/read")
                     .header("Authorization", "Bearer " + a.accessToken())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(OM.writeValueAsString(Map.of("lastNotificationId", UUID.randomUUID().toString()))))
+                    .content(OM.writeValueAsString(Map.of(
+                            "tab", "NOTIFICATION",
+                            "lastNotificationId", UUID.randomUUID().toString()))))
                     .andReturn();
             expectError(res, 404, "NOTIFICATION_NOT_FOUND");
         }

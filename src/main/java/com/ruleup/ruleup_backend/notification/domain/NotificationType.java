@@ -11,6 +11,13 @@ import static com.ruleup.ruleup_backend.notification.domain.NotificationParams.*
 /**
  * 알림 타입 레지스트리 <b>23종</b> — 백엔드 테크 스펙 5절, 공통 8절.
  *
+ * <h4>문서는 22종, 코드는 23종이다 — 차이는 {@code CS_ANSWERED} 하나다</h4>
+ * 마이그레이션 파일명({@code V34__notification_registry_22_types})과 알림 정책 §4 표가 22종인데
+ * 여기는 23종이다. 늘어난 한 종은 CS 답변 고지이고 근거는 <b>앱 운영 정책 §5.5</b> 다 —
+ * 그 정책이 「알림 정책 §4 표에 CS 답변 행 추가 필요」를 미결로 남겨 두었고, 이 상수의 속성이
+ * 바로 그 제안값이다. <b>코드가 앞서 있는 상태</b>이며 표가 갱신되면 숫자가 맞는다.
+ * 적재된 타입 문자열은 그대로이므로 이 차이로 동작이 갈리지는 않는다.
+ *
  * <h4>테이블이 아니라 코드 enum이다</h4>
  * {@code notification_types} 레지스트리 테이블은 2026-09-08 제거됐다. 타입 코드 · 토글 그룹 ·
  * 딥링크 · {@code pushable} · 억제 인터벌 · 탭이 전부 여기 불변 값으로 있다.

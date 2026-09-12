@@ -36,10 +36,17 @@ public class FirebaseConfig {
     @Bean
     FirebaseApp firebaseApp(@Value("${app.fcm.credentials-json:}") String credentialsJson,
                             @Value("${app.fcm.credentials-path:}") String credentialsPath,
-                            @Value("${app.fcm.project-id:}") String projectId) throws IOException {
+                            @Value("${app.fcm.project-id:}") String projectId,
+                            @Value("${app.fcm.timeout-ms:5000}") int timeoutMs) throws IOException {
         GoogleCredentials credentials = loadCredentials(credentialsJson, credentialsPath);
 
-        FirebaseOptions.Builder builder = FirebaseOptions.builder().setCredentials(credentials);
+        FirebaseOptions.Builder builder = FirebaseOptions.builder()
+                .setCredentials(credentials)
+                // 명세의 FCM 5초. SDK 기본값은 사실상 무제한이라, 응답 없는 호출 하나가 컨슈머
+                // 스레드를 붙잡으면 08:00 묶음이 통째로 밀린다. 묶음 전송이라 영향이 더 크다.
+                .setConnectTimeout(timeoutMs)
+                .setReadTimeout(timeoutMs)
+                .setWriteTimeout(timeoutMs);
         if (projectId != null && !projectId.isBlank()) {
             builder.setProjectId(projectId);
         }

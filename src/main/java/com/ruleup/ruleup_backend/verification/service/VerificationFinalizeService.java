@@ -9,6 +9,10 @@ import com.ruleup.ruleup_backend.verification.domain.*;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationMethodResultRepository;
 import com.ruleup.ruleup_backend.common.event.RoutineFailureConfirmed;
+import com.ruleup.ruleup_backend.notification.NotificationEvent;
+import com.ruleup.ruleup_backend.notification.NotificationPublisher;
+import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
+import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,6 +26,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -55,6 +60,7 @@ public class VerificationFinalizeService {
     private final ChallengeQueryService challengeQuery;
     private final VerificationConfigFactory configFactory;
     private final VerificationProgressService progressService;
+    private final NotificationPublisher notificationPublisher;
     private final ApplicationEventPublisher eventPublisher;
 
     /**
@@ -145,6 +151,22 @@ public class VerificationFinalizeService {
             eventPublisher.publishEvent(new RoutineFailureConfirmed(
                     daily.getChallengeId(), member.getUserId(), daily.getId(),
                     daily.getTargetDate(), now));
+        }
+
+        // 판정 결과 고지 — 성공·실패 둘 다. 확정 시각이 귀속일 이틀 뒤 00:00 이라 그때 유저는
+        // 앱을 보고 있지 않다. 알림함이 「그날이 어떻게 끝났는지」를 확인할 유일한 자리다.
+        // 판정 하나에 확정은 하나뿐이라 verification_id 가 곧 멱등 키이고, 배치가 재실행돼도
+        // 두 번 적재되지 않는다.
+        if (member != null) {
+            notificationPublisher.publish(NotificationEvent.forChallenge(member.getUserId(),
+                    NotificationType.VERIFICATION_RESULT,
+                    confirmedFail ? "인증이 실패로 확정됐어요" : "인증이 완료로 확정됐어요",
+                    confirmedFail
+                            ? "이의 기간이 지나 이 결과는 되돌릴 수 없어요."
+                            : "그날 몫을 채웠어요. 진행률에 반영됐어요.",
+                    daily.getChallengeId(),
+                    Map.of(NotificationParams.VERIFICATION_ID, daily.getId().toString(),
+                            NotificationParams.CHALLENGE_ID, daily.getChallengeId().toString())));
         }
         return member != null;
     }

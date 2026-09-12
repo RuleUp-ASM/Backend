@@ -7,6 +7,11 @@ import com.ruleup.ruleup_backend.challenge.domain.MemberStatus;
 import com.ruleup.ruleup_backend.challenge.explore.ChallengeGridChanged;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
+import com.ruleup.ruleup_backend.notification.NotificationEvent;
+import com.ruleup.ruleup_backend.notification.NotificationMuteCleaner;
+import com.ruleup.ruleup_backend.notification.NotificationPublisher;
+import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
+import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,6 +24,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -43,6 +49,8 @@ public class ChallengeCompletionService {
     private final ChallengeRepository challengeRepository;
     private final ChallengeMemberRepository memberRepository;
     private final UserJoinCounterService joinCounterService;
+    private final NotificationMuteCleaner muteCleaner;
+    private final NotificationPublisher notificationPublisher;
     private final TransactionTemplate transactionTemplate;
     private final ApplicationEventPublisher eventPublisher;
 
@@ -70,9 +78,23 @@ public class ChallengeCompletionService {
         Set<UUID> members = new LinkedHashSet<>();   // 여러 방이 동시에 끝난 사용자는 한 번만 재계산하면 된다
         for (Challenge c : due) {
             c.complete();
-            for (ChallengeMember m : memberRepository
-                    .findByChallengeIdAndStatusOrderByJoinedAtAsc(c.getId(), MemberStatus.ACTIVE)) {
-                members.add(m.getUserId());
+            // 끝난 방의 음소거는 의미를 잃는다. 남겨 두면 설정 목록에 영영 쌓인다.
+            muteCleaner.clearMutesOfChallenge(c.getId());
+
+            List<ChallengeMember> active = memberRepository
+                    .findByChallengeIdAndStatusOrderByJoinedAtAsc(c.getId(), MemberStatus.ACTIVE);
+            for (ChallengeMember m : active) members.add(m.getUserId());
+
+            // 종료 고지 — 묶음 발행이라 SQS 호출이 100건에 한 번이고,
+            // dedup_key = CHALLENGE_LIFECYCLE:{user}:{challenge}:ENDED 가 재실행 중복을 막는다.
+            if (!active.isEmpty()) {
+                notificationPublisher.publishAll(active.stream()
+                        .map(m -> NotificationEvent.forChallenge(m.getUserId(),
+                                NotificationType.CHALLENGE_LIFECYCLE,
+                                "챌린지가 끝났어요", "수고하셨어요. 최종 결과를 확인해보세요.", c.getId(),
+                                Map.of(NotificationParams.CHALLENGE_ID, c.getId().toString(),
+                                        NotificationParams.PHASE, "ENDED")))
+                        .toList());
             }
         }
         // 그리드는 UPCOMING·ACTIVE 를 세므로 종료된 방은 집계에서 빠진다 → 캐시를 버려야 수가 따라 내려간다.

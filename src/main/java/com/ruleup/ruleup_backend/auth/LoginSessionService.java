@@ -11,6 +11,7 @@ import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.oauth.OAuthUserInfo;
+import com.ruleup.ruleup_backend.push.repository.DeviceTokenRepository;
 import com.ruleup.ruleup_backend.score.UserScoreSummaryRepository;
 import com.ruleup.ruleup_backend.score.domain.UserScoreSummary;
 import com.ruleup.ruleup_backend.user.UserRepository;
@@ -43,6 +44,7 @@ public class LoginSessionService {
     private final UserScoreSummaryRepository scoreSummaryRepository;
     private final SocialTokenService socialTokenService;
     private final NotificationPublisher notificationPublisher;
+    private final DeviceTokenRepository deviceTokenRepository;
     private final CountryResolver countryResolver;
     private final TokenService tokenService;
 
@@ -65,13 +67,20 @@ public class LoginSessionService {
                 && !req.deviceId().equals(user.getDeviceId());
         if (deviceChanged) {
             refreshTokenRepository.revokeAllByUserId(user.getId(), Instant.now());
+            // 지금 활성인 토큰이 곧 <b>이전 기기</b>의 것이다. 새 기기는 로그인 직후 별도 호출로
+            // 토큰을 올리므로 아직 등록돼 있지 않다 — 이 시점을 놓치면 대상이 사라지고, 고지가
+            // 새 기기로 가거나 양쪽에 뜬다. 발송 시점에는 조회로 찾을 수 없다(이미 비활성).
+            String previousDevice = deviceTokenRepository.findActiveTokensOf(user.getId())
+                    .stream().findFirst().orElse(null);
             // 필수(A) — 계정 보안 고지라 야간에도 즉시 나간다.
-            notificationPublisher.publish(NotificationEvent.of(user.getId(),
+            NotificationEvent loggedOut = NotificationEvent.of(user.getId(),
                     NotificationType.DEVICE_LOGGED_OUT,
                     "다른 기기에서 로그인됨",
                     "새 기기에서 로그인되어 기존 기기의 세션이 종료됐어요. 본인이 아니라면 계정 보안을 확인해주세요.",
                     // 새로 로그인한 기기 id 가 이 사건을 유일하게 가리킨다.
-                    Map.of(NotificationParams.EVENT_KEY, req.deviceId())));
+                    Map.of(NotificationParams.EVENT_KEY, req.deviceId()));
+            notificationPublisher.publish(previousDevice == null
+                    ? loggedOut : loggedOut.withTargetToken(previousDevice));
         }
 
         // ===== 설치 인계 — uq_users_active_installation_id: 하나의 설치는 한 활성 계정에만 연결 =====

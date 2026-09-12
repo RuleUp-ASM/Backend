@@ -189,6 +189,51 @@ class WatcherRelationIT extends ChallengeApiSupport {
 
     // =====================================================================
     @Nested
+    @DisplayName("억제 키 — 이름이 아니라 식별자")
+    class SuppressKey {
+
+        @Test
+        @DisplayName("루틴 id 를 키에 넣는다 — 이름을 넣으면 개명에 억제가 풀리고 동명 루틴이 묶인다")
+        void key_carries_routine_id() throws Exception {
+            Target t = target("key");
+            Member watcher = member(uniq("wk"));
+            accept(t, watcher);
+            // 픽스처는 템플릿을 비워 두므로 직접 심는다 — 비워 두면 폴백 경로만 지나가
+            // 「이름 대신 id」를 증명하지 못한다.
+            jdbcTemplate.update("UPDATE challenges SET template_id = 7 WHERE id = ?",
+                    bytes(t.challengeId()));
+
+            confirmFailure(t, UUID.randomUUID());
+
+            assertThat(notificationRepository.findByUserIdOrderByIdDesc(watcher.id()))
+                    .filteredOn(n -> NotificationType.PENALTY_FAILURE_SHARED.name().equals(n.getType()))
+                    .singleElement()
+                    .satisfies(n -> assertThat(n.getSuppressKey())
+                            .as("키는 (challenge_id, routine_id, target_user_id) 다")
+                            .isEqualTo("PENALTY_FAILURE_SHARED:" + t.challengeId()
+                                    + ":7:" + t.owner().id()));
+        }
+
+        @Test
+        @DisplayName("템플릿이 없는 커스텀 루틴은 챌린지 id 로 대신한다 — 키가 비면 발행이 막힌다")
+        void falls_back_to_challenge_id() throws Exception {
+            Target t = target("fallback");
+            Member watcher = member(uniq("wf"));
+            accept(t, watcher);   // template_id 를 심지 않는다
+
+            confirmFailure(t, UUID.randomUUID());
+
+            assertThat(notificationRepository.findByUserIdOrderByIdDesc(watcher.id()))
+                    .filteredOn(n -> NotificationType.PENALTY_FAILURE_SHARED.name().equals(n.getType()))
+                    .singleElement()
+                    .satisfies(n -> assertThat(n.getSuppressKey())
+                            .isEqualTo("PENALTY_FAILURE_SHARED:" + t.challengeId()
+                                    + ":" + t.challengeId() + ":" + t.owner().id()));
+        }
+    }
+
+    // =====================================================================
+    @Nested
     @DisplayName("초대와 동의 성립")
     class Consent {
 

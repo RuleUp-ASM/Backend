@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -49,6 +50,7 @@ class NotificationInboxApiIT extends AuthApiSupport {
     @Autowired WebApplicationContext wac;
     @Autowired NotificationPublisher publisher;
     @Autowired TransactionTemplate txTemplate;
+    @Autowired JdbcTemplate jdbc;
 
     private MockMvc mvc;
 
@@ -86,6 +88,22 @@ class NotificationInboxApiIT extends AuthApiSupport {
                 .header("Authorization", "Bearer " + at)).andReturn();
     }
 
+    /**
+     * 보관 기간 밖으로 밀어낸다. SQL 안에서 상대 계산을 하는 이유는 {@code created_at} 이
+     * DATETIME(3) 이라 자바에서 Instant 를 넣으면 JVM 시간대 해석이 끼어들기 때문이다.
+     */
+    private void backdate(UUID userId, int days) {
+        jdbc.update("UPDATE notifications SET created_at = DATE_SUB(created_at, INTERVAL ? DAY)"
+                + " WHERE user_id = ?", days, bytes(userId));
+    }
+
+    private static byte[] bytes(UUID u) {
+        java.nio.ByteBuffer bb = java.nio.ByteBuffer.allocate(16);
+        bb.putLong(u.getMostSignificantBits());
+        bb.putLong(u.getLeastSignificantBits());
+        return bb.array();
+    }
+
     private MvcResult markRead(String at, String tab, String lastId) throws Exception {
         Map<String, Object> body = (tab == null)
                 ? Map.of("lastNotificationId", lastId)
@@ -115,6 +133,19 @@ class NotificationInboxApiIT extends AuthApiSupport {
             assertThat(this_(res, "$.data.items[0].type")).isEqualTo("APPEAL_RESULT");
             assertThat(this_(res, "$.data.items[0].deeplink")).isEqualTo("ruleup://me/appeals");
             assertThat((Integer) read(res, "$.data.retentionDays")).isEqualTo(180);
+        }
+
+        @Test
+        @DisplayName("보관 기간이 지난 알림은 내려가지 않는다 — 파기가 밀려도 다시 보이면 안 된다")
+        void retentionBoundaryHidesExpiredRows() throws Exception {
+            Account a = join("보관");
+            store(a.userId(), NotificationType.APPEAL_RESULT, "old" + seq());
+            backdate(a.userId(), 200);                     // 보관 180일을 넘긴다
+            store(a.userId(), NotificationType.APPEAL_RESULT, "fresh" + seq());
+
+            List<String> ids = read(list(a.accessToken(), ""), "$.data.items[*].id");
+
+            assertThat(ids).as("경계 밖 한 건은 빠지고 최근 한 건만 남는다").hasSize(1);
         }
 
         @Test
@@ -273,16 +304,52 @@ class NotificationInboxApiIT extends AuthApiSupport {
         }
 
         @Test
-        @DisplayName("탭을 생략하면 알림 탭이다")
-        void tabDefaults() throws Exception {
+        @DisplayName("탭을 생략하면 400 — 명세가 필수로 정한 값이다")
+        void tabIsRequired() throws Exception {
             Account a = join("탭생략");
             store(a.userId(), NotificationType.APPEAL_RESULT, "r7");
             String id = read(list(a.accessToken(), ""), "$.data.items[0].id");
 
-            markRead(a.accessToken(), null, id);
+            expectError(markRead(a.accessToken(), null, id), 400, "INVALID_REQUEST");
+
+            assertThat((String) read(list(a.accessToken(), ""), "$.data.lastReadNotificationId"))
+                    .as("거절했으면 커서도 움직이지 않았다").isNull();
+        }
+
+        @Test
+        @DisplayName("탭이 맞으면 그 알림의 탭으로 커서가 움직인다")
+        void advancesWithMatchingTab() throws Exception {
+            Account a = join("탭일치");
+            store(a.userId(), NotificationType.APPEAL_RESULT, "r7b");
+            String id = read(list(a.accessToken(), ""), "$.data.items[0].id");
+
+            markRead(a.accessToken(), "NOTIFICATION", id);
 
             assertThat((String) read(list(a.accessToken(), ""), "$.data.lastReadNotificationId"))
                     .isEqualTo(id);
+        }
+
+        @Test
+        @DisplayName("알림의 실제 탭과 어긋나면 400 — 무시하면 클라이언트가 오해한 채 남는다")
+        void rejectsMismatchedTab() throws Exception {
+            Account a = join("탭불일치");
+            store(a.userId(), NotificationType.APPEAL_RESULT, "r9");
+            String id = read(list(a.accessToken(), ""), "$.data.items[0].id");
+
+            expectError(markRead(a.accessToken(), "ANNOUNCEMENT", id), 400, "INVALID_REQUEST");
+
+            assertThat((String) read(list(a.accessToken(), ""), "$.data.lastReadNotificationId"))
+                    .as("거절했으면 커서도 움직이지 않았다").isNull();
+        }
+
+        @Test
+        @DisplayName("정의되지 않은 탭 값도 400 이다")
+        void rejectsUnknownTab() throws Exception {
+            Account a = join("탭이상");
+            store(a.userId(), NotificationType.APPEAL_RESULT, "r10");
+            String id = read(list(a.accessToken(), ""), "$.data.items[0].id");
+
+            expectError(markRead(a.accessToken(), "INBOX", id), 400, "INVALID_REQUEST");
         }
 
         @Test

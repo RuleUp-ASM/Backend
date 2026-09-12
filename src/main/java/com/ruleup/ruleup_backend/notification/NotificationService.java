@@ -65,9 +65,10 @@ public class NotificationService {
         NotificationTab tab = tabOf(rawTab);
         UUID cursor = Cursor.decode(rawCursor);
 
-        // 한 건 더 읽어 다음 페이지 유무를 판단한다.
+        // 한 건 더 읽어 다음 페이지 유무를 판단한다. 보관 기간 밖은 파기 배치가 아직 못 지웠더라도
+        // 내려보내지 않는다 — 응답의 retentionDays 와 실제 목록이 어긋나면 안 된다.
         List<Notification> rows = repository.findInbox(userId, tab.code(), cursor,
-                Limit.of(PAGE_SIZE + 1));
+                Instant.now().minus(RETENTION), Limit.of(PAGE_SIZE + 1));
         boolean hasNext = rows.size() > PAGE_SIZE;
         List<Notification> page = hasNext ? rows.subList(0, PAGE_SIZE) : rows;
 
@@ -94,19 +95,30 @@ public class NotificationService {
      * <p><b>클라이언트가 보낸 id 로만 갱신한다.</b> 현재 시각으로 갱신하면 조회와 갱신 사이에
      * 적재된 알림이 화면에 뜬 적 없이 읽음 처리돼 레드닷이 영영 뜨지 않는다 — 00시 판정 배치나
      * 08:00 큐 소진 구간에서 실제로 생기는 경로다.
+     *
+     * <p><b>{@code tab} 은 필수다</b>(명세 Request Body — 필수 YES). 다만 커서를 실제로 움직일
+     * 탭은 <b>알림 자신에게서</b> 가져오고, 보내온 값이 그와 어긋나면 400 이다. 셋을 동시에
+     * 지켜야 한다 — 생략을 받아주면 명세와 어긋나고, 클라이언트 주장대로 커서를 움직이면
+     * 엉뚱한 탭의 레드닷이 꺼지며, 어긋난 요청을 204 로 받아주면 클라이언트가 자기 버그를
+     * 모른 채 남는다.
      */
     @Transactional
     public void markRead(UUID userId, NotificationSettingDtos.ReadRequest request) {
-        if (request == null || request.lastNotificationId() == null)
+        if (request == null || request.lastNotificationId() == null
+                || request.tab() == null || request.tab().isBlank())
             throw new BusinessException(ErrorCode.INVALID_REQUEST);
 
         UUID notificationId = parseUuid(request.lastNotificationId());
         Notification target = repository.findByIdAndUserId(notificationId, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOTIFICATION_NOT_FOUND));
 
-        // 탭은 알림 자신이 안다 — 클라이언트가 보낸 탭과 어긋나면 커서가 엉뚱한 쪽으로 움직인다.
-        settings(userId, Instant.now()).advanceReadCursor(
-                target.tabEnum(), notificationId, Instant.now());
+        // 커서를 움직일 탭은 알림 자신에게서 가져온다 — 클라이언트가 보낸 값을 그대로 믿으면
+        // 커서가 엉뚱한 탭으로 움직인다. 보내온 값은 대조용이며, 어긋나면 거절한다.
+        NotificationTab tab = target.tabEnum();
+        if (tabOf(request.tab()) != tab)
+            throw new BusinessException(ErrorCode.INVALID_REQUEST);
+
+        settings(userId, Instant.now()).advanceReadCursor(tab, notificationId, Instant.now());
     }
 
     // ===== 설정 =====

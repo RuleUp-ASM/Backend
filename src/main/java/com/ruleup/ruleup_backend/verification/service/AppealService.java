@@ -6,6 +6,10 @@ import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
+import com.ruleup.ruleup_backend.notification.NotificationEvent;
+import com.ruleup.ruleup_backend.notification.NotificationPublisher;
+import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
+import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.verification.domain.Appeal;
 import com.ruleup.ruleup_backend.verification.domain.Polarity;
 import com.ruleup.ruleup_backend.verification.domain.VerificationPolarity;
@@ -23,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -57,6 +62,7 @@ public class AppealService {
     private final VerificationConfigFactory configFactory;
     private final VerificationProgressService progressService;
     private final StreakService streakService;
+    private final NotificationPublisher notificationPublisher;
     private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
@@ -91,6 +97,14 @@ public class AppealService {
         eventPublisher.publishEvent(new AppealAccepted(
                 appeal.getId(), userId, daily.getChallengeId(), daily.getId(),
                 daily.getTargetDate(), now));
+
+        // 결과 고지. 응답으로도 알려 주지만 그것만으로는 부족하다 — 신청 화면을 떠난 뒤에
+        // 정정 사실을 확인할 자리가 알림함뿐이다. 이의 하나에 결과는 하나라 appeal_id 가 곧 멱등 키다.
+        notificationPublisher.publish(NotificationEvent.of(userId,
+                NotificationType.APPEAL_RESULT,
+                "이의가 받아들여졌어요",
+                "인증이 완료로 정정됐어요. 진행률과 연속 기록도 함께 되돌렸어요.",
+                Map.of(NotificationParams.APPEAL_ID, appeal.getId().toString())));
 
         return new AppealResponse(
                 appeal.getId().toString(),

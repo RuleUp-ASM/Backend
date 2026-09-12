@@ -17,6 +17,7 @@ import com.ruleup.ruleup_backend.challenge.repository.UserChallengeCounterReposi
 import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
+import com.ruleup.ruleup_backend.notification.NotificationMuteCleaner;
 import com.ruleup.ruleup_backend.notification.NotificationPublisher;
 import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
@@ -39,6 +40,7 @@ public class RoomAdminService {
     private final ChallengeInvitationRepository invitationRepository;
     private final UserChallengeCounterRepository counterRepository;
     private final NotificationPublisher notificationPublisher;
+    private final NotificationMuteCleaner muteCleaner;
     private final ApplicationEventPublisher eventPublisher;
     private final AppLinks appLinks;
 
@@ -80,6 +82,8 @@ public class RoomAdminService {
         challenge.bumpVersion();
         challengeRepository.decrementParticipantCount(challengeId);
         counterRepository.decrement(targetUserId);   // 동시 참여 3개 카운터도 함께 정리
+        // 나간 방의 음소거는 설정 목록에 남을 이유가 없고, 재입장 시 되살아나면 안 된다.
+        muteCleaner.clearMute(targetUserId, challengeId);
         eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "KICK"));
         // 같은 방에서 재입장 후 다시 강퇴될 수 있으므로 강퇴 시각까지 키에 넣는다.
         notificationPublisher.publish(NotificationEvent.forChallenge(targetUserId,
@@ -120,11 +124,15 @@ public class RoomAdminService {
         challenge.bumpVersion();
         challengeRepository.decrementParticipantCount(challengeId);
         counterRepository.decrement(targetUserId);
+        muteCleaner.clearMute(targetUserId, challengeId);
         eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "KICK"));
+        // 부정행위는 일반 강퇴와 다른 타입이다 — 진입점이 방이 아니라 제재 이력이고, 유저는
+        // 「왜 나갔는지」가 아니라 「무엇으로 판정됐는지」를 봐야 한다. challengeId 를 싣지 않는
+        // 이유도 같다: 영구 차단이라 그 방은 「내 챌린지」에 없고 카운터가 뜰 자리가 없다.
         // 영구 차단이라 같은 방에서 두 번 강퇴될 일이 없다 — 방 id 만으로 멱등 키가 된다.
-        notificationPublisher.publish(NotificationEvent.forChallenge(targetUserId,
-                NotificationType.CHALLENGE_KICKED, "챌린지에서 내보내졌어요",
-                "이 챌린지에는 다시 참여할 수 없어요.", challengeId,
+        notificationPublisher.publish(NotificationEvent.of(targetUserId,
+                NotificationType.CHEAT_DETECTED, "챌린지에서 내보내졌어요",
+                "이 챌린지에는 다시 참여할 수 없어요. 자세한 내용은 제재 이력에서 확인해주세요.",
                 Map.of(NotificationParams.EVENT_KEY, challengeId + ":cheat")));
     }
 

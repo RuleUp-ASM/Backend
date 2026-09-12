@@ -588,6 +588,53 @@ class AdminBackofficeIT extends ChallengeApiSupport {
         }
 
         @Test
+        @DisplayName("제목·본문이 컬럼을 넘으면 거절한다 — 저장까지 끌고 가면 500 이 된다")
+        void notice_rejects_oversized_text() throws Exception {
+            Member op = operator("opslen");
+
+            expectError(postAuth("/api/v1/admin/notices", op.token(), Map.of(
+                            "title", "가".repeat(101),
+                            "body", "점검이 있어요.")),
+                    400, "ANNOUNCEMENT_TITLE_LENGTH");
+
+            expectError(postAuth("/api/v1/admin/notices", op.token(), Map.of(
+                            "title", "점검 안내",
+                            "body", "나".repeat(501))),
+                    400, "ANNOUNCEMENT_BODY_LENGTH");
+        }
+
+        /**
+         * 공지는 되돌릴 수 없는 전체 팬아웃이다. 외부 URL 을 받아 주면 약 2만 명의 알림함에
+         * 그대로 실려 나가고, 적재된 뒤에는 회수 경로가 없다.
+         */
+        @Test
+        @DisplayName("딥링크가 ruleup:// 가 아니면 거절한다 — 외부 URL 이 전체 알림함으로 나간다")
+        void notice_rejects_external_deeplink() throws Exception {
+            Member op = operator("opslink");
+
+            expectError(postAuth("/api/v1/admin/notices", op.token(), Map.of(
+                            "title", "점검 안내",
+                            "body", "점검이 있어요.",
+                            "deepLink", "https://example.com/promo")),
+                    400, "ANNOUNCEMENT_DEEPLINK_INVALID");
+        }
+
+        @Test
+        @DisplayName("형식 검증이 2단계 확인보다 앞선다 — 틀린 요청에 「한 번 더 확인」을 묻지 않는다")
+        void notice_validates_before_confirmation() throws Exception {
+            Member op = operator("opsorder");
+
+            MvcResult res = postAuth("/api/v1/admin/notices", op.token(), Map.of(
+                    "title", "점검 안내",
+                    "body", "점검이 있어요.",
+                    "deepLink", "https://example.com/promo"));
+
+            assertThat(res.getResponse().getStatus())
+                    .as("428 이면 검증이 토큰 발급 뒤에 있다는 뜻이다 — 형식이 틀린 요청에 확인을 요구하게 된다")
+                    .isEqualTo(400);
+        }
+
+        @Test
         @DisplayName("유저 통합 뷰는 자동·직권 제재를 별개 트랙으로 내린다")
         void user_view_separates_tracks() throws Exception {
             Member op = operator("userview");

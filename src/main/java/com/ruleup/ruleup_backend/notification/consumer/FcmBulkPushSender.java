@@ -17,10 +17,13 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * FCM 묶음 전송 — {@code sendEach(List&lt;Message&gt;)}.
@@ -52,43 +55,114 @@ public class FcmBulkPushSender implements BulkPushSender {
 
     private final FirebaseMessaging firebaseMessaging;
 
+    /**
+     * 묶음 전체를 <b>{@code sendEach} 한 번</b>으로 보낸다.
+     *
+     * <p>구 구조는 알림마다 {@code sendEach} 를 따로 불렀다. 단일 활성 기기 정책이라 보통 토큰이
+     * 1개이므로 사실상 <b>알림 수만큼 Firebase 왕복이 직렬로</b> 일어났고, 한 묶음이 최대 1,000건
+     * (SQS 100건 × 수신 10건)이라 08:30 소진 목표를 맞출 수 없었다. 묶음 전송의 목적이 이것이다.
+     *
+     * <p>{@code sendEachForMulticast} 는 여전히 쓰지 않는다 — 알림마다 {@code notificationId}·
+     * {@code deeplink} 가 달라 payload 를 공유할 수 없다.
+     */
     @Override
     public List<PushOutcome> send(List<PushRequest> requests) {
-        List<PushOutcome> outcomes = new ArrayList<>(requests.size());
-        for (PushRequest request : requests) outcomes.add(sendOne(request));
-        return outcomes;
+        // (요청, 토큰) 쌍을 한 줄로 편다. owner·tokenOf 가 응답 i 번째를 어느 알림·어느 토큰이
+        // 냈는지 되짚는 색인이다 — BatchResponse 는 보낸 순서대로만 돌아온다.
+        List<Message> messages = new ArrayList<>();
+        List<PushRequest> owner = new ArrayList<>();
+        List<String> tokenOf = new ArrayList<>();
+        for (PushRequest request : requests) {
+            for (String token : request.tokens()) {
+                messages.add(build(token, request.message()));
+                owner.add(request);
+                tokenOf.add(token);
+            }
+        }
+        if (messages.isEmpty()) return requests.stream().map(FcmBulkPushSender::noToken).toList();
+
+        try {
+            return fold(requests, owner, tokenOf, toTokenResults(firebaseMessaging.sendEach(messages)));
+        } catch (Exception e) {
+            // 호출 자체가 실패했다 — 네트워크·타임아웃이라 묶음 전체가 재시도 대상이다.
+            log.warn("FCM 묶음 전송 실패 count={}: {}", messages.size(), e.toString());
+            return requests.stream().map(r -> PushOutcome.failed(r.notificationId(),
+                    e.getClass().getSimpleName(), true, List.of())).toList();
+        }
     }
 
     /**
-     * 한 알림의 모든 기기로. 단일 활성 기기 정책이라 보통 토큰 1개지만, 전환 중에는 여럿일 수 있다.
+     * 토큰 1건의 결과 — <b>Firebase 타입을 경계에서 끊는다</b>.
      *
-     * <p>토큰 하나라도 성공하면 성공으로 본다 — 사용자에게 도달했기 때문이다.
+     * <p>{@code SendResponse} 는 final 이고 생성자가 패키지 전용이라 테스트가 만들 수 없다.
+     * 접기 규칙(성공 우선·죽은 토큰 귀속·재시도 판정)이야말로 틀리면 조용히 아픈 부분이므로,
+     * 그 규칙만 순수 함수로 떼어 목 없이 검증한다({@link DispatchDecision} 과 같은 이유다).
      */
-    private PushOutcome sendOne(PushRequest request) {
-        List<Message> messages = request.tokens().stream()
-                .map(token -> build(token, request.message())).toList();
-        try {
-            BatchResponse response = firebaseMessaging.sendEach(messages);
-            if (response.getSuccessCount() > 0) return PushOutcome.success(request.notificationId());
+    record TokenResult(boolean successful, MessagingErrorCode errorCode) {
 
-            List<String> dead = new ArrayList<>();
-            boolean retryable = false;
-            String errorCode = null;
-            for (int i = 0; i < response.getResponses().size(); i++) {
-                SendResponse r = response.getResponses().get(i);
-                if (r.isSuccessful() || r.getException() == null) continue;
-                MessagingErrorCode code = r.getException().getMessagingErrorCode();
-                errorCode = String.valueOf(code);
-                if (DEAD_TOKEN.contains(code)) dead.add(request.tokens().get(i));
-                if (RETRYABLE.contains(code)) retryable = true;
-            }
-            return PushOutcome.failed(request.notificationId(), errorCode, retryable, dead);
-        } catch (Exception e) {
-            // 호출 자체가 실패했다 — 네트워크·타임아웃이라 재시도 가치가 있다.
-            log.warn("FCM 묶음 전송 실패 notificationId={}: {}", request.notificationId(), e.toString());
-            return PushOutcome.failed(request.notificationId(),
-                    e.getClass().getSimpleName(), true, List.of());
+        static TokenResult ok() {
+            return new TokenResult(true, null);
         }
+
+        static TokenResult error(MessagingErrorCode code) {
+            return new TokenResult(false, code);
+        }
+    }
+
+    private static List<TokenResult> toTokenResults(BatchResponse response) {
+        return response.getResponses().stream()
+                .map(row -> row.isSuccessful() ? TokenResult.ok()
+                        : TokenResult.error(row.getException() == null
+                                ? null : row.getException().getMessagingErrorCode()))
+                .toList();
+    }
+
+    /**
+     * 토큰 단위 결과를 알림 단위로 접는다. <b>토큰 하나라도 성공하면 그 알림은 성공</b>이다 —
+     * 사용자에게 도달했기 때문이다.
+     *
+     * @param owner   {@code results[i]} 를 낸 요청. 보낸 순서와 응답 순서가 같다는 계약에 기댄다
+     * @param tokenOf {@code results[i]} 가 쓴 토큰. 죽은 토큰을 낸 알림에 귀속시키는 데 쓴다
+     */
+    static List<PushOutcome> fold(List<PushRequest> requests, List<PushRequest> owner,
+                                  List<String> tokenOf, List<TokenResult> results) {
+        Set<UUID> succeeded = new HashSet<>();
+        Map<UUID, String> errorCode = new HashMap<>();
+        Set<UUID> retryable = new HashSet<>();
+        Map<UUID, List<String>> dead = new HashMap<>();
+
+        for (int i = 0; i < results.size() && i < owner.size(); i++) {
+            UUID id = owner.get(i).notificationId();
+            TokenResult result = results.get(i);
+            if (result.successful()) {
+                succeeded.add(id);
+                continue;
+            }
+            MessagingErrorCode code = result.errorCode();
+            if (code == null) continue;
+            errorCode.put(id, code.name());
+            // 죽은 토큰은 그 토큰을 실제로 낸 알림에 귀속시킨다 — 엉뚱한 기기를 내리면 안 된다.
+            if (DEAD_TOKEN.contains(code)) {
+                dead.computeIfAbsent(id, k -> new ArrayList<>()).add(tokenOf.get(i));
+            }
+            if (RETRYABLE.contains(code)) retryable.add(id);
+        }
+
+        return requests.stream().map(request -> {
+            UUID id = request.notificationId();
+            if (succeeded.contains(id)) return PushOutcome.success(id);
+            if (request.tokens().isEmpty()) return noToken(request);
+            return PushOutcome.failed(id, errorCode.get(id), retryable.contains(id),
+                    dead.getOrDefault(id, List.of()));
+        }).toList();
+    }
+
+    /**
+     * 보낼 토큰이 없다 — 판정 ⑧단계가 걸렀어야 하지만 조회와 전송 사이에 기기가 빠지면 생긴다.
+     * <b>재시도 대상이 아니다</b>: 다시 받아도 토큰은 여전히 없고 메시지만 큐에 남는다.
+     */
+    private static PushOutcome noToken(PushRequest request) {
+        return PushOutcome.failed(request.notificationId(), "NO_TOKEN", false, List.of());
     }
 
     private Message build(String token, NotificationMessage n) {

@@ -1,6 +1,8 @@
 package com.ruleup.ruleup_backend.auth;
 
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
+import com.ruleup.ruleup_backend.moderation.ContentModerationClient;
+import com.ruleup.ruleup_backend.moderation.ModerationResult;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import com.ruleup.ruleup_backend.user.domain.Gender;
 import com.ruleup.ruleup_backend.user.domain.OAuthProvider;
@@ -17,6 +19,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -28,6 +31,9 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -56,11 +62,27 @@ class OnboardingApiContractIT extends AuthApiSupport {
     @Autowired WebApplicationContext wac;
     @Autowired UserRepository userRepository;
 
+    /**
+     * 검수를 <b>보류(UNAVAILABLE)</b>로 고정한다 — 이 클래스의 관심사는 API 계약이지 심사 결과가 아니다.
+     *
+     * <p>고정하지 않으면 「등록 직후는 PENDING」 단언이 <b>비동기 검수와 경쟁</b>한다. 검수는
+     * {@code @Async @TransactionalEventListener(AFTER_COMMIT)} 로 커밋 직후 별도 스레드에서 돌고,
+     * 테스트 프로필의 fake 는 문제없는 입력을 <b>APPROVED</b> 로 판정한다. 승인이 단언보다 먼저
+     * 도착하면 {@code PENDING} 이 {@code APPROVED} 로 뒤집힌다 — CI 처럼 느린 환경에서만 터진다.
+     *
+     * <p>사진 등록은 {@code moderateImageBytes} 를 타므로 그 분기까지 함께 막아야 한다.
+     */
+    @MockitoBean ContentModerationClient moderationClient;
+
     private MockMvc mvc;
 
     @BeforeEach
     void setUp() {
         mvc = MockMvcBuilders.webAppContextSetup(wac).apply(springSecurity()).build();
+        when(moderationClient.moderateNickname(anyString())).thenReturn(ModerationResult.UNAVAILABLE);
+        when(moderationClient.moderateImage(anyString())).thenReturn(ModerationResult.UNAVAILABLE);
+        when(moderationClient.moderateImageBytes(any(), anyString()))
+                .thenReturn(ModerationResult.UNAVAILABLE);
     }
 
     @Override
