@@ -1,6 +1,9 @@
 package com.ruleup.ruleup_backend.notification;
 
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
+import com.ruleup.ruleup_backend.agreement.UserAgreementStateRepository;
+import com.ruleup.ruleup_backend.agreement.domain.AgreementType;
+import com.ruleup.ruleup_backend.agreement.domain.UserAgreementState;
 import com.ruleup.ruleup_backend.notification.consumer.NotificationDispatcher;
 import com.ruleup.ruleup_backend.notification.consumer.SuppressedReason;
 import com.ruleup.ruleup_backend.notification.domain.Notification;
@@ -58,6 +61,7 @@ class NotificationConsumerIT {
     @Autowired TransactionTemplate txTemplate;
     @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
     @Autowired NotificationTestQueue.RecordingPushSender pushSender;
+    @Autowired UserAgreementStateRepository agreementStateRepository;
 
     /**
      * 음소거 행은 챌린지에 FK 가 걸려 있어 실재하는 방이 필요하다 — 그래야 「탈퇴한 방의
@@ -331,6 +335,75 @@ class NotificationConsumerIT {
         void emptyBatch() {
             assertThat(dispatcher.dispatch(List.of(), kstAt(12))).isEmpty();
         }
+    }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("마케팅 수신 동의 — 약관 상태가 원본이다")
+    class MarketingConsent {
+
+        @Test
+        @DisplayName("동의 행이 없으면 막힌다 — 가입 때 거부하면 설정 행도 없어 토글은 ON 으로 읽힌다")
+        void noAgreementRowBlocks() {
+            // 약관 행을 만들지 않는다. 설정 행도 없으므로 그룹 토글은 ON 으로 해석된다 —
+            // 토글만 보던 구 판정이 바로 이 사람에게 광고를 보냈다.
+            UUID userId = userWithDevice();
+            Notification n = store(userId, NotificationType.MARKETING, marketingParams());
+
+            var outcomes = dispatcher.dispatch(List.of(messageOf(n)), kstAt(12));
+
+            assertThat(outcomes.getFirst().suppressedReason())
+                    .isEqualTo(SuppressedReason.MARKETING_CONSENT_OFF);
+        }
+
+        @Test
+        @DisplayName("동의했으면 나간다")
+        void consentedSends() {
+            UUID userId = userWithDevice();
+            consent(userId, true);
+            Notification n = store(userId, NotificationType.MARKETING, marketingParams());
+
+            var outcomes = dispatcher.dispatch(List.of(messageOf(n)), kstAt(12));
+
+            assertThat(outcomes.getFirst().sent()).isTrue();
+        }
+
+        @Test
+        @DisplayName("동의 후 철회했으면 막힌다 — agreed=false 는 미동의와 같다")
+        void revokedBlocks() {
+            UUID userId = userWithDevice();
+            consent(userId, false);
+            Notification n = store(userId, NotificationType.MARKETING, marketingParams());
+
+            var outcomes = dispatcher.dispatch(List.of(messageOf(n)), kstAt(12));
+
+            assertThat(outcomes.getFirst().suppressedReason())
+                    .isEqualTo(SuppressedReason.MARKETING_CONSENT_OFF);
+        }
+
+        @Test
+        @DisplayName("미동의자의 제재 고지는 그대로 나간다 — 동의 게이트는 마케팅에만 적용된다")
+        void otherGroupsUnaffected() {
+            UUID userId = userWithDevice();   // 마케팅 미동의
+            Notification n = store(userId, NotificationType.ACCOUNT_SANCTION,
+                    Map.of(NotificationParams.EVENT_KEY, "mc" + SEQ.incrementAndGet()));
+
+            var outcomes = dispatcher.dispatch(List.of(messageOf(n)), kstAt(12));
+
+            assertThat(outcomes.getFirst().sent()).isTrue();
+        }
+    }
+
+    private void consent(UUID userId, boolean agreed) {
+        txTemplate.executeWithoutResult(t -> agreementStateRepository.save(
+                UserAgreementState.of(userId, AgreementType.MARKETING, agreed, "1.0",
+                        Instant.now())));
+    }
+
+    /** 마케팅은 멱등키가 {@code event_key}, 억제키가 {@code campaign_id} 다. */
+    private static Map<String, String> marketingParams() {
+        String key = "mk" + SEQ.incrementAndGet() + System.nanoTime();
+        return Map.of(NotificationParams.EVENT_KEY, key, NotificationParams.CAMPAIGN_ID, key);
     }
 
     private Notification reload(Notification n) {

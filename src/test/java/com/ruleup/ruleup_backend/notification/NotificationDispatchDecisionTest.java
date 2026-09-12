@@ -55,10 +55,13 @@ class NotificationDispatchDecisionTest {
                         "permission", "CAMERA", "campaign_id", "cp1")));
     }
 
-    /** 아무것도 막지 않는 상태 — 설정 기본값, 음소거 없음, 억제 이력 없음, 기기 있음. */
+    /**
+     * 아무것도 막지 않는 상태 — 설정 기본값, 음소거 없음, 억제 이력 없음, 기기 있음,
+     * 마케팅 수신 동의함.
+     */
     private static DispatchInputs allow() {
         return new DispatchInputs(UserNotificationSetting.defaults(USER, kst(12, 0)),
-                Set.of(), Map.of(), true);
+                Set.of(), Map.of(), true, true);
     }
 
     /** 두 탭의 읽음 지점을 같은 값으로 올린 상태. */
@@ -251,6 +254,53 @@ class NotificationDispatchDecisionTest {
             assertThat(DispatchDecision.decide(
                     message(NotificationType.TIER_CHANGED, NEWER, null),
                     allow().withMuted(Set.of(ROOM)), kst(12, 0)).shouldSend()).isTrue();
+        }
+    }
+
+    @Nested
+    @DisplayName("마케팅 수신 동의 — 설정 토글과 별개다")
+    class MarketingConsent {
+
+        @Test
+        @DisplayName("동의한 적이 없으면 창 안이어도 막힌다 — 설정 행이 없으면 토글은 ON 으로 읽힌다")
+        void withoutConsentIsBlocked() {
+            // 가입 때 마케팅을 거부한 사람의 상태: 설정 행이 없어 그룹 토글은 ON 으로 해석되지만
+            // 약관 동의는 없다. 토글만 보면 이 사람에게 광고가 나간다.
+            DispatchInputs notConsented = allow().withMarketingConsent(false);
+
+            assertThat(DispatchDecision.decide(
+                    message(NotificationType.MARKETING, NEWER, null), notConsented, kst(12, 0))
+                    .suppressedReason()).isEqualTo(SuppressedReason.MARKETING_CONSENT_OFF);
+        }
+
+        @Test
+        @DisplayName("동의가 발송 창보다 먼저다 — 미동의는 시각과 무관하게 막힌다")
+        void consentBeatsWindow() {
+            assertThat(DispatchDecision.decide(
+                    message(NotificationType.MARKETING, NEWER, null),
+                    allow().withMarketingConsent(false), kst(20, 30)).suppressedReason())
+                    .isEqualTo(SuppressedReason.MARKETING_CONSENT_OFF);
+        }
+
+        @Test
+        @DisplayName("마케팅이 아닌 타입은 동의 여부를 보지 않는다 — 제재 고지가 막히면 안 된다")
+        void otherGroupsIgnoreConsent() {
+            DispatchInputs notConsented = allow().withMarketingConsent(false);
+
+            assertThat(DispatchDecision.decide(
+                    message(NotificationType.ACCOUNT_SANCTION, NEWER, null), notConsented,
+                    kst(12, 0)).shouldSend()).isTrue();
+            assertThat(DispatchDecision.decide(
+                    message(NotificationType.ROUTINE_REMINDER, NEWER, null), notConsented,
+                    kst(12, 0)).shouldSend()).isTrue();
+        }
+
+        @Test
+        @DisplayName("동의했고 창 안이면 보낸다")
+        void consentedInsideWindowSends() {
+            assertThat(DispatchDecision.decide(
+                    message(NotificationType.MARKETING, NEWER, null),
+                    allow().withMarketingConsent(true), kst(12, 0)).shouldSend()).isTrue();
         }
     }
 

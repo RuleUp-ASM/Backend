@@ -12,6 +12,13 @@ public enum SuppressedReason {
     MASTER_OFF,
     GROUP_OFF,
     MUTED,
+    /**
+     * 광고성 정보 수신에 동의한 적이 없다 — <b>설정 토글과 별개</b>다.
+     *
+     * <p>가입 때 거부하면 설정 행이 아예 만들어지지 않고, 행이 없으면 마스터·그룹을 전부 ON 으로
+     * 해석한다. 그래서 토글만 보면 미동의자에게 광고가 나간다.
+     */
+    MARKETING_CONSENT_OFF,
     /** 마케팅이 08~21시 밖으로 새어 나가려 한 경우 — 발화하면 발송 경로를 즉시 차단한다. */
     MARKETING_WINDOW,
     INTERVAL,

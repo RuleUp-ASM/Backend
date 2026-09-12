@@ -1,5 +1,8 @@
 package com.ruleup.ruleup_backend.notification.consumer;
 
+import com.ruleup.ruleup_backend.agreement.UserAgreementStateRepository;
+import com.ruleup.ruleup_backend.agreement.domain.AgreementType;
+import com.ruleup.ruleup_backend.agreement.domain.UserAgreementState;
 import com.ruleup.ruleup_backend.notification.NotificationMuteRepository;
 import com.ruleup.ruleup_backend.notification.NotificationRepository;
 import com.ruleup.ruleup_backend.notification.NotificationSettingRepository;
@@ -52,6 +55,7 @@ public class NotificationDispatcher {
     private final NotificationSettingRepository settingRepository;
     private final NotificationMuteRepository muteRepository;
     private final DeviceTokenRepository deviceTokenRepository;
+    private final UserAgreementStateRepository agreementStateRepository;
     private final BulkPushSender pushSender;
 
     /**
@@ -109,6 +113,7 @@ public class NotificationDispatcher {
                 .computeIfAbsent(m.getUserId(), k -> new HashSet<>()).add(m.getChallengeId()));
 
         Map<UUID, Map<String, Instant>> lastPushed = loadSuppressHistory(messages, userIds, now);
+        Set<UUID> marketingConsented = loadMarketingConsent(messages, userIds);
 
         Map<UUID, DispatchInputs> inputs = new HashMap<>();
         for (UUID userId : userIds) {
@@ -117,9 +122,30 @@ public class NotificationDispatcher {
                     settings.getOrDefault(userId, UserNotificationSetting.defaults(userId, now)),
                     mutes.getOrDefault(userId, Set.of()),
                     lastPushed.getOrDefault(userId, Map.of()),
-                    !tokens.getOrDefault(userId, List.of()).isEmpty()));
+                    !tokens.getOrDefault(userId, List.of()).isEmpty(),
+                    // 동의는 <b>있어야</b> 보낸다. 행이 없으면 한 번도 동의한 적 없다는 뜻이다.
+                    marketingConsented.contains(userId)));
         }
         return inputs;
+    }
+
+    /**
+     * 마케팅 수신 동의 — <b>묶음에 마케팅이 하나도 없으면 조회 자체를 하지 않는다</b>.
+     * 23종 중 1종뿐이라 이 쿼리는 보통 나가지 않는다(억제 이력과 같은 이유).
+     *
+     * <p>설정의 {@code groupMarketing} 이 아니라 <b>약관 동의 상태</b>를 본다. 설정 행은 없을 수
+     * 있고 없으면 ON 으로 해석되는데, 가입 때 마케팅을 거부한 사람이 바로 그 상태다.
+     */
+    private Set<UUID> loadMarketingConsent(List<NotificationMessage> messages, List<UUID> userIds) {
+        boolean anyMarketing = messages.stream()
+                .anyMatch(m -> m.toggleGroup() == NotificationToggleGroup.MARKETING);
+        if (!anyMarketing) return Set.of();
+
+        return agreementStateRepository
+                .findByUserIdInAndAgreementType(userIds, AgreementType.MARKETING).stream()
+                .filter(UserAgreementState::isAgreed)
+                .map(UserAgreementState::getUserId)
+                .collect(Collectors.toSet());
     }
 
     /** {@code (userId, token)} 행을 유저별로 접는다. 쿼리는 묶음당 한 번뿐이다. */

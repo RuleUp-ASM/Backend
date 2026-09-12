@@ -60,8 +60,10 @@ class PushLogFormatTest {
                 String.class, Instant.class);
         log.setAccessible(true);
 
+        // 의존성은 전부 null 이어도 된다 — 여기서 부르는 것은 로그 한 줄을 찍는 logResult 뿐이고
+        // 그 메서드는 어떤 리포지터리도 건드리지 않는다. 인자 수가 늘면 여기만 맞춰 주면 된다.
         NotificationDispatcher dispatcher = new NotificationDispatcher(
-                null, null, null, null, null);
+                null, null, null, null, null, null);
         log.invoke(dispatcher, message(), result, null, null, at);
 
         return OM.readTree(captured.list.getLast().getFormattedMessage());
