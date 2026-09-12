@@ -13,6 +13,7 @@ import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
+import com.ruleup.ruleup_backend.notification.NotificationMuteCleaner;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.room.RoomAuthority;
 import com.ruleup.ruleup_backend.report.BlockService;
@@ -72,6 +73,7 @@ public class ChallengeMemberService {
     private final UserRepository userRepository;
     private final UserScoreSummaryRepository scoreSummaryRepository;
     private final VerificationDailyRepository verificationDailyRepository;
+    private final NotificationMuteCleaner muteCleaner;
     private final ApplicationEventPublisher eventPublisher;
     private final RoomAuthority roomAuthority;
     private final BlockService blockService;
@@ -244,6 +246,8 @@ public class ChallengeMemberService {
         c.bumpVersion();
         challengeRepository.decrementParticipantCount(challengeId);
         counterRepository.decrement(userId);
+        // 나간 방의 음소거는 설정 목록에 남을 이유가 없고, 재입장 시 되살아나면 안 된다.
+        muteCleaner.clearMute(userId, challengeId);
         eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "LEAVE"));
 
         // 중도 탈퇴 감점은 정액이 아니라 진행 기간에 반비례한다 — −⌈15 × (1 − 진행주간/52)⌉.
@@ -307,6 +311,11 @@ public class ChallengeMemberService {
             eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "WITHDRAW"));
             left++;
         }
+
+        // 루프 뒤에 한 번만 지운다. 루프 안 decrementParticipantCount 가 clearAutomatically 라
+        // 매 회 영속성 컨텍스트가 비워지므로, 그 사이에 끼워 넣을 이유가 없다.
+        // 계정이 사라지므로 참여 중이던 방·종료된 방을 가리지 않고 전부 정리한다.
+        muteCleaner.clearMutesOfUser(userId);
 
         counterRepository.setCount(userId, joinCounterService.countActiveSlots(userId));
         if (left > 0) log.info("회원 탈퇴 정리 userId={} 나간 방 {}건", userId, left);

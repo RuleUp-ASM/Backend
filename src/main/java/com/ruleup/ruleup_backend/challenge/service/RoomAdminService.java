@@ -17,6 +17,7 @@ import com.ruleup.ruleup_backend.challenge.repository.UserChallengeCounterReposi
 import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
+import com.ruleup.ruleup_backend.notification.NotificationMuteCleaner;
 import com.ruleup.ruleup_backend.notification.NotificationPublisher;
 import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
@@ -39,6 +40,7 @@ public class RoomAdminService {
     private final ChallengeInvitationRepository invitationRepository;
     private final UserChallengeCounterRepository counterRepository;
     private final NotificationPublisher notificationPublisher;
+    private final NotificationMuteCleaner muteCleaner;
     private final ApplicationEventPublisher eventPublisher;
     private final AppLinks appLinks;
 
@@ -80,6 +82,8 @@ public class RoomAdminService {
         challenge.bumpVersion();
         challengeRepository.decrementParticipantCount(challengeId);
         counterRepository.decrement(targetUserId);   // 동시 참여 3개 카운터도 함께 정리
+        // 나간 방의 음소거는 설정 목록에 남을 이유가 없고, 재입장 시 되살아나면 안 된다.
+        muteCleaner.clearMute(targetUserId, challengeId);
         eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "KICK"));
         // 같은 방에서 재입장 후 다시 강퇴될 수 있으므로 강퇴 시각까지 키에 넣는다.
         notificationPublisher.publish(NotificationEvent.forChallenge(targetUserId,
@@ -120,6 +124,7 @@ public class RoomAdminService {
         challenge.bumpVersion();
         challengeRepository.decrementParticipantCount(challengeId);
         counterRepository.decrement(targetUserId);
+        muteCleaner.clearMute(targetUserId, challengeId);
         eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "KICK"));
         // 영구 차단이라 같은 방에서 두 번 강퇴될 일이 없다 — 방 id 만으로 멱등 키가 된다.
         notificationPublisher.publish(NotificationEvent.forChallenge(targetUserId,

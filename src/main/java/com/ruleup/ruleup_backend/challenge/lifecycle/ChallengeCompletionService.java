@@ -7,6 +7,7 @@ import com.ruleup.ruleup_backend.challenge.domain.MemberStatus;
 import com.ruleup.ruleup_backend.challenge.explore.ChallengeGridChanged;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
+import com.ruleup.ruleup_backend.notification.NotificationMuteCleaner;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,6 +44,7 @@ public class ChallengeCompletionService {
     private final ChallengeRepository challengeRepository;
     private final ChallengeMemberRepository memberRepository;
     private final UserJoinCounterService joinCounterService;
+    private final NotificationMuteCleaner muteCleaner;
     private final TransactionTemplate transactionTemplate;
     private final ApplicationEventPublisher eventPublisher;
 
@@ -70,6 +72,8 @@ public class ChallengeCompletionService {
         Set<UUID> members = new LinkedHashSet<>();   // 여러 방이 동시에 끝난 사용자는 한 번만 재계산하면 된다
         for (Challenge c : due) {
             c.complete();
+            // 끝난 방의 음소거는 의미를 잃는다. 남겨 두면 설정 목록에 영영 쌓인다.
+            muteCleaner.clearMutesOfChallenge(c.getId());
             for (ChallengeMember m : memberRepository
                     .findByChallengeIdAndStatusOrderByJoinedAtAsc(c.getId(), MemberStatus.ACTIVE)) {
                 members.add(m.getUserId());
