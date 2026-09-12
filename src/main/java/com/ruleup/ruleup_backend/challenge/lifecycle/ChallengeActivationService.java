@@ -1,9 +1,16 @@
 package com.ruleup.ruleup_backend.challenge.lifecycle;
 
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
+import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
+import com.ruleup.ruleup_backend.challenge.domain.MemberStatus;
 import com.ruleup.ruleup_backend.challenge.explore.ChallengeGridChanged;
+import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
+import com.ruleup.ruleup_backend.notification.NotificationEvent;
+import com.ruleup.ruleup_backend.notification.NotificationPublisher;
+import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
+import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 챌린지 활성화 배치 (생성 및 라이프사이클 §2 — 시작일 도달 시 UPCOMING→ACTIVE).
@@ -35,6 +43,8 @@ public class ChallengeActivationService {
     private static final int CLAIM_LIMIT = 200;
 
     private final ChallengeRepository challengeRepository;
+    private final ChallengeMemberRepository memberRepository;
+    private final NotificationPublisher notificationPublisher;
     private final ApplicationEventPublisher eventPublisher;
 
     /** 1분마다: 시작일이 도달한 시작 전(UPCOMING)·모더레이션 통과 챌린지를 ACTIVE 로 전환한다. */
@@ -45,6 +55,8 @@ public class ChallengeActivationService {
         List<Challenge> due = challengeRepository.findUpcomingDueForActivationForUpdate(today, CLAIM_LIMIT);
         for (Challenge c : due) {
             c.activate();
+            notifyLifecycle(c, "STARTED", "챌린지가 시작됐어요",
+                    "오늘부터 인증이 시작돼요. 첫 인증을 잊지 마세요.");
             eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(c.getId(), "CHALLENGE_ACTIVATED"));
         }
         if (!due.isEmpty()) {
@@ -53,5 +65,22 @@ public class ChallengeActivationService {
             eventPublisher.publishEvent(ChallengeGridChanged.of("CHALLENGE_ACTIVATED"));
             log.info("시작일 도달로 ACTIVE 전환한 챌린지 {}건", due.size());
         }
+    }
+
+    /**
+     * 그 방의 현재 멤버 전원에게 생명주기 고지. <b>묶음 발행</b>이라 SQS 호출이 100건에 한 번이고,
+     * {@code dedup_key = CHALLENGE_LIFECYCLE:{user}:{challenge}:{phase}} 가 재실행 중복을 막는다.
+     */
+    private void notifyLifecycle(Challenge c, String phase, String title, String body) {
+        List<ChallengeMember> members = memberRepository
+                .findByChallengeIdAndStatusOrderByJoinedAtAsc(c.getId(), MemberStatus.ACTIVE);
+        if (members.isEmpty()) return;
+
+        notificationPublisher.publishAll(members.stream()
+                .map(m -> NotificationEvent.forChallenge(m.getUserId(),
+                        NotificationType.CHALLENGE_LIFECYCLE, title, body, c.getId(),
+                        Map.of(NotificationParams.CHALLENGE_ID, c.getId().toString(),
+                                NotificationParams.PHASE, phase)))
+                .toList());
     }
 }
