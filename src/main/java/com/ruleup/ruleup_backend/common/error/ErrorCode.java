@@ -42,6 +42,13 @@ public enum ErrorCode {
     // ===== 기기 정보 (deviceInfo) (4.1 / 4.3) =====
     /** reason 으로 MISSING_DEVICE_ID / MISSING_DEVICE_INFO / MALFORMED_DEVICE_INFO 를 구분해 내려준다. */
     INVALID_DEVICE_INFO(HttpStatus.BAD_REQUEST, "기기 정보를 확인하지 못했어요. 앱을 다시 실행한 뒤 시도해주세요."),
+    /**
+     * FCM 등록 토큰이 형식에 맞지 않는다 — 알림 공통 스펙이 정의한 코드다.
+     *
+     * <p>공백만 막으면 개행이 섞였거나 컬럼(512)을 넘는 값이 그대로 저장되고, 그 토큰은 발송
+     * 단계에서야 조용히 실패한다. 등록 시점에 거절하는 편이 원인을 훨씬 빨리 드러낸다.
+     */
+    INVALID_DEVICE_TOKEN(HttpStatus.BAD_REQUEST, "기기 알림 설정을 확인하지 못했어요. 앱을 다시 실행한 뒤 시도해주세요."),
 
     // ===== 닉네임 / 카테고리 / 약관 / 온보딩 (4.3 / 4.6 / 4.9) =====
     NICKNAME_FORMAT_INVALID(HttpStatus.BAD_REQUEST, "닉네임 형식이 올바르지 않습니다."),
