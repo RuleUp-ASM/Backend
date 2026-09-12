@@ -295,6 +295,19 @@ public enum ErrorCode {
     ANNOUNCEMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "공지를 찾을 수 없어요."),
     /** 이미 팬아웃된 공지는 회수되지 않는다 — 취소는 대기 중인 공지에만 의미가 있다. */
     ANNOUNCEMENT_ALREADY_SENT(HttpStatus.CONFLICT, "이미 발송된 공지는 취소할 수 없어요."),
+    /**
+     * 공지 원본은 컬럼(제목 100 · 본문 500 · 딥링크 200)을 넘길 수 없다.
+     *
+     * <p>전용 코드를 둔 이유는 <b>순서</b> 때문이다. 길이 초과를 저장 단계까지 끌고 가면 운영자는
+     * 2단계 확인을 마친 뒤에야 500 을 보고, 무엇이 왜 틀렸는지 알 수 없다.
+     */
+    ANNOUNCEMENT_TITLE_LENGTH(HttpStatus.BAD_REQUEST, "공지 제목은 100자를 넘을 수 없어요."),
+    ANNOUNCEMENT_BODY_LENGTH(HttpStatus.BAD_REQUEST, "공지 내용은 500자를 넘을 수 없어요."),
+    /**
+     * 딥링크는 전부 {@code ruleup://} 커스텀 스킴이다(공통 8절). 검증하지 않으면 외부 URL 이
+     * 약 2만 명의 알림함에 그대로 팬아웃된다 — 되돌릴 수 없는 발송이다.
+     */
+    ANNOUNCEMENT_DEEPLINK_INVALID(HttpStatus.BAD_REQUEST, "공지 링크는 앱 안의 화면만 가리킬 수 있어요."),
 
     // ===== CS 문의 (앱 운영 정책 § 5) =====
     INQUIRY_NOT_FOUND(HttpStatus.NOT_FOUND, "문의 내역을 찾을 수 없어요."),

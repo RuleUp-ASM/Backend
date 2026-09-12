@@ -393,6 +393,7 @@ public class AdminOpsService {
     public AdminDtos.NoticeResponse publishNotice(UUID operatorId, AdminDtos.NoticeRequest request) {
         if (request == null || isBlank(request.title()) || isBlank(request.body()))
             throw new BusinessException(ErrorCode.INVALID_REQUEST);
+        validateNoticeShape(request);
 
         Announcement.Kind kind = isBlank(request.kind())
                 ? Announcement.Kind.MAINTENANCE : parseKind(request.kind());
@@ -432,6 +433,36 @@ public class AdminOpsService {
                 kind, request.title(), request.body(), request.deepLink(), operatorId, scheduledAt, now));
 
         return noticeResponse(announcement, recipients);
+    }
+
+    /** 컬럼 상한 — {@code announcements(title 100 · body 500 · deep_link 200)}. */
+    private static final int NOTICE_TITLE_MAX = 100;
+    private static final int NOTICE_BODY_MAX = 500;
+    private static final int NOTICE_DEEPLINK_MAX = 200;
+
+    /** 딥링크는 전부 커스텀 스킴이다 — 앱 내부 소비 전용이라 https 앱링크를 쓰지 않는다(공통 8절). */
+    private static final String NOTICE_DEEPLINK_SCHEME = "ruleup://";
+
+    /**
+     * 공지 원본이 컬럼에 들어가는지, 링크가 앱 안을 가리키는지 <b>2단계 확인보다 먼저</b> 본다.
+     *
+     * <p><b>순서가 핵심이다.</b> 뒤에 두면 운영자가 확인 모달까지 통과한 뒤 저장에서 터져 500 을
+     * 보고, 무엇이 왜 틀렸는지 알 수 없다. 되돌릴 수 없는 전체 팬아웃 요청에 형식이 틀린 채로
+     * 「한 번 더 확인하시겠습니까」를 묻는 것 자체가 잘못이다.
+     *
+     * <p>딥링크를 검증하지 않으면 외부 URL 이 약 2만 명의 알림함에 그대로 실려 나간다.
+     * 적재된 뒤에는 회수 경로가 없다 — 취소는 팬아웃 전에만 의미가 있다.
+     */
+    private void validateNoticeShape(AdminDtos.NoticeRequest request) {
+        if (request.title().length() > NOTICE_TITLE_MAX)
+            throw new BusinessException(ErrorCode.ANNOUNCEMENT_TITLE_LENGTH);
+        if (request.body().length() > NOTICE_BODY_MAX)
+            throw new BusinessException(ErrorCode.ANNOUNCEMENT_BODY_LENGTH);
+
+        String deepLink = request.deepLink();
+        if (isBlank(deepLink)) return;   // 링크 없는 공지는 알림함에 머문다 — 정상이다
+        if (!deepLink.startsWith(NOTICE_DEEPLINK_SCHEME) || deepLink.length() > NOTICE_DEEPLINK_MAX)
+            throw new BusinessException(ErrorCode.ANNOUNCEMENT_DEEPLINK_INVALID);
     }
 
     @Transactional(readOnly = true)
