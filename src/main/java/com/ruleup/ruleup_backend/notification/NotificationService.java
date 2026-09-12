@@ -96,13 +96,16 @@ public class NotificationService {
      * 적재된 알림이 화면에 뜬 적 없이 읽음 처리돼 레드닷이 영영 뜨지 않는다 — 00시 판정 배치나
      * 08:00 큐 소진 구간에서 실제로 생기는 경로다.
      *
-     * <p><b>탭은 알림 자신에게서 가져오되, 보내온 탭이 어긋나면 400 이다.</b> 두 가지를 동시에
-     * 지켜야 한다 — 클라이언트 주장대로 커서를 움직이면 안 되고(엉뚱한 탭의 레드닷이 꺼진다),
-     * 어긋난 요청을 204 로 받아주어도 안 된다(클라이언트가 자기 버그를 모른 채 남는다).
+     * <p><b>{@code tab} 은 필수다</b>(명세 Request Body — 필수 YES). 다만 커서를 실제로 움직일
+     * 탭은 <b>알림 자신에게서</b> 가져오고, 보내온 값이 그와 어긋나면 400 이다. 셋을 동시에
+     * 지켜야 한다 — 생략을 받아주면 명세와 어긋나고, 클라이언트 주장대로 커서를 움직이면
+     * 엉뚱한 탭의 레드닷이 꺼지며, 어긋난 요청을 204 로 받아주면 클라이언트가 자기 버그를
+     * 모른 채 남는다.
      */
     @Transactional
     public void markRead(UUID userId, NotificationSettingDtos.ReadRequest request) {
-        if (request == null || request.lastNotificationId() == null)
+        if (request == null || request.lastNotificationId() == null
+                || request.tab() == null || request.tab().isBlank())
             throw new BusinessException(ErrorCode.INVALID_REQUEST);
 
         UUID notificationId = parseUuid(request.lastNotificationId());
@@ -110,10 +113,9 @@ public class NotificationService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOTIFICATION_NOT_FOUND));
 
         // 커서를 움직일 탭은 알림 자신에게서 가져온다 — 클라이언트가 보낸 값을 그대로 믿으면
-        // 커서가 엉뚱한 탭으로 움직인다. 다만 보내온 값이 어긋날 때 조용히 넘기지는 않는다.
-        // 무시하면 잘못 부른 클라이언트가 204 를 받고 「공지를 읽었다」고 오해한 채로 남는다.
+        // 커서가 엉뚱한 탭으로 움직인다. 보내온 값은 대조용이며, 어긋나면 거절한다.
         NotificationTab tab = target.tabEnum();
-        if (request.tab() != null && !request.tab().isBlank() && tabOf(request.tab()) != tab)
+        if (tabOf(request.tab()) != tab)
             throw new BusinessException(ErrorCode.INVALID_REQUEST);
 
         settings(userId, Instant.now()).advanceReadCursor(tab, notificationId, Instant.now());

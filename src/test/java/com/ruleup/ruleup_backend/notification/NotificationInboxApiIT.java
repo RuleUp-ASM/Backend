@@ -304,13 +304,26 @@ class NotificationInboxApiIT extends AuthApiSupport {
         }
 
         @Test
-        @DisplayName("탭을 생략해도 된다 — 알림 자신의 탭으로 움직인다")
-        void tabDefaults() throws Exception {
+        @DisplayName("탭을 생략하면 400 — 명세가 필수로 정한 값이다")
+        void tabIsRequired() throws Exception {
             Account a = join("탭생략");
             store(a.userId(), NotificationType.APPEAL_RESULT, "r7");
             String id = read(list(a.accessToken(), ""), "$.data.items[0].id");
 
-            markRead(a.accessToken(), null, id);
+            expectError(markRead(a.accessToken(), null, id), 400, "INVALID_REQUEST");
+
+            assertThat((String) read(list(a.accessToken(), ""), "$.data.lastReadNotificationId"))
+                    .as("거절했으면 커서도 움직이지 않았다").isNull();
+        }
+
+        @Test
+        @DisplayName("탭이 맞으면 그 알림의 탭으로 커서가 움직인다")
+        void advancesWithMatchingTab() throws Exception {
+            Account a = join("탭일치");
+            store(a.userId(), NotificationType.APPEAL_RESULT, "r7b");
+            String id = read(list(a.accessToken(), ""), "$.data.items[0].id");
+
+            markRead(a.accessToken(), "NOTIFICATION", id);
 
             assertThat((String) read(list(a.accessToken(), ""), "$.data.lastReadNotificationId"))
                     .isEqualTo(id);

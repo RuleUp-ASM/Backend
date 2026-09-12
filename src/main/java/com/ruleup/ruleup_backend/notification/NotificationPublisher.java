@@ -42,6 +42,20 @@ public class NotificationPublisher {
     /** SQS 메시지 하나에 담는 알림 수. 100건 ≈ 40KB 로 256KB 한도에 여유가 있다. */
     private static final int BATCH_SIZE = 100;
 
+    /**
+     * 컬럼 상한 — {@code notifications.title(100) · body(500) · deeplink(255)}.
+     *
+     * <p>넘긴 값을 그대로 저장하면 flush 에서 터지고, 적재가 도메인 트랜잭션 안이라
+     * <b>알림 문구 하나가 강퇴 판정을 되돌린다</b>. 백엔드 4-1 이 요구하는 「예외 대신 폴백」이
+     * 이것이다 — 잘린 고지는 남지만 판정이 사라지지는 않는다.
+     */
+    private static final int TITLE_MAX = 100;
+    private static final int BODY_MAX = 500;
+    private static final int DEEPLINK_MAX = 255;
+
+    private static final String TITLE_FALLBACK = "새 알림이 도착했어요";
+    private static final String BODY_FALLBACK = "자세한 내용은 앱에서 확인해주세요.";
+
     private final NotificationRepository notificationRepository;
     private final NotificationQueue queue;
 
@@ -99,9 +113,41 @@ public class NotificationPublisher {
             log.debug("같은 멱등키로 이미 적재돼 있다. key={}", dedupKey);
             return null;
         }
+        // 문구는 컬럼에 맞춰 넣는다. 발행부가 빈 값이나 긴 값을 넘겨도 여기서 흡수해야 한다 —
+        // 그대로 저장하면 flush 에서 터져 발행부의 도메인 판정까지 함께 롤백된다.
         return notificationRepository.save(Notification.of(
-                event.userId(), event.type(), event.title(), event.body(), event.challengeId(),
-                event.resolvedDeeplink(), dedupKey, event.suppressKey(), now));
+                event.userId(), event.type(),
+                fit(event.title(), TITLE_MAX, TITLE_FALLBACK, event, "제목"),
+                fit(event.body(), BODY_MAX, BODY_FALLBACK, event, "본문"),
+                event.challengeId(),
+                clamp(event.resolvedDeeplink(), event), dedupKey, event.suppressKey(), now));
+    }
+
+    /**
+     * 필수 문구를 컬럼 안에 맞춘다 — <b>비면 폴백, 넘치면 절단</b>.
+     *
+     * <p>둘 다 <b>경고를 남긴다</b>. 조용히 넘기면 문구가 빈 고지가 쌓이는 것을 아무도 모르고,
+     * 그것이 곧 「알림은 왔는데 무슨 일인지 모르겠다」는 CS 로 돌아온다.
+     */
+    private static String fit(String value, int max, String fallback,
+                              NotificationEvent event, String field) {
+        if (value == null || value.isBlank()) {
+            log.warn("알림 {} 이(가) 비어 폴백 문구로 적재한다. type={} user={}",
+                    field, event.type(), event.userId());
+            return fallback;
+        }
+        if (value.length() <= max) return value;
+        log.warn("알림 {} 이(가) 컬럼 상한을 넘어 자른다. type={} len={} max={}",
+                field, event.type(), value.length(), max);
+        return value.substring(0, max);
+    }
+
+    /** 딥링크는 <b>없어도 되는 값</b>이라 폴백을 두지 않는다 — 길이만 맞춘다. */
+    private static String clamp(String deeplink, NotificationEvent event) {
+        if (deeplink == null || deeplink.length() <= DEEPLINK_MAX) return deeplink;
+        log.warn("알림 딥링크가 컬럼 상한을 넘어 자른다. type={} len={}",
+                event.type(), deeplink.length());
+        return deeplink.substring(0, DEEPLINK_MAX);
     }
 
     /**
