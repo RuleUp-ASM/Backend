@@ -332,6 +332,9 @@ public class AdminController {
             점검·장애·약관·종료 공지. **푸시가 나가지 않는다** — 공지는 알림함에만 적재된다
             (알림 테크 스펙 오픈 이슈 #8, 2026-09-07 확정). 그래서 응답에 푸시 통계 필드가 없다.
 
+            **`kind=MARKETING` 만 예외다.** 광고성 정보는 수신 **동의자에게만** 가고 푸시도 나간다
+            (정보통신망법 — 발송 창 08~21시). 미동의자는 알림함에도 적재되지 않는다.
+
             전체 팬아웃이라 되돌릴 수 없어 **428 을 탄다.** 적재는 팬아웃 잡이 청크 단위로 한다.
             """)
     @ApiErrorCodes({ErrorCode.CONFIRMATION_REQUIRED, ErrorCode.INVALID_REQUEST,

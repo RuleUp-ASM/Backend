@@ -288,10 +288,14 @@ public final class AdminDtos {
     @Schema(name = "AdminNoticeRequest", description = """
             점검·장애·약관·종료 공지. **푸시 통계 필드가 없다** — 공지는 알림함에만 적재되고
             푸시가 나가지 않는다(알림 테크 스펙 오픈 이슈 #8, 2026-09-07 확정). 이 속성을 운영
-            토글로 두지 않는 이유는 하나다: 누가 켜면 2만 명에게 푸시가 나간다.""")
+            토글로 두지 않는 이유는 하나다: 누가 켜면 2만 명에게 푸시가 나간다.
+
+            **`MARKETING` 만 다르다.** 광고성 정보는 수신 **동의자에게만** 가고(정보통신망법)
+            푸시도 나간다. 발송은 08~21시로 제한되며, 동의를 철회한 사람은 발송 판정에서
+            한 번 더 걸러진다. `recipientCount` 도 동의자 기준으로 센다.""")
     public record NoticeRequest(
-            @Schema(description = "MAINTENANCE / INCIDENT / TERMS / SHUTDOWN", example = "MAINTENANCE",
-                    requiredMode = Schema.RequiredMode.REQUIRED)
+            @Schema(description = "MAINTENANCE / INCIDENT / TERMS / SHUTDOWN / MARKETING",
+                    example = "MAINTENANCE", requiredMode = Schema.RequiredMode.REQUIRED)
             String kind,
             @Schema(requiredMode = Schema.RequiredMode.REQUIRED) String title,
             @Schema(requiredMode = Schema.RequiredMode.REQUIRED) String body,

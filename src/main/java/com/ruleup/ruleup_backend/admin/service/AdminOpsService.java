@@ -382,8 +382,12 @@ public class AdminOpsService {
      * 실제 적재는 {@link com.ruleup.ruleup_backend.notification.announcement.AnnouncementFanoutJob}
      * 이 청크 단위로 한다.
      *
-     * <p>공지는 알림 센터의 <b>공지 탭에만</b> 쌓이고 푸시가 나가지 않는다({@code pushable=false}).
-     * 그래서 응답에 푸시 통계 필드가 없다.
+     * <p>운영 공지는 알림 센터의 <b>공지 탭에만</b> 쌓이고 푸시가 나가지 않는다
+     * ({@code pushable=false}). 그래서 응답에 푸시 통계 필드가 없다.
+     *
+     * <p><b>{@code MARKETING} 만 다르다.</b> 광고성 정보는 수신 동의자에게만 보낼 수 있고
+     * (정보통신망법) 푸시도 나간다. 그래서 예상 수신자 수도 동의자 기준으로 센다 — 팬아웃과
+     * 다른 집합을 세면 「광고가 덜 나갔다」는 오해가 매번 생긴다.
      */
     @Transactional
     public AdminDtos.NoticeResponse publishNotice(UUID operatorId, AdminDtos.NoticeRequest request) {
@@ -395,11 +399,19 @@ public class AdminOpsService {
         Instant scheduledAt = isBlank(request.scheduledAt()) ? null : parseInstant(request.scheduledAt());
 
         // 팬아웃 잡과 같은 조건이어야 한다 — 예상 수신자와 실제 적재 수가 어긋나면
-        // 「공지가 덜 나갔다」는 오해가 매번 생긴다.
-        Integer audience = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM users WHERE status <> 'WITHDRAWN' AND deleted_at IS NULL"
-                        + " AND role = 'MEMBER'",
-                Integer.class);
+        // 「공지가 덜 나갔다」는 오해가 매번 생긴다. 광고는 수신 동의자만 세는 이유다.
+        Integer audience = kind.isMarketing()
+                ? jdbc.queryForObject(
+                        "SELECT COUNT(*) FROM users u"
+                                + " JOIN user_agreement_states s ON s.user_id = u.id"
+                                + " WHERE u.status <> 'WITHDRAWN' AND u.deleted_at IS NULL"
+                                + " AND u.role = 'MEMBER'"
+                                + " AND s.agreement_type = 'MARKETING' AND s.agreed = 1",
+                        Integer.class)
+                : jdbc.queryForObject(
+                        "SELECT COUNT(*) FROM users WHERE status <> 'WITHDRAWN' AND deleted_at IS NULL"
+                                + " AND role = 'MEMBER'",
+                        Integer.class);
         int recipients = audience == null ? 0 : audience;
 
         String payload = kind + "|" + request.title() + "|" + request.body();
