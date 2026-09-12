@@ -98,6 +98,26 @@ class NotificationPurgeIT {
             assertThat(rowsOf(userId)).isZero();
         }
 
+        /**
+         * 반복 횟수가 청크 크기를 넘어가는 지점까지 밀어 넣는다.
+         *
+         * <p>앞 테스트(5건·청크 2)는 3회차에 끝나 <b>중단 조건이 무엇과 비교되는지</b>를 구분하지
+         * 못한다. 반복 변수와 비교해도 우연히 같은 시점에 멈추기 때문이다. 10건이면 4회차에서
+         * 「지운 2건 &lt; 회차 3」이 성립해 <b>남은 2건을 두고 돌아간다</b> — 그 잔여를 본다.
+         */
+        @Test
+        @DisplayName("반복 횟수가 청크 크기를 넘어서도 끝까지 지운다 — 회차와 비교하면 잔여가 남는다")
+        void drainsPastChunkSizedRoundCount() {
+            UUID userId = newUser();
+            for (int i = 0; i < 10; i++) store(userId, "old" + SEQ.incrementAndGet());
+            backdate(userId, 200);
+
+            int deleted = batch.purgeExpired();
+
+            assertThat(rowsOf(userId)).as("한 건도 남기지 않는다").isZero();
+            assertThat(deleted).as("10건을 전부 셌다").isGreaterThanOrEqualTo(10);
+        }
+
         @Test
         @DisplayName("보관 기간 안의 알림은 건드리지 않는다")
         void keepsRowsInsideRetention() {

@@ -304,7 +304,7 @@ class NotificationInboxApiIT extends AuthApiSupport {
         }
 
         @Test
-        @DisplayName("탭을 생략하면 알림 탭이다")
+        @DisplayName("탭을 생략해도 된다 — 알림 자신의 탭으로 움직인다")
         void tabDefaults() throws Exception {
             Account a = join("탭생략");
             store(a.userId(), NotificationType.APPEAL_RESULT, "r7");
@@ -314,6 +314,29 @@ class NotificationInboxApiIT extends AuthApiSupport {
 
             assertThat((String) read(list(a.accessToken(), ""), "$.data.lastReadNotificationId"))
                     .isEqualTo(id);
+        }
+
+        @Test
+        @DisplayName("알림의 실제 탭과 어긋나면 400 — 무시하면 클라이언트가 오해한 채 남는다")
+        void rejectsMismatchedTab() throws Exception {
+            Account a = join("탭불일치");
+            store(a.userId(), NotificationType.APPEAL_RESULT, "r9");
+            String id = read(list(a.accessToken(), ""), "$.data.items[0].id");
+
+            expectError(markRead(a.accessToken(), "ANNOUNCEMENT", id), 400, "INVALID_REQUEST");
+
+            assertThat((String) read(list(a.accessToken(), ""), "$.data.lastReadNotificationId"))
+                    .as("거절했으면 커서도 움직이지 않았다").isNull();
+        }
+
+        @Test
+        @DisplayName("정의되지 않은 탭 값도 400 이다")
+        void rejectsUnknownTab() throws Exception {
+            Account a = join("탭이상");
+            store(a.userId(), NotificationType.APPEAL_RESULT, "r10");
+            String id = read(list(a.accessToken(), ""), "$.data.items[0].id");
+
+            expectError(markRead(a.accessToken(), "INBOX", id), 400, "INVALID_REQUEST");
         }
 
         @Test

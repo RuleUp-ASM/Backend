@@ -95,6 +95,10 @@ public class NotificationService {
      * <p><b>클라이언트가 보낸 id 로만 갱신한다.</b> 현재 시각으로 갱신하면 조회와 갱신 사이에
      * 적재된 알림이 화면에 뜬 적 없이 읽음 처리돼 레드닷이 영영 뜨지 않는다 — 00시 판정 배치나
      * 08:00 큐 소진 구간에서 실제로 생기는 경로다.
+     *
+     * <p><b>탭은 알림 자신에게서 가져오되, 보내온 탭이 어긋나면 400 이다.</b> 두 가지를 동시에
+     * 지켜야 한다 — 클라이언트 주장대로 커서를 움직이면 안 되고(엉뚱한 탭의 레드닷이 꺼진다),
+     * 어긋난 요청을 204 로 받아주어도 안 된다(클라이언트가 자기 버그를 모른 채 남는다).
      */
     @Transactional
     public void markRead(UUID userId, NotificationSettingDtos.ReadRequest request) {
@@ -105,9 +109,14 @@ public class NotificationService {
         Notification target = repository.findByIdAndUserId(notificationId, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOTIFICATION_NOT_FOUND));
 
-        // 탭은 알림 자신이 안다 — 클라이언트가 보낸 탭과 어긋나면 커서가 엉뚱한 쪽으로 움직인다.
-        settings(userId, Instant.now()).advanceReadCursor(
-                target.tabEnum(), notificationId, Instant.now());
+        // 커서를 움직일 탭은 알림 자신에게서 가져온다 — 클라이언트가 보낸 값을 그대로 믿으면
+        // 커서가 엉뚱한 탭으로 움직인다. 다만 보내온 값이 어긋날 때 조용히 넘기지는 않는다.
+        // 무시하면 잘못 부른 클라이언트가 204 를 받고 「공지를 읽었다」고 오해한 채로 남는다.
+        NotificationTab tab = target.tabEnum();
+        if (request.tab() != null && !request.tab().isBlank() && tabOf(request.tab()) != tab)
+            throw new BusinessException(ErrorCode.INVALID_REQUEST);
+
+        settings(userId, Instant.now()).advanceReadCursor(tab, notificationId, Instant.now());
     }
 
     // ===== 설정 =====

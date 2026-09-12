@@ -74,10 +74,12 @@ public class NotificationBatch {
         Instant threshold = Instant.now().minus(NotificationService.RETENTION);
 
         int total = 0;
-        for (int chunk = 0; chunk < MAX_CHUNKS; chunk++) {
+        for (int round = 0; round < MAX_CHUNKS; round++) {
             int deleted = self.purgeChunk(threshold);
             total += deleted;
-            if (deleted < chunk) {   // 마지막 청크 — 남은 행이 없다
+            // 덜 지워졌다 = 한도까지 못 채웠다 = 남은 행이 없다. 비교 대상은 반복 횟수가 아니라
+            // 청크 크기다 — 반복 변수에 chunk 라는 이름을 쓰면 필드를 가려 조용히 일찍 멈춘다.
+            if (deleted < chunk) {
                 if (total > 0) log.info("알림 보관 기간 경과분 정리 — {}건", total);
                 return total;
             }

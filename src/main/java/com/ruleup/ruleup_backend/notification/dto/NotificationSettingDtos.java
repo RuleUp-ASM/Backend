@@ -134,7 +134,8 @@ public final class NotificationSettingDtos {
             id 가 더 작아서 읽음 지점이 과거로 밀린다 — 서버가 무시하지만 호출할 이유도 없다.""")
     public record ReadRequest(
             @Schema(description = """
-                    무시된다 — 탭은 알림 자신이 안다. 계약 호환을 위해 받기만 한다.""")
+                    생략할 수 있다 — 커서를 움직일 탭은 알림 자신에게서 가져온다. 다만 보낸 값이
+                    그 알림의 실제 탭과 어긋나거나 정의되지 않은 값이면 400 이다.""")
             String tab,
             @Schema(description = """
                     **응답에 실제로 담겼던 최신 알림의 id.** 서버는 `NOW()` 로 갱신하지 않는다.""",
