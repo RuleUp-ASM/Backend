@@ -57,6 +57,7 @@ class NotificationConsumerIT {
     @Autowired UserRepository userRepository;
     @Autowired TransactionTemplate txTemplate;
     @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
+    @Autowired NotificationTestQueue.RecordingPushSender pushSender;
 
     /**
      * 음소거 행은 챌린지에 FK 가 걸려 있어 실재하는 방이 필요하다 — 그래야 「탈퇴한 방의
@@ -287,6 +288,42 @@ class NotificationConsumerIT {
 
             assertThat(outcomes.get(0).suppressedReason()).isNull();
             assertThat(outcomes.get(1).suppressedReason()).isEqualTo(SuppressedReason.MASTER_OFF);
+        }
+
+        @Test
+        @DisplayName("여러 유저의 토큰을 묶음으로 해결한다 — 알림마다 다시 물으면 08:00 묶음이 밀린다")
+        void resolvesTokensForWholeBatch() {
+            pushSender.reset();
+            UUID first = userWithDevice();
+            UUID second = userWithDevice();
+            String firstToken = deviceTokenRepository.findByUserId(first).getFirst().getToken();
+            String secondToken = deviceTokenRepository.findByUserId(second).getFirst().getToken();
+
+            Notification a = store(first, NotificationType.ACCOUNT_SANCTION,
+                    Map.of(NotificationParams.EVENT_KEY, "tk1" + SEQ.incrementAndGet()));
+            Notification b = store(second, NotificationType.ACCOUNT_SANCTION,
+                    Map.of(NotificationParams.EVENT_KEY, "tk2" + SEQ.incrementAndGet()));
+
+            dispatcher.dispatch(List.of(messageOf(a), messageOf(b)), kstAt(12));
+
+            assertThat(pushSender.sent).hasSize(2);
+            assertThat(pushSender.sent.get(0).tokens())
+                    .as("각 알림이 자기 유저의 토큰을 들고 간다").containsExactly(firstToken);
+            assertThat(pushSender.sent.get(1).tokens()).containsExactly(secondToken);
+        }
+
+        @Test
+        @DisplayName("활성 기기가 없으면 전송기까지 가지 않는다 — 판정에서 걸린다")
+        void noDeviceNeverReachesSender() {
+            pushSender.reset();
+            UUID userId = newUser();   // 기기 없음
+            Notification n = store(userId, NotificationType.ACCOUNT_SANCTION,
+                    Map.of(NotificationParams.EVENT_KEY, "nd" + SEQ.incrementAndGet()));
+
+            var outcomes = dispatcher.dispatch(List.of(messageOf(n)), kstAt(12));
+
+            assertThat(outcomes.getFirst().suppressedReason()).isEqualTo(SuppressedReason.NO_DEVICE);
+            assertThat(pushSender.sent).isEmpty();
         }
 
         @Test

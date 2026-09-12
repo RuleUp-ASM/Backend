@@ -1,5 +1,8 @@
 package com.ruleup.ruleup_backend.notification;
 
+import com.ruleup.ruleup_backend.notification.consumer.BulkPushSender;
+import com.ruleup.ruleup_backend.notification.consumer.PushOutcome;
+import com.ruleup.ruleup_backend.notification.consumer.PushRequest;
 import com.ruleup.ruleup_backend.notification.queue.NotificationMessage;
 import com.ruleup.ruleup_backend.notification.queue.NotificationQueue;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -23,6 +26,33 @@ public class NotificationTestQueue {
     @Primary
     Recording recordingNotificationQueue() {
         return new Recording();
+    }
+
+    /**
+     * 전송기 대역 — <b>무엇을 어떤 토큰으로 보내려 했는가</b>를 본다.
+     *
+     * <p>운영 폴백 스텁은 토큰을 버려서, 컨슈머가 토큰을 제대로 해결했는지 볼 자리가 없었다.
+     * 폴백과 같이 전부 성공으로 처리하므로 기존 테스트의 동작은 달라지지 않는다.
+     */
+    @Bean
+    @Primary
+    RecordingPushSender recordingBulkPushSender() {
+        return new RecordingPushSender();
+    }
+
+    public static class RecordingPushSender implements BulkPushSender {
+
+        public final List<PushRequest> sent = new ArrayList<>();
+
+        @Override
+        public List<PushOutcome> send(List<PushRequest> requests) {
+            sent.addAll(requests);
+            return requests.stream().map(r -> PushOutcome.success(r.notificationId())).toList();
+        }
+
+        public void reset() {
+            sent.clear();
+        }
     }
 
     public static class Recording implements NotificationQueue {

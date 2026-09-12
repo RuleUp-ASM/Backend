@@ -63,7 +63,10 @@ public class NotificationDispatcher {
     public List<DispatchOutcome> dispatch(List<NotificationMessage> messages, Instant now) {
         if (messages.isEmpty()) return List.of();
 
-        Map<UUID, DispatchInputs> inputs = loadInputs(messages, now);
+        List<UUID> userIds = messages.stream().map(NotificationMessage::userId).distinct().toList();
+        // 토큰을 묶음으로 한 번에 읽는다. 이 맵이 발송 대상 토큰이자 「활성 기기 있음」의 근거다.
+        Map<UUID, List<String>> tokens = loadTokens(userIds);
+        Map<UUID, DispatchInputs> inputs = loadInputs(messages, userIds, tokens, now);
 
         List<DispatchOutcome> outcomes = new ArrayList<>(messages.size());
         List<PushRequest> toSend = new ArrayList<>();
@@ -83,7 +86,8 @@ public class NotificationDispatcher {
                 continue;
             }
             logAttempt(message, now);
-            toSend.add(new PushRequest(message, tokensOf(message.userId())));
+            toSend.add(new PushRequest(message,
+                    tokens.getOrDefault(message.userId(), List.of())));
             sending.put(message.id(), message);
             outcomes.add(null);   // 전송 결과를 받아 채운다
         }
@@ -94,17 +98,15 @@ public class NotificationDispatcher {
 
     // ===== 묶음 조회 =====
 
-    private Map<UUID, DispatchInputs> loadInputs(List<NotificationMessage> messages, Instant now) {
-        List<UUID> userIds = messages.stream().map(NotificationMessage::userId).distinct().toList();
-
+    private Map<UUID, DispatchInputs> loadInputs(List<NotificationMessage> messages,
+                                                 List<UUID> userIds,
+                                                 Map<UUID, List<String>> tokens, Instant now) {
         Map<UUID, UserNotificationSetting> settings = settingRepository.findByUserIdIn(userIds)
                 .stream().collect(Collectors.toMap(UserNotificationSetting::getUserId, s -> s));
 
         Map<UUID, Set<UUID>> mutes = new HashMap<>();
         muteRepository.findByUserIdIn(userIds).forEach(m -> mutes
                 .computeIfAbsent(m.getUserId(), k -> new HashSet<>()).add(m.getChallengeId()));
-
-        Set<UUID> withDevice = new HashSet<>(deviceTokenRepository.findUserIdsWithActiveToken(userIds));
 
         Map<UUID, Map<String, Instant>> lastPushed = loadSuppressHistory(messages, userIds, now);
 
@@ -115,9 +117,18 @@ public class NotificationDispatcher {
                     settings.getOrDefault(userId, UserNotificationSetting.defaults(userId, now)),
                     mutes.getOrDefault(userId, Set.of()),
                     lastPushed.getOrDefault(userId, Map.of()),
-                    withDevice.contains(userId)));
+                    !tokens.getOrDefault(userId, List.of()).isEmpty()));
         }
         return inputs;
+    }
+
+    /** {@code (userId, token)} 행을 유저별로 접는다. 쿼리는 묶음당 한 번뿐이다. */
+    private Map<UUID, List<String>> loadTokens(List<UUID> userIds) {
+        Map<UUID, List<String>> byUser = new HashMap<>();
+        for (Object[] row : deviceTokenRepository.findActiveTokensByUserIds(userIds)) {
+            byUser.computeIfAbsent((UUID) row[0], k -> new ArrayList<>()).add((String) row[1]);
+        }
+        return byUser;
     }
 
     /**
@@ -139,10 +150,6 @@ public class NotificationDispatcher {
                     .put((String) row[1], (Instant) row[2]);
         }
         return byUser;
-    }
-
-    private List<String> tokensOf(UUID userId) {
-        return deviceTokenRepository.findActiveTokens(userId);
     }
 
     // ===== 전송 결과 반영 =====
