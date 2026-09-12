@@ -2,7 +2,10 @@ package com.ruleup.ruleup_backend.agreement;
 
 import com.ruleup.ruleup_backend.agreement.domain.AgreementType;
 import com.ruleup.ruleup_backend.agreement.domain.UserAgreementState;
+import org.springframework.data.domain.Limit;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.Collection;
 import java.util.List;
@@ -22,6 +25,26 @@ public interface UserAgreementStateRepository
      */
     List<UserAgreementState> findByUserIdInAndAgreementType(Collection<UUID> userIds,
                                                             AgreementType agreementType);
+
+    /**
+     * 이 항목에 <b>동의해 둔</b> 사람 중 저장 버전이 현행과 다른 사람 — 개정 고지 대상.
+     *
+     * <p>동의한 적 없는 사람({@code agreed=false} · 행 없음)은 제외한다. 그들에게 「약관이
+     * 개정됐어요」는 틀린 문장이고, 필수 약관 미동의는 개정과 무관하게 게이트가 이미 막고 있다.
+     *
+     * <p>오래 동의한 순으로 주는 이유는 상한에 걸렸을 때 <b>가장 오래된 버전부터</b> 처리하기
+     * 위해서다 — 같은 대상을 매일 다시 긁지 않는다.
+     */
+    @Query("""
+            select s from UserAgreementState s
+             where s.agreementType = :type
+               and s.agreed = true
+               and s.version <> :currentVersion
+             order by s.agreedAt asc
+            """)
+    List<UserAgreementState> findOutdated(@Param("type") AgreementType type,
+                                          @Param("currentVersion") String currentVersion,
+                                          Limit limit);
 
     long countByUserId(UUID userId);
 }
