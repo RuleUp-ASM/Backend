@@ -16,6 +16,7 @@ import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.NotificationPublisher;
 import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
+import com.ruleup.ruleup_backend.score.domain.StreakWarning;
 import com.ruleup.ruleup_backend.score.domain.Tier;
 import com.ruleup.ruleup_backend.score.domain.TierNotice;
 import com.ruleup.ruleup_backend.score.domain.TierPoints;
@@ -139,8 +140,36 @@ public class ScoreService {
                 applyRoutine(summary, cycle, streakDelta, reason,
                         "streak:%s:%d".formatted(challengeId, cycleNo));
             }
+            // 경고는 연속 기록을 실제로 올린 이 자리에서만 낸다 — alreadyApplied 가 이미 멱등을
+            // 보장하므로 마감이 재실행돼도 두 번 울리지 않는다.
+            if (StreakWarning.shouldWarn(result, streak.getFailureStreak())) {
+                notifyConsecutiveFailure(userId, challengeId, cycleNo);
+            }
         }
         cycle.close(result, Instant.now());
+    }
+
+    /**
+     * 연속 실패 경고 — <b>강퇴 직전 고지</b>다(2사이클 경고 · 3사이클 강퇴).
+     *
+     * <p>억제 키가 {@code (challenge_id, routine_id)} 라 루틴 id 가 필요하다. 이름을 넣으면
+     * 이름이 바뀔 때 억제가 풀리고 같은 루틴이 다른 것으로 읽힌다 — id 여야 한다.
+     * 챌린지에 템플릿이 없으면(커스텀 루틴) 챌린지 id 로 대신한다: 억제 단위가 방 하나로
+     * 좁아질 뿐 키가 비어 발행이 통째로 막히는 것보다 낫다.
+     */
+    private void notifyConsecutiveFailure(UUID userId, UUID challengeId, int cycleNo) {
+        Long templateId = challengeRepository.findById(challengeId)
+                .map(Challenge::getTemplateId).orElse(null);
+        String routineId = (templateId != null) ? templateId.toString() : challengeId.toString();
+
+        notificationPublisher.publish(NotificationEvent.forChallenge(userId,
+                NotificationType.CONSECUTIVE_FAILURE_WARNING,
+                "연속으로 인증을 놓치고 있어요",
+                "한 번 더 놓치면 이 챌린지에서 나가게 돼요. 다음 사이클은 꼭 채워보세요.",
+                challengeId,
+                Map.of(NotificationParams.EVENT_KEY, challengeId + ":" + cycleNo,
+                        NotificationParams.CHALLENGE_ID, challengeId.toString(),
+                        NotificationParams.ROUTINE_ID, routineId)));
     }
 
     /** 연속 성공 보너스 또는 연속 실패 추가 감점. 부분 달성은 추가 점수가 없다. */
