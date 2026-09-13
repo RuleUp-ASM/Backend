@@ -82,12 +82,16 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
 
         Map<String, Object> ev = new HashMap<>();
         ev.put("dwellMinutes", dwellMin);
+        // 목표를 함께 남긴다 — 실패 설명이 「체류 42분 / 목표 60분」으로 나가려면 판정 당시
+        // 기준값이 evidence 에 있어야 한다(공통 5-8). 기준은 나중에 조정될 수 있다.
+        ev.put("goalMinutes", goalMin);
         ev.put("insideGeofence", inside);
         ev.put("source", source);
         ev.put("dwellSeconds", dwellSec);
         if (openEnter != null) ev.put("enterAt", openEnter.toString());
         if (lastInside != null) ev.put("lastInsideAt", lastInside.toString());   // ① 연속성 이월
         if (!seen.isEmpty()) ev.put("seenTransitions", capSeen(seen));            // ② 멱등 키 이월
+        putHygiene(ev, ctx, cfg);
 
         return success
                 ? EvaluationOutcome.success(ev, windowClose)
@@ -145,6 +149,7 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
         ev.put("graceMinutes", graceSec / 60);
         ev.put("dwellSeconds", longestStaySec);          // 가장 오래 머문 시간(이월)
         if (openEnter != null) ev.put("enterAt", openEnter.toString());
+        putHygiene(ev, ctx, cfg);
         return violated
                 ? EvaluationOutcome.violated("ENTERED_AVOID_ZONE", ev, windowClose)
                 : EvaluationOutcome.pending(ev, windowClose);   // 무위반은 확정 배치가 SUCCESS 로 잠근다
@@ -169,6 +174,46 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
             }
         }
         return out;
+    }
+
+    /**
+     * 판정에서 <b>뺀</b> 신호 수를 evidence 에 누적한다 — 신호 위생 층의 기록이다(공통 5-3).
+     *
+     * <p>판정 로직은 건드리지 않는다. 조작된 위치와 저정확도 측위는 이미 근거에서 빠져 있고,
+     * 여기서는 <b>몇 개가 빠졌는지만</b> 센다. 그 수가 여러 판정에 걸쳐 반복될 때 이상패턴
+     * 탐지가 부정행위를 확정한다 — 단건으로는 확정하지 않는다.
+     *
+     * <p>sync 마다 이번 배치분을 이전 값에 더한다. 배제 로그는 <b>확정 시 한 번</b> 이 값을
+     * 옮기므로, 누적해 두지 않으면 중간 sync 에서 빠진 신호가 기록에서 사라진다.
+     */
+    private void putHygiene(Map<String, Object> ev, DayContext ctx, GpsConfig cfg) {
+        int mock = priorInt(ctx.priorEvidence(), "excludedMock");
+        int lowAccuracy = priorInt(ctx.priorEvidence(), "excludedAccuracy");
+        Integer maxAccuracy = cfg.accuracyMaxM();
+
+        if (ctx.signals() != null) {
+            for (SyncSignal s : ctx.signals()) {
+                if (s.transitions() != null) {
+                    for (GeofenceTransition t : s.transitions()) {
+                        if (t != null && Boolean.TRUE.equals(t.isMock())) mock++;
+                    }
+                }
+                if (s.points() == null) continue;
+                for (GeoPoint p : s.points()) {
+                    if (p == null) continue;
+                    if (Boolean.TRUE.equals(p.isMock())) mock++;
+                    else if (maxAccuracy != null && p.accuracy() != null
+                            && p.accuracy() > maxAccuracy) lowAccuracy++;
+                }
+            }
+        }
+        if (mock > 0) ev.put("excludedMock", mock);
+        if (lowAccuracy > 0) ev.put("excludedAccuracy", lowAccuracy);
+    }
+
+    private int priorInt(Map<String, Object> prior, String key) {
+        Object value = (prior != null) ? prior.get(key) : null;
+        return (value instanceof Number n) ? n.intValue() : 0;
     }
 
     /** LOCATION fallback 누적 결과: 갱신된 총 체류초·이번 배치가 더한 초·이월할 lastInsideAt. */

@@ -1,12 +1,15 @@
 package com.ruleup.ruleup_backend.verification.service;
 
+import com.ruleup.ruleup_backend.verification.domain.SignalExclusionReason;
 import com.ruleup.ruleup_backend.verification.dto.SyncRequest;
 import com.ruleup.ruleup_backend.verification.signal.SignalType;
 import com.ruleup.ruleup_backend.verification.signal.SyncSignal;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -27,9 +30,12 @@ import java.util.UUID;
  * <p>원본 신호는 그대로 저장한다. 판정에 안 쓸 뿐 이상탐지 자료로는 남겨야 한다.
  */
 @Component
+@RequiredArgsConstructor
 public class SignalTrustGate {
 
     private static final Logger log = LoggerFactory.getLogger(SignalTrustGate.class);
+
+    private final SignalExclusionRecorder exclusionRecorder;
 
     /** 위치 신뢰가 필요한 신호 — VPN·무결성 실패의 영향을 받는다. */
     private static final List<String> LOCATION_TYPES =
@@ -43,13 +49,24 @@ public class SignalTrustGate {
         List<SyncSignal> kept = signals.stream()
                 .filter(s -> s == null || s.type() == null || !LOCATION_TYPES.contains(s.type()))
                 .toList();
-        int dropped = signals.size() - kept.size();
-        if (dropped > 0) {
+        List<SyncSignal> dropped = signals.stream()
+                .filter(s -> s != null && s.type() != null && LOCATION_TYPES.contains(s.type()))
+                .toList();
+        if (!dropped.isEmpty()) {
             // 로깅 스펙 §9 #7 — reason 은 MOCK·VPN·UNTRUSTED 중 하나다.
             log.info("gate_dropped userId={} reason={} dropped={} kept={}",
-                    userId, reason, dropped, kept.size());
+                    userId, reason, dropped.size(), kept.size());
+            // 배제 로그는 이상패턴 탐지의 입력이다(공통 5-3). 여기 기록은 **판정 이전**이라
+            // 귀속할 판정이 없다 — 기기 단위 사건이라 유저에만 달아 둔다.
+            exclusionRecorder.recordGateDrop(userId, exclusionReason(reason), dropped, Instant.now());
         }
         return kept;
+    }
+
+    /** 게이트 사유 → 배제 로그의 사유. VPN 과 무결성 실패는 층이 다르다. */
+    private SignalExclusionReason exclusionReason(String reason) {
+        return "VPN".equals(reason)
+                ? SignalExclusionReason.VPN : SignalExclusionReason.UNTRUSTED_SOURCE;
     }
 
     /** 위치를 못 믿을 사유. 없으면 null. */

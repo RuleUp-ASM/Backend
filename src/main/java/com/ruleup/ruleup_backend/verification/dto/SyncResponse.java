@@ -24,7 +24,7 @@ public record SyncResponse(
 ) {
     /**
      * @param challengeId  챌린지 ID
-     * @param todayStatus  IN_PROGRESS / FAIL_EXPECTED / CHECKING / DONE / FAILED / NOT_TARGET
+     * @param todayStatus  IN_PROGRESS / FAIL_EXPECTED / DONE / FAILED / NOT_TARGET — 상태값 4종 + 비대상
      *                     — 오늘 인증 결과 조회의 status 와 같은 값
      * @param progressRate 사이클 진행률(%). 확정된 인증 결과 기준
      */

@@ -83,9 +83,21 @@ class VerificationTransportGateIT extends VerificationApiSupport {
                 .content(gzip(OM.writeValueAsString(body)))).andReturn();
     }
 
+    /** 배제 로그 — 신호 위생 층의 기록이자 이상탐지 입력이다(공통 5-3). */
+    private int exclusionsOf(UUID userId, String reason) {
+        Integer n = jdbc().queryForObject(
+                "SELECT COALESCE(SUM(signalCount), 0) FROM signal_exclusions"
+                        + " WHERE userId = ? AND reason = ?",
+                Integer.class, bytes(userId), reason);
+        return n != null ? n : 0;
+    }
+
     private int storedSignalsOf(UUID userId) {
         Integer n = jdbc().queryForObject(
-                "SELECT COUNT(*) FROM verification_signals WHERE userId = ?", Integer.class, bytes(userId));
+                "SELECT (SELECT COUNT(*) FROM verification_location_signals WHERE userId = ?)"
+                        + " + (SELECT COUNT(*) FROM verification_device_usage_signals WHERE userId = ?)"
+                        + " + (SELECT COUNT(*) FROM verification_health_connect_signals WHERE userId = ?)",
+                Integer.class, bytes(userId), bytes(userId), bytes(userId));
         return n != null ? n : 0;
     }
 
@@ -166,6 +178,8 @@ class VerificationTransportGateIT extends VerificationApiSupport {
             assertThat(todayStatusOf(memberId)).isIn(null, "PENDING");
             assertThat(dwellOf(memberId)).as("체류로 세지 않는다").isIn(null, 0L);
             assertThat(storedSignalsOf(me.id())).as("원본은 그대로 저장한다 — 이상탐지 자료다").isEqualTo(2);
+            assertThat(exclusionsOf(me.id(), "VPN"))
+                    .as("무엇이 왜 빠졌는지 남는다 — 이상패턴 탐지의 입력이다").isEqualTo(2);
         }
 
         @Test
@@ -198,6 +212,8 @@ class VerificationTransportGateIT extends VerificationApiSupport {
 
             assertThat(res.getResponse().getStatus()).as("에러가 아니다").isEqualTo(200);
             assertThat(todayStatusOf(memberId)).as("실패로 확정하지도 않는다").isIn(null, "PENDING");
+            assertThat(exclusionsOf(me.id(), "VPN"))
+                    .as("배제는 기록하되 그것만으로 제재하지 않는다").isPositive();
         }
 
         @Test
@@ -214,6 +230,8 @@ class VerificationTransportGateIT extends VerificationApiSupport {
                             "integrity", Map.of("verdict", "MEETS_DEVICE_INTEGRITY")));
 
             assertThat(todayStatusOf(memberId)).isEqualTo("SUCCESS");
+            assertThat(exclusionsOf(me.id(), "VPN")).as("뺄 것이 없으면 로그도 남지 않는다").isZero();
+            assertThat(exclusionsOf(me.id(), "UNTRUSTED_SOURCE")).isZero();
         }
     }
 }

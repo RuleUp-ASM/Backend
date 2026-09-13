@@ -163,7 +163,7 @@ public class VerificationChallengeController {
                     챌린지 상세의 "오늘 인증" 카드 + **판정 결과 모달** 데이터.
                     `unacknowledgedResult`가 있으면 클라는 성공/실패 모달을 띄우고 `ack`를 호출한다.
 
-                    `status`: `IN_PROGRESS` / `CHECKING` / `DONE` / `FAILED` / `NOT_TARGET`.
+                    `status`: `IN_PROGRESS` / `FAIL_EXPECTED` / `DONE` / `FAILED` / `NOT_TARGET`.
                     """)
     @ApiErrorCodes({ErrorCode.LOGIN_REQUIRED, ErrorCode.NOT_CHALLENGE_MEMBER, ErrorCode.CHALLENGE_NOT_FOUND})
     @GetMapping("/{challengeId}/verifications/today")
