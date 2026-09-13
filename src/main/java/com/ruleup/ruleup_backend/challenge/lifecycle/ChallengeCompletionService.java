@@ -90,8 +90,7 @@ public class ChallengeCompletionService {
             if (!active.isEmpty()) {
                 notificationPublisher.publishAll(active.stream()
                         .map(m -> NotificationEvent.forChallenge(m.getUserId(),
-                                NotificationType.CHALLENGE_LIFECYCLE,
-                                "챌린지가 끝났어요", "수고하셨어요. 최종 결과를 확인해보세요.", c.getId(),
+                                NotificationType.CHALLENGE_LIFECYCLE, c.getId(),
                                 Map.of(NotificationParams.CHALLENGE_ID, c.getId().toString(),
                                         NotificationParams.PHASE, "ENDED")))
                         .toList());

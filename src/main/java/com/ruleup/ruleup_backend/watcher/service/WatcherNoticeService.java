@@ -86,10 +86,10 @@ public class WatcherNoticeService {
             notificationPublisher.publish(NotificationEvent.of(
                     relation.getWatcherUserId(),
                     NotificationType.PENALTY_FAILURE_SHARED,
-                    "감시 알림",
-                    failedNickname + "님이 [" + challengeTitle + "]의 " + routineName
-                            + " 약속을 지키지 못했어요.",
-                    Map.of(NotificationParams.EVENT_KEY, notice.getId().toString(),
+                    Map.of(NotificationParams.ACTOR_NAME, failedNickname,
+                            NotificationParams.CHALLENGE_TITLE, challengeTitle,
+                            NotificationParams.ROUTINE_NAME, routineName,
+                            NotificationParams.EVENT_KEY, notice.getId().toString(),
                             NotificationParams.NOTICE_ID, notice.getId().toString(),
                             NotificationParams.CHALLENGE_ID, relation.getChallengeId().toString(),
                             // 키에는 이름이 아니라 id 다 — 아래 routineIdOf 참조.

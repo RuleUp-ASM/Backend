@@ -72,11 +72,11 @@ public class LoginSessionService {
             // 새 기기로 가거나 양쪽에 뜬다. 발송 시점에는 조회로 찾을 수 없다(이미 비활성).
             String previousDevice = deviceTokenRepository.findActiveTokensOf(user.getId())
                     .stream().findFirst().orElse(null);
-            // 필수(A) — 계정 보안 고지라 야간에도 즉시 나간다.
+            // 계정 보안 고지지만 야간 예외는 없다 — 절대 규칙 2 는 강퇴·계정 잠금에도 예외를
+            // 두지 않는다. 야간(21:00~08:00)에 일어나면 적재만 되고 푸시는 08:00 에 나간다.
+            // 고지 성립 시각은 적재 시각이므로 그것으로 충분하다.
             NotificationEvent loggedOut = NotificationEvent.of(user.getId(),
                     NotificationType.DEVICE_LOGGED_OUT,
-                    "다른 기기에서 로그인됨",
-                    "새 기기에서 로그인되어 기존 기기의 세션이 종료됐어요. 본인이 아니라면 계정 보안을 확인해주세요.",
                     // 새로 로그인한 기기 id 가 이 사건을 유일하게 가리킨다.
                     Map.of(NotificationParams.EVENT_KEY, req.deviceId()));
             notificationPublisher.publish(previousDevice == null

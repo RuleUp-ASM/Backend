@@ -47,9 +47,6 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
 
     Optional<Notification> findByIdAndUserId(UUID id, UUID userId);
 
-    /** 발행 멱등 — UNIQUE 가 최종 보증이고 이건 재시도가 예외로 가지 않게 하는 선조회다. */
-    boolean existsByDedupKey(String dedupKey);
-
     /** 6개월 파기 배치 — {@code idx_notifications_purge (created_at)}. */
     List<Notification> findByCreatedAtBefore(Instant threshold, Limit limit);
 

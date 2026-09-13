@@ -118,7 +118,7 @@ class NotificationConsumerIT {
 
     private Notification store(UUID userId, NotificationType type, Map<String, String> params) {
         return txTemplate.execute(t -> publisher.publish(
-                NotificationEvent.of(userId, type, "제목", "본문", params)).orElseThrow());
+                NotificationEvent.of(userId, type, params)).orElseThrow());
     }
 
     private static NotificationMessage messageOf(Notification n) {

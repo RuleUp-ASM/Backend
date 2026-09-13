@@ -70,11 +70,9 @@ public class UserModerationService {
                     checked = true;
                     notificationPublisher.publish(NotificationEvent.of(userId,
                             NotificationType.MODERATION_REJECTED,
-                            "닉네임을 바꿔주세요",
-                            "회원님의 닉네임이 커뮤니티 기준에 맞지 않아 다른 사용자에게는 임시 닉네임으로 표시됩니다. "
-                                    + "닉네임을 변경하면 다시 노출됩니다.",
                             // 바꾼 닉네임이 또 거부될 수 있으므로 대상만으로는 키가 되지 않는다.
-                            Map.of(NotificationParams.TARGET_KEY, "nickname",
+                            Map.of(NotificationParams.VARIANT, "NICKNAME",
+                                    NotificationParams.TARGET_KEY, "nickname",
                                     NotificationParams.EVENT_KEY,
                                     userId + ":nickname:" + Instant.now().toEpochMilli())));
                 }
@@ -97,10 +95,8 @@ public class UserModerationService {
                     checked = true;
                     notificationPublisher.publish(NotificationEvent.of(userId,
                             NotificationType.MODERATION_REJECTED,
-                            "프로필 사진을 바꿔주세요",
-                            "회원님의 프로필 사진이 커뮤니티 기준에 맞지 않아 다른 사용자에게는 숨겨집니다. "
-                                    + "사진을 변경하면 다시 노출됩니다.",
-                            Map.of(NotificationParams.TARGET_KEY, "profile_image",
+                            Map.of(NotificationParams.VARIANT, "PROFILE_IMAGE",
+                                    NotificationParams.TARGET_KEY, "profile_image",
                                     NotificationParams.EVENT_KEY,
                                     userId + ":profile_image:" + Instant.now().toEpochMilli())));
                 }

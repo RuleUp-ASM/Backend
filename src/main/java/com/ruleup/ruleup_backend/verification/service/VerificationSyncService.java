@@ -311,7 +311,9 @@ public class VerificationSyncService {
         if (outcome.status() == VerificationStatus.PENDING && permissionGap(gaps, method, today)) {
             evidence = (evidence != null) ? new HashMap<>(evidence) : new HashMap<>();
             evidence.putIfAbsent("pendingReason", "PERMISSION_MISSING");
-            // 실시간 권한공백 → 고스트 푸시 큐 적재 트리거(§8.5). 리스너가 같은 트랜잭션에서 outbox만 적재(발송은 별도 스윕).
+            // 실시간 권한공백 → 리스너 트리거(§8.5). 리스너는 같은 트랜잭션에서 둘을 적재한다 —
+            // 고스트 푸시 outbox(발송은 별도 스윕)와 권한 재허용 고지(알림함). 둘 다 예외를
+            // 삼키므로 여기 sync 평가가 그것 때문에 롤백되지 않는다.
             eventPublisher.publishEvent(new PermissionGapDetected(
                     member.getUserId(), member.getChallengeId(), method.name(), today, now));
         }
@@ -344,10 +346,9 @@ public class VerificationSyncService {
                 // 같은 날을 여러 번 sync 해도 verification_id 멱등 키가 두 번째 적재를 막는다.
                 notificationPublisher.publish(NotificationEvent.forChallenge(member.getUserId(),
                         NotificationType.VERIFICATION_RESULT,
-                        "인증이 완료됐어요",
-                        "오늘 몫을 채웠어요. 진행률에 반영됐어요.",
                         member.getChallengeId(),
-                        Map.of(NotificationParams.VERIFICATION_ID, daily.getId().toString(),
+                        Map.of(NotificationParams.VARIANT, "SYNC_SUCCESS",
+                                NotificationParams.VERIFICATION_ID, daily.getId().toString(),
                                 NotificationParams.CHALLENGE_ID,
                                 member.getChallengeId().toString())));
             }

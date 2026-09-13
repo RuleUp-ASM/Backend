@@ -11,12 +11,17 @@ import static com.ruleup.ruleup_backend.notification.domain.NotificationParams.*
 /**
  * 알림 타입 레지스트리 <b>23종</b> — 백엔드 테크 스펙 5절, 공통 8절.
  *
- * <h4>문서는 22종, 코드는 23종이다 — 차이는 {@code CS_ANSWERED} 하나다</h4>
- * 마이그레이션 파일명({@code V34__notification_registry_22_types})과 알림 정책 §4 표가 22종인데
- * 여기는 23종이다. 늘어난 한 종은 CS 답변 고지이고 근거는 <b>앱 운영 정책 §5.5</b> 다 —
- * 그 정책이 「알림 정책 §4 표에 CS 답변 행 추가 필요」를 미결로 남겨 두었고, 이 상수의 속성이
- * 바로 그 제안값이다. <b>코드가 앞서 있는 상태</b>이며 표가 갱신되면 숫자가 맞는다.
- * 적재된 타입 문자열은 그대로이므로 이 차이로 동작이 갈리지는 않는다.
+ * <h4>23종 — 문서와 맞다</h4>
+ * 한동안 코드가 문서보다 한 종 앞서 있었다. {@code CS_ANSWERED} 가 앱 운영 정책 §5.5 에만 있고
+ * 알림 정책 §4 표에는 없었기 때문인데, <b>2026-09-13 에 세 문서 모두에 행이 추가돼</b>
+ * (정책 §4 · 공통 8절 · 백엔드 5-1) 이제 어긋나지 않는다. 마이그레이션 파일명
+ * ({@code V34__notification_registry_22_types})의 22 는 그 시점의 숫자라 그대로 둔다 —
+ * 적용된 마이그레이션의 이름은 바꾸지 않는다.
+ *
+ * <p>⚠️ 정책 §4 표의 행 수와 이 enum 의 종 수는 <b>원래 1:1이 아니다</b>. 그 표는 「알림」 단위라
+ * 모더레이션 거부가 닉네임·프로필 이미지·챌린지 제목으로 3행인데 코드는
+ * {@code MODERATION_REJECTED} 한 종이고, 운영자 공지는 그 표에 행이 없다. 숫자를 맞대 놓고
+ * 세지 말고 <b>타입 코드 단위인 공통 8절 표</b>와 대조해야 한다.
  *
  * <h4>테이블이 아니라 코드 enum이다</h4>
  * {@code notification_types} 레지스트리 테이블은 2026-09-08 제거됐다. 타입 코드 · 토글 그룹 ·
@@ -86,9 +91,15 @@ public enum NotificationType {
     /**
      * 부정행위 검출 — 검출 1회가 곧 강퇴·영구 차단이다.
      *
-     * <p>확정값은 {@code ruleup://me/cheat-history} 지만 받침할 화면·API 가 없어 아직
-     * {@code me/sanctions} 를 보낸다(공통 #18). 없는 화면을 가리키는 것이 잘못된 화면을
-     * 가리키는 것보다 나쁘다 — 구 {@code verification/{id}} 가 빈 화면으로 갔던 그 문제다.
+     * <p>진입점은 <b>제재 이력으로 확정</b>됐다(공통 #18 종결, 2026-09-13). 별도
+     * {@code me/cheat-history} 를 만들지 않는다 — {@code GET /users/me/sanctions} 의 자동 제재
+     * 트랙이 이미 검출 건을 그릴 수 있게 내린다({@code reasonCode = CHEAT_DETECTED} ·
+     * {@code permanent = true} · 방 제목 · 발생 시각).
+     *
+     * <p>#18 이 남겨 둔 「이의 기한 경과 안내까지 수행할 화면이 필요하다」는 요구는 <b>다른
+     * 결정으로 이미 해소됐다</b>. 그 API 계약이 「열람 전용이며 이의 제기 버튼을 두지 않는다 —
+     * 강퇴는 CS 문의로만 다툰다」로 정리했으므로, 부정행위 강퇴를 다투는 경로는 이의가 아니라
+     * CS 문의({@link #CS_ANSWERED})다. 화면 하나를 더 만들 이유가 없다.
      */
     CHEAT_DETECTED(NotificationToggleGroup.ACCOUNT, "ruleup://me/sanctions",
             new String[]{EVENT_KEY}),
@@ -113,6 +124,11 @@ public enum NotificationType {
     /**
      * CS 답변 등록 — 앱 운영 정책 § 5.5(분류 일반 · 토글 계정 · 중복 인터벌 없음).
      *
+     * <p><b>딥링크가 가리킬 화면은 실재한다</b> — 앱 운영 정책 § 5.9 의 「내 문의 내역」·
+     * 「문의 상세 · 답변 완료」가 그것이다. 받침 화면이 없어 확정 목적지로 못 보내는
+     * {@link #CHEAT_DETECTED} 와는 상황이 반대이고, 그래서 이쪽은 확정값을 그대로 쓴다.
+     * 남은 것은 정책 §4 · 공통 8절 표에 행을 추가하는 문서 작업뿐이다.
+     *
      * <p>억제 인터벌을 두지 않는다. 문의 하나에 답변은 하나뿐이고({@code inquiry_id} 가 곧
      * 멱등 키다) 여러 건을 접수한 사람은 <b>건마다 답을 받아야</b> 어느 문의가 처리됐는지 안다.
      *
@@ -131,8 +147,10 @@ public enum NotificationType {
     /**
      * 연속 실패 경고 — 강퇴 직전 고지다.
      *
-     * <p>인터벌은 스펙에서 미정으로 남아 있던 유일한 값이며 <b>24시간으로 확정</b>했다(2026-09-08).
-     * 다른 억제 타입의 기본값과 같고, 같은 루틴의 경고가 하루에 두 번 이상 울릴 이유가 없다.
+     * <p>인터벌 <b>24시간 확정</b>(백엔드 5-1 의 유일한 미정값, 2026-09-08 결정 → 2026-09-13
+     * 알림 정책 §4 표에 반영). 억제 키가 {@code (challenge_id, routine_id)} 라 <b>방마다 따로</b>
+     * 울리므로 이 억제가 막는 것은 「같은 방 같은 루틴의 경고가 하루에 두 번」뿐이다. 정책 §7 의
+     * 기본값과도 같다.
      */
     CONSECUTIVE_FAILURE_WARNING(NotificationToggleGroup.CHALLENGE,
             "ruleup://challenges/{challenge_id}",
@@ -314,18 +332,7 @@ public enum NotificationType {
      * 깨진 경로로 보내느니 클라이언트가 알림함으로 폴백하는 편이 낫다.
      */
     public String deeplink(Map<String, String> params) {
-        if (deeplinkTemplate == null) return null;
-        String result = deeplinkTemplate;
-        int open;
-        while ((open = result.indexOf('{')) >= 0) {
-            int close = result.indexOf('}', open);
-            if (close < 0) return null;
-            String key = result.substring(open + 1, close);
-            String value = (params == null) ? null : params.get(key);
-            if (value == null || value.isBlank()) return null;
-            result = result.substring(0, open) + value + result.substring(close + 1);
-        }
-        return result;
+        return Placeholders.render(deeplinkTemplate, params);
     }
 
     /**

@@ -87,8 +87,10 @@ public class RoomAdminService {
         eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "KICK"));
         // 같은 방에서 재입장 후 다시 강퇴될 수 있으므로 강퇴 시각까지 키에 넣는다.
         notificationPublisher.publish(NotificationEvent.forChallenge(targetUserId,
-                NotificationType.CHALLENGE_KICKED, "챌린지에서 내보내졌어요", normalized, challengeId,
-                Map.of(NotificationParams.EVENT_KEY,
+                NotificationType.CHALLENGE_KICKED, challengeId,
+                // 사유는 방장이 직접 쓴 문장이라 본문이 통째로 값이다.
+                Map.of(NotificationParams.REASON, normalized,
+                        NotificationParams.EVENT_KEY,
                         challengeId + ":" + rejoinAt.toEpochMilli())));
         return new RoomAdminDtos.KickResponse(true, targetUserId.toString(), rejoinAt.toString());
     }
@@ -131,8 +133,7 @@ public class RoomAdminService {
         // 이유도 같다: 영구 차단이라 그 방은 「내 챌린지」에 없고 카운터가 뜰 자리가 없다.
         // 영구 차단이라 같은 방에서 두 번 강퇴될 일이 없다 — 방 id 만으로 멱등 키가 된다.
         notificationPublisher.publish(NotificationEvent.of(targetUserId,
-                NotificationType.CHEAT_DETECTED, "챌린지에서 내보내졌어요",
-                "이 챌린지에는 다시 참여할 수 없어요. 자세한 내용은 제재 이력에서 확인해주세요.",
+                NotificationType.CHEAT_DETECTED,
                 Map.of(NotificationParams.EVENT_KEY, challengeId + ":cheat")));
     }
 

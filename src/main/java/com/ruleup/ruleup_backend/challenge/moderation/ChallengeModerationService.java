@@ -95,12 +95,11 @@ public class ChallengeModerationService {
         }
         if (anyRejected) {
             notificationPublisher.publish(NotificationEvent.forChallenge(c.getCreatorId(),
-                            NotificationType.MODERATION_REJECTED,
-                            "챌린지 제목·설명을 바꿔주세요",
-                            "[" + c.publicTitle() + "] 챌린지의 제목 또는 설명이 커뮤니티 기준에 맞지 않아요. "
-                                    + "수정 전까지 다른 사람에게는 임시 제목으로 보여요.", c.getId(),
+                            NotificationType.MODERATION_REJECTED, c.getId(),
                             // 수정 후 재심사에서 또 거부될 수 있어 심사 시각을 키에 넣는다.
-                            Map.of(NotificationParams.TARGET_KEY, "challenge_text",
+                            Map.of(NotificationParams.VARIANT, "CHALLENGE_TEXT",
+                                    NotificationParams.CHALLENGE_TITLE, c.publicTitle(),
+                                    NotificationParams.TARGET_KEY, "challenge_text",
                                     NotificationParams.EVENT_KEY,
                                     c.getId() + ":" + Instant.now().toEpochMilli()))
                     // 프로필이 아니라 그 방 수정 화면으로 보내야 바로 고칠 수 있다.
@@ -129,12 +128,10 @@ public class ChallengeModerationService {
             case REJECTED -> {
                 c.rejectAndRemoveImage();
                 notificationPublisher.publish(NotificationEvent.forChallenge(c.getCreatorId(),
-                        NotificationType.CHALLENGE_IMAGE_REMOVED,
-                        "챌린지 대표 이미지를 바꿔주세요",
-                        "[" + c.publicTitle() + "] 챌린지의 대표 이미지가 커뮤니티 기준에 맞지 않아 내렸어요. "
-                                + "새 이미지를 올려주세요.", c.getId(),
+                        NotificationType.CHALLENGE_IMAGE_REMOVED, c.getId(),
                         // 같은 방에서 이미지를 다시 올렸다가 또 내려갈 수 있다.
-                        Map.of(NotificationParams.CHALLENGE_ID, c.getId().toString(),
+                        Map.of(NotificationParams.CHALLENGE_TITLE, c.publicTitle(),
+                                NotificationParams.CHALLENGE_ID, c.getId().toString(),
                                 NotificationParams.EVENT_KEY,
                                 c.getId() + ":" + Instant.now().toEpochMilli())));
                 log.info("moderation_result target=IMAGE approved=false challengeId={}", c.getId());

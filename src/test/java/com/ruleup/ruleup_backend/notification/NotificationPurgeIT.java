@@ -56,7 +56,7 @@ class NotificationPurgeIT {
 
     private void store(UUID userId, String key) {
         txTemplate.executeWithoutResult(t -> publisher.publish(NotificationEvent.of(
-                userId, NotificationType.APPEAL_RESULT, "제목-" + key, "본문-" + key,
+                userId, NotificationType.APPEAL_RESULT,
                 Map.of(NotificationParams.APPEAL_ID, key))));
     }
 

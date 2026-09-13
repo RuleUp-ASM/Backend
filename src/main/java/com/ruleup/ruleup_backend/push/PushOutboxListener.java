@@ -68,8 +68,6 @@ public class PushOutboxListener {
         String challengeId = event.challengeId().toString();
         notificationPublisher.publish(NotificationEvent.of(event.userId(),
                 NotificationType.PERMISSION_REGRANT_REQUIRED,
-                "인증 권한을 다시 허용해주세요",
-                "권한이 없어 자동 인증이 기록되지 않고 있어요. 방 설정에서 다시 허용해주세요.",
                 Map.of(NotificationParams.EVENT_KEY,
                                 challengeId + ":" + event.signalType() + ":" + event.targetDate(),
                         NotificationParams.CHALLENGE_ID, challengeId,
