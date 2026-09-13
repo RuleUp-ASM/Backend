@@ -86,6 +86,17 @@ class CheatDetectionIT extends VerificationApiSupport {
         return n != null ? n : 0;
     }
 
+    /**
+     * 원장에 적힌 감점 총액. <b>잔액이 아니라 이 값을 본다</b> — 신규 유저는 잔액이 0 이라
+     * 「0 에서 50 을 빼도 0」이 되어 집행 여부를 가릴 수 없다.
+     */
+    private int cheatDeltaOf(UUID userId) {
+        Integer n = jdbc().queryForObject(
+                "SELECT COALESCE(SUM(raw_delta), 0) FROM score_transactions WHERE user_id = ?"
+                        + " AND incident_type = 'CHEAT_DETECTED'", Integer.class, bytes(userId));
+        return n != null ? n : 0;
+    }
+
     private int cheatNoticesOf(UUID userId) {
         Integer n = jdbc().queryForObject(
                 "SELECT COUNT(*) FROM notifications WHERE user_id = ? AND type = 'CHEAT_DETECTED'",
@@ -109,8 +120,9 @@ class CheatDetectionIT extends VerificationApiSupport {
                 .as("무엇을 근거로 확정했는지 남는다").isPresent();
         assertThat(rejoinBanned(challenge, me.id()))
                 .as("해당 챌린지 영구 차단 — 백오프가 아니다").isTrue();
-        assertThat(cheatLedgerOf(me.id()))
-                .as("사건성 감점 −50 이 원장에 남는다 — 사이클 한도를 거치지 않는다").isEqualTo(1);
+        assertThat(cheatLedgerOf(me.id())).as("감점 원장 한 줄").isEqualTo(1);
+        assertThat(cheatDeltaOf(me.id()))
+                .as("−50 전액 — 사건성 감점은 사이클 ±20 한도를 거치지 않는다").isEqualTo(-50);
         assertThat(scoreOf(me.id()))
                 .as("누적 점수는 0 아래로 내려가지 않는다").isEqualTo(Math.max(0, scoreBefore - 50));
         assertThat(cheatNoticesOf(me.id())).as("필수(A) 통지").isEqualTo(1);
@@ -133,6 +145,7 @@ class CheatDetectionIT extends VerificationApiSupport {
         assertThat(detectionRepository.findByUserIdOrderByDetectedAtDesc(me.id()))
                 .as("검출 기록도 하나뿐이다").hasSize(1);
         assertThat(cheatLedgerOf(me.id())).as("감점도 한 번뿐이다 — 두 줄이면 −100 이다").isEqualTo(1);
+        assertThat(cheatDeltaOf(me.id())).as("총액도 −50 그대로다").isEqualTo(-50);
         assertThat(scoreOf(me.id())).isEqualTo(Math.max(0, scoreBefore - 50));
         assertThat(cheatNoticesOf(me.id())).as("같은 통지가 두 번 가지 않는다").isEqualTo(1);
     }

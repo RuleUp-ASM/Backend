@@ -69,7 +69,17 @@ public class SignalExclusionRecorder {
     public void recordEvaluationHygiene(UUID userId, UUID verificationDailyId,
                                         VerificationMethod method, Map<String, Object> evidence,
                                         Instant at) {
-        if (userId == null || evidence == null || evidence.isEmpty()) return;
+        save(hygieneRows(userId, verificationDailyId, method, evidence, at));
+    }
+
+    /**
+     * evidence → 배제 행. <b>순수 함수라 따로 검증한다</b> — 어떤 키를 어떤 사유로 옮기는지가
+     * 이 층의 계약이고, 그 매핑이 틀리면 탐지가 엉뚱한 것을 세게 된다.
+     */
+    static List<SignalExclusion> hygieneRows(UUID userId, UUID verificationDailyId,
+                                             VerificationMethod method,
+                                             Map<String, Object> evidence, Instant at) {
+        if (userId == null || evidence == null || evidence.isEmpty()) return List.of();
 
         String signalType = signalTypeOf(method);
         List<SignalExclusion> rows = new ArrayList<>(4);
@@ -84,12 +94,13 @@ public class SignalExclusionRecorder {
         origins.forEach((reason, c) -> rows.add(SignalExclusion.of(
                 userId, verificationDailyId, signalType, reason, c, at)));
 
+        // 수면은 출처 목록 대신 플래그만 남긴다. 같은 사유가 두 번 세어지지 않게 한다.
         if (Boolean.TRUE.equals(evidence.get("untrustedExcluded")) && !origins.containsKey(
                 SignalExclusionReason.UNTRUSTED_SOURCE)) {
             rows.add(SignalExclusion.of(userId, verificationDailyId, signalType,
                     SignalExclusionReason.UNTRUSTED_SOURCE, 1, at));
         }
-        save(rows);
+        return rows;
     }
 
     private void save(List<SignalExclusion> rows) {
@@ -104,7 +115,7 @@ public class SignalExclusionRecorder {
 
     /** {@code ["fitbit:UNTRUSTED_ORIGIN", "user:MANUAL"]} → 사유별 건수. */
     @SuppressWarnings("unchecked")
-    private Map<SignalExclusionReason, Integer> rejectedOrigins(Map<String, Object> evidence) {
+    private static Map<SignalExclusionReason, Integer> rejectedOrigins(Map<String, Object> evidence) {
         Object raw = evidence.get("rejectedOrigins");
         Map<SignalExclusionReason, Integer> byReason = new LinkedHashMap<>();
         if (!(raw instanceof List<?> list)) return byReason;
@@ -121,14 +132,14 @@ public class SignalExclusionRecorder {
         return byReason;
     }
 
-    private java.util.Optional<Integer> count(Map<String, Object> evidence, String key) {
+    private static java.util.Optional<Integer> count(Map<String, Object> evidence, String key) {
         Object value = evidence.get(key);
         if (!(value instanceof Number n) || n.intValue() <= 0) return java.util.Optional.empty();
         return java.util.Optional.of(n.intValue());
     }
 
     /** 판정 방식 → 신호 타입. 어떤 종류의 신호가 빠졌는지가 탐지 규칙의 입력이다. */
-    private String signalTypeOf(VerificationMethod method) {
+    private static String signalTypeOf(VerificationMethod method) {
         if (method == null) return "UNKNOWN";
         return switch (method) {
             case GPS_PRESENCE, GPS_DISTANCE -> "LOCATION";
