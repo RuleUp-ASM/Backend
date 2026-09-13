@@ -122,6 +122,36 @@ class NotificationTemplateTest {
         }
 
         @Test
+        @DisplayName("값 안의 중괄호를 치환자로 오인하지 않는다 — 사유가 통째로 사라지던 버그")
+        void bracesInsideValuesAreLiteral() {
+            String reason = "GPS {오류}로 강퇴";
+
+            assertThat(NotificationTemplate.render(NotificationType.CHALLENGE_KICKED,
+                    Map.of(NotificationParams.REASON, reason)).body())
+                    .isEqualTo(reason);
+        }
+
+        @Test
+        @DisplayName("중괄호가 든 값이 문장 가운데 들어가도 뒤쪽 문구가 살아 있다")
+        void bracesInTheMiddleKeepTheRest() {
+            String body = NotificationTemplate.render(NotificationType.CHALLENGE_IMAGE_REMOVED,
+                    Map.of(NotificationParams.CHALLENGE_TITLE, "{아침} 러닝")).body();
+
+            assertThat(body).startsWith("[{아침} 러닝] 챌린지의 대표 이미지가")
+                    .endsWith("새 이미지를 올려주세요.");
+        }
+
+        @Test
+        @DisplayName("치환자가 여럿이어도 각 값의 중괄호는 그대로 남는다")
+        void everyValueIsLiteral() {
+            assertThat(NotificationTemplate.render(NotificationType.PENALTY_FAILURE_SHARED,
+                    Map.of(NotificationParams.ACTOR_NAME, "{루피}",
+                            NotificationParams.CHALLENGE_TITLE, "{아침} 러닝",
+                            NotificationParams.ROUTINE_NAME, "5km {달리기}")).body())
+                    .isEqualTo("{루피}님이 [{아침} 러닝]의 5km {달리기} 약속을 지키지 못했어요.");
+        }
+
+        @Test
         @DisplayName("강퇴 본문은 방장이 쓴 사유가 통째로 들어간다")
         void kickReason() {
             assertThat(NotificationTemplate.render(NotificationType.CHALLENGE_KICKED,

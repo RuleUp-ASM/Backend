@@ -311,7 +311,9 @@ public class VerificationSyncService {
         if (outcome.status() == VerificationStatus.PENDING && permissionGap(gaps, method, today)) {
             evidence = (evidence != null) ? new HashMap<>(evidence) : new HashMap<>();
             evidence.putIfAbsent("pendingReason", "PERMISSION_MISSING");
-            // 실시간 권한공백 → 고스트 푸시 큐 적재 트리거(§8.5). 리스너가 같은 트랜잭션에서 outbox만 적재(발송은 별도 스윕).
+            // 실시간 권한공백 → 리스너 트리거(§8.5). 리스너는 같은 트랜잭션에서 둘을 적재한다 —
+            // 고스트 푸시 outbox(발송은 별도 스윕)와 권한 재허용 고지(알림함). 둘 다 예외를
+            // 삼키므로 여기 sync 평가가 그것 때문에 롤백되지 않는다.
             eventPublisher.publishEvent(new PermissionGapDetected(
                     member.getUserId(), member.getChallengeId(), method.name(), today, now));
         }
