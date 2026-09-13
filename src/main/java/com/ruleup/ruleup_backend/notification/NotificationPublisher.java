@@ -12,8 +12,11 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * 알림 발행 — <b>적재 → 커밋 → enqueue</b>.
@@ -23,6 +26,13 @@ import java.util.Optional;
  * 커밋된 것이므로 <b>적재 누락이라는 실패 모드가 없다</b>. 아웃박스를 걷어낸 이유가 이것이다 —
  * 그 구조는 「릴레이 5회 실패 = 적재 누락」이라는 실패 모드를 스스로 만들고 그것을 알람으로
  * 감시하는 형태였다.
+ *
+ * <h4>그 대가로 적재는 도메인 판정을 되돌릴 수 없다</h4>
+ * 알림 하나 때문에 강퇴 판정이 롤백되면 안 된다(백엔드 4-1). 그래서 세 가지를 지킨다 —
+ * ① 문구·딥링크는 컬럼에 맞춰 폴백·절단하고({@link #fit}) ② 멱등키가 없어도 적재는 하고
+ * ③ <b>같은 멱등키의 동시 발행을 예외가 아니라 0행으로 흡수한다</b>({@link NotificationStore}).
+ * ③ 이 특히 중요하다 — 크론이 ECS 태스크 수만큼 동시에 도는 것을 설계가 전제하고 있어서
+ * 같은 키의 충돌은 사고가 아니라 정상 경로다.
  *
  * <h4>적재 경로에 조건 분기가 하나도 없다</h4>
  * 토글·음소거·야간·억제는 전부 <b>푸시만</b> 막고 컨슈머가 발송 직전에 평가한다. 차단도 여기서
@@ -45,7 +55,7 @@ public class NotificationPublisher {
     /**
      * 컬럼 상한 — {@code notifications.title(100) · body(500) · deeplink(255)}.
      *
-     * <p>넘긴 값을 그대로 저장하면 flush 에서 터지고, 적재가 도메인 트랜잭션 안이라
+     * <p>넘긴 값을 그대로 저장하면 INSERT 가 터지고, 적재가 도메인 트랜잭션 안이라
      * <b>알림 문구 하나가 강퇴 판정을 되돌린다</b>. 백엔드 4-1 이 요구하는 「예외 대신 폴백」이
      * 이것이다 — 잘린 고지는 남지만 판정이 사라지지는 않는다.
      */
@@ -56,7 +66,7 @@ public class NotificationPublisher {
     private static final String TITLE_FALLBACK = "새 알림이 도착했어요";
     private static final String BODY_FALLBACK = "자세한 내용은 앱에서 확인해주세요.";
 
-    private final NotificationRepository notificationRepository;
+    private final NotificationStore store;
     private final NotificationQueue queue;
 
     /**
@@ -74,20 +84,27 @@ public class NotificationPublisher {
      * enqueue 하므로 SQS 호출이 100건에 한 번이다.
      */
     public List<Notification> publishAll(List<NotificationEvent> events) {
+        if (events.isEmpty()) return List.of();
         Instant now = Instant.now();
-        List<Notification> stored = new ArrayList<>(events.size());
-        List<NotificationMessage> messages = new ArrayList<>(events.size());
 
         // 적재된 행과 그것을 낸 이벤트의 짝을 유지한다. 행만 모아 두면 대상 토큰처럼
         // **적재되지 않는** 전달 힌트를 큐로 넘길 방법이 없다.
+        List<Notification> rows = new ArrayList<>(events.size());
+        Map<UUID, NotificationEvent> source = new HashMap<>(events.size());
         for (NotificationEvent event : events) {
-            Notification row = store(event, now);
-            if (row == null) continue;
-            stored.add(row);
+            Notification row = row(event, now);
+            rows.add(row);
+            source.put(row.getId(), event);
+        }
+
+        List<Notification> stored = store.store(rows);
+
+        List<NotificationMessage> messages = new ArrayList<>(stored.size());
+        for (Notification row : stored) {
             // 푸시 대상만 큐로. 공지는 pushable=false 라 적재만 되고 알림 센터에만 남는다.
             if (NotificationType.find(row.getType())
                     .map(NotificationType::isPushable).orElse(false)) {
-                messages.add(NotificationMessage.from(row, event.targetToken()));
+                messages.add(NotificationMessage.from(row, source.get(row.getId()).targetToken()));
             }
         }
         if (!messages.isEmpty()) enqueueAfterCommit(messages);
@@ -96,32 +113,26 @@ public class NotificationPublisher {
     }
 
     /**
-     * 적재 1건. 멱등키가 이미 있으면 <b>조용히 건너뛴다</b> — 발행 재시도이지 오류가 아니다.
-     *
-     * <p>겹침을 예외로 잡지 않고 <b>먼저 조회해서</b> 거른다. 적재가 도메인 트랜잭션 안이라,
-     * 제약 위반이 flush 에서 터지면 영속성 컨텍스트가 죽어 <b>강퇴 판정까지 롤백된다</b>.
-     * 진짜 경합(같은 키가 동시에 두 번)은 {@code uq_notifications_dedup} 이 끝까지 막고,
-     * 이 조회는 흔한 재시도 경로가 예외로 가지 않게 하는 장치다.
+     * 적재할 행 1건. <b>겹침을 여기서 조회로 거르지 않는다</b> — 선조회는 동시 발행을 막지
+     * 못하면서 도메인 트랜잭션을 위험에 빠뜨리기만 한다. 판정은 {@link NotificationStore} 의
+     * INSERT 한 문장이 한다.
      *
      * <p>키가 없는 발행은 경고만 남기고 적재한다. 절대 규칙 1이 멱등 보호보다 위다.
      */
-    private Notification store(NotificationEvent event, Instant now) {
+    private Notification row(NotificationEvent event, Instant now) {
         String dedupKey = event.dedupKey();
         if (dedupKey == null) {
             log.warn("알림 멱등키 없음 — 발행 재시도가 중복 적재될 수 있다. type={} user={}",
                     event.type(), event.userId());
-        } else if (notificationRepository.existsByDedupKey(dedupKey)) {
-            log.debug("같은 멱등키로 이미 적재돼 있다. key={}", dedupKey);
-            return null;
         }
         // 문구는 컬럼에 맞춰 넣는다. 발행부가 빈 값이나 긴 값을 넘겨도 여기서 흡수해야 한다 —
-        // 그대로 저장하면 flush 에서 터져 발행부의 도메인 판정까지 함께 롤백된다.
-        return notificationRepository.save(Notification.of(
+        // 그대로 저장하면 INSERT 가 터져 발행부의 도메인 판정까지 함께 롤백된다.
+        return Notification.of(
                 event.userId(), event.type(),
                 fit(event.title(), TITLE_MAX, TITLE_FALLBACK, event, "제목"),
                 fit(event.body(), BODY_MAX, BODY_FALLBACK, event, "본문"),
                 event.challengeId(),
-                clamp(event.resolvedDeeplink(), event), dedupKey, event.suppressKey(), now));
+                clamp(event.resolvedDeeplink(), event), dedupKey, event.suppressKey(), now);
     }
 
     /**
