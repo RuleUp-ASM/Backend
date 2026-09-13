@@ -71,7 +71,10 @@ class VerificationSignalIngestIT extends VerificationApiSupport {
 
     private int storedSignalsOf(UUID userId) {
         Integer n = jdbc().queryForObject(
-                "SELECT COUNT(*) FROM verification_signals WHERE userId = ?", Integer.class, bytes(userId));
+                "SELECT (SELECT COUNT(*) FROM verification_location_signals WHERE userId = ?)"
+                        + " + (SELECT COUNT(*) FROM verification_device_usage_signals WHERE userId = ?)"
+                        + " + (SELECT COUNT(*) FROM verification_health_connect_signals WHERE userId = ?)",
+                Integer.class, bytes(userId), bytes(userId), bytes(userId));
         return n != null ? n : 0;
     }
 
@@ -82,6 +85,53 @@ class VerificationSignalIngestIT extends VerificationApiSupport {
     }
 
     private static String visitParams() { return "{\"duration_min\":30,\"radius_m\":100}"; }
+
+    private int countIn(String table, UUID userId) {
+        Integer n = jdbc().queryForObject(
+                "SELECT COUNT(*) FROM " + table + " WHERE userId = ?", Integer.class, bytes(userId));
+        return n != null ? n : 0;
+    }
+
+    private int dayPartitionsOf(String table) {
+        Integer n = jdbc().queryForObject(
+                "SELECT COUNT(*) FROM information_schema.PARTITIONS"
+                        + " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?"
+                        + " AND PARTITION_NAME LIKE 'p2%'", Integer.class, table);
+        return n != null ? n : 0;
+    }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("저장 도메인")
+    class Domains {
+
+        @Test
+        @DisplayName("입력 타입은 5종 그대로지만 저장은 셋으로 갈린다 — 위치와 앱 사용이 같은 테이블에 섞이지 않는다")
+        void signalsAreRoutedByDomain() throws Exception {
+            Member me = member(uniq("domain"));
+            UUID challenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
+            UUID memberId = insertReadyMember(challenge, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+
+            syncOk(me.token(), List.of(
+                    geofenceSignal(memberId, "ENTER", todayAt(9, 0)),
+                    usageSignal("com.example.app", todayAt(10, 0), todayAt(10, 30))));
+
+            assertThat(countIn("verification_location_signals", me.id()))
+                    .as("지오펜스는 위치 도메인").isEqualTo(1);
+            assertThat(countIn("verification_device_usage_signals", me.id()))
+                    .as("앱 사용은 기기 사용 도메인").isEqualTo(1);
+            assertThat(countIn("verification_health_connect_signals", me.id())).isZero();
+        }
+
+        @Test
+        @DisplayName("일자 파티션이 미리 잘려 있다 — 없으면 만료분을 날짜별로 떨어뜨릴 수 없다")
+        void dayPartitionsArePreparedAhead() {
+            // 기동 시 정비가 최소 7일 앞을 확보한다(스펙 4-1-1).
+            assertThat(dayPartitionsOf("verification_location_signals")).isGreaterThanOrEqualTo(7);
+            assertThat(dayPartitionsOf("verification_device_usage_signals")).isGreaterThanOrEqualTo(7);
+            assertThat(dayPartitionsOf("verification_health_connect_signals")).isGreaterThanOrEqualTo(7);
+        }
+    }
 
     @Nested
     @DisplayName("원본 저장")

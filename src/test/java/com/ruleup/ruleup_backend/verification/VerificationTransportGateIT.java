@@ -94,7 +94,10 @@ class VerificationTransportGateIT extends VerificationApiSupport {
 
     private int storedSignalsOf(UUID userId) {
         Integer n = jdbc().queryForObject(
-                "SELECT COUNT(*) FROM verification_signals WHERE userId = ?", Integer.class, bytes(userId));
+                "SELECT (SELECT COUNT(*) FROM verification_location_signals WHERE userId = ?)"
+                        + " + (SELECT COUNT(*) FROM verification_device_usage_signals WHERE userId = ?)"
+                        + " + (SELECT COUNT(*) FROM verification_health_connect_signals WHERE userId = ?)",
+                Integer.class, bytes(userId), bytes(userId), bytes(userId));
         return n != null ? n : 0;
     }
 
