@@ -94,15 +94,15 @@ public enum NotificationType {
     /**
      * 부정행위 검출 — 검출 1회가 곧 강퇴·영구 차단이다.
      *
-     * <p>확정값은 {@code ruleup://me/cheat-history} 지만 <b>지금 이 값이 계약대로다</b>.
-     * 공통 #18 이 「목적지는 확정(2026-09-07), 적용은 보류」로 두고 <b>「그것이 끝나기 전까지
-     * 서버는 {@code me/sanctions} 를 보낸다」</b>고 명시했다 — 그 화면을 받칠 조회 API 가
-     * {@code GET /users/me/sanctions} 하나뿐이고, 그 응답으로 검출 건과 이의 가능 여부를 그릴 수
-     * 있는지 확인이 끝나지 않았다. 없는 화면을 가리키는 것이 잘못된 화면을 가리키는 것보다
-     * 나쁘다 — 구 {@code verification/{id}} 가 빈 화면으로 갔던 그 문제다.
+     * <p>진입점은 <b>제재 이력으로 확정</b>됐다(공통 #18 종결, 2026-09-13). 별도
+     * {@code me/cheat-history} 를 만들지 않는다 — {@code GET /users/me/sanctions} 의 자동 제재
+     * 트랙이 이미 검출 건을 그릴 수 있게 내린다({@code reasonCode = CHEAT_DETECTED} ·
+     * {@code permanent = true} · 방 제목 · 발생 시각).
      *
-     * <p>그러므로 공통 8절 표의 {@code me/cheat-history} 와 이 값의 차이는 <b>미구현이 아니라
-     * 대기</b>다. 화면과 조회 API 가 생기면 이 상수와 그 테스트를 함께 바꾼다.
+     * <p>#18 이 남겨 둔 「이의 기한 경과 안내까지 수행할 화면이 필요하다」는 요구는 <b>다른
+     * 결정으로 이미 해소됐다</b>. 그 API 계약이 「열람 전용이며 이의 제기 버튼을 두지 않는다 —
+     * 강퇴는 CS 문의로만 다툰다」로 정리했으므로, 부정행위 강퇴를 다투는 경로는 이의가 아니라
+     * CS 문의({@link #CS_ANSWERED})다. 화면 하나를 더 만들 이유가 없다.
      */
     CHEAT_DETECTED(NotificationToggleGroup.ACCOUNT, "ruleup://me/sanctions",
             new String[]{EVENT_KEY}),
@@ -150,8 +150,10 @@ public enum NotificationType {
     /**
      * 연속 실패 경고 — 강퇴 직전 고지다.
      *
-     * <p>인터벌은 스펙에서 미정으로 남아 있던 유일한 값이며 <b>24시간으로 확정</b>했다(2026-09-08).
-     * 다른 억제 타입의 기본값과 같고, 같은 루틴의 경고가 하루에 두 번 이상 울릴 이유가 없다.
+     * <p>인터벌 <b>24시간 확정</b>(백엔드 5-1 의 유일한 미정값, 2026-09-08 결정 → 2026-09-13
+     * 알림 정책 §4 표에 반영). 억제 키가 {@code (challenge_id, routine_id)} 라 <b>방마다 따로</b>
+     * 울리므로 이 억제가 막는 것은 「같은 방 같은 루틴의 경고가 하루에 두 번」뿐이다. 정책 §7 의
+     * 기본값과도 같다.
      */
     CONSECUTIVE_FAILURE_WARNING(NotificationToggleGroup.CHALLENGE,
             "ruleup://challenges/{challenge_id}",

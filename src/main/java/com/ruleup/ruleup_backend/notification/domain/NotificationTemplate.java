@@ -111,11 +111,12 @@ public enum NotificationTemplate {
             "이 챌린지에는 다시 참여할 수 없어요. 자세한 내용은 제재 이력에서 확인해주세요."),
 
     /**
-     * 이의 인용. <b>기각 문구는 아직 없다</b> — 기각을 고지하는 발행부가 없기 때문이다.
-     * 기각 경로가 생기면 {@code REJECTED} 변형을 여기 추가한다. 변형으로 갈라 둔 이유가 그것이다:
-     * 변형 없이 단일 문구로 두면 기각 발행이 <b>인용 문구를 그대로 써버린다</b>.
+     * 이의 결과 — <b>문구가 하나뿐인 것이 맞다</b>. 인증 이의는 판정하지 않는 자동 인용
+     * 구제권이라(인증 정책 §5) 기각 상태가 아예 없다 — {@code Appeal} 에 PENDING·REJECTED 가
+     * 없고, 형식 미달은 접수 자체가 400/409 로 끝나 이력도 알림도 남지 않는다.
+     * {@code AppealResponse}·{@code MyAppealsResponse} 가 「ACCEPTED 고정」으로 계약돼 있다.
      */
-    APPEAL_RESULT_ACCEPTED(NotificationType.APPEAL_RESULT, VARIANT, "ACCEPTED",
+    APPEAL_RESULT(NotificationType.APPEAL_RESULT,
             "이의가 받아들여졌어요", "인증이 완료로 정정됐어요. 진행률과 연속 기록도 함께 되돌렸어요."),
 
     TERMS_UPDATED(NotificationType.TERMS_UPDATED,

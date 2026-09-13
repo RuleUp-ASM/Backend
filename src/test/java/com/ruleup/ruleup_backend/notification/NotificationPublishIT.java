@@ -249,8 +249,7 @@ class NotificationPublishIT {
             UUID userId = newUser();
             txTemplate.executeWithoutResult(t -> publisher.publish(
                     NotificationEvent.of(userId, NotificationType.APPEAL_RESULT,
-                            Map.of(NotificationParams.VARIANT, "ACCEPTED",
-                                    NotificationParams.APPEAL_ID, "ap-1"))));
+                            Map.of(NotificationParams.APPEAL_ID, "ap-1"))));
 
             Notification n = inbox(userId).getFirst();
             assertThat(n.getTitle()).as("발행부가 아니라 레지스트리가 정한 문구다")
@@ -386,8 +385,7 @@ class NotificationPublishIT {
             UUID userId = newUser();
             txTemplate.executeWithoutResult(t -> publisher.publish(NotificationEvent.of(
                     userId, NotificationType.APPEAL_RESULT,
-                    Map.of(NotificationParams.VARIANT, "ACCEPTED",
-                            NotificationParams.APPEAL_ID, "ap-payload"))));
+                    Map.of(NotificationParams.APPEAL_ID, "ap-payload"))));
 
             NotificationMessage m = spy().sent.getFirst();
             assertThat(m.userId()).isEqualTo(userId);

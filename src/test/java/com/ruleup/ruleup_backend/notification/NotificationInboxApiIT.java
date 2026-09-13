@@ -82,8 +82,7 @@ class NotificationInboxApiIT extends AuthApiSupport {
                 ? NotificationEvent.authored(userId, type, "제목-" + key, "본문-" + key,
                         Map.of(NotificationParams.ANNOUNCEMENT_ID, key))
                 : NotificationEvent.of(userId, type,
-                        Map.of(NotificationParams.VARIANT, "ACCEPTED",
-                                NotificationParams.EVENT_KEY, key,
+                        Map.of(NotificationParams.EVENT_KEY, key,
                                 NotificationParams.APPEAL_ID, key));
         txTemplate.executeWithoutResult(t -> publisher.publish(event));
     }

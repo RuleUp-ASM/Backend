@@ -102,8 +102,7 @@ public class AppealService {
         // 정정 사실을 확인할 자리가 알림함뿐이다. 이의 하나에 결과는 하나라 appeal_id 가 곧 멱등 키다.
         notificationPublisher.publish(NotificationEvent.of(userId,
                 NotificationType.APPEAL_RESULT,
-                Map.of(NotificationParams.VARIANT, "ACCEPTED",
-                        NotificationParams.APPEAL_ID, appeal.getId().toString())));
+                Map.of(NotificationParams.APPEAL_ID, appeal.getId().toString())));
 
         return new AppealResponse(
                 appeal.getId().toString(),

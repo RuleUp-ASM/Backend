@@ -76,11 +76,19 @@ class NotificationTemplateTest {
         @DisplayName("맞는 변형이 없으면 null 이다 — 다른 사건의 문구를 대신 내보내지 않는다")
         void unknownVariantRendersNothing() {
             NotificationTemplate.Rendered rendered = NotificationTemplate.render(
-                    NotificationType.APPEAL_RESULT,
-                    Map.of(NotificationParams.VARIANT, "REJECTED"));
+                    NotificationType.ACCOUNT_SANCTION,
+                    Map.of(NotificationParams.VARIANT, "WARNING"));
 
             assertThat(rendered.title()).isNull();
             assertThat(rendered.body()).isNull();
+        }
+
+        @Test
+        @DisplayName("이의 결과는 변형이 없다 — 자동 인용 구제권이라 기각 상태가 아예 없다")
+        void appealHasSingleText() {
+            assertThat(NotificationTemplate.of(NotificationType.APPEAL_RESULT))
+                    .singleElement()
+                    .extracting(NotificationTemplate::variantParam).isNull();
         }
     }
 

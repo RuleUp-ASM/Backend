@@ -159,7 +159,7 @@ class NotificationRegistryTest {
         }
 
         @Test
-        @DisplayName("부정행위는 me/cheat-history 가 확정값이나 받침 화면이 없어 me/sanctions 를 보낸다 — 공통 #18")
+        @DisplayName("부정행위는 제재 이력으로 보낸다 — 공통 #18 종결(2026-09-13)")
         void cheatDetectedStaysOnSanctions() {
             assertThat(link(NotificationType.CHEAT_DETECTED)).isEqualTo("ruleup://me/sanctions");
         }

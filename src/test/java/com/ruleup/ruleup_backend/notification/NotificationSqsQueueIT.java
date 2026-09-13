@@ -126,8 +126,7 @@ class NotificationSqsQueueIT {
         UUID userId = newUser();
         txTemplate.executeWithoutResult(t -> publisher.publish(NotificationEvent.of(
                 userId, NotificationType.APPEAL_RESULT,
-                Map.of(NotificationParams.VARIANT, "ACCEPTED",
-                        NotificationParams.APPEAL_ID, "ap-" + SEQ.incrementAndGet()))));
+                Map.of(NotificationParams.APPEAL_ID, "ap-" + SEQ.incrementAndGet()))));
 
         List<Message> messages = receiveAll();
         assertThat(messages).hasSize(1);
@@ -154,8 +153,7 @@ class NotificationSqsQueueIT {
         List<NotificationEvent> events = new ArrayList<>();
         for (int i = 0; i < 100; i++) {
             events.add(NotificationEvent.of(newUser(), NotificationType.APPEAL_RESULT,
-                    Map.of(NotificationParams.VARIANT, "ACCEPTED",
-                            NotificationParams.APPEAL_ID, "bulk-" + SEQ.incrementAndGet())));
+                    Map.of(NotificationParams.APPEAL_ID, "bulk-" + SEQ.incrementAndGet())));
         }
         txTemplate.executeWithoutResult(t -> publisher.publishAll(events));
 
@@ -170,8 +168,7 @@ class NotificationSqsQueueIT {
         List<NotificationEvent> events = new ArrayList<>();
         for (int i = 0; i < 101; i++) {
             events.add(NotificationEvent.of(newUser(), NotificationType.APPEAL_RESULT,
-                    Map.of(NotificationParams.VARIANT, "ACCEPTED",
-                            NotificationParams.APPEAL_ID, "split-" + SEQ.incrementAndGet())));
+                    Map.of(NotificationParams.APPEAL_ID, "split-" + SEQ.incrementAndGet())));
         }
         txTemplate.executeWithoutResult(t -> publisher.publishAll(events));
 

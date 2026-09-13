@@ -57,8 +57,7 @@ class NotificationPurgeIT {
     private void store(UUID userId, String key) {
         txTemplate.executeWithoutResult(t -> publisher.publish(NotificationEvent.of(
                 userId, NotificationType.APPEAL_RESULT,
-                Map.of(NotificationParams.VARIANT, "ACCEPTED",
-                        NotificationParams.APPEAL_ID, key))));
+                Map.of(NotificationParams.APPEAL_ID, key))));
     }
 
     /**
