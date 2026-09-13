@@ -112,10 +112,9 @@ public class VerificationManualService {
         // 알림이 영영 없다. verification_id 가 멱등 키라 취소 후 다시 체크해도 한 번만 적재된다.
         notificationPublisher.publish(NotificationEvent.forChallenge(userId,
                 NotificationType.VERIFICATION_RESULT,
-                "인증이 완료됐어요",
-                "오늘 몫을 체크했어요. 진행률에 반영됐어요.",
                 challengeId,
-                Map.of(NotificationParams.VERIFICATION_ID, daily.getId().toString(),
+                Map.of(NotificationParams.VARIANT, "MANUAL_SUCCESS",
+                        NotificationParams.VERIFICATION_ID, daily.getId().toString(),
                         NotificationParams.CHALLENGE_ID, challengeId.toString())));
 
         return new ManualVerificationResponse(

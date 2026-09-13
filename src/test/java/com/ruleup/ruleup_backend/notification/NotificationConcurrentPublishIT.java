@@ -101,13 +101,14 @@ class NotificationConcurrentPublishIT {
 
     private NotificationEvent appealResult(UUID userId, String appealId) {
         return NotificationEvent.of(userId, NotificationType.APPEAL_RESULT,
-                "이의 결과", "본문", Map.of(NotificationParams.APPEAL_ID, appealId));
+                Map.of(NotificationParams.VARIANT, "ACCEPTED",
+                        NotificationParams.APPEAL_ID, appealId));
     }
 
     /** 같은 트랜잭션에 딸린 별개의 적재. 롤백됐는지 확인하는 표식이다. */
     private NotificationEvent marker(UUID userId, String tag) {
         return NotificationEvent.of(userId, NotificationType.TERMS_UPDATED,
-                "약관이 개정됐어요", "본문", Map.of(NotificationParams.EVENT_KEY, tag));
+                Map.of(NotificationParams.EVENT_KEY, tag));
     }
 
     private String markerKey(UUID userId, String tag) {

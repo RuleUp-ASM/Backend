@@ -344,10 +344,9 @@ public class VerificationSyncService {
                 // 같은 날을 여러 번 sync 해도 verification_id 멱등 키가 두 번째 적재를 막는다.
                 notificationPublisher.publish(NotificationEvent.forChallenge(member.getUserId(),
                         NotificationType.VERIFICATION_RESULT,
-                        "인증이 완료됐어요",
-                        "오늘 몫을 채웠어요. 진행률에 반영됐어요.",
                         member.getChallengeId(),
-                        Map.of(NotificationParams.VERIFICATION_ID, daily.getId().toString(),
+                        Map.of(NotificationParams.VARIANT, "SYNC_SUCCESS",
+                                NotificationParams.VERIFICATION_ID, daily.getId().toString(),
                                 NotificationParams.CHALLENGE_ID,
                                 member.getChallengeId().toString())));
             }

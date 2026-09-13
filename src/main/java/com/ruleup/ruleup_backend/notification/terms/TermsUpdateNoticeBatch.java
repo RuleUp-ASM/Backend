@@ -74,8 +74,6 @@ public class TermsUpdateNoticeBatch {
         for (UserAgreementState state : outdated) {
             events.add(NotificationEvent.of(state.getUserId(),
                     NotificationType.TERMS_UPDATED,
-                    "약관이 개정됐어요",
-                    "계속 이용하시려면 새 약관에 동의해주세요.",
                     // 개정마다 한 번 — 같은 버전이면 재실행해도 적재되지 않는다.
                     Map.of(NotificationParams.EVENT_KEY, type.name() + ":" + current)));
         }

@@ -79,9 +79,10 @@ public class WatcherReactionService {
         notificationPublisher.publish(NotificationEvent.of(
                 relation.getTargetUserId(),
                 NotificationType.WATCHER_REACTION,
-                reaction == ReactionType.CHEER ? "응원이 도착했어요" : "놀림이 도착했어요",
-                reactorNickname + "님이 반응을 보냈어요.",
-                Map.of(NotificationParams.EVENT_KEY, noticeId + ":" + watcherUserId,
+                // 응원과 놀림은 제목이 다르다 — 문구 선택은 레지스트리가 한다.
+                Map.of(NotificationParams.VARIANT, reaction.name(),
+                        NotificationParams.ACTOR_NAME, reactorNickname,
+                        NotificationParams.EVENT_KEY, noticeId + ":" + watcherUserId,
                         NotificationParams.CHALLENGE_ID, relation.getChallengeId().toString(),
                         NotificationParams.SENDER_ID, watcherUserId.toString())));
 

@@ -82,16 +82,10 @@ public class DormancyNoticeBatch {
             // 탈퇴 예고 선을 넘었으면 그쪽만 보낸다. 둘 다 보내면 같은 날 두 통이 오고,
             // 사용자는 더 무거운 쪽(탈퇴)을 놓친다.
             if (lastActive.isBefore(withdrawalLine)) {
-                publish(user, NotificationType.INACTIVE_WITHDRAWAL_NOTICE,
-                        "오랫동안 들어오지 않으셨어요",
-                        "계정이 곧 정리될 예정이에요. 계속 쓰시려면 한 번만 들어와주세요.",
-                        "withdrawal");
+                publish(user, NotificationType.INACTIVE_WITHDRAWAL_NOTICE, "withdrawal");
                 withdrawal++;
             } else {
-                publish(user, NotificationType.DORMANCY_NOTICE,
-                        "곧 휴면 계정이 돼요",
-                        "한동안 활동이 없어 곧 휴면으로 전환돼요. 지금 들어오시면 그대로 유지돼요.",
-                        "dormancy");
+                publish(user, NotificationType.DORMANCY_NOTICE, "dormancy");
                 dormancy++;
             }
         }
@@ -102,8 +96,8 @@ public class DormancyNoticeBatch {
     }
 
     /** 키에 {@code lastActiveAt} 을 넣어 같은 침묵 구간에서는 한 번만 적재되게 한다. */
-    private void publish(User user, NotificationType type, String title, String body, String kind) {
-        publisher.publish(NotificationEvent.of(user.getId(), type, title, body,
+    private void publish(User user, NotificationType type, String kind) {
+        publisher.publish(NotificationEvent.of(user.getId(), type,
                 Map.of(NotificationParams.EVENT_KEY,
                         kind + ":" + user.getLastActiveAt().toEpochMilli())));
     }

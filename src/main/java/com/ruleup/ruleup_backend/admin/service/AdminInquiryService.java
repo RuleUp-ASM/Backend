@@ -159,8 +159,6 @@ public class AdminInquiryService {
         // 본문을 알림에 싣지 않는다 — 잠금화면에 CS 답변 전문이 뜨면 곤란한 사연이 있다.
         notificationPublisher.publish(NotificationEvent.of(inquiry.getUserId(),
                 NotificationType.CS_ANSWERED,
-                "문의에 답변이 등록됐어요",
-                "보내주신 문의에 답변이 등록됐어요. 눌러서 확인해주세요.",
                 Map.of(NotificationParams.INQUIRY_ID, inquiryId.toString())));
 
         return detailOf(inquiry);

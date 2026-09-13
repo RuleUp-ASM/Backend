@@ -135,7 +135,8 @@ public class AnnouncementFanoutJob {
 
         return publisher.publishAll(recipients.stream()
                 .map(userId -> {
-                    NotificationEvent event = NotificationEvent.of(userId, type,
+                    // 공지·캠페인은 운영자가 쓴 문장이 곧 내용이라 템플릿으로 환원할 수 없다.
+                    NotificationEvent event = NotificationEvent.authored(userId, type,
                             announcement.getTitle(), announcement.getBody(), params);
                     return (deeplink == null || deeplink.isBlank())
                             ? event : event.withDeeplink(deeplink);

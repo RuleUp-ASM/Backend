@@ -176,8 +176,6 @@ public class RoutineReminderBatch {
         return publisher.publishAll(targets.stream()
                 .map(entry -> NotificationEvent.forChallenge(entry.getKey(),
                         NotificationType.ROUTINE_REMINDER,
-                        "오늘 인증할 루틴이 남아 있어요",
-                        "아직 인증하지 않은 루틴이 있어요. 오늘이 지나기 전에 확인해주세요.",
                         entry.getValue(),
                         Map.of(NotificationParams.CHALLENGE_ID, entry.getValue().toString(),
                                 NotificationParams.DATE, date.toString(),

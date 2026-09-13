@@ -160,12 +160,10 @@ public class VerificationFinalizeService {
         if (member != null) {
             notificationPublisher.publish(NotificationEvent.forChallenge(member.getUserId(),
                     NotificationType.VERIFICATION_RESULT,
-                    confirmedFail ? "인증이 실패로 확정됐어요" : "인증이 완료로 확정됐어요",
-                    confirmedFail
-                            ? "이의 기간이 지나 이 결과는 되돌릴 수 없어요."
-                            : "그날 몫을 채웠어요. 진행률에 반영됐어요.",
                     daily.getChallengeId(),
-                    Map.of(NotificationParams.VERIFICATION_ID, daily.getId().toString(),
+                    Map.of(NotificationParams.VARIANT,
+                                    confirmedFail ? "CONFIRMED_FAILURE" : "CONFIRMED_SUCCESS",
+                            NotificationParams.VERIFICATION_ID, daily.getId().toString(),
                             NotificationParams.CHALLENGE_ID, daily.getChallengeId().toString())));
         }
         return member != null;

@@ -164,8 +164,6 @@ public class ScoreService {
 
         notificationPublisher.publish(NotificationEvent.forChallenge(userId,
                 NotificationType.CONSECUTIVE_FAILURE_WARNING,
-                "연속으로 인증을 놓치고 있어요",
-                "한 번 더 놓치면 이 챌린지에서 나가게 돼요. 다음 사이클은 꼭 채워보세요.",
                 challengeId,
                 Map.of(NotificationParams.EVENT_KEY, challengeId + ":" + cycleNo,
                         NotificationParams.CHALLENGE_ID, challengeId.toString(),
@@ -306,12 +304,7 @@ public class ScoreService {
 
         notificationPublisher.publish(NotificationEvent.of(summary.getUserId(),
                 changed ? NotificationType.TIER_CHANGED : NotificationType.TIER_BOUNDARY_NEAR,
-                changed
-                        ? (up ? "티어가 올랐어요" : "티어가 내려갔어요")
-                        : (up ? "다음 티어가 코앞이에요" : "티어가 내려갈 수 있어요"),
-                changed
-                        ? (up ? "축하해요! 새 티어로 올라섰어요." : "점수가 내려가 티어가 조정됐어요.")
-                        : (up ? "조금만 더 쌓으면 다음 티어예요." : "점수가 조금만 더 내려가면 티어가 조정돼요."),
+                // 문구는 direction 이 고른다 — 승급·강등, 경계 근접·이탈이 전부 이 값으로 갈린다.
                 Map.of(NotificationParams.DIRECTION, notice.direction(),
                         NotificationParams.EVENT_KEY, eventId.toString())));
     }

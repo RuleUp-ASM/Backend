@@ -97,8 +97,6 @@ public class GhostPushSetupReminderService {
 
         notificationPublisher.publish(NotificationEvent.of(userId,
                 NotificationType.PERMISSION_REGRANT_REQUIRED,
-                "인증 권한을 다시 허용해주세요",
-                "권한이 없어 자동 인증이 기록되지 않고 있어요. 방 설정에서 다시 허용해주세요.",
                 Map.of(NotificationParams.EVENT_KEY, c.getId() + ":" + permission,
                         NotificationParams.CHALLENGE_ID, c.getId().toString(),
                         NotificationParams.PERMISSION, permission)));

@@ -55,8 +55,7 @@ public class ChallengeActivationService {
         List<Challenge> due = challengeRepository.findUpcomingDueForActivationForUpdate(today, CLAIM_LIMIT);
         for (Challenge c : due) {
             c.activate();
-            notifyLifecycle(c, "STARTED", "챌린지가 시작됐어요",
-                    "오늘부터 인증이 시작돼요. 첫 인증을 잊지 마세요.");
+            notifyLifecycle(c, "STARTED");
             eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(c.getId(), "CHALLENGE_ACTIVATED"));
         }
         if (!due.isEmpty()) {
@@ -71,14 +70,14 @@ public class ChallengeActivationService {
      * 그 방의 현재 멤버 전원에게 생명주기 고지. <b>묶음 발행</b>이라 SQS 호출이 100건에 한 번이고,
      * {@code dedup_key = CHALLENGE_LIFECYCLE:{user}:{challenge}:{phase}} 가 재실행 중복을 막는다.
      */
-    private void notifyLifecycle(Challenge c, String phase, String title, String body) {
+    private void notifyLifecycle(Challenge c, String phase) {
         List<ChallengeMember> members = memberRepository
                 .findByChallengeIdAndStatusOrderByJoinedAtAsc(c.getId(), MemberStatus.ACTIVE);
         if (members.isEmpty()) return;
 
         notificationPublisher.publishAll(members.stream()
                 .map(m -> NotificationEvent.forChallenge(m.getUserId(),
-                        NotificationType.CHALLENGE_LIFECYCLE, title, body, c.getId(),
+                        NotificationType.CHALLENGE_LIFECYCLE, c.getId(),
                         Map.of(NotificationParams.CHALLENGE_ID, c.getId().toString(),
                                 NotificationParams.PHASE, phase)))
                 .toList());

@@ -3,6 +3,7 @@ package com.ruleup.ruleup_backend.notification;
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
 import com.ruleup.ruleup_backend.auth.AuthApiSupport;
 import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
+import com.ruleup.ruleup_backend.notification.domain.NotificationTemplate;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -76,11 +77,15 @@ class NotificationInboxApiIT extends AuthApiSupport {
     }
 
     private void store(UUID userId, NotificationType type, String key) {
-        txTemplate.executeWithoutResult(t -> publisher.publish(NotificationEvent.of(
-                userId, type, "제목-" + key, "본문-" + key,
-                Map.of(NotificationParams.EVENT_KEY, key,
-                        NotificationParams.APPEAL_ID, key,
-                        NotificationParams.ANNOUNCEMENT_ID, key))));
+        // 공지는 운영자가 쓴 문구, 나머지는 레지스트리 렌더 — 발행 경로가 다르다.
+        NotificationEvent event = NotificationTemplate.AUTHORED_TYPES.contains(type)
+                ? NotificationEvent.authored(userId, type, "제목-" + key, "본문-" + key,
+                        Map.of(NotificationParams.ANNOUNCEMENT_ID, key))
+                : NotificationEvent.of(userId, type,
+                        Map.of(NotificationParams.VARIANT, "ACCEPTED",
+                                NotificationParams.EVENT_KEY, key,
+                                NotificationParams.APPEAL_ID, key));
+        txTemplate.executeWithoutResult(t -> publisher.publish(event));
     }
 
     private MvcResult list(String at, String query) throws Exception {
@@ -123,13 +128,14 @@ class NotificationInboxApiIT extends AuthApiSupport {
         @DisplayName("최신순으로 내려오고 항목이 계약된 필드만 담는다")
         void newestFirst() throws Exception {
             Account a = join("목록");
-            store(a.userId(), NotificationType.APPEAL_RESULT, "k1");
+            // 문구가 레지스트리에서 나오므로 순서는 서로 다른 타입으로 구분한다.
+            store(a.userId(), NotificationType.TERMS_UPDATED, "k1");
             store(a.userId(), NotificationType.APPEAL_RESULT, "k2");
 
             MvcResult res = list(a.accessToken(), "");
 
-            assertThat(this_(res, "$.data.items[0].title")).isEqualTo("제목-k2");
-            assertThat(this_(res, "$.data.items[1].title")).isEqualTo("제목-k1");
+            assertThat(this_(res, "$.data.items[0].title")).isEqualTo("이의가 받아들여졌어요");
+            assertThat(this_(res, "$.data.items[1].title")).isEqualTo("약관이 개정됐어요");
             assertThat(this_(res, "$.data.items[0].type")).isEqualTo("APPEAL_RESULT");
             assertThat(this_(res, "$.data.items[0].deeplink")).isEqualTo("ruleup://me/appeals");
             assertThat((Integer) read(res, "$.data.retentionDays")).isEqualTo(180);

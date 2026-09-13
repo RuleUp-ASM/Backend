@@ -163,9 +163,9 @@ public class AdminSanctionService {
         // publish 는 이 트랜잭션에 합류해 발행 의사만 적는다 — 해제가 롤백되면 고지도 함께 사라진다.
         notificationPublisher.publish(NotificationEvent.of(
                 sanction.getUserId(), NotificationType.ACCOUNT_SANCTION,
-                "제재가 해제됐어요", "재검토 결과 제재가 해제됐어요. 다시 이용하실 수 있어요.",
                 // 집행 고지와 해제 고지가 같은 제재 id 를 쓰므로 접두어로 가른다.
-                Map.of(NotificationParams.EVENT_KEY, "revoke:" + sanctionId)));
+                Map.of(NotificationParams.VARIANT, "REVOKED",
+                        NotificationParams.EVENT_KEY, "revoke:" + sanctionId)));
 
         return com.ruleup.ruleup_backend.admin.service.AdminSanctionItems.of(sanction,
                 userRepository.findById(targetUserId).map(u -> u.visibleNicknameTo(null)).orElse(null),
@@ -223,12 +223,11 @@ public class AdminSanctionService {
 
         notificationPublisher.publish(NotificationEvent.of(target.getId(),
                 NotificationType.ACCOUNT_SANCTION,
-                noticeTitle(type),
-                // 본문에 민감정보를 담지 않는다 — 상세는 앱 안에서 본다.
-                endsAt == null ? "자세한 내용은 마이페이지에서 확인해주세요."
-                        : "해제 예정일까지 일부 기능을 이용할 수 없어요. 자세한 내용은 마이페이지에서 확인해주세요.",
-                // 제재 id 가 이 집행을 유일하게 가리킨다. 해제 고지는 revoke: 접두어로 갈린다.
-                Map.of(NotificationParams.EVENT_KEY, sanction.getId().toString())));
+                // 문구는 수단과 기한 유무로 갈린다 — 제재 사유·해제일 같은 민감정보는 담지 않고
+                // 상세는 앱 안에서 본다(백엔드 10절).
+                Map.of(NotificationParams.VARIANT, noticeVariant(type, endsAt),
+                        // 제재 id 가 이 집행을 유일하게 가리킨다. 해제 고지는 revoke: 접두어로 갈린다.
+                        NotificationParams.EVENT_KEY, sanction.getId().toString())));
 
         outboxService.enqueue(SanctionLeaveListener.OUTBOX_TYPE,
                 new SanctionLeaveListener.Payload(target.getId(), sanction.getReasonText()),
@@ -236,12 +235,9 @@ public class AdminSanctionService {
         outboxDispatcher.requestFlush();
     }
 
-    private String noticeTitle(SanctionType type) {
-        return switch (type) {
-            case BAN -> "계정이 영구 정지됐어요";
-            case LOCK -> "계정이 잠겼어요";
-            case FEATURE_SUSPENSION -> "일부 기능이 정지됐어요";
-        };
+    /** 집행 고지의 문구 변형 — 수단 3종 × 기한 유무. 문구 자체는 레지스트리가 소유한다. */
+    private String noticeVariant(SanctionType type, String endsAt) {
+        return (endsAt == null) ? type.name() : type.name() + "_UNTIL";
     }
 
     /**

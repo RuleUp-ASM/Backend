@@ -4,6 +4,7 @@ import com.ruleup.ruleup_backend.TestcontainersConfiguration;
 import com.ruleup.ruleup_backend.notification.domain.Notification;
 import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.domain.NotificationTab;
+import com.ruleup.ruleup_backend.notification.domain.NotificationTemplate;
 import com.ruleup.ruleup_backend.notification.domain.NotificationToggleGroup;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.notification.domain.UserNotificationSetting;
@@ -74,13 +75,25 @@ class NotificationPublishIT {
                 tag + "@example.com", nickname(), null, List.of())).getId();
     }
 
+    /**
+     * 아무 타입이나 하나 발행하기 위한 이벤트. 문구가 레지스트리로 옮겨졌으므로 <b>그 타입이
+     * 요구하는 변형과 치환 값까지</b> 채운다 — 비면 폴백 문구로 적재돼 검증이 무뎌진다.
+     */
     private NotificationEvent event(UUID userId, NotificationType type) {
-        return NotificationEvent.of(userId, type, "제목", "본문", Map.of(
+        Map<String, String> params = new java.util.HashMap<>(Map.of(
                 NotificationParams.EVENT_KEY, "e" + SEQ.incrementAndGet(),
                 NotificationParams.APPEAL_ID, "ap" + SEQ.get(),
                 NotificationParams.VERIFICATION_ID, "v" + SEQ.get(),
                 NotificationParams.DIRECTION, "UP",
-                NotificationParams.ANNOUNCEMENT_ID, "an" + SEQ.get()));
+                NotificationParams.ANNOUNCEMENT_ID, "an" + SEQ.get(),
+                NotificationParams.ACTOR_NAME, "테스터",
+                NotificationParams.CHALLENGE_TITLE, "테스트 방",
+                NotificationParams.ROUTINE_NAME, "아침 러닝",
+                NotificationParams.REASON, "테스트 사유"));
+        // 변형이 있는 타입은 첫 변형으로 렌더한다 — 어느 것이든 문구가 나오기만 하면 된다.
+        NotificationTemplate.of(type).stream().findFirst()
+                .ifPresent(t -> params.putAll(t.variantParams()));
+        return NotificationEvent.of(userId, type, params);
     }
 
     private List<Notification> inbox(UUID userId) {
@@ -235,12 +248,14 @@ class NotificationPublishIT {
         void rendersAtStoreTime() {
             UUID userId = newUser();
             txTemplate.executeWithoutResult(t -> publisher.publish(
-                    NotificationEvent.of(userId, NotificationType.APPEAL_RESULT, "이의 결과", "인용됐어요",
-                            Map.of(NotificationParams.APPEAL_ID, "ap-1"))));
+                    NotificationEvent.of(userId, NotificationType.APPEAL_RESULT,
+                            Map.of(NotificationParams.VARIANT, "ACCEPTED",
+                                    NotificationParams.APPEAL_ID, "ap-1"))));
 
             Notification n = inbox(userId).getFirst();
-            assertThat(n.getTitle()).isEqualTo("이의 결과");
-            assertThat(n.getBody()).isEqualTo("인용됐어요");
+            assertThat(n.getTitle()).as("발행부가 아니라 레지스트리가 정한 문구다")
+                    .isEqualTo("이의가 받아들여졌어요");
+            assertThat(n.getBody()).isEqualTo("인증이 완료로 정정됐어요. 진행률과 연속 기록도 함께 되돌렸어요.");
             assertThat(n.getDeeplink()).isEqualTo("ruleup://me/appeals");
         }
 
@@ -249,8 +264,10 @@ class NotificationPublishIT {
         void deeplinkOverride() {
             UUID userId = newUser();
             txTemplate.executeWithoutResult(t -> publisher.publish(
-                    NotificationEvent.of(userId, NotificationType.MODERATION_REJECTED, "거부", "본문",
-                                    Map.of(NotificationParams.TARGET_KEY, "challenge_title",
+                    NotificationEvent.of(userId, NotificationType.MODERATION_REJECTED,
+                                    Map.of(NotificationParams.VARIANT, "CHALLENGE_TEXT",
+                                            NotificationParams.CHALLENGE_TITLE, "아침 러닝",
+                                            NotificationParams.TARGET_KEY, "challenge_title",
                                             NotificationParams.EVENT_KEY, "m1"))
                             .withDeeplink("ruleup://challenges/c-9/edit")));
 
@@ -263,8 +280,11 @@ class NotificationPublishIT {
         void watcherNoticeHasNoChallengeCounter() {
             UUID watcher = newUser();
             txTemplate.executeWithoutResult(t -> publisher.publish(
-                    NotificationEvent.of(watcher, NotificationType.PENALTY_FAILURE_SHARED, "실패", "본문",
-                            Map.of(NotificationParams.EVENT_KEY, "p1",
+                    NotificationEvent.of(watcher, NotificationType.PENALTY_FAILURE_SHARED,
+                            Map.of(NotificationParams.ACTOR_NAME, "루피",
+                                    NotificationParams.CHALLENGE_TITLE, "아침 러닝",
+                                    NotificationParams.ROUTINE_NAME, "5km 달리기",
+                                    NotificationParams.EVENT_KEY, "p1",
                                     NotificationParams.NOTICE_ID, "n-1",
                                     NotificationParams.CHALLENGE_ID, "c-1",
                                     NotificationParams.ROUTINE_ID, "r-1",
@@ -281,7 +301,7 @@ class NotificationPublishIT {
             txTemplate.executeWithoutResult(t -> {
                 publisher.publish(event(userId, NotificationType.ACCOUNT_SANCTION));
                 publisher.publish(NotificationEvent.of(userId, NotificationType.TIER_BOUNDARY_NEAR,
-                        "경계", "본문", Map.of(NotificationParams.EVENT_KEY, "t1",
+                        Map.of(NotificationParams.EVENT_KEY, "t1",
                                 NotificationParams.DIRECTION, "UP")));
             });
 
@@ -303,9 +323,9 @@ class NotificationPublishIT {
             Map<String, String> params = Map.of(NotificationParams.APPEAL_ID, "ap-same");
 
             txTemplate.executeWithoutResult(t -> publisher.publish(NotificationEvent.of(
-                    userId, NotificationType.APPEAL_RESULT, "이의 결과", "본문", params)));
+                    userId, NotificationType.APPEAL_RESULT, params)));
             txTemplate.executeWithoutResult(t -> publisher.publish(NotificationEvent.of(
-                    userId, NotificationType.APPEAL_RESULT, "이의 결과", "본문", params)));
+                    userId, NotificationType.APPEAL_RESULT, params)));
 
             assertThat(inbox(userId)).hasSize(1);
         }
@@ -317,9 +337,9 @@ class NotificationPublishIT {
             Map<String, String> params = Map.of(NotificationParams.APPEAL_ID, "ap-dup");
 
             txTemplate.executeWithoutResult(t -> publisher.publish(NotificationEvent.of(
-                    userId, NotificationType.APPEAL_RESULT, "이의 결과", "본문", params)));
+                    userId, NotificationType.APPEAL_RESULT, params)));
             txTemplate.executeWithoutResult(t -> publisher.publish(NotificationEvent.of(
-                    userId, NotificationType.APPEAL_RESULT, "이의 결과", "본문", params)));
+                    userId, NotificationType.APPEAL_RESULT, params)));
 
             assertThat(spy().sent).hasSize(1);
         }
@@ -332,9 +352,9 @@ class NotificationPublishIT {
             Map<String, String> params = Map.of(NotificationParams.ANNOUNCEMENT_ID, "an-1");
 
             txTemplate.executeWithoutResult(t -> {
-                publisher.publish(NotificationEvent.of(a, NotificationType.ANNOUNCEMENT,
+                publisher.publish(NotificationEvent.authored(a, NotificationType.ANNOUNCEMENT,
                         "공지", "본문", params));
-                publisher.publish(NotificationEvent.of(b, NotificationType.ANNOUNCEMENT,
+                publisher.publish(NotificationEvent.authored(b, NotificationType.ANNOUNCEMENT,
                         "공지", "본문", params));
             });
 
@@ -352,7 +372,7 @@ class NotificationPublishIT {
         @DisplayName("공지는 적재만 되고 큐에 들어가지 않는다 — pushable=false")
         void announcementIsNeverQueued() {
             UUID userId = newUser();
-            txTemplate.executeWithoutResult(t -> publisher.publish(NotificationEvent.of(
+            txTemplate.executeWithoutResult(t -> publisher.publish(NotificationEvent.authored(
                     userId, NotificationType.ANNOUNCEMENT, "점검 안내", "본문",
                     Map.of(NotificationParams.ANNOUNCEMENT_ID, "an-2"))));
 
@@ -365,16 +385,17 @@ class NotificationPublishIT {
         void messageCarriesRenderedPayload() {
             UUID userId = newUser();
             txTemplate.executeWithoutResult(t -> publisher.publish(NotificationEvent.of(
-                    userId, NotificationType.APPEAL_RESULT, "이의 결과", "인용됐어요",
-                    Map.of(NotificationParams.APPEAL_ID, "ap-payload"))));
+                    userId, NotificationType.APPEAL_RESULT,
+                    Map.of(NotificationParams.VARIANT, "ACCEPTED",
+                            NotificationParams.APPEAL_ID, "ap-payload"))));
 
             NotificationMessage m = spy().sent.getFirst();
             assertThat(m.userId()).isEqualTo(userId);
             assertThat(m.type()).isEqualTo("APPEAL_RESULT");
             assertThat(m.toggleGroup()).isEqualTo(NotificationToggleGroup.ACCOUNT);
             assertThat(m.tab()).isEqualTo(NotificationTab.NOTIFICATION);
-            assertThat(m.title()).isEqualTo("이의 결과");
-            assertThat(m.body()).isEqualTo("인용됐어요");
+            assertThat(m.title()).isEqualTo("이의가 받아들여졌어요");
+            assertThat(m.body()).isEqualTo("인증이 완료로 정정됐어요. 진행률과 연속 기록도 함께 되돌렸어요.");
             assertThat(m.deeplink()).isEqualTo("ruleup://me/appeals");
             assertThat(m.suppressKey()).isNull();
         }

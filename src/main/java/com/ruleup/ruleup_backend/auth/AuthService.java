@@ -340,10 +340,11 @@ public class AuthService {
             user.markNicknameConflict();
             notificationPublisher.publish(NotificationEvent.of(user.getId(),
                     NotificationType.MODERATION_REJECTED,
-                    "닉네임을 변경해주세요",
-                    "쓰시던 닉네임을 다른 분이 사용 중이라 임시 닉네임으로 시작했어요. 프로필에서 새 닉네임을 정해주세요.",
+                    // 심사 거부가 아니라 복원 중 선점 충돌이다 — 잘못한 것이 없는 사람에게
+                    // 「기준 위반」이라고 쓰면 안 되므로 문구 변형이 다르다.
                     // 복원은 계정당 여러 번 일어날 수 있어 복원 시각을 멱등키에 넣는다.
-                    Map.of(NotificationParams.TARGET_KEY, "nickname",
+                    Map.of(NotificationParams.VARIANT, "NICKNAME_TAKEN",
+                            NotificationParams.TARGET_KEY, "nickname",
                             NotificationParams.EVENT_KEY, "restore:" + Instant.now().toEpochMilli())));
         }
 

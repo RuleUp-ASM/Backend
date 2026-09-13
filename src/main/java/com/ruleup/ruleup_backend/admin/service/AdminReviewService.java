@@ -395,12 +395,11 @@ public class AdminReviewService {
             if (c.getImageUrl() != null && !c.getImageUrl().isBlank()) c.rejectAndRemoveImage();
 
             notificationPublisher.publish(NotificationEvent.forChallenge(c.getCreatorId(),
-                            NotificationType.MODERATION_REJECTED,
-                            "챌린지 내용을 바꿔주세요",
-                            "[" + c.publicTitle() + "] 챌린지의 내용이 커뮤니티 기준에 맞지 않아요. "
-                                    + "수정 전까지 다른 사람에게는 임시 제목으로 보여요.", c.getId(),
+                            NotificationType.MODERATION_REJECTED, c.getId(),
                             // 수정 후 다시 거부될 수 있어 시각을 키에 넣는다.
-                            Map.of(NotificationParams.TARGET_KEY, "challenge_text",
+                            Map.of(NotificationParams.VARIANT, "CHALLENGE_CONTENT",
+                                    NotificationParams.CHALLENGE_TITLE, c.publicTitle(),
+                                    NotificationParams.TARGET_KEY, "challenge_text",
                                     NotificationParams.EVENT_KEY,
                                     c.getId() + ":" + Instant.now().toEpochMilli()))
                     .withDeeplink("ruleup://challenges/" + c.getId() + "/edit"));

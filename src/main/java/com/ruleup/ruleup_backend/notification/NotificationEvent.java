@@ -15,6 +15,10 @@ import java.util.UUID;
  * 적재가 도메인 트랜잭션 안에 있기 때문이다 — 템플릿이 엔티티를 들여다보다 터지면
  * <b>알림 버그가 강퇴 판정을 롤백시킨다</b>(백엔드 4-1).
  *
+ * @param title 사람이 쓴 제목. <b>공지·캠페인만</b> 값을 갖는다({@link #authored}) —
+ *              나머지 타입은 null 이고 {@link NotificationTemplate} 이 렌더한다.
+ * @param body 사람이 쓴 본문. 규칙은 {@code title} 과 같다.
+ *
  * @param challengeId <b>카운터 귀속 전용</b>. {@code params} 의 챌린지 값과 의미가 다르다 —
  *                    감시자 통지는 챌린지에서 발생하지만 수신자가 방 멤버가 아니라 여기는 null 이다.
  * @param deeplinkOverride 레지스트리 기본 딥링크를 대체한다. <b>대상 종류에 따라 진입점이 갈리는
@@ -39,33 +43,21 @@ public record NotificationEvent(
         params = (params == null) ? Map.of() : Map.copyOf(params);
     }
 
-    public static NotificationEvent of(UUID userId, NotificationType type, String title, String body,
-                                       Map<String, String> params) {
-        return new NotificationEvent(userId, type, title, body, null, params, null, null);
-    }
-
     /**
-     * 카운터가 뜰 방이 있는 알림. 감시자 통지에는 쓰지 않는다 — 수신자의 「내 챌린지」 목록에
-     * 그 방이 없어 카운터가 뜰 자리가 없다.
-     */
-    public static NotificationEvent forChallenge(UUID userId, NotificationType type, String title,
-                                                 String body, UUID challengeId,
-                                                 Map<String, String> params) {
-        return new NotificationEvent(userId, type, title, body, challengeId, params, null, null);
-    }
-
-    /**
-     * 문구를 <b>레지스트리에서 렌더</b>하는 발행 — 이쪽이 기본 경로다(백엔드 4-1 ①).
+     * 발행 — <b>문구는 레지스트리가 렌더한다</b>(백엔드 4-1 ①).
      *
      * <p>발행부는 무슨 일이 일어났는지만 {@code params} 로 알려주고 문구는 건드리지 않는다.
-     * 제목·본문이 발행 지점마다 흩어져 있으면 기동 시 전 타입 더미 렌더 검증을 할 수 없다.
+     * 제목·본문이 발행 지점마다 흩어져 있으면 기동 시 전 타입 더미 렌더 검증을 할 자리가 없다.
      */
     public static NotificationEvent of(UUID userId, NotificationType type,
                                        Map<String, String> params) {
         return new NotificationEvent(userId, type, null, null, null, params, null, null);
     }
 
-    /** 카운터가 뜰 방이 있는 알림 — 문구는 레지스트리가 렌더한다. */
+    /**
+     * 카운터가 뜰 방이 있는 알림. 감시자 통지에는 쓰지 않는다 — 수신자의 「내 챌린지」 목록에
+     * 그 방이 없어 카운터가 뜰 자리가 없다.
+     */
     public static NotificationEvent forChallenge(UUID userId, NotificationType type,
                                                  UUID challengeId, Map<String, String> params) {
         return new NotificationEvent(userId, type, null, null, challengeId, params, null, null);

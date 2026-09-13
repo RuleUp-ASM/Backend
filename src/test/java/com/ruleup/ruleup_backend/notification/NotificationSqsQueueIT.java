@@ -125,8 +125,9 @@ class NotificationSqsQueueIT {
     void messageCarriesRenderedPayload() throws Exception {
         UUID userId = newUser();
         txTemplate.executeWithoutResult(t -> publisher.publish(NotificationEvent.of(
-                userId, NotificationType.APPEAL_RESULT, "이의 결과", "인용됐어요",
-                Map.of(NotificationParams.APPEAL_ID, "ap-" + SEQ.incrementAndGet()))));
+                userId, NotificationType.APPEAL_RESULT,
+                Map.of(NotificationParams.VARIANT, "ACCEPTED",
+                        NotificationParams.APPEAL_ID, "ap-" + SEQ.incrementAndGet()))));
 
         List<Message> messages = receiveAll();
         assertThat(messages).hasSize(1);
@@ -140,8 +141,9 @@ class NotificationSqsQueueIT {
         assertThat(item.get("type").asText()).isEqualTo("APPEAL_RESULT");
         assertThat(item.get("toggleGroup").asText()).isEqualTo("ACCOUNT");
         assertThat(item.get("tab").asText()).isEqualTo("NOTIFICATION");
-        assertThat(item.get("title").asText()).isEqualTo("이의 결과");
-        assertThat(item.get("body").asText()).isEqualTo("인용됐어요");
+        assertThat(item.get("title").asText()).isEqualTo("이의가 받아들여졌어요");
+        assertThat(item.get("body").asText())
+                .isEqualTo("인증이 완료로 정정됐어요. 진행률과 연속 기록도 함께 되돌렸어요.");
         assertThat(item.get("deeplink").asText()).isEqualTo("ruleup://me/appeals");
         assertThat(item.get("id").asText()).isNotBlank();
     }
@@ -152,8 +154,8 @@ class NotificationSqsQueueIT {
         List<NotificationEvent> events = new ArrayList<>();
         for (int i = 0; i < 100; i++) {
             events.add(NotificationEvent.of(newUser(), NotificationType.APPEAL_RESULT,
-                    "이의 결과", "본문",
-                    Map.of(NotificationParams.APPEAL_ID, "bulk-" + SEQ.incrementAndGet())));
+                    Map.of(NotificationParams.VARIANT, "ACCEPTED",
+                            NotificationParams.APPEAL_ID, "bulk-" + SEQ.incrementAndGet())));
         }
         txTemplate.executeWithoutResult(t -> publisher.publishAll(events));
 
@@ -168,8 +170,8 @@ class NotificationSqsQueueIT {
         List<NotificationEvent> events = new ArrayList<>();
         for (int i = 0; i < 101; i++) {
             events.add(NotificationEvent.of(newUser(), NotificationType.APPEAL_RESULT,
-                    "이의 결과", "본문",
-                    Map.of(NotificationParams.APPEAL_ID, "split-" + SEQ.incrementAndGet())));
+                    Map.of(NotificationParams.VARIANT, "ACCEPTED",
+                            NotificationParams.APPEAL_ID, "split-" + SEQ.incrementAndGet())));
         }
         txTemplate.executeWithoutResult(t -> publisher.publishAll(events));
 
@@ -180,7 +182,7 @@ class NotificationSqsQueueIT {
     @DisplayName("공지는 큐에 들어가지 않는다 — pushable=false 라 적재만 된다")
     void announcementNeverReachesTheQueue() {
         UUID userId = newUser();
-        txTemplate.executeWithoutResult(t -> publisher.publish(NotificationEvent.of(
+        txTemplate.executeWithoutResult(t -> publisher.publish(NotificationEvent.authored(
                 userId, NotificationType.ANNOUNCEMENT, "점검 안내", "본문",
                 Map.of(NotificationParams.ANNOUNCEMENT_ID, "an-" + SEQ.incrementAndGet()))));
 
