@@ -35,7 +35,7 @@ class NotificationRegistryTest {
     class Types {
 
         @Test
-        @DisplayName("23종이며 이름이 스펙 표와 정확히 일치한다")
+        @DisplayName("23종 — 공통 8절 표 22종 + 앱 운영 정책 §5.5 의 CS 답변 1종")
         void twentyThreeTypes() {
             assertThat(Arrays.stream(NotificationType.values()).map(Enum::name))
                     .containsExactlyInAnyOrder(
