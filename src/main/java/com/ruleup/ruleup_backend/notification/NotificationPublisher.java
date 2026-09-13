@@ -129,8 +129,8 @@ public class NotificationPublisher {
         // 그대로 저장하면 INSERT 가 터져 발행부의 도메인 판정까지 함께 롤백된다.
         return Notification.of(
                 event.userId(), event.type(),
-                fit(event.title(), TITLE_MAX, TITLE_FALLBACK, event, "제목"),
-                fit(event.body(), BODY_MAX, BODY_FALLBACK, event, "본문"),
+                fit(event.resolvedTitle(), TITLE_MAX, TITLE_FALLBACK, event, "제목"),
+                fit(event.resolvedBody(), BODY_MAX, BODY_FALLBACK, event, "본문"),
                 event.challengeId(),
                 clamp(event.resolvedDeeplink(), event), dedupKey, event.suppressKey(), now);
     }

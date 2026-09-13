@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.notification;
 
+import com.ruleup.ruleup_backend.notification.domain.NotificationTemplate;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 
 import java.util.Map;
@@ -53,6 +54,32 @@ public record NotificationEvent(
         return new NotificationEvent(userId, type, title, body, challengeId, params, null, null);
     }
 
+    /**
+     * 문구를 <b>레지스트리에서 렌더</b>하는 발행 — 이쪽이 기본 경로다(백엔드 4-1 ①).
+     *
+     * <p>발행부는 무슨 일이 일어났는지만 {@code params} 로 알려주고 문구는 건드리지 않는다.
+     * 제목·본문이 발행 지점마다 흩어져 있으면 기동 시 전 타입 더미 렌더 검증을 할 수 없다.
+     */
+    public static NotificationEvent of(UUID userId, NotificationType type,
+                                       Map<String, String> params) {
+        return new NotificationEvent(userId, type, null, null, null, params, null, null);
+    }
+
+    /** 카운터가 뜰 방이 있는 알림 — 문구는 레지스트리가 렌더한다. */
+    public static NotificationEvent forChallenge(UUID userId, NotificationType type,
+                                                 UUID challengeId, Map<String, String> params) {
+        return new NotificationEvent(userId, type, null, null, challengeId, params, null, null);
+    }
+
+    /**
+     * <b>사람이 쓴 문구</b>로 발행 — 운영자 공지와 캠페인뿐이다. 그 둘은 문장 자체가 내용이라
+     * 템플릿으로 환원할 수 없다({@link NotificationTemplate#AUTHORED_TYPES}).
+     */
+    public static NotificationEvent authored(UUID userId, NotificationType type, String title,
+                                             String body, Map<String, String> params) {
+        return new NotificationEvent(userId, type, title, body, null, params, null, null);
+    }
+
     public NotificationEvent withDeeplink(String deeplink) {
         return new NotificationEvent(userId, type, title, body, challengeId, params, deeplink,
                 targetToken);
@@ -77,6 +104,21 @@ public record NotificationEvent(
     /** 실제 진입 경로 — 재정의가 없으면 레지스트리 값을 쓴다. */
     public String resolvedDeeplink() {
         return (deeplinkOverride != null) ? deeplinkOverride : type.deeplink(params);
+    }
+
+    /**
+     * 적재할 제목 — 발행부가 준 문구가 있으면 그것, 없으면 레지스트리 렌더 결과다.
+     *
+     * <p>둘 다 비면 null 을 준다. 적재 단계가 폴백 문구로 메우고 경고를 남긴다 — 여기서
+     * 예외를 던지면 알림 문구 하나가 도메인 판정을 되돌린다(백엔드 4-1 ③).
+     */
+    public String resolvedTitle() {
+        return (title != null) ? title : NotificationTemplate.render(type, params).title();
+    }
+
+    /** 적재할 본문. 규칙은 {@link #resolvedTitle()} 과 같다. */
+    public String resolvedBody() {
+        return (body != null) ? body : NotificationTemplate.render(type, params).body();
     }
 
     public String dedupKey() {

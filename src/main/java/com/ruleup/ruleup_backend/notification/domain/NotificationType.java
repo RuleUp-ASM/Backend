@@ -314,18 +314,7 @@ public enum NotificationType {
      * 깨진 경로로 보내느니 클라이언트가 알림함으로 폴백하는 편이 낫다.
      */
     public String deeplink(Map<String, String> params) {
-        if (deeplinkTemplate == null) return null;
-        String result = deeplinkTemplate;
-        int open;
-        while ((open = result.indexOf('{')) >= 0) {
-            int close = result.indexOf('}', open);
-            if (close < 0) return null;
-            String key = result.substring(open + 1, close);
-            String value = (params == null) ? null : params.get(key);
-            if (value == null || value.isBlank()) return null;
-            result = result.substring(0, open) + value + result.substring(close + 1);
-        }
-        return result;
+        return Placeholders.render(deeplinkTemplate, params);
     }
 
     /**

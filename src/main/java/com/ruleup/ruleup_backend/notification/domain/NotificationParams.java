@@ -50,4 +50,24 @@ public final class NotificationParams {
     public static final String DATE = "date";
     /** 리마인더 슬롯(MORNING · NOON · EVENING). */
     public static final String SLOT = "slot";
+
+    // ===== 문구 렌더링 =====
+
+    /**
+     * 한 타입 안에서 <b>어느 문구를 쓸지</b> 고르는 값 — {@link NotificationTemplate} 의 열쇠다.
+     *
+     * <p>제재 고지처럼 한 타입이 여러 사건을 담을 때 쓴다. 이미 의미 있는 파라미터로 갈리는
+     * 타입은 그것을 그대로 쓴다 — 생명주기는 {@link #PHASE}, 티어는 {@link #DIRECTION} 이라
+     * 같은 값을 두 번 넘기지 않는다.
+     */
+    public static final String VARIANT = "variant";
+
+    /** 문구에 들어가는 상대 닉네임 — 실패 당사자 또는 반응을 보낸 감시자. */
+    public static final String ACTOR_NAME = "actor_name";
+    /** 문구에 들어가는 챌린지 제목. <b>공개 제목</b>이다(심사 중이면 임시 제목). */
+    public static final String CHALLENGE_TITLE = "challenge_title";
+    /** 문구에 들어가는 루틴 이름. 억제 키의 {@link #ROUTINE_ID} 와 다르다 — 이쪽은 표시용이다. */
+    public static final String ROUTINE_NAME = "routine_name";
+    /** 강퇴 사유 — 방장이 직접 쓴 문장이라 템플릿이 아니라 값으로 들어간다. */
+    public static final String REASON = "reason";
 }
