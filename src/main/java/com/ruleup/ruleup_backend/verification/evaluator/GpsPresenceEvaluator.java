@@ -82,6 +82,9 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
 
         Map<String, Object> ev = new HashMap<>();
         ev.put("dwellMinutes", dwellMin);
+        // 목표를 함께 남긴다 — 실패 설명이 「체류 42분 / 목표 60분」으로 나가려면 판정 당시
+        // 기준값이 evidence 에 있어야 한다(공통 5-8). 기준은 나중에 조정될 수 있다.
+        ev.put("goalMinutes", goalMin);
         ev.put("insideGeofence", inside);
         ev.put("source", source);
         ev.put("dwellSeconds", dwellSec);

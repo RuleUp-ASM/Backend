@@ -7,6 +7,7 @@ import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
 import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.verification.domain.*;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
+import com.ruleup.ruleup_backend.verification.repository.VerificationFailureDetailRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationMethodResultRepository;
 import com.ruleup.ruleup_backend.common.event.RoutineFailureConfirmed;
 import com.ruleup.ruleup_backend.notification.NotificationEvent;
@@ -57,6 +58,7 @@ public class VerificationFinalizeService {
 
     private final VerificationDailyRepository dailyRepo;
     private final VerificationMethodResultRepository methodResultRepo;
+    private final VerificationFailureDetailRepository failureDetailRepo;
     private final ChallengeQueryService challengeQuery;
     private final VerificationConfigFactory configFactory;
     private final VerificationProgressService progressService;
@@ -127,6 +129,7 @@ public class VerificationFinalizeService {
         Challenge challenge = challengeQuery.findChallenge(daily.getChallengeId()).orElse(null);
         if (challenge == null) {
             daily.confirmFailure(now, daily.getMethod(), "NO_SIGNAL_RECEIVED");
+            recordFailureDetail(daily, null, "NO_SIGNAL_RECEIVED", now);
             return false;
         }
         VerificationConfig config = configFactory.build(challenge);
@@ -139,7 +142,11 @@ public class VerificationFinalizeService {
             daily.recordResult(VerificationStatus.SUCCESS, method.name(), null, now);
             confirmedFail = false;
         } else {
-            daily.confirmFailure(now, method.name(), finalFailureReason(daily, method, config));
+            String reasonCode = finalFailureReason(daily, method, config);
+            daily.confirmFailure(now, method.name(), reasonCode);
+            // 실패 상세는 **확정된 실패에만** 남긴다. 실패 예정은 뒤집힐 수 있는 계산 상태라
+            // 행을 만들면 이의로 완료가 된 뒤에도 「실패했다는 기록」이 남는다.
+            recordFailureDetail(daily, method, reasonCode, now);
             confirmedFail = true;
         }
 
@@ -178,10 +185,30 @@ public class VerificationFinalizeService {
 
         var mr = methodResultRepo.findByVerificationDailyIdAndMethod(daily.getId(), method.name()).orElse(null);
         if (mr == null) return "NO_SIGNAL_RECEIVED";
-        Object pendingReason = (mr.getEvidence() != null) ? mr.getEvidence().get("pendingReason") : null;
+        String pendingReason = FailureReasons.pendingReasonOf(mr.getEvidence());
         if ("UNTRUSTED_HEALTH_SOURCE".equals(pendingReason)) return "UNTRUSTED_HEALTH_SOURCE";
         if ("PERMISSION_MISSING".equals(pendingReason)) return "PERMISSION_MISSING";   // 무신호와 구분
-        return failureReasonFor(method, config);
+        return FailureReasons.of(method, config);
+    }
+
+    /**
+     * 실패 상세 기록 — <b>왜 실패했는지를 설명할 수 있게</b> 사유 코드·요약·기준값·실제값을 남긴다
+     * (개인정보보호법의 자동화된 결정 설명, 공통 5-8).
+     *
+     * <p>기준값을 판정 시점 값으로 <b>스냅샷</b>해 두는 것이 핵심이다. GPS 반경·기상 허용 범위는
+     * 배포 없이 조정하는 값이라, 나중 기준으로 과거 판정을 설명하면 틀린 설명이 된다.
+     *
+     * <p>PK 가 판정 id 라 배치가 재실행돼도 같은 행을 덮어쓴다. 실패가 이의로 뒤집히는 경로는
+     * 없다 — 이의 기한이 확정 시각과 같아서, 확정된 실패는 이미 신청 창이 닫혀 있다.
+     */
+    private void recordFailureDetail(VerificationDaily daily, VerificationMethod method,
+                                     String reasonCode, Instant now) {
+        Map<String, Object> evidence = (method == null) ? null
+                : methodResultRepo.findByVerificationDailyIdAndMethod(daily.getId(), method.name())
+                .map(VerificationMethodResult::getEvidence).orElse(null);
+
+        failureDetailRepo.save(VerificationFailureDetail.of(
+                daily.getId(), reasonCode, FailureEvidence.of(reasonCode, evidence), now));
     }
 
     /** 진행률 재계산 + (그날이 오늘이면) todayStatus 뱃지 캐시 갱신. */
@@ -242,25 +269,4 @@ public class VerificationFinalizeService {
     }
 
 
-    private String failureReasonFor(VerificationMethod method, VerificationConfig config) {
-        return switch (method) {
-            case WAKE -> "WOKE_UP_LATE";
-            case SCREEN_TIME -> "INSUFFICIENT_USAGE";
-            case GPS_PRESENCE -> "INSUFFICIENT_DWELL";
-            case GPS_DISTANCE -> "INSUFFICIENT_DISTANCE";
-            case HEALTH -> healthFailureReason(config);
-            case SLEEP -> "INSUFFICIENT_SLEEP";
-            default -> "NO_SIGNAL_RECEIVED";
-        };
-    }
-
-    private String healthFailureReason(VerificationConfig config) {
-        if (config.health() != null && config.health().metric() != null) {
-            return switch (config.health().metric()) {
-                case STEPS -> "INSUFFICIENT_STEPS";
-                default -> "INSUFFICIENT_DISTANCE";   // DISTANCE / EXERCISE_DURATION
-            };
-        }
-        return "INSUFFICIENT_DISTANCE";
-    }
 }

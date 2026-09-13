@@ -14,11 +14,17 @@ package com.ruleup.ruleup_backend.verification.dto;
  *                             구 {@code CHECKING}은 폐기됐다 — 확정 배치가 도는 짧은 구간에도
  *                             실패 예정이 보여야 이의 진입점이 사라지지 않는다
  * @param window               인증 창 표시 문구(자동=시간대, 수동="자정 마감"). 없으면 null
- * @param pendingReason        판정에 필요한 정보가 없는 이유. 구 {@code CHECKING} 전용 값
- *                             ({@code WAITING_SIGNAL})은 상태값 4종 정리와 함께 폐기됐다
+ * @param gapReason            <b>데이터 부족 사유</b> — {@code PERMISSION_MISSING}(권한이 꺼져
+ *                             측정 불가) / {@code NO_SIGNAL}(권한은 있으나 쓸 신호가 없음).
+ *                             목표 미달은 여기 오지 않는다 — 그건 잴 수 있었고 못 미친 것이라
+ *                             {@code failureReason} 이다. 유저가 할 일이 달라서 층을 나눈다
  * @param confirmedAt          확정 시각(ISO-8601, KST). 성공은 조건 충족 즉시,
  *                             실패는 귀속일 이틀 뒤 00:00 KST. 미확정이면 null
- * @param failureReason        실패 사유. FAILED · FAIL_EXPECTED 일 때 채워진다
+ * @param failureReason        실패 사유 코드. FAILED · FAIL_EXPECTED 일 때 채워진다
+ * @param evidenceSummary      <b>판정 근거 요약</b> — 「체류 42분 / 목표 60분」처럼 사람이 읽는
+ *                             한 줄이다. 개인정보보호법의 자동화된 결정 설명 요구가 사유 코드와
+ *                             이 근거를 함께 요구한다(공통 5-8). 실패 예정 구간에서는 그 시점
+ *                             신호로 계산하고, 확정된 실패는 판정 당시 스냅샷을 그대로 읽는다
  * @param streak               연속 기록 변화
  * @param unacknowledgedResult 미확인 판정. 존재 시 클라는 모달을 띄우고 ack를 호출한다
  * @param appeal               이의 신청 가능 여부와 기한. FAILED · FAIL_EXPECTED 일 때
@@ -27,9 +33,10 @@ public record TodayVerificationResponse(
         String date,
         String status,
         String window,
-        String pendingReason,
+        String gapReason,
         String confirmedAt,
         String failureReason,
+        String evidenceSummary,
         StreakChange streak,
         UnacknowledgedResult unacknowledgedResult,
         Appeal appeal

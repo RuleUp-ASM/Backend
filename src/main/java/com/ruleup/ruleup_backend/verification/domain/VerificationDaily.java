@@ -73,6 +73,13 @@ public class VerificationDaily extends AssignedIdEntity {
     @Column(name = "failureReason", length = 40)
     private String failureReason;
 
+    /**
+     * 판정 <b>불가</b> 사유 — {@code PERMISSION_MISSING} / {@code NO_SIGNAL}. 실패 사유와 층이 다르다.
+     * 「목표에 못 미쳤다」와 「잴 수가 없었다」는 유저가 할 일이 다르므로 섞지 않는다(공통 5-2).
+     */
+    @Column(name = "gapReason", length = 30)
+    private String gapReason;
+
     @Column(name = "windowClosesAt")
     private Instant windowClosesAt;      // 인증 창 닫힘 시각(시간창이 있는 유형)
 
@@ -188,6 +195,7 @@ public class VerificationDaily extends AssignedIdEntity {
         this.status = VerificationStatus.FAILED;
         this.method = method;
         this.failureReason = failureReason;
+        this.gapReason = GapReason.of(failureReason);
         this.verifiedAt = confirmedAt;
         this.verifiedVia = null;
         this.shareableAt = confirmedAt;
