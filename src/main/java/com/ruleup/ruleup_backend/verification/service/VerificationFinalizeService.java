@@ -59,6 +59,7 @@ public class VerificationFinalizeService {
     private final VerificationDailyRepository dailyRepo;
     private final VerificationMethodResultRepository methodResultRepo;
     private final VerificationFailureDetailRepository failureDetailRepo;
+    private final SignalExclusionRecorder exclusionRecorder;
     private final ChallengeQueryService challengeQuery;
     private final VerificationConfigFactory configFactory;
     private final VerificationProgressService progressService;
@@ -150,6 +151,11 @@ public class VerificationFinalizeService {
             confirmedFail = true;
         }
 
+        // 확정 시점에 판정에서 뺀 신호를 배제 로그로 옮긴다 — 성공·실패를 가리지 않는다.
+        // 신호 위생 이상은 인증 결과와 무관하게 탐지 입력으로 남겨야 한다(공통 3절 ①).
+        exclusionRecorder.recordEvaluationHygiene(daily.getUserId(), daily.getId(), method,
+                evidenceOf(daily, method), now);
+
         ChallengeMember member = challengeQuery.findMember(daily.getChallengeMemberId()).orElse(null);
         refreshProgress(member, daily);
 
@@ -203,12 +209,16 @@ public class VerificationFinalizeService {
      */
     private void recordFailureDetail(VerificationDaily daily, VerificationMethod method,
                                      String reasonCode, Instant now) {
-        Map<String, Object> evidence = (method == null) ? null
-                : methodResultRepo.findByVerificationDailyIdAndMethod(daily.getId(), method.name())
-                .map(VerificationMethodResult::getEvidence).orElse(null);
-
         failureDetailRepo.save(VerificationFailureDetail.of(
-                daily.getId(), reasonCode, FailureEvidence.of(reasonCode, evidence), now));
+                daily.getId(), reasonCode,
+                FailureEvidence.of(reasonCode, evidenceOf(daily, method)), now));
+    }
+
+    /** 그 판정에 쌓인 평가 근거. 방식이 없으면(챌린지가 사라진 경우) 읽을 것도 없다. */
+    private Map<String, Object> evidenceOf(VerificationDaily daily, VerificationMethod method) {
+        if (method == null) return null;
+        return methodResultRepo.findByVerificationDailyIdAndMethod(daily.getId(), method.name())
+                .map(VerificationMethodResult::getEvidence).orElse(null);
     }
 
     /** 진행률 재계산 + (그날이 오늘이면) todayStatus 뱃지 캐시 갱신. */

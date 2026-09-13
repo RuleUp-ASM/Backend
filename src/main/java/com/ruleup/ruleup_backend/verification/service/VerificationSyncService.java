@@ -79,6 +79,7 @@ public class VerificationSyncService {
     private final com.ruleup.ruleup_backend.user.UserRepository userRepository;
     private final com.ruleup.ruleup_backend.common.web.CountryResolver countryResolver;
     private final VerificationProperties properties;
+    private final SignalExclusionRecorder exclusionRecorder;
     private final Map<VerificationMethod, MethodEvaluator> evaluators;
 
     public VerificationSyncService(ChallengeQueryService challengeQuery,
@@ -96,6 +97,7 @@ public class VerificationSyncService {
                                    com.ruleup.ruleup_backend.user.UserRepository userRepository,
                                    com.ruleup.ruleup_backend.common.web.CountryResolver countryResolver,
                                    VerificationProperties properties,
+                                   SignalExclusionRecorder exclusionRecorder,
                                    List<MethodEvaluator> evaluatorList) {
         this.challengeQuery = challengeQuery;
         this.dailyRepo = dailyRepo;
@@ -112,6 +114,7 @@ public class VerificationSyncService {
         this.userRepository = userRepository;
         this.countryResolver = countryResolver;
         this.properties = properties;
+        this.exclusionRecorder = exclusionRecorder;
         this.evaluators = evaluatorList.stream()
                 .collect(Collectors.toMap(MethodEvaluator::method, e -> e, (a, b) -> a));
     }
@@ -340,6 +343,10 @@ public class VerificationSyncService {
                 member.incrementPeriodCompleted();   // 빈도형: 주기 완료 +1 (미확정 상태에서 첫 SUCCESS 전이 1회)
             }
             if (outcome.status() == VerificationStatus.SUCCESS) {
+                // 판정에서 뺀 신호를 배제 로그로 옮긴다 — **확정 시 한 번**이다. evidence 는
+                // sync 마다 누적되므로 매번 옮기면 같은 배제가 여러 행이 된다(공통 5-3).
+                exclusionRecorder.recordEvaluationHygiene(
+                        member.getUserId(), daily.getId(), method, evidence, now);
                 // 즉시 확정된 성공은 확정 배치를 거치지 않는다 — finalizeDue 는 미확정 건만 집어가고
                 // finalizeOne 은 초입에서 isTerminal() 로 되돌아간다. 그래서 성공 고지를 여기서
                 // 하지 않으면 「성공한 날」만 알림이 없는 비대칭이 생긴다(실패는 확정 배치가 고지한다).
