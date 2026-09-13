@@ -60,7 +60,7 @@ public final class RoomDtos {
 
             @Schema(description = "내 오늘 인증 상태. 오늘이 판정 대상이 아니면 NOT_TARGET.",
                     example = "DONE",
-                    allowableValues = {"IN_PROGRESS", "FAIL_EXPECTED", "DONE", "FAILED", "NOT_TARGET"})
+                    allowableValues = {"IN_PROGRESS", "DONE", "FAILED", "NOT_TARGET"})
             String myTodayStatus,
 
             @Schema(description = "Phase 1에서는 항상 null. Phase 2 고정 공지 호환 필드.")

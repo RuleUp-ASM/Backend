@@ -14,10 +14,13 @@ package com.ruleup.ruleup_backend.verification.dto;
  *                             구 {@code CHECKING}은 폐기됐다 — 확정 배치가 도는 짧은 구간에도
  *                             실패 예정이 보여야 이의 진입점이 사라지지 않는다
  * @param window               인증 창 표시 문구(자동=시간대, 수동="자정 마감"). 없으면 null
- * @param gapReason            <b>데이터 부족 사유</b> — {@code PERMISSION_MISSING}(권한이 꺼져
+ * @param pendingReason        <b>데이터 부족 사유</b> — {@code PERMISSION_MISSING}(권한이 꺼져
  *                             측정 불가) / {@code NO_SIGNAL}(권한은 있으나 쓸 신호가 없음).
  *                             목표 미달은 여기 오지 않는다 — 그건 잴 수 있었고 못 미친 것이라
- *                             {@code failureReason} 이다. 유저가 할 일이 달라서 층을 나눈다
+ *                             {@code failureReason} 이다. 유저가 할 일이 달라서 층을 나눈다.
+ *                             <b>필드 이름은 그대로 둔다</b> — 담는 값이 바뀌었을 뿐이고,
+ *                             이름을 고치면 안드로이드가 함께 바뀌어야 한다. 구 값
+ *                             {@code WAITING_SIGNAL} 은 {@code CHECKING} 폐기와 함께 사라졌다
  * @param confirmedAt          확정 시각(ISO-8601, KST). 성공은 조건 충족 즉시,
  *                             실패는 귀속일 이틀 뒤 00:00 KST. 미확정이면 null
  * @param failureReason        실패 사유 코드. FAILED · FAIL_EXPECTED 일 때 채워진다
@@ -33,7 +36,7 @@ public record TodayVerificationResponse(
         String date,
         String status,
         String window,
-        String gapReason,
+        String pendingReason,
         String confirmedAt,
         String failureReason,
         String evidenceSummary,
