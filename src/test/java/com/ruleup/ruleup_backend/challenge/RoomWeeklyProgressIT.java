@@ -99,7 +99,7 @@ class RoomWeeklyProgressIT extends ChallengeApiSupport {
         Member me = member(uniq("weekly-today"));
         UUID challengeId = room(me, 3, 7);
 
-        assertThat(todayStatus(challengeId, me)).isIn("IN_PROGRESS", "CHECKING");
+        assertThat(todayStatus(challengeId, me)).isEqualTo("IN_PROGRESS");
 
         setTodayStatus(challengeId, me, "SUCCESS");
         assertThat(todayStatus(challengeId, me)).isEqualTo("DONE");

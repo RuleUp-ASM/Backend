@@ -153,9 +153,8 @@ public class MeCalendarService {
     /**
      * 저장 상태 + 귀속일 → 화면 상태. 상태값은 <b>진행중 · 실패 예정 · 완료 · 실패</b> 4종이다.
      *
-     * <p>인증 모듈의 TodayStatusView 를 쓰지 않는 이유가 둘 있다. 하나는 그쪽이 아직 구 {@code CHECKING}
-     * 을 내린다는 것이고(2026-08-28 폐기), 다른 하나는 실패 예정 판정에 방마다 다른 polarity 가
-     * 필요해 월 캘린더에서 방 설정을 전부 읽어야 한다는 것이다. 일자 단위 화면에서는 <b>귀속일이
+     * <p>인증 모듈의 TodayStatusView 를 쓰지 않는 이유는 실패 예정 판정에 방마다 다른 polarity 가
+     * 필요해 월 캘린더에서 방 설정을 전부 읽어야 하기 때문이다. 일자 단위 화면에서는 <b>귀속일이
      * 끝났는데 아직 확정되지 않았다</b>는 사실만으로 실패 예정이 성립한다 — 유예 하루가 정확히 그 구간이다.
      */
     private String displayStatus(VerificationStatus stored, LocalDate targetDate) {

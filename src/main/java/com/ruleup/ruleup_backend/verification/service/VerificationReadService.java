@@ -41,9 +41,6 @@ public class VerificationReadService {
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final DateTimeFormatter ISO_OFFSET = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
 
-    /** CHECKING 인 이유 — 창은 닫혔는데 판정에 쓸 신호가 아직 다 도착하지 않았다. */
-    private static final String WAITING_SIGNAL = "WAITING_SIGNAL";
-
     private final ChallengeQueryService challengeQuery;
     private final VerificationDailyRepository dailyRepo;
     private final AppealRepository appealRepo;
@@ -92,7 +89,7 @@ public class VerificationReadService {
                 today.toString(),
                 status,
                 TodayStatusView.NOT_TARGET.equals(status) ? null : windowLabel(config),
-                TodayStatusView.CHECKING.equals(status) ? WAITING_SIGNAL : null,
+                null,   // 데이터 부족 사유 — 권한 부족·신호 없음 구분은 gapReason 이 담당한다
                 (daily != null) ? formatKst(daily.getVerifiedAt()) : null,
                 failing && daily != null ? daily.getFailureReason() : null,
                 streakService.around(member.getId(), today),

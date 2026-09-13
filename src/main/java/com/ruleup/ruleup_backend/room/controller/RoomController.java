@@ -55,7 +55,7 @@ public class RoomController {
                     사이클 중간에 들어와 다음 주부터 판정되는 멤버와 아직 시작 전인 방은
                     `judging:false` · `done:0` 이다.
 
-                    `myTodayStatus` 는 화면 어휘 5종이다 — `IN_PROGRESS` · `CHECKING`(00~03시 유예 구간) ·
+                    `myTodayStatus` 는 화면 어휘 5종이다 — `IN_PROGRESS` · `FAIL_EXPECTED`(이대로면 실패) ·
                     `DONE` · `FAILED` · `NOT_TARGET`. 요일 지정이 없으므로 "요일상 대상이 아닌 날"은 없고,
                     `NOT_TARGET` 은 이번 주 몫을 이미 채웠거나(`myWeekly.done ≥ weeklyCount`)
                     아직 판정 대상이 아닌 경우(`judging:false`)에만 내려간다.

@@ -29,13 +29,6 @@ import java.util.UUID;
 public class RoomService {
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
-    /**
-     * 자정 직후 유예 구간(KST 00~03시). 어젯밤 신호가 아직 확정 배치를 타지 않은 시간대라
-     * 미확정(PENDING)을 "진행 중"이 아니라 <b>확인 중(CHECKING)</b>으로 보여준다 — 이미 끝난 하루를
-     * 아직 할 수 있는 것처럼 그리면 안 된다.
-     */
-    private static final int GRACE_END_HOUR = 3;
-
     private final RoomAuthority authority;
     private final RankingService rankingService;
     private final ChallengeMemberRepository memberRepository;
@@ -120,7 +113,9 @@ public class RoomService {
         int weeklyCount = challenge.getWeeklyCount() == null ? ChallengeCycle.CYCLE_DAYS : challenge.getWeeklyCount();
         // 이번 주 몫을 이미 채웠으면 오늘은 더 할 게 없다 — 요일 지정이 없으므로 이것이 유일한 비대상 조건이다.
         if (!weekly.judging() || weekly.done() >= weeklyCount) return "NOT_TARGET";
-        return now.getHour() < GRACE_END_HOUR ? "CHECKING" : "IN_PROGRESS";
+        // 자정 직후를 「확인 중」으로 따로 그리던 분기를 걷어냈다 — 확정이 귀속일 이틀 뒤 00:00 로
+        // 옮겨지면서 00~03시가 특별한 구간이 아니게 됐다(상태값 4종, 백엔드 정합화 §4).
+        return "IN_PROGRESS";
     }
 
     /**

@@ -186,14 +186,14 @@ class VerificationDailyStatePolicyTest {
         }
 
         @Test
-        @DisplayName("확정 시각이 지나고 아직 확정 전이면 검사중 — 짧은 재평가 구간이다")
-        void checkingAfterFinalizeBoundary() {
+        @DisplayName("확정 배치가 도는 구간에도 검사중이 아니라 실패 예정이다 — 이의 진입점이 사라지면 안 된다")
+        void noCheckingStateAfterFinalizeBoundary() {
             assertThat(TodayStatusView.of(VerificationStatus.PENDING, TARGET, null,
                     Polarity.ACHIEVEMENT, AFTER_FINALIZE))
-                    .isEqualTo(TodayStatusView.CHECKING);
+                    .isEqualTo(TodayStatusView.FAIL_EXPECTED);
             assertThat(TodayStatusView.of(VerificationStatus.PENDING, TARGET, "USAGE_EXCEEDED",
                     Polarity.CONSTRAINT, AFTER_FINALIZE))
-                    .isEqualTo(TodayStatusView.CHECKING);
+                    .isEqualTo(TodayStatusView.FAIL_EXPECTED);
         }
 
         @Test
