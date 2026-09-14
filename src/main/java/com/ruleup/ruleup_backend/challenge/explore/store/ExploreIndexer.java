@@ -136,7 +136,7 @@ public class ExploreIndexer {
         if (row.verificationType() != null) {
             store.addToSet(ExploreKeys.verifyType(row.verificationType()), row.id());
         }
-        store.setTrending(row.id(), row.category(), row.recentJoins());
+        store.setTrending(row.id(), row.category(), row.recentJoins(), row.lastJoinedMillis());
     }
 
     /**

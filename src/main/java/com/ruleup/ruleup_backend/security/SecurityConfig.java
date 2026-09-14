@@ -34,7 +34,6 @@ public class SecurityConfig {
             "/api/v1/auth/refresh",          // 4.4 토큰 재발급 (refreshToken 사용)
             "/api/v1/nicknames/**",          // 4.6 닉네임 검사
             "/api/v1/categories",            // 4.7 카테고리 마스터
-            "/api/v1/challenge-categories",  // 탐색 §2.2 홈 카테고리 그리드(공개 표시용 수치)
             "/api/v1/app-links/check",       // 딥링크 진입 시점 — 아직 로그인 전일 수 있다
             "/api/v1/dev/tokens",            // 개발용 토큰 발급(비-prod 전용). 시크릿 헤더로 따로 막는다
             "/api/v1/admin/auth/login",      // 운영자 콘솔 진입 — 토큰을 받으러 오는 경로라 토큰이 없다

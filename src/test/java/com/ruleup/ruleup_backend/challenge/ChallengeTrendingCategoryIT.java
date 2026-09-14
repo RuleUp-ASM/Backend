@@ -29,13 +29,31 @@ import static org.springframework.security.test.web.servlet.setup.SecurityMockMv
  * 카테고리 카운트로 새면 안 된다. 그 다음이 인기 산식(24시간 신규 참여 수, 동점이면 최근 참여 우선)과
  * "인기에는 필터를 적용하지 않는다"는 규칙이다 — 못 들어가는 방도 보이되 잠금 표시만 한다.
  */
-@SpringBootTest
-@Import(TestcontainersConfiguration.class)
+@SpringBootTest(properties = {
+        "app.explore.redis.enabled=true",
+        "app.explore.redis.open-duration-ms=200"
+})
+@Import({TestcontainersConfiguration.class, ChallengeTrendingCategoryIT.RedisTestConfig.class})
 class ChallengeTrendingCategoryIT extends ChallengeApiSupport {
+
+    /**
+     * 인기·목록은 파생 인덱스로만 응답한다 — 준비되지 않으면 503 이다(공통 5-4).
+     * 예전에는 MySQL 폴백이 있어 Redis 없이도 이 테스트가 돌았지만, 그 폴백이 곧 스펙 위반이었다.
+     */
+    @org.springframework.boot.test.context.TestConfiguration(proxyBeanMethods = false)
+    static class RedisTestConfig {
+        @org.springframework.context.annotation.Bean
+        @org.springframework.boot.testcontainers.service.connection.ServiceConnection
+        com.redis.testcontainers.RedisContainer redisContainer() {
+            return new com.redis.testcontainers.RedisContainer(
+                    org.testcontainers.utility.DockerImageName.parse("redis:7-alpine"));
+        }
+    }
 
     @Autowired WebApplicationContext wac;
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired PopularityRefreshJob popularityRefreshJob;
+    @Autowired com.ruleup.ruleup_backend.challenge.explore.store.ExploreIndexer exploreIndexer;
     @Autowired CacheManager cacheManager;
     MockMvc mvc;
 
@@ -77,7 +95,17 @@ class ChallengeTrendingCategoryIT extends ChallengeApiSupport {
         return id;
     }
 
+    /**
+     * 인기·목록은 파생 인덱스가 준비돼야 응답한다(준비 전에는 503). 픽스처를 MySQL 에 심었으면
+     * 여기서 한 번 반영해 주어야 그 방들이 후보가 된다 — 운영에서는 COMMIT 후 갱신과 5분 스윕이
+     * 하는 일이다.
+     */
+    private void reindex() {
+        exploreIndexer.reindexAll();
+    }
+
     private MvcResult trending(String token, String category) throws Exception {
+        reindex();
         String url = "/api/v1/challenges/trending" + (category != null ? "?category=" + category : "");
         return getAuth(url, token);
     }
@@ -244,7 +272,7 @@ class ChallengeTrendingCategoryIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("들어갈 수 있는 공개 그룹만 센다 — 시작 전은 세고, 비공개·솔로·종료는 빠진다")
+        @DisplayName("[P1] 진행 중인 공개 그룹만 센다 — 시작 전·비공개·솔로·종료는 빠진다")
         void countsJoinablePublicGroupOnly() throws Exception {
             String token = memberToken(uniq("cat-count"));
             publicGroup("READING", "ACTIVE", 0, 30);          // 셈
@@ -253,14 +281,25 @@ class ChallengeTrendingCategoryIT extends ChallengeApiSupport {
             jdbcTemplate.update("UPDATE challenges SET visibility = 'PRIVATE' WHERE id = ?", (Object) bytes(priv));
             UUID solo = publicGroup("READING", "ACTIVE", 0, 30);
             jdbcTemplate.update("UPDATE challenges SET mode = 'SOLO' WHERE id = ?", (Object) bytes(solo));
-            publicGroup("READING", "COMPLETED", 0, 30);       // 안 셈 — 들어갈 수 없다
-            // 시작 전 방도 가입할 수 있고 인기·목록에도 나온다 → 그리드도 센다(2026-08-11 변경).
-            publicGroup("READING", "UPCOMING", 0, 30);        // 셈
+            publicGroup("READING", "COMPLETED", 0, 30);       // 안 셈 — 끝난 방이다
+            // 인기·목록은 모집 중 방을 포함하지만 카테고리 수는 진행 중 방만 센다 —
+            // 스펙이 「의도된 비대칭」이라 못 박은 지점이다(공통 3절).
+            publicGroup("READING", "UPCOMING", 0, 30);        // 안 셈
 
             evictCaches();
             MvcResult res = getAuth("/api/v1/challenge-categories", token);
             List<Integer> reading = read(res, "$.data.items[?(@.code == 'READING')].activeGroupCount");
-            assertThat(reading).containsExactly(2);
+            assertThat(reading).containsExactly(1);
+        }
+
+        @Test
+        @DisplayName("[P1] 로그인하지 않으면 카테고리 수도 내려주지 않는다")
+        void categoriesRequireAuthentication() throws Exception {
+            assertThat(mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                            .get("/api/v1/challenge-categories"))
+                    .andReturn().getResponse().getStatus())
+                    .as("탐색 5개 API 는 모두 로그인 필요다 — 공개하면 방 수가 그대로 새는 지표가 된다")
+                    .isEqualTo(401);
         }
     }
 }

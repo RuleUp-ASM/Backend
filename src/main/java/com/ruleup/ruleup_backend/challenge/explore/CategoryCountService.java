@@ -37,8 +37,10 @@ public class CategoryCountService {
     public CategoryGridResponse getCategories() {
         Map<String, Integer> counts = new HashMap<>();
         jdbc.query("SELECT category, COUNT(*) FROM challenges " +
+                        // 진행 중인 방만 센다. 인기·목록은 모집 중(UPCOMING) 방을 포함하지만
+                        // 카테고리 수는 그렇지 않다 — 스펙이 「의도된 비대칭」이라 못 박았다(공통 3절).
                         "WHERE mode = 'GROUP' AND visibility = 'PUBLIC' " +
-                        "  AND status IN ('UPCOMING', 'ACTIVE') " +
+                        "  AND status = 'ACTIVE' " +
                         "  AND deleted_at IS NULL " +
                         "GROUP BY category",
                 rs -> { counts.put(rs.getString(1), rs.getInt(2)); });

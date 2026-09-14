@@ -115,18 +115,23 @@ public class ExploreQueryService {
 
         // 경로를 먼저 정하고 그 경로의 커서만 받는다 — 경로가 바뀌면 커서의 의미가 달라진다.
         ExploreDataSource source = chooseSource();
+        // 준비되지 않았으면 커서를 해석하기 전에 끝낸다. 먼저 해석하면 「경로가 다른 커서」로
+        // 읽혀 CURSOR_INVALID 가 나가는데, 그건 클라에게 <b>첫 페이지부터 다시 받으라</b>는
+        // 말이라 장애 상황에서 사용자를 목록 맨 위로 돌려보낸다. 사실은 잠시 뒤 이어 받으면 된다.
+        if (source == ExploreDataSource.MYSQL) {
+            throw new BusinessException(ErrorCode.EXPLORE_TEMPORARILY_UNAVAILABLE);
+        }
         ExploreCursor cursor = ExploreCursor.decode(cursorRaw, sort, source);
         Query query = new Query(userId, categories, verification, eligibleOnly, sort, size,
                 myTier, myChallengeIds);
 
-        if (source == ExploreDataSource.MYSQL) return fromMysql(query, cursor);
         try {
             return fromRedis(query, cursor);
+        } catch (BusinessException e) {
+            throw e;
         } catch (RuntimeException e) {
             circuit.recordFailure(e);                     // 연속 실패면 회로가 열린다
-            // 커서를 들고 있었다면 이어 붙일 수 없다 — 첫 페이지부터 다시 받게 한다.
-            if (cursor != null) throw new BusinessException(ErrorCode.CURSOR_INVALID);
-            return fromMysql(query, null);
+            throw new BusinessException(ErrorCode.EXPLORE_TEMPORARILY_UNAVAILABLE);
         }
     }
 
@@ -197,9 +202,12 @@ public class ExploreQueryService {
             List<Row> page = kept.subList(0, q.size());
             return render(q, page, redisCursor(q.sort(), keptMembers.get(q.size() - 1)), true);
         }
-        // 페이지를 못 채웠다. ZSET 을 끝까지 봤으면 정말 끝이고, 상한에 걸린 것이면 아직 남아 있다.
-        boolean hasNext = !zsetExhausted && afterMember != null;
-        return render(q, kept, hasNext ? redisCursor(q.sort(), afterMember) : null, hasNext);
+        // 페이지를 못 채운 채 스캔 상한에 걸렸다면, 짧은 페이지를 정상인 척 내리지 않는다 —
+        // 클라는 「결과가 이것뿐」과 「더 보려면 더 훑어야 한다」를 구분할 수 없다(공통 5-4).
+        if (!zsetExhausted && kept.size() < q.size()) {
+            throw new BusinessException(ErrorCode.EXPLORE_TEMPORARILY_UNAVAILABLE);
+        }
+        return render(q, kept, null, false);
     }
 
     /** 멤버 문자열 하나가 커서의 전부다 — id 는 거기서 꺼내 검증용으로 함께 싣는다. */

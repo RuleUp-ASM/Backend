@@ -34,9 +34,11 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 
@@ -155,39 +157,38 @@ class ExploreRedisFallbackIT extends ChallengeApiSupport {
     // =================================================================
     @ParameterizedTest
     @EnumSource(ExploreSort.class)
-    @DisplayName("정렬 6종 전부 Redis 와 MySQL 이 같은 순서를 낸다 — 폴백해도 목록이 뒤섞이지 않는다")
-    void bothPathsProduceTheSameOrder(ExploreSort sort) throws Exception {
+    @DisplayName("정렬 6종 전부 같은 요청에 같은 순서를 낸다 — 서버가 달라도 순위가 갈리지 않는다")
+    void everySortIsStableAcrossRequests(ExploreSort sort) throws Exception {
         Member viewer = member(uniq("parity"));
         seedChallenges(viewer.id(), 7);
 
         closeCircuit();
-        ExploreResponse fromRedis = exploreQueryService.explore(
-                viewer.id(), null, null, false, sort.name(), null, 20);
+        List<String> first = idsOf(exploreQueryService.explore(
+                viewer.id(), null, null, false, sort.name(), null, 20));
+        List<String> again = idsOf(exploreQueryService.explore(
+                viewer.id(), null, null, false, sort.name(), null, 20));
 
-        useMysqlOnly();
-        ExploreResponse fromMysql = exploreQueryService.explore(
-                viewer.id(), null, null, false, sort.name(), null, 20);
-
-        assertThat(idsOf(fromRedis))
-                .as("%s 정렬에서 두 경로의 순서가 같아야 한다", sort)
+        assertThat(first)
+                .as("%s 정렬은 파생 인덱스 하나로만 결정된다 — 같은 인덱스면 순서도 같다", sort)
                 .isNotEmpty()
-                .containsExactlyElementsOf(idsOf(fromMysql));
+                .containsExactlyElementsOf(again);
     }
 
     @Test
-    @DisplayName("커서 페이징도 두 경로가 같은 페이지를 낸다 — 경계 행이 중복·누락되지 않는다")
-    void cursorPagingMatchesAcrossPaths() throws Exception {
+    @DisplayName("커서 페이징이 경계 행을 중복·누락 없이 이어 붙인다")
+    void cursorPagingCoversEveryRowOnce() throws Exception {
         Member viewer = member(uniq("paging"));
         seedChallenges(viewer.id(), 12);
 
-        // 경로를 페이지마다 바꾸면 그건 폴백 시나리오다(별도 테스트). 여기서는 한 경로로 끝까지 간다.
         closeCircuit();
-        List<String> viaRedis = collectPages(viewer.id(), 3, 3);
-        useMysqlOnly();
-        List<String> viaMysql = collectPages(viewer.id(), 3, 3);
+        List<String> paged = collectPages(viewer.id(), 3, 3);
+        List<String> atOnce = idsOf(exploreQueryService.explore(
+                viewer.id(), null, null, false, "POPULAR", null, 9));
 
-        assertThat(viaRedis).hasSize(9).doesNotHaveDuplicates();
-        assertThat(viaRedis).as("페이지 경계까지 두 경로가 같아야 한다").containsExactlyElementsOf(viaMysql);
+        assertThat(paged).hasSize(9).doesNotHaveDuplicates();
+        assertThat(paged)
+                .as("쪼개 받은 순서가 한 번에 받은 순서와 달라지면 경계에서 방이 새거나 겹친다")
+                .containsExactlyElementsOf(atOnce);
     }
 
     /** 커서를 이어 {@code pages} 장을 모은다. 경로는 호출 전에 이미 정해져 있어야 한다. */
@@ -205,71 +206,78 @@ class ExploreRedisFallbackIT extends ChallengeApiSupport {
     }
 
     @Test
-    @DisplayName("Redis 가 죽으면 목록이 빈 채로 나가지 않고 MySQL 로 내려간다")
-    void redisOutageFallsBackInsteadOfReturningEmpty() throws Exception {
+    @DisplayName("[P1] 인기 후보가 비면 MySQL 로 대신 내리지 않고 503 이다")
+    void trendingIsUnavailableRatherThanServedFromMysql() throws Exception {
         Member viewer = member(uniq("outage"));
         seedChallenges(viewer.id(), 4);
 
         // 파생 인덱스를 통째로 날려 "Redis 는 살아 있는데 내용이 없다"를 만든다.
-        // 이 상태를 정상으로 취급하면 인기 섹션이 조용히 사라진다.
         store.flushDerived();
 
-        var ranking = trendingRankingSource.ranking(null);
-        assertThat(ranking.entries()).as("폴백으로라도 인기 목록은 나와야 한다").isNotEmpty();
-        assertThat(ranking.source()).isEqualTo(ExploreDataSource.MYSQL);
+        assertThatThrownBy(() -> trendingRankingSource.ranking(null))
+                .as("MySQL 로 대신 내리면 순위가 서버마다 달라지고, 장애가 조용히 덮인다 — "
+                        + "스펙은 이 구간을 EXPLORE_TEMPORARILY_UNAVAILABLE 로 드러내라고 못 박았다")
+                .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.type(BusinessException.class))
+                .extracting(BusinessException::getErrorCode)
+                .isEqualTo(ErrorCode.EXPLORE_TEMPORARILY_UNAVAILABLE);
     }
 
     @Test
-    @DisplayName("워밍업 전에는 Redis 를 쓰지 않는다 — 반쯤 찬 인덱스로 목록을 내리지 않는다")
-    void doesNotServeFromRedisBeforeWarmUp() throws Exception {
+    @DisplayName("[P1] 워밍업 전에는 목록도 503 이다 — 반쯤 찬 인덱스로도, 다른 저장소로도 내리지 않는다")
+    void exploreIsUnavailableBeforeWarmUp() throws Exception {
         Member viewer = member(uniq("warmup"));
         seedChallenges(viewer.id(), 5);
 
         store.flushDerived();       // warmed 플래그까지 사라진다
         assertThat(store.isWarmed()).isFalse();
 
-        ExploreResponse res = exploreQueryService.explore(
-                viewer.id(), null, null, false, "POPULAR", null, 3);
-
-        assertThat(idsOf(res)).as("워밍업 전이어도 목록은 온전해야 한다").hasSize(3);
-        // 커서에 새겨진 경로가 곧 이 응답을 만든 저장소다 — MySQL 이어야 한다.
-        assertThat(ExploreCursor.decode(res.nextCursor(), ExploreSort.POPULAR, ExploreDataSource.MYSQL))
-                .isNotNull();
+        assertThatThrownBy(() -> exploreQueryService.explore(
+                viewer.id(), null, null, false, "POPULAR", null, 3))
+                .as("원천 워밍업이 끝날 때까지는 503 이고, 끝나면 목록이 돌아온다")
+                .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.type(BusinessException.class))
+                .extracting(BusinessException::getErrorCode)
+                .isEqualTo(ErrorCode.EXPLORE_TEMPORARILY_UNAVAILABLE);
     }
 
     @Test
-    @DisplayName("경로가 다른 커서는 CURSOR_INVALID — 폴백 구간에서 목록이 어긋나느니 첫 페이지부터 다시 받는다")
-    void cursorFromAnotherPathIsRejected() throws Exception {
+    @DisplayName("[P1] 다음 페이지를 받기 전에 인덱스가 내려가면 503 — 반쪽 목록을 이어 붙이지 않는다")
+    void pagingStopsWithUnavailableWhenTheIndexGoesDown() throws Exception {
         Member viewer = member(uniq("cursorsrc"));
         seedChallenges(viewer.id(), 5);
 
         closeCircuit();
         ExploreResponse first = exploreQueryService.explore(
                 viewer.id(), null, null, false, "POPULAR", null, 2);
-        assertThat(first.nextCursor()).as("Redis 경로의 커서").isNotBlank();
+        assertThat(first.nextCursor()).isNotBlank();
 
-        // 다음 페이지 요청 사이에 Redis 가 죽어 MySQL 로 내려간 상황.
+        // 다음 페이지 요청 사이에 파생 인덱스가 죽었다. 예전에는 MySQL 로 내려가며
+        // CURSOR_INVALID 를 돌려줬지만, 이제 내려갈 곳이 없다.
         useMysqlOnly();
         assertThatThrownBy(() -> exploreQueryService.explore(
                 viewer.id(), null, null, false, "POPULAR", first.nextCursor(), 2))
                 .isInstanceOfSatisfying(BusinessException.class, ex ->
-                        assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.CURSOR_INVALID));
+                        assertThat(ex.getErrorCode())
+                                .isEqualTo(ErrorCode.EXPLORE_TEMPORARILY_UNAVAILABLE));
     }
 
     @Test
-    @DisplayName("필터는 Redis 집합으로 교차해도 SQL 과 같은 결과를 낸다")
-    void filtersMatchAcrossPaths() throws Exception {
+    @DisplayName("필터는 Redis 집합 교차로 걸러지고, 걸러진 결과도 원천의 조건을 만족한다")
+    void filtersNarrowTheCandidatesAndStayTrueToTheSource() throws Exception {
         Member viewer = member(uniq("filter"));
         seedChallenges(viewer.id(), 6);
 
         closeCircuit();
-        ExploreResponse fromRedis = exploreQueryService.explore(
-                viewer.id(), "EXERCISE", "MANUAL", false, "PARTICIPANTS", null, 20);
+        List<String> filtered = idsOf(exploreQueryService.explore(
+                viewer.id(), "EXERCISE", "MANUAL", false, "PARTICIPANTS", null, 20));
 
-        useMysqlOnly();
-        ExploreResponse fromMysql = exploreQueryService.explore(
-                viewer.id(), "EXERCISE", "MANUAL", false, "PARTICIPANTS", null, 20);
-
-        assertThat(idsOf(fromRedis)).isNotEmpty().containsExactlyElementsOf(idsOf(fromMysql));
+        assertThat(filtered).isNotEmpty();
+        // 집합 교차만 믿지 않고 원천으로 되짚는다 — 집합이 낡으면 조건에 안 맞는 방이 섞인다.
+        for (String id : filtered) {
+            Map<String, Object> row = jdbcTemplate.queryForMap(
+                    "SELECT category, JSON_UNQUOTE(JSON_EXTRACT(verification_config, '$.verificationType')) AS vt "
+                            + "FROM challenges WHERE id = UNHEX(REPLACE(?, '-', ''))", id);
+            assertThat(row.get("category")).isEqualTo("EXERCISE");
+            assertThat(row.get("vt")).isEqualTo("MANUAL");
+        }
     }
 }

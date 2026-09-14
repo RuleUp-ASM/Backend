@@ -2,6 +2,8 @@ package com.ruleup.ruleup_backend.challenge.explore;
 
 import com.ruleup.ruleup_backend.challenge.explore.store.ExploreCircuitBreaker;
 import com.ruleup.ruleup_backend.challenge.explore.store.ExploreRedisStore;
+import com.ruleup.ruleup_backend.common.error.BusinessException;
+import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -45,16 +47,22 @@ public class TrendingRankingSource {
 
     /** 카테고리별(또는 전체) 인기 Top 20. */
     public Ranking ranking(String category) {
-        if (circuit.isOpen()) return fromSql(category);
-
+        // 인기는 「서버 간 순위 동일」이 계약이다(공통 5-2). 다른 저장소로 대신 내리면 그 계약이
+        // 깨지고, 장애가 200 뒤에 숨는다. 준비되지 않은 구간은 드러내고 잠시 뒤 받게 한다.
+        if (circuit.isOpen()) {
+            throw new BusinessException(ErrorCode.EXPLORE_TEMPORARILY_UNAVAILABLE);
+        }
         List<ExploreRedisStore.TrendingEntry> top;
         try {
-            // 워밍업 전이면 반쯤 찬 인덱스다 — 있는 것만 보여주면 방이 사라진 것처럼 보인다.
-            if (!store.isWarmed()) return fromSql(category);
+            if (!store.isWarmed()) {
+                throw new BusinessException(ErrorCode.EXPLORE_TEMPORARILY_UNAVAILABLE);
+            }
             top = store.topTrending(category, TOP_N);
+        } catch (BusinessException e) {
+            throw e;
         } catch (RuntimeException e) {
             circuit.recordFailure(e);
-            return fromSql(category);
+            throw new BusinessException(ErrorCode.EXPLORE_TEMPORARILY_UNAVAILABLE);
         }
 
         // 비어 있음을 정상으로 취급하지 않는다. 다만 이건 <b>장애가 아니라 인덱스가 덜 찬 상태</b>라

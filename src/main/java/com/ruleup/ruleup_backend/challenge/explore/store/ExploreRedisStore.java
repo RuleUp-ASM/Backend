@@ -60,24 +60,56 @@ public class ExploreRedisStore {
         List<TrendingEntry> entries = new ArrayList<>(tuples.size());
         for (ZSetOperations.TypedTuple<String> t : tuples) {
             if (t.getValue() == null) continue;
+            // score 는 「참여자 수 · 동점 보정」을 함께 담은 합성값이다. 카드에 보여줄 것은
+            // 참여자 수뿐이므로 상위 자리만 꺼낸다 — 그대로 쓰면 수억이 찍힌다.
             entries.add(new TrendingEntry(ExploreKeys.fromHex(t.getValue()),
-                    t.getScore() == null ? 0 : t.getScore().intValue()));
+                    t.getScore() == null ? 0 : recentJoinsOf(t.getScore())));
         }
         return entries;
     }
 
     public record TrendingEntry(UUID challengeId, int recentJoins24h) {}
 
+    /** 합성 score 에서 참여자 수만 꺼낸다. */
+    static int recentJoinsOf(double score) {
+        return (int) ((long) score / TIE_BREAK_RANGE);
+    }
+
     /**
      * 인기 점수를 지금 값으로 덮는다. 증분(+1)이 아니라 절대값인 이유는 <b>인덱서가 24시간 창을
      * 매번 다시 세기</b> 때문이다 — 증분으로 쌓으면 창을 벗어난 참여를 뺄 방법이 없다.
      * 전체와 카테고리 ZSET 을 함께 쓴다. 둘이 어긋나면 카테고리 탭과 홈의 순위가 달라진다.
      */
-    public void setTrending(UUID challengeId, String category, int score) {
+    public void setTrending(UUID challengeId, String category, int recentJoins24h, Long lastJoinedMillis) {
         String member = ExploreKeys.hex(challengeId);
+        double score = trendingScore(recentJoins24h, lastJoinedMillis);
         redis.opsForZSet().add(ExploreKeys.TRENDING_ALL, member, score);
         if (category != null) redis.opsForZSet().add(ExploreKeys.trendingCategory(category), member, score);
     }
+
+    /**
+     * 인기 점수 인코딩 — <b>신규 참여자 수 DESC → 마지막 참여 시각 DESC</b>(공통 5-3).
+     *
+     * <p>점수에 참여자 수만 넣으면 동점일 때 ZSET 이 member(=challengeId)로 정렬한다. 그러면
+     * 「같은 인원이면 더 최근에 몰린 쪽이 위」라는 규칙이 <b>UUID 순서</b>로 바뀐다 — 규칙이
+     * 있으나 마나 하고, 순서가 무작위로 보인다.
+     *
+     * <p>두 값을 한 double 에 쌓는다. 상위 자리가 참여자 수, 하위 자리가 기준 시각 이후 초다.
+     * ZSET score 는 double 이라 정수부 2^53 까지 정확하므로, 참여자 수 × 2^31 + 초 는 안전하다.
+     * 시각을 초로 줄이는 것은 정밀도를 아끼기 위함이고, 같은 초에 몰린 방들의 순서까지는
+     * 보장하지 않는다 — 거기까지는 규칙이 정하지 않는다.
+     */
+    static double trendingScore(int recentJoins24h, Long lastJoinedMillis) {
+        long seconds = (lastJoinedMillis == null) ? 0L
+                : Math.clamp((lastJoinedMillis - TRENDING_EPOCH_MILLIS) / 1000L, 0L, TIE_BREAK_RANGE - 1);
+        return (double) recentJoins24h * TIE_BREAK_RANGE + seconds;
+    }
+
+    /** 동점 보정에 쓰는 기준 시각(2020-01-01T00:00:00Z). 이 이전 시각은 0 으로 접는다. */
+    private static final long TRENDING_EPOCH_MILLIS = 1_577_836_800_000L;
+
+    /** 동점 보정 자리의 폭(초). 2^31 초 ≈ 68년이라 기준 시각 이후를 충분히 덮는다. */
+    private static final long TIE_BREAK_RANGE = 2_147_483_648L;
 
     public void removeTrending(UUID challengeId, String category) {
         String member = ExploreKeys.hex(challengeId);

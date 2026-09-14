@@ -259,6 +259,10 @@ public enum ErrorCode {
     INVALID_SORT_TYPE(HttpStatus.BAD_REQUEST, "지원하지 않는 정렬이에요."),
     INVALID_FILTER_VALUE(HttpStatus.BAD_REQUEST, "선택할 수 없는 필터 값이에요."),
     CURSOR_INVALID(HttpStatus.BAD_REQUEST, "목록을 처음부터 다시 불러와 주세요."),
+    // 탐색 목록·인기는 파생 인덱스가 준비돼야 순위가 서버마다 같다. 다른 저장소로 대신 내리면
+    // 순위가 갈리고 장애가 조용히 덮이므로, 준비되지 않은 구간은 드러내고 잠시 뒤 다시 받게 한다.
+    EXPLORE_TEMPORARILY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE,
+            "잠시 후 다시 시도해 주세요. 목록을 준비하고 있어요."),
     NOT_CLONEABLE(HttpStatus.FORBIDDEN, "이 챌린지는 템플릿으로 가져올 수 없어요."),
     INVALID_QUERY(HttpStatus.BAD_REQUEST, "검색어가 올바르지 않습니다."),
     PLACE_SEARCH_RATE_LIMIT(HttpStatus.TOO_MANY_REQUESTS, "장소 검색 요청이 너무 많습니다."),
