@@ -110,24 +110,55 @@ public class ChallengeMemberService {
         List<Integer> capacityRow = challengeRepository.findCapacityById(challengeId);
         if (capacityRow.isEmpty()) throw new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND);
         Integer capacityKnown = capacityRow.get(0);   // null 이면 무제한
-        return selfProvider.getObject().joinInTransaction(userId, challengeId, invited, capacityKnown);
+        try {
+            return selfProvider.getObject().joinInTransaction(userId, challengeId, invited, capacityKnown);
+        } catch (CapacityAppearedException e) {
+            // 트랜잭션 밖에서 「무제한」으로 읽은 사이에 방장이 정원을 걸었다. 그 트랜잭션은
+            // 이미 일반 읽기로 스냅샷을 고정해 버려서 정원을 세도 믿을 수 없다 — 락을 첫 문장
+            // 으로 다시 열어야 한다. 정원이 생긴 것을 확인했으니 이번에는 잠그고 들어간다.
+            return selfProvider.getObject().joinInTransaction(userId, challengeId, invited, e.capacity());
+        }
+    }
+
+    /**
+     * 정원 유무를 읽은 뒤 가입 트랜잭션이 열리기 전에 방장이 정원을 건 경우.
+     *
+     * <p>그대로 진행하면 여러 가입 요청이 <b>챌린지 행 락 없이</b> 같은 인원수를 보고 모두
+     * 통과해 정원을 넘길 수 있다. 되돌리고 잠금 경로로 한 번 다시 간다.
+     */
+    private static class CapacityAppearedException extends RuntimeException {
+        private final Integer capacity;
+        CapacityAppearedException(Integer capacity) { super(null, null, false, false); this.capacity = capacity; }
+        Integer capacity() { return capacity; }
     }
 
     @Transactional
     public JoinResponse joinInTransaction(UUID userId, UUID challengeId, boolean invited, Integer capacityKnown) {
         Instant now = Instant.now();
 
-        // 정원이 있는 방만 챌린지 행을 잠근다(탐색 백엔드 5-1). 무제한 방은 셀 값이 없으므로
-        // 잠글 이유도 없다 — 잠그면 같은 방 가입이 서로를 기다리며 줄을 선다.
+        // 정원이 있는 방은 <b>쓰기 잠금</b>으로 마지막 한 자리를 직렬화한다(탐색 백엔드 5-1).
         //
-        // ⚠️ 정원 유무는 <b>트랜잭션 밖에서</b> 미리 읽는다. REPEATABLE READ 에서 일반 SELECT 는
-        // 읽기 스냅샷을 그 시점에 고정하는데, 락을 기다리기 전에 스냅샷이 잡히면 ④의 정원
-        // COUNT 가 그 사이 커밋된 다른 가입을 못 본다 → 마지막 한 자리에 여러 명이 들어간다.
-        // 잠금 읽기는 스냅샷을 만들지 않으므로, 정원 있는 방에서는 이 잠금 읽기가 첫 문장이다.
+        // ⚠️ 정원 유무는 트랜잭션 밖에서 미리 읽는다. REPEATABLE READ 에서 일반 SELECT 는 읽기
+        // 스냅샷을 그 시점에 고정하는데, 락을 기다리기 전에 스냅샷이 잡히면 뒤의 정원 COUNT 가
+        // 그 사이 커밋된 가입을 못 본다 → 마지막 한 자리에 여러 명이 들어간다. 잠금 읽기는
+        // 스냅샷을 만들지 않으므로, 정원 있는 방에서는 이 잠금 읽기가 트랜잭션의 첫 문장이다.
+        //
+        // 무제한 방은 <b>공유 잠금</b>이다. 스펙은 「락과 COUNT 를 모두 생략」이라고 적었지만,
+        // 정말 잠그지 않으면 정원을 거는 설정 변경과의 경합이 열린다 — 설정이 아직 커밋되기
+        // 전이라 가입은 여전히 「무제한」을 보고 정원 검사 없이 들어가고, 설정 쪽은 그 가입을
+        // 못 센 채 커밋해 정원을 넘긴다. 스펙이 생략하라는 이유는 <b>가입끼리의 경합</b>을
+        // 없애려는 것이고, 공유 잠금은 서로 막지 않으므로 그 목적은 그대로 지켜진다.
+        // COUNT 는 스펙대로 하지 않는다 — 셀 값이 없으므로 애초에 할 일이 없다.
         Challenge c = (capacityKnown != null
                 ? challengeRepository.findByIdForUpdate(challengeId)
-                : challengeRepository.findById(challengeId))
+                : challengeRepository.findByIdForShare(challengeId))
                 .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
+
+        // 무제한인 줄 알고 잠그지 않았는데 정원이 걸려 있다면, 이 트랜잭션의 스냅샷은 이미
+        // 고정돼 정원을 세도 믿을 수 없다. 되돌리고 잠금 경로로 다시 들어간다.
+        if (capacityKnown == null && c.getMaxParticipants() != null) {
+            throw new CapacityAppearedException(c.getMaxParticipants());
+        }
 
         // 솔로 방은 본인만 — 타인에겐 존재를 숨긴다(상세 조회 404 규칙과 동일).
         if (!c.isGroup() && !c.isOwner(userId))

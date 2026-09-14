@@ -4,6 +4,7 @@ import com.ruleup.ruleup_backend.challenge.creation.ChallengeImageUpload;
 import com.ruleup.ruleup_backend.challenge.creation.ChallengeImageUploadRepository;
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus;
+import com.ruleup.ruleup_backend.challenge.domain.MemberStatus;
 import com.ruleup.ruleup_backend.challenge.domain.ParticipationType;
 import com.ruleup.ruleup_backend.challenge.draft.DraftView;
 import com.ruleup.ruleup_backend.challenge.dto.ChallengeSettingsResponse;
@@ -50,6 +51,10 @@ public class ChallengeSettingsService {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     /** 고를 수 있는 정원 (탐색 공통 5-3) — 생성과 같은 목록을 쓴다. 비우면 무제한. */
+    /** 탐색의 노출 후보·필터·정렬을 정하는 값들. 이 중 하나라도 바뀌면 투영을 다시 만든다. */
+    private static final java.util.Set<String> EXPLORE_FIELDS = java.util.Set.of(
+            "visibility", "mode", "category", "verification", "minTier", "capacity", "period");
+
     private static final java.util.Set<Integer> CAPACITY_CHOICES =
             java.util.Set.of(5, 10, 20, 30, 50, 100, 200, 300);
 
@@ -120,8 +125,10 @@ public class ChallengeSettingsService {
             throw new BusinessException(ErrorCode.MODERATION_LOCKED, String.valueOf(retryAfter));
         }
 
-        // 잠금 범위: 카테고리는 항상 불가, 방 성격 항목은 시작 전+혼자일 때만
-        boolean fullEditable = c.isUpcoming() && c.getParticipantCount() <= 1;
+        // 잠금 범위: 카테고리는 항상 불가, 방 성격 항목은 시작 전+혼자일 때만.
+        // 여기는 challenges 행을 <b>쓰기 잠금</b>으로 들고 있으므로, 같은 방의 가입(정원 있는 방은
+        // 쓰기·무제한 방은 공유 잠금)과 직렬화된다 — 아래에서 센 수는 이 트랜잭션 동안 늘지 않는다.
+        boolean fullEditable = aloneAndUpcoming(c);
         if (body.has("category")) rejectNotEditable(c);
         if (!fullEditable) {
             for (String field : List.of("mode", "visibility", "rankingVisible", "minTier",
@@ -153,6 +160,12 @@ public class ChallengeSettingsService {
         if (!updated.isEmpty()) c.bumpVersion();
         if (!moderation.isEmpty()) {
             eventPublisher.publishEvent(new ChallengeModerationRequested(c.getId()));
+        }
+        // 탐색 노출·필터를 정하는 값이 바뀌었으면 파생 인덱스를 <b>커밋 직후</b> 다시 만든다.
+        // 5분 보정만 믿으면 비공개→공개로 바꾼 방이 그동안 목록에 안 뜨고, AUTO→MANUAL 로
+        // 바꾼 방은 그동안 옛 필터 결과에 뜬다 — 사용자에게는 설정이 안 먹은 것으로 보인다.
+        if (updated.keySet().stream().anyMatch(EXPLORE_FIELDS::contains)) {
+            eventPublisher.publishEvent(new com.ruleup.ruleup_backend.challenge.explore.ChallengeExploreProjectionRequested(c.getId()));
         }
         return new PatchChallengeResponse(
                 c.getId().toString(),
@@ -437,8 +450,23 @@ public class ChallengeSettingsService {
     }
 
     private List<String> editableFields(Challenge c) {
-        boolean fullEditable = c.getStatus() == ChallengeStatus.UPCOMING && c.getParticipantCount() <= 1;
-        return fullEditable ? FULL_EDITABLE : LIMITED_EDITABLE;
+        return aloneAndUpcoming(c) ? FULL_EDITABLE : LIMITED_EDITABLE;
+    }
+
+    /**
+     * 「아직 시작 전이고 방장 혼자인가」 — <b>멤버십 행을 직접 센다.</b>
+     *
+     * <p>{@code challenges.participant_count} 를 쓰면 안 된다. 가입 트랜잭션은 그 열을 갱신하지
+     * 않고 커밋 뒤 원천에서 다시 세어 채우는 <b>표시용 작업본</b>이다(탐색 백엔드 3-1). 그
+     * 재계산이 늦거나 유실된 구간에는 실제 참여자가 둘 이상인데도 값이 1 로 남아 있고, 그
+     * 값으로 권한을 판정하면 <b>이미 사람이 들어온 방의 모드·공개 범위·기간·인증 방식이 열린다</b> —
+     * 들어온 사람이 약속과 다른 방에 남는다. 권한은 파생값이 아니라 원천으로 판정해야 한다.
+     *
+     * <p>세는 비용은 {@code (challenge_id, status)} 커버링 인덱스가 받는다(V53).
+     */
+    private boolean aloneAndUpcoming(Challenge c) {
+        return c.getStatus() == ChallengeStatus.UPCOMING
+                && memberRepository.countByChallengeIdAndStatus(c.getId(), MemberStatus.ACTIVE) <= 1;
     }
 
     private DraftView.Verification verificationView(Challenge c) {

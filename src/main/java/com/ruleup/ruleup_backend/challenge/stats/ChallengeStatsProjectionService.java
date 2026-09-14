@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.ByteBuffer;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -89,12 +90,50 @@ public class ChallengeStatsProjectionService {
         Double retentionRate = (upcoming || c.totalProgress < MIN_TOTAL_PROGRESS || participantCount == 0)
                 ? null : ratio(c.nonFailed, participantCount);
 
+        // <b>값이 그대로면 쓰지 않는다.</b> challenge_stats.updated_at 은 「이 방의 통계가 언제
+        // 달라졌는가」를 뜻해야 한다 — 탐색 투영이 그 시각을 원천 리비전에 넣어 순서를 정하고,
+        // 5분 보정이 그 시각으로 「다시 볼 방」을 고르기 때문이다.
+        //
+        // 재계산할 때마다 무조건 NOW(6) 을 찍으면 값이 하나도 안 바뀐 전수 배치가 <b>모든 방의
+        // 리비전을 한꺼번에 미래로 밀어버린다.</b> 그러면 멀쩡한 Redis 투영이 전부 「원천보다
+        // 오래됐다」로 읽혀 준비 상태가 내려가고, 전수 재구성과 그동안의 503 이 매일 따라온다.
+        // 위 participant_count 를 쓸 때 challenges.updated_at 을 그대로 두는 것과 같은 이유다.
+        if (unchanged(id, c, completionRate, retentionRate)) return;
+
         jdbc.update("UPDATE challenge_stats SET " +
                         "qualified_member_count = ?, qualified_success_member_count = ?, completion_rate = ?, " +
                         "total_progress_count = ?, non_failed_member_count = ?, retention_rate = ?, " +
                         "updated_at = NOW(6) WHERE challenge_id = ?",
                 c.qualified, c.qualifiedSuccess, completionRate,
                 c.totalProgress, c.nonFailed, retentionRate, id);
+    }
+
+    /**
+     * 지금 저장된 값이 이번에 센 값과 같은가.
+     *
+     * <p>비율은 {@code DECIMAL(5,4)} 이라 double 로 견주면 표현 차이로 「달라졌다」가 나올 수 있다.
+     * 그래서 <b>DB 가 찍어 주는 문자열</b>끼리 비교한다 — 저장될 모양 그대로를 견주는 셈이라,
+     * 소수점 자리수나 부동소수 반올림이 끼어들지 않는다.
+     */
+    private boolean unchanged(byte[] id, Counts c, Double completionRate, Double retentionRate) {
+        List<String> current = jdbc.query(
+                "SELECT qualified_member_count, qualified_success_member_count, completion_rate, " +
+                        "       total_progress_count, non_failed_member_count, retention_rate " +
+                        "FROM challenge_stats WHERE challenge_id = ?",
+                (rs, i) -> rs.getInt(1) + "|" + rs.getInt(2) + "|" + rs.getString(3) + "|"
+                        + rs.getInt(4) + "|" + rs.getInt(5) + "|" + rs.getString(6),
+                id);
+        if (current.isEmpty()) return false;
+
+        // 같은 자리수로 찍어야 문자열이 맞아떨어진다 — DECIMAL(5,4) 는 언제나 소수 넷째 자리까지다.
+        String next = c.qualified + "|" + c.qualifiedSuccess + "|" + decimal4(completionRate) + "|"
+                + c.totalProgress + "|" + c.nonFailed + "|" + decimal4(retentionRate);
+        return current.getFirst().equals(next);
+    }
+
+    private static String decimal4(Double value) {
+        return (value == null) ? null : new java.math.BigDecimal(value.toString())
+                .setScale(4, java.math.RoundingMode.HALF_UP).toPlainString();
     }
 
     /**
