@@ -26,6 +26,8 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -100,7 +102,10 @@ public class AppealService {
 
         // 인용 — 정상 성공과 동일하게 정정한다.
         daily.correctByAppeal(now);
-        metrics.appealAccepted();   // 인정률의 분자
+        // 인정률의 <b>분자</b>는 커밋 이후에 센다. 여기서 올리면 뒤이은 진행률 갱신·아웃박스
+        // 적재·알림 적재나 최종 커밋이 실패했을 때 DB 는 롤백되는데 지표에만 인용이 남아,
+        // 인정률이 실제보다 높게 보인다 — 분모는 그대로이므로 그 차이가 그대로 왜곡이 된다.
+        afterCommit(metrics::appealAccepted);
         ChallengeMember member = challengeQuery.findMember(daily.getChallengeMemberId()).orElse(null);
         refreshProgress(member, daily);
         eventPublisher.publishEvent(
@@ -153,6 +158,20 @@ public class AppealService {
      * 접수 저장. uq(verificationDailyId) 가 동시 요청에서도 한 건만 남긴다 —
      * 경합에서 진 요청은 이미 인용된 것과 같으므로 NOT_FAILED 로 돌려준다.
      */
+    /**
+     * 커밋이 실제로 끝난 뒤에만 실행한다. 롤백되면 아무 일도 일어나지 않는다 —
+     * 트랜잭션 밖에서 불리면 그 자리에서 바로 실행한다.
+     */
+    private static void afterCommit(Runnable action) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            action.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override public void afterCommit() { action.run(); }
+        });
+    }
+
     private Appeal saveAppeal(VerificationDaily daily, UUID userId, String reason, String imageUrl, Instant now) {
         try {
             return appealRepo.saveAndFlush(Appeal.accept(
