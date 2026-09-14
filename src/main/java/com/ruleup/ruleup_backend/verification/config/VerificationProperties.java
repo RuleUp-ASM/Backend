@@ -24,7 +24,14 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param gpsRetentionDays  GPS 원본 좌표를 <b>확정 이후</b> 유지할 일수. 위치정보법의 목적 달성 시
  *                          즉시 파기 원칙 대상이라 다른 신호와 규칙이 다르다. 기준은 고정 일괄
  *                          시각이 아니라 <b>건별 확정 시각 + 이 값</b>이다 — 일괄로 잡으면 아직
- *                          확정 전인 건까지 지워진다. 기본 30일이며 이상탐지 윈도우에 맞춰 조정한다
+ *                          확정 전인 건까지 지워진다.
+ *                          <p><b>반드시 {@code signalRetentionDays} 보다 짧아야 한다.</b> 공통 스펙은
+ *                          「30일 예정」이라 적었지만 백엔드 스펙은 판정 원본을 D+2 확정 직후 파티션째
+ *                          걷으라고 적었다. 30일로 두면 좌표 행이 파기 타이머가 도달하기 <b>전에</b>
+ *                          파티션과 함께 사라져 {@code purgedAt} 경로가 한 번도 돌지 않는다 —
+ *                          「파기했다」는 기록이 없는 채로 사라지는 셈이다. 둘 중 짧은 쪽이 법 취지에
+ *                          맞으므로 <b>1일</b>을 기본으로 삼아 파기 배치가 먼저 닿게 한다. 30일은
+ *                          이상탐지가 볼 수 있는 <b>상한</b>이지 목표가 아니다
  * @param anomalyRetentionDays 이상탐지 입력(유형별 anomaly 도메인)의 보관 일수. 스펙이 <b>최대 30일</b>
  *                          이라고 못 박았고, 만료분은 행 삭제가 아니라 일자 파티션 DROP 으로 걷는다
  * @param requireActiveDevice sync 요청에 기기 식별자를 <b>강제</b>할지. 스펙의 「AT + 활성 기기 검증」을
@@ -52,7 +59,7 @@ public record VerificationProperties(Integer geofenceRadiusM, Integer maxPayload
     private static final int DEFAULT_AVOID_GRACE_MINUTES = 5;
     private static final int DEFAULT_SIGNAL_RETENTION_DAYS = 3;
     private static final int DEFAULT_SIGNAL_PARTITION_LOOKAHEAD_DAYS = 10;
-    private static final int DEFAULT_GPS_RETENTION_DAYS = 30;
+    private static final int DEFAULT_GPS_RETENTION_DAYS = 1;
     private static final int DEFAULT_ANOMALY_RETENTION_DAYS = 30;
 
     public VerificationProperties {
@@ -66,6 +73,13 @@ public record VerificationProperties(Integer geofenceRadiusM, Integer maxPayload
         signalPartitionLookaheadDays = positiveOrDefault(
                 signalPartitionLookaheadDays, DEFAULT_SIGNAL_PARTITION_LOOKAHEAD_DAYS);
         gpsRetentionDays = positiveOrDefault(gpsRetentionDays, DEFAULT_GPS_RETENTION_DAYS);
+        if (gpsRetentionDays >= signalRetentionDays) {
+            // 설정만으로 조용히 어긋나면 파기 경로가 죽은 것을 아무도 모른다. 기동 때 막는다.
+            throw new IllegalArgumentException(
+                    "app.verification.gps-retention-days(" + gpsRetentionDays + ") 는 "
+                            + "signal-retention-days(" + signalRetentionDays + ") 보다 짧아야 한다 — "
+                            + "그렇지 않으면 좌표가 파기 타이머 도달 전에 파티션째 사라져 파기 기록이 남지 않는다");
+        }
         anomalyRetentionDays = positiveOrDefault(anomalyRetentionDays, DEFAULT_ANOMALY_RETENTION_DAYS);
         // 게이트 강화는 <b>끄는 쪽이 기본</b>이다. 구버전 앱을 한 번에 인증 불가로 만드는 변경은
         // 관측으로 안전을 확인한 뒤 켜야 한다.

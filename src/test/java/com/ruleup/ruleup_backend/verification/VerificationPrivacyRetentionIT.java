@@ -2,6 +2,7 @@ package com.ruleup.ruleup_backend.verification;
 
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
 import com.ruleup.ruleup_backend.verification.service.LocationPurgeService;
+import com.ruleup.ruleup_backend.verification.service.SignalPartitionMaintainer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -42,6 +43,7 @@ class VerificationPrivacyRetentionIT extends VerificationApiSupport {
     @Autowired WebApplicationContext wac;
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired LocationPurgeService locationPurge;
+    @Autowired SignalPartitionMaintainer partitionMaintainer;
 
     private MockMvc mvc;
 
@@ -167,6 +169,39 @@ class VerificationPrivacyRetentionIT extends VerificationApiSupport {
                     .as("행까지 지우면 「이 신호를 받아 이렇게 판정했다」를 설명할 수 없다")
                     .isEqualTo(purged);
             assertThat(todayStatusOf(memberId)).as("판정 결과는 그대로다").isEqualTo("SUCCESS");
+        }
+    }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("원본 파티션과 파기 타이머의 경계")
+    class PartitionHold {
+
+        @Test
+        @DisplayName("[P1] 확정되지 않은 좌표는 파티션 파기 판단에서 「남아 있다」로 세어진다")
+        void unconfirmedCoordinatesAreCountedBeforeDroppingThePartition() throws Exception {
+            Member me = member(uniq("privacy-hold"));
+            UUID challenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
+            UUID memberId = insertReadyMember(challenge, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+
+            // 진입만 있고 목표 체류에 못 미친다 — 확정되지 않았으므로 파기 타이머도 없다.
+            sync(me.token(), List.of(geofenceSignal(memberId, "ENTER", todayAt(9, 0))));
+
+            java.time.LocalDate today = java.time.LocalDate.now(KST);
+            assertThat(partitionMaintainer.countUnconfirmed(today))
+                    .as("시각만 보고 떨어뜨리면 판정도 못 한 좌표를 파기 기록 없이 잃는다")
+                    .isGreaterThanOrEqualTo(1);
+
+            // 체류가 채워져 확정되면 타이머가 걸리고, 그 뒤에는 붙잡을 이유가 없다.
+            sync(me.token(), List.of(geofenceSignal(memberId, "EXIT", todayAt(10, 0))));
+            assertThat(todayStatusOf(memberId)).isEqualTo("SUCCESS");
+
+            Integer stillUnconfirmed = jdbc().queryForObject(
+                    "SELECT COUNT(*) FROM verification_location_signals "
+                            + "WHERE userId = ? AND purgeAfter IS NULL", Integer.class, bytes(me.id()));
+            assertThat(stillUnconfirmed)
+                    .as("확정됐는데도 타이머가 없으면 그 좌표는 영영 파기 대상이 되지 않는다")
+                    .isZero();
         }
     }
 
