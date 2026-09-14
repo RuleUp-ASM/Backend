@@ -35,7 +35,8 @@ public final class VerificationDeadlines {
     public static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     /** 귀속일 종료 후 확정까지 두는 유예(일). 늦게 도착하는 신호를 받아 주는 구간이다. */
-    private static final int GRACE_DAYS = 1;
+    /** 귀속일이 끝난 뒤 더 기다리는 날 수. 확정 경계·이의 기한이 모두 여기서 파생된다. */
+    public static final int GRACE_DAYS = 1;
 
     private VerificationDeadlines() {}
 

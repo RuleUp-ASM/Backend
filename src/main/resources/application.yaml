@@ -98,6 +98,23 @@ app:
     geofence-radius-m: ${VERIFICATION_GEOFENCE_RADIUS_M:500}     # 잠정 500m — 성능 테스트 후 조정
     max-payload-bytes: ${VERIFICATION_MAX_PAYLOAD_BYTES:1048576} # sync 1회 상한(클라가 이 값으로 구간을 쪼갠다)
 
+    # --- 신호 신뢰 게이트 (기본 꺼짐) --------------------------------------
+    # 둘 다 스펙이 요구하는 검증인데 기본값이 false 다. 켜는 순간 필드를 보내지 않는 앱이
+    # 인증 불가가 되기 때문이고, 지금 안드로이드가 실제로 보내지 않고 있다(stg 실측).
+    # 값이 여기 적혀 있어야 「왜 꺼져 있는지」와 「언제 켜는지」가 코드 밖에서도 보인다.
+    #
+    # require-active-device: sync 요청에 deviceId 를 강제한다.
+    #   없으면 400 INVALID_SIGNAL_PAYLOAD 로 요청 전체를 반려하고, 계정에 활성 기기가
+    #   등록돼 있지 않으면 신호를 판정에 쓰지 않는다(모르면 쓰지 않는다).
+    #   켜는 조건 → verification.sync.device_id_missing 과
+    #              verification.sync.active_device_unknown 이 둘 다 0 으로 떨어질 것.
+    #
+    # require-signal-origin: 수면 기록에 출처 메타데이터를 강제한다.
+    #   없으면 그 세그먼트를 판정에서 뺀다 — 출처를 안 보내는 앱은 수면 인증이 전부 실패한다.
+    #   켜는 조건 → 수면 신호에 origin 이 실려 오는 것을 실제 트래픽에서 확인할 것.
+    require-active-device: ${VERIFICATION_REQUIRE_ACTIVE_DEVICE:false}
+    require-signal-origin: ${VERIFICATION_REQUIRE_SIGNAL_ORIGIN:false}
+
   # 추천 세그먼트 점수 윈도우 배치 튜닝(SegmentScoreService, 매일 04:00 KST).
   recommendation:
     segment-window-days: ${RECO_SEGMENT_WINDOW_DAYS:30}        # 최근 N일 생성 챌린지만 인기도 집계

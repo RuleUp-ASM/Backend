@@ -124,6 +124,36 @@ class VerificationFinalizeIsolationIT extends VerificationApiSupport {
     }
 
     @Test
+    @DisplayName("[P1] 확정 시각이 앞당겨진 행은 폴러를 점유하지 않고, 정상 대상이 굶지 않는다")
+    void anEarlyRowNeitherSpinsThePollerNorStarvesTheRest() throws Exception {
+        Member me = member(uniq("finalize-early"));
+        UUID challenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
+        startedDaysAgo(challenge, 10);
+        UUID memberId = insertReadyMember(challenge, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+
+        // ① 오늘 귀속인데 저장된 확정 시각만 과거로 당겨진 행. 확정 쪽은 귀속일에서 다시
+        //    파생한 시각으로 거절하는데, 거절은 행을 바꾸지 않는다 — 폴링 조건이 이 행을
+        //    계속 집으면 45초 예산을 통째로 여기에 쓰고 아래 ②가 영영 차례를 못 받는다.
+        UUID early = openDue(memberId, challenge, me.id(), LocalDate.now(KST));
+        // ② 정상적으로 확정돼야 하는 D-2 대상.
+        UUID due = openDue(memberId, challenge, me.id(), LocalDate.now(KST).minusDays(2));
+
+        long startedAt = System.nanoTime();
+        finalizeService.finalizeDue();
+        long elapsedSec = (System.nanoTime() - startedAt) / 1_000_000_000L;
+
+        assertThat(statusOf(due))
+                .as("앞의 한 건이 폴러를 붙잡으면 뒤에 밀린 정상 대상이 확정되지 못한다")
+                .isNotEqualTo("PENDING");
+        assertThat(statusOf(early))
+                .as("귀속일 기준으로 아직 이르다 — 확정하면 이의 창이 열린 건을 실패로 굳힌다")
+                .isEqualTo("PENDING");
+        assertThat(elapsedSec)
+                .as("같은 행을 다시 집으면 예산(45초)을 다 쓴다 — 애초에 집지 않아야 한다")
+                .isLessThan(20L);
+    }
+
+    @Test
     @DisplayName("[P1] 판정 하나가 터져도 나머지는 확정되고, 터진 건만 뒤로 밀린다")
     void oneBrokenRowDoesNotBlockTheRest() throws Exception {
         Member me = member(uniq("finalize-isolate"));

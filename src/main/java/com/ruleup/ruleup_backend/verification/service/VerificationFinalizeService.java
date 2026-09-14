@@ -310,7 +310,7 @@ public class VerificationFinalizeService {
      */
     private UUID claimOne() {
         return transactionTemplate.execute(tx ->
-                dailyRepo.findDuePendingForUpdate(clock.instant(), 1).stream()
+                dailyRepo.findDuePendingForUpdate(clock.instant(), finalizableThrough(), 1).stream()
                         .findFirst().map(VerificationDaily::getId).orElse(null));
     }
 
@@ -334,6 +334,17 @@ public class VerificationFinalizeService {
         }
     }
 
+    /**
+     * 확정 경계가 지난 <b>가장 늦은 귀속일</b> — KST 오늘에서 이틀 전.
+     *
+     * <p>귀속일 D 의 확정 경계는 D+2 00:00 KST 다. 따라서 지금 확정해도 되는 귀속일은 오늘−2 까지다.
+     * 폴링 질의가 이 상한을 함께 쓰므로, 저장된 확정 시각이 앞당겨진 행이 있어도 <b>집히지 않는다</b> —
+     * 집은 뒤에 거절하면 행이 그대로라 같은 건을 무한히 다시 조회하게 된다.
+     */
+    private LocalDate finalizableThrough() {
+        return LocalDate.now(clock.withZone(KST)).minusDays(1L + VerificationDeadlines.GRACE_DAYS);
+    }
+
     /** 실패한 행을 뒤로 민다. 이 UPDATE 마저 실패하면 다음 tick 이 같은 자리에서 다시 시도한다. */
     private void defer(UUID id) {
         metrics.finalizeFailed();
@@ -351,7 +362,7 @@ public class VerificationFinalizeService {
     private int finalizeChunk(int limit) {
         Integer claimed = transactionTemplate.execute(tx -> {
             Instant now = clock.instant();
-            List<VerificationDaily> due = dailyRepo.findDuePendingForUpdate(now, limit);
+            List<VerificationDaily> due = dailyRepo.findDuePendingForUpdate(now, finalizableThrough(), limit);
             Set<UUID> changedChallenges = new HashSet<>();
             for (VerificationDaily daily : due) {
                 if (finalizeOne(daily, now)) changedChallenges.add(daily.getChallengeId());

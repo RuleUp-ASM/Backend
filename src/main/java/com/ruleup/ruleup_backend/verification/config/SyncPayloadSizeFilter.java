@@ -88,6 +88,14 @@ public class SyncPayloadSizeFilter extends OncePerRequestFilter {
     private void writeTooLarge(HttpServletResponse response) throws IOException {
         // 초과율(스펙 목표 1% 이하)의 분자. 분모는 verification.sync 타이머의 count 다.
         metrics.payloadRejected();
+        renderTooLarge(response);
+    }
+
+    /**
+     * 413 본문 렌더링. gzip 해제 필터도 <b>압축된 본문</b>이 상한을 넘으면 여기로 반려하므로,
+     * 두 필터가 같은 응답 모양을 내도록 한 자리에 둔다.
+     */
+    static void renderTooLarge(HttpServletResponse response) throws IOException {
         ErrorCode code = ErrorCode.SYNC_PAYLOAD_TOO_LARGE;
         response.setStatus(code.getStatus().value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);

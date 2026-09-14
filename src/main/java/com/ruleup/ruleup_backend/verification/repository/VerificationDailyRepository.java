@@ -90,13 +90,25 @@ public interface VerificationDailyRepository extends JpaRepository<VerificationD
     List<VerificationDaily> findByStatusAndFinalizeAfterLessThanEqual(VerificationStatus status, Instant now);
 
     /**
-     * 확정 배치 클레임: 귀속일 다음 날 00:00 KST 가 지난 미확정 행을 FOR UPDATE SKIP LOCKED 로 선점.
+     * 확정 배치 클레임: 확정 시각이 지난 미확정 행을 FOR UPDATE SKIP LOCKED 로 선점.
      * 동시에 도는 스케줄러는 잠긴 행을 건너뛰어 중복 확정이 구조적으로 불가능하다(ShedLock 없이 멱등).
+     *
+     * <p>조건이 <b>둘</b>인 이유가 있다. 행에 적힌 {@code finalizeAfter} 만 보면, 그 값이 어떤 경로로든
+     * 앞당겨져 저장된 행을 계속 집어 온다. 확정 쪽은 귀속일에서 다시 파생한 시각으로 한 번 더 걸러
+     * 거절하는데(「D+2 이전 확정 0건」), 거절은 <b>행을 바꾸지 않으므로</b> 같은 행이 다음 조회에
+     * 또 걸린다 — 폴러가 45초 예산을 그 한 건에 다 쓰고 뒤에 밀린 정상 대상이 굶는다.
+     * 그래서 귀속일 자체에도 상한을 걸어 <b>애초에 집지 않는다.</b>
+     *
+     * @param maxTargetDate 확정 경계가 지난 가장 늦은 귀속일 = KST 오늘 − 2일
+     *                      (귀속일 D 의 확정 경계가 D+2 00:00 KST 이므로 D ≤ 오늘−2 여야 지난 것이다)
      */
     @Query(value = "SELECT * FROM VerificationDaily " +
             "WHERE status = 'PENDING' AND finalizeAfter IS NOT NULL AND finalizeAfter <= :now " +
+            "  AND targetDate <= :maxTargetDate " +
             "ORDER BY finalizeAfter LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
-    List<VerificationDaily> findDuePendingForUpdate(@Param("now") Instant now, @Param("limit") int limit);
+    List<VerificationDaily> findDuePendingForUpdate(@Param("now") Instant now,
+                                                    @Param("maxTargetDate") LocalDate maxTargetDate,
+                                                    @Param("limit") int limit);
 
 
     /**
