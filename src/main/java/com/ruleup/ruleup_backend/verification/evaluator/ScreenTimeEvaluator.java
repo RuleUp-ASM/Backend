@@ -72,13 +72,34 @@ public class ScreenTimeEvaluator implements MethodEvaluator {
         }
     }
 
+    /** 사용 구간을 여는 이벤트. */
+    private static final Set<String> OPEN_EVENTS = Set.of("RESUMED", "ACTIVITY_RESUMED", "MOVE_TO_FOREGROUND");
+
+    /**
+     * 사용 구간을 닫는 이벤트.
+     *
+     * <p>PAUSED 가 표준이지만 <b>빠질 때가 있다</b> — 앱이 강제 종료되거나 프로세스가 죽으면
+     * UsageStats 에 STOPPED 만 남는다. 그때 닫지 않으면 그 세션이 창 끝까지 열려 있는 것으로
+     * 계산돼, 최소 사용형은 안 쓴 시간을 인정받고 최대 사용형은 쓰지 않은 시간으로 실패한다.
+     * 스펙이 「종료를 판단할 수 있는 후속 정보를 이용해 보정할 수 있음」이라고 둔 자리다.
+     */
+    private static final Set<String> CLOSE_EVENTS =
+            Set.of("PAUSED", "ACTIVITY_PAUSED", "STOPPED", "ACTIVITY_STOPPED", "MOVE_TO_BACKGROUND");
+
+    /** 화면이 꺼지면 어떤 앱도 쓰이고 있지 않다 — 열린 세션 전부를 닫는 시스템 이벤트다. */
+    private static final Set<String> SCREEN_OFF_EVENTS =
+            Set.of("SCREEN_OFF", "SCREEN_NON_INTERACTIVE", "DEVICE_SHUTDOWN");
+
     /** 그날 이벤트를 패키지별로 페어링해 닫힌 구간의 창 내 초를 반환. open 맵에는 미완 세션이 남는다. */
     private long processEvents(List<SyncSignal> signals, Set<String> targets, Window window, Map<String, Instant> open) {
         // 패키지별 (type, at) 수집
         Map<String, List<UsageEvent>> byPkg = new HashMap<>();
+        List<Instant> screenOff = new ArrayList<>();
         if (signals != null) {
             for (SyncSignal s : signals) {
-                if (!SignalType.SCREEN_TIME.name().equals(s.type()) || s.usageEvents() == null) continue;
+                if (!carriesUsage(s.type())) continue;
+                collectScreenOff(s, screenOff);
+                if (s.usageEvents() == null) continue;
                 for (UsageEvent e : s.usageEvents()) {
                     if (e.packageName() == null) continue;
                     if (!targets.isEmpty() && !targets.contains(e.packageName())) continue;
@@ -86,23 +107,56 @@ public class ScreenTimeEvaluator implements MethodEvaluator {
                 }
             }
         }
+        screenOff.sort(Comparator.naturalOrder());
+
         long addedSec = 0;
         for (var entry : byPkg.entrySet()) {
             String pkg = entry.getKey();
             List<UsageEvent> events = entry.getValue();
             events.sort(Comparator.comparing(ev -> safeInstant(ev.at())));
+            int offIndex = 0;
             for (UsageEvent ev : events) {
                 Instant at = safeInstant(ev.at());
                 if (at == null) continue;
-                if ("RESUMED".equals(ev.type())) {
+
+                // 이 이벤트 이전에 화면이 꺼졌다면 그 시점에 세션을 닫는다(보정).
+                while (offIndex < screenOff.size() && !screenOff.get(offIndex).isAfter(at)) {
+                    Instant offAt = screenOff.get(offIndex++);
+                    Instant opened = open.remove(pkg);
+                    if (opened != null) addedSec += overlapSeconds(opened, offAt, window);
+                }
+
+                String type = (ev.type() != null) ? ev.type().toUpperCase() : "";
+                if (OPEN_EVENTS.contains(type)) {
                     open.putIfAbsent(pkg, at);                  // 이미 열려있으면 유지(가장 이른 것)
-                } else if ("PAUSED".equals(ev.type())) {
+                } else if (CLOSE_EVENTS.contains(type)) {
                     Instant opened = open.remove(pkg);
                     if (opened != null) addedSec += overlapSeconds(opened, at, window);
                 }
             }
+            // 마지막 이벤트 뒤에 온 화면 꺼짐도 세션을 닫는다.
+            while (offIndex < screenOff.size()) {
+                Instant offAt = screenOff.get(offIndex++);
+                Instant opened = open.remove(pkg);
+                if (opened != null) addedSec += overlapSeconds(opened, offAt, window);
+            }
         }
         return addedSec;
+    }
+
+    /** 앱 사용 이벤트를 실어 오는 입력 타입. */
+    private boolean carriesUsage(String type) {
+        return SignalType.SCREEN_TIME.name().equals(type) || SignalType.WAKE.name().equals(type);
+    }
+
+    private void collectScreenOff(SyncSignal s, List<Instant> out) {
+        if (s.screenEvents() == null) return;
+        for (var e : s.screenEvents()) {
+            if (e == null || e.event() == null) continue;
+            if (!SCREEN_OFF_EVENTS.contains(e.event().toUpperCase())) continue;
+            Instant at = safeInstant(e.at());
+            if (at != null) out.add(at);
+        }
     }
 
     private long closeOpenAt(Instant closeAt, Window window, Map<String, Instant> open) {

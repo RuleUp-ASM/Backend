@@ -83,6 +83,7 @@ public class VerificationSyncService {
     private final com.ruleup.ruleup_backend.common.web.CountryResolver countryResolver;
     private final VerificationProperties properties;
     private final SignalExclusionRecorder exclusionRecorder;
+    private final VerificationSyncSessionStore sessionStore;
     private final Map<VerificationMethod, MethodEvaluator> evaluators;
 
     public VerificationSyncService(ChallengeQueryService challengeQuery,
@@ -102,6 +103,7 @@ public class VerificationSyncService {
                                    com.ruleup.ruleup_backend.common.web.CountryResolver countryResolver,
                                    VerificationProperties properties,
                                    SignalExclusionRecorder exclusionRecorder,
+                                   VerificationSyncSessionStore sessionStore,
                                    List<MethodEvaluator> evaluatorList) {
         this.challengeQuery = challengeQuery;
         this.dailyRepo = dailyRepo;
@@ -120,6 +122,7 @@ public class VerificationSyncService {
         this.countryResolver = countryResolver;
         this.properties = properties;
         this.exclusionRecorder = exclusionRecorder;
+        this.sessionStore = sessionStore;
         this.evaluators = evaluatorList.stream()
                 .collect(Collectors.toMap(MethodEvaluator::method, e -> e, (a, b) -> a));
     }
@@ -143,10 +146,13 @@ public class VerificationSyncService {
         LocalDate today = LocalDate.now(KST);
         Instant now = Instant.now();
 
-        // 원본 저장 + 영속 멱등. 못 믿을 봉투(VPN·무결성 실패)의 위치 신호는 저장하되
+        com.ruleup.ruleup_backend.user.domain.User user = userRepository.findById(userId).orElse(null);
+        sessionStore.touch(userId, req.sessionId(), now);
+
+        // 원본 저장 + 영속 멱등. 못 믿을 봉투(VPN·무결성 실패·비활성 기기)의 신호는 저장하되
         // 배제 사유를 행에 새긴다 — 제외와 제재는 분리하고, 원본은 이상탐지 자료로 남긴다.
-        VerificationSignalIngestService.Ingested ingested =
-                signalIngest.ingest(userId, signals, now, trustGate.decide(req));
+        VerificationSignalIngestService.Ingested ingested = signalIngest.ingest(userId, signals, now,
+                new VerificationSignalIngestService.Source(req.deviceId(), gateFor(user, req)));
         trustGate.record(userId, req, signals);
 
         // 판정 입력은 저장된 원본이다. 오늘과 유예 중인 어제를 한 번씩만 읽어 멤버들이 나눠 쓴다 —
@@ -212,12 +218,33 @@ public class VerificationSyncService {
                 members.size(), updated.size(), Boolean.TRUE.equals(req.backlog()));
         // flushIntervalSec: 기기 스펙 기반 산정값을 매 ACK마다 전체값으로 회신(§6 제어 모델).
         // maxPayloadBytes: 클라가 이 값을 보고 전송 구간을 쪼갠다(설정값, 실측 후 조정).
-        com.ruleup.ruleup_backend.user.domain.User user = userRepository.findById(userId).orElse(null);
         backfillCountry(user, req.timeZone());
         int flushIntervalSec = FlushIntervalPolicy.forUser(user);
         return new SyncResponse(
                 ZonedDateTime.ofInstant(now, KST).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
                 flushIntervalSec, updated, ignored, properties.maxPayloadBytes(), ingested.droppedCount());
+    }
+
+    /**
+     * 이 요청의 신호에 새길 배제 사유.
+     *
+     * <p>비활성 기기가 먼저다 — 기기 전체를 못 믿는 경우라 신호 종류를 가리지 않는다. 예전 기기에
+     * 남아 있던 백로그가 새 기기의 인증을 통과시키면 안 되기 때문이다(스펙: 「비활성 기기 신호는
+     * 수신해도 판정에 쓰지 않음」). 기기를 밝히지 않은 요청은 <b>거르지 않는다</b> — 계약에 기기가
+     * 없던 시절의 앱이 전부 인증 불가가 된다.
+     */
+    private java.util.function.Function<String, SignalExclusionReason> gateFor(
+            com.ruleup.ruleup_backend.user.domain.User user, SyncRequest req) {
+        var trust = trustGate.decide(req);
+        if (!inactiveDevice(user, req.deviceId())) return trust;
+        return type -> SignalExclusionReason.UNTRUSTED_SOURCE;
+    }
+
+    /** 활성 기기가 아닌지. 양쪽 다 값이 있고 서로 다를 때만 그렇게 본다. */
+    private boolean inactiveDevice(com.ruleup.ruleup_backend.user.domain.User user, String deviceId) {
+        if (user == null || deviceId == null || deviceId.isBlank()) return false;
+        String active = user.getDeviceId();
+        return active != null && !active.isBlank() && !active.equals(deviceId.trim());
     }
 
     /**

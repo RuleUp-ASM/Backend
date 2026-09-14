@@ -76,10 +76,18 @@ public class VerificationSignalIngestService {
 
     /** 적재 대상 한 건 — 도메인·귀속일이 정해진 뒤의 모습. */
     private record Candidate(SignalDomain domain, LocalDate observedDate, String dedupKey,
-                             SyncSignal signal, Instant occurredAt, SignalExclusionReason excludeReason) {}
+                             SyncSignal signal, Instant occurredAt, SignalExclusionReason excludeReason,
+                             boolean explicitRecordId) {}
 
-    /** 게이트가 신호 타입별로 내리는 배제 결정. 아무것도 배제하지 않는 기본값. */
-    public static final java.util.function.Function<String, SignalExclusionReason> ACCEPT_ALL = type -> null;
+    /**
+     * 신호의 출처와 게이트 결정.
+     *
+     * @param deviceId 보낸 기기(없으면 null). 행에 적어 두어야 나중에 「어느 기기가 올린 신호인가」를 안다
+     * @param gate     신호 타입 → 판정 배제 사유(없으면 null)
+     */
+    public record Source(String deviceId, java.util.function.Function<String, SignalExclusionReason> gate) {
+        public static Source trusted() { return new Source(null, type -> null); }
+    }
 
     /**
      * 신호를 원본 그대로 저장하고, 처음 받은 것만 골라 돌려준다.
@@ -89,16 +97,15 @@ public class VerificationSignalIngestService {
      */
     @Transactional
     public Ingested ingest(UUID userId, List<SyncSignal> signals, Instant receivedAt) {
-        return ingest(userId, signals, receivedAt, ACCEPT_ALL);
+        return ingest(userId, signals, receivedAt, Source.trusted());
     }
 
     /**
-     * @param gate 신호 타입 → 판정 배제 사유(없으면 null). 봉투 수준 게이트(VPN·무결성 실패)의 결정을
-     *             <b>행에 새긴다</b> — 요청 메모리에서만 빼면 다음 sync 의 전량 재평가가 되살린다
+     * @param source 보낸 기기와 게이트 결정. 봉투 수준 게이트(VPN·무결성 실패·비활성 기기)의 결정을
+     *               <b>행에 새긴다</b> — 요청 메모리에서만 빼면 다음 sync 의 전량 재평가가 되살린다
      */
     @Transactional
-    public Ingested ingest(UUID userId, List<SyncSignal> signals, Instant receivedAt,
-                           java.util.function.Function<String, SignalExclusionReason> gate) {
+    public Ingested ingest(UUID userId, List<SyncSignal> signals, Instant receivedAt, Source source) {
         if (signals == null || signals.isEmpty()) return new Ingested(List.of(), 0);
 
         // 한 요청 안의 중복부터 접는다 — 같은 배치에 같은 신호가 두 번 실려 오는 일이 흔하다.
@@ -124,7 +131,8 @@ public class VerificationSignalIngestService {
             grouped.computeIfAbsent(domain.get(), d -> new LinkedHashMap<>())
                     .computeIfAbsent(observedDate, d -> new ArrayList<>())
                     .add(new Candidate(domain.get(), observedDate, e.getKey(), signal, occurredAt,
-                            gate.apply(signal.type())));
+                            source.gate().apply(signal.type()),
+                            signal.recordId() != null && !signal.recordId().isBlank()));
         }
         if (!unsupported.isEmpty()) {
             // 평가기가 무시하는 타입이다. 계약에 없는 payload 를 쌓지 않는다(수집 최소화).
@@ -136,7 +144,7 @@ public class VerificationSignalIngestService {
         for (Map.Entry<SignalDomain, Map<LocalDate, List<Candidate>>> byDomain : grouped.entrySet()) {
             for (Map.Entry<LocalDate, List<Candidate>> byDate : byDomain.getValue().entrySet()) {
                 dropped += store(userId, byDomain.getKey(), byDate.getKey(), byDate.getValue(),
-                        receivedAt, accepted);
+                        receivedAt, source.deviceId(), accepted);
             }
         }
         return new Ingested(accepted, dropped);
@@ -144,19 +152,63 @@ public class VerificationSignalIngestService {
 
     /** 한 도메인·한 귀속일 묶음을 적재하고, 중복으로 걸러낸 수를 돌려준다. */
     private int store(UUID userId, SignalDomain domain, LocalDate observedDate,
-                      List<Candidate> candidates, Instant receivedAt, List<SyncSignal> accepted) {
-        Set<String> known = alreadyStored(userId, domain, observedDate,
-                candidates.stream().map(Candidate::dedupKey).collect(java.util.stream.Collectors.toSet()));
+                      List<Candidate> candidates, Instant receivedAt, String deviceId,
+                      List<SyncSignal> accepted) {
+        Set<String> keys = candidates.stream().map(Candidate::dedupKey)
+                .collect(java.util.stream.Collectors.toSet());
+        Set<String> known = alreadyStored(userId, domain, observedDate, keys);
+        Set<String> otherDate = storedOnOtherDate(userId, domain, observedDate,
+                candidates.stream().filter(Candidate::explicitRecordId).map(Candidate::dedupKey)
+                        .collect(java.util.stream.Collectors.toSet()));
 
         List<Object[]> rows = new ArrayList<>(candidates.size());
         int dropped = 0;
         for (Candidate c : candidates) {
             if (known.contains(c.dedupKey())) { dropped++; continue; }
+            if (otherDate.contains(c.dedupKey())) {
+                // 같은 recordId 가 <b>다른 발생일</b>로 다시 왔다. 정상 재전송이 아니라 귀속일을 바꿔
+                // 판정을 다시 받으려는 요청이거나 클라 버그다 — 파티션 유일 키가 (발생일, 유저,
+                // dedupKey) 라 DB 는 이걸 막지 못하므로 여기서 거른다(백엔드 4-1-1).
+                log.warn("signal_date_conflict userId={} domain={} observedDate={} dedupKey={}",
+                        userId, domain, observedDate, c.dedupKey());
+                dropped++;
+                continue;
+            }
             accepted.add(c.signal());
-            rows.add(row(userId, c, receivedAt));
+            rows.add(row(userId, c, receivedAt, deviceId));
         }
         insertAll(domain, rows);
         return dropped;
+    }
+
+    /**
+     * 같은 dedupKey 가 <b>다른 귀속일</b>로 이미 저장돼 있는지. 클라가 recordId 를 명시한 신호만 본다 —
+     * 내용 해시로 만든 키는 날짜가 내용에 들어 있어 애초에 충돌하지 않는다.
+     *
+     * <p>보관 중인 파티션 전부를 뒤지지 않고 앞뒤 하루만 본다. 판정을 바꿀 수 있는 구간이
+     * 현재 귀속일과 직전 유예 귀속일뿐이라, 그 밖의 날짜로 옮겨 봐야 판정에 닿지 못한다.
+     */
+    private Set<String> storedOnOtherDate(UUID userId, SignalDomain domain, LocalDate observedDate,
+                                          Set<String> keys) {
+        if (keys.isEmpty()) return Set.of();
+        Set<String> found = new HashSet<>();
+        List<String> all = new ArrayList<>(keys);
+        for (int from = 0; from < all.size(); from += INSERT_BATCH) {
+            List<String> chunk = all.subList(from, Math.min(from + INSERT_BATCH, all.size()));
+            String placeholders = String.join(",", Collections.nCopies(chunk.size(), "?"));
+            List<Object> args = new ArrayList<>();
+            args.add(Date.valueOf(observedDate.minusDays(1)));
+            args.add(Date.valueOf(observedDate.plusDays(1)));
+            args.add(Date.valueOf(observedDate));
+            args.add(bytes(userId));
+            args.addAll(chunk);
+            found.addAll(jdbc.queryForList(
+                    "SELECT dedupKey FROM " + domain.table()
+                            + " WHERE observedDate BETWEEN ? AND ? AND observedDate <> ? AND userId = ?"
+                            + " AND dedupKey IN (" + placeholders + ")",
+                    String.class, args.toArray()));
+        }
+        return found;
     }
 
     /**
@@ -190,17 +242,18 @@ public class VerificationSignalIngestService {
         for (int from = 0; from < rows.size(); from += INSERT_BATCH) {
             List<Object[]> chunk = rows.subList(from, Math.min(from + INSERT_BATCH, rows.size()));
             jdbc.batchUpdate("INSERT IGNORE INTO " + domain.table()
-                    + " (id, observedDate, userId, signalType, excludeReason, occurredAt, receivedAt,"
-                    + "  payload, dedupKey)"
-                    + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", chunk);
+                    + " (id, observedDate, userId, deviceId, signalType, excludeReason, occurredAt,"
+                    + "  receivedAt, payload, dedupKey)"
+                    + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", chunk);
         }
     }
 
-    private Object[] row(UUID userId, Candidate c, Instant receivedAt) {
+    private Object[] row(UUID userId, Candidate c, Instant receivedAt, String deviceId) {
         return new Object[]{
                 bytes(UuidGenerator.generate()),
                 Date.valueOf(c.observedDate()),
                 bytes(userId),
+                deviceId,
                 (c.signal().type() != null) ? c.signal().type() : "UNKNOWN",
                 (c.excludeReason() != null) ? c.excludeReason().name() : null,
                 (c.occurredAt() != null) ? Timestamp.from(c.occurredAt()) : null,
