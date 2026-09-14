@@ -13,6 +13,10 @@ import java.util.List;
  *                           초과하면 413 SYNC_PAYLOAD_TOO_LARGE 로 반려된다
  * @param dedupDroppedCount  이미 받은 적이 있어 걸러낸 신호 수. 중복 수신은 정상 경로이며(오프라인 복구·
  *                           구간 재전송·FCM 기동), 이 값은 클라 재전송 동작을 관찰하기 위한 참고값이다
+ * @param consentRequired    개별 동의가 없어 <b>수집을 거부한</b> 신호가 요구하는 동의 항목
+ *                           (LOCATION_INFO · HEALTH_INFO). 비어 있지 않으면 클라는 동의 화면으로 보낸다.
+ *                           요청 전체를 반려하지 않는 이유는, 동의가 필요 없는 앱 사용 인증까지 함께
+ *                           멈추기 때문이다
  */
 public record SyncResponse(
         String syncedAt,
@@ -20,7 +24,8 @@ public record SyncResponse(
         List<UpdatedChallenge> updatedChallenges,
         List<String> ignoredSignalTypes,
         int maxPayloadBytes,
-        int dedupDroppedCount
+        int dedupDroppedCount,
+        List<String> consentRequired
 ) {
     /**
      * @param challengeId  챌린지 ID

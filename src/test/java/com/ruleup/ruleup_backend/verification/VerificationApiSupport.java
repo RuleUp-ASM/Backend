@@ -30,6 +30,31 @@ public abstract class VerificationApiSupport extends ChallengeApiSupport {
         return TEMPLATE_SEQ.incrementAndGet();
     }
 
+    /**
+     * 인증 테스트의 사용자는 개별 동의를 마친 상태로 만든다.
+     *
+     * <p>위치·건강 신호는 개별 동의가 없으면 <b>수집 자체를 거부</b>한다(공통 5-6). 실제 앱도 해당
+     * 인증 수단을 처음 켤 때 동의를 받으므로, 신호를 올리는 사용자는 이미 동의한 상태다.
+     * 동의 게이트 자체의 동작은 동의를 주지 않은 사용자로 따로 검증한다.
+     */
+    @Override
+    protected Member member(String tag) throws Exception {
+        Member m = super.member(tag);
+        grantSignalConsents(m.id());
+        return m;
+    }
+
+    /** 위치·건강 개별 동의를 심는다. */
+    protected void grantSignalConsents(UUID userId) {
+        for (String type : List.of("LOCATION_INFO", "HEALTH_INFO")) {
+            jdbc().update("INSERT INTO user_agreement_states "
+                            + "(user_id, agreement_type, agreed, version, agreed_at) "
+                            + "VALUES (?, ?, 1, 'v1', NOW(6)) "
+                            + "ON DUPLICATE KEY UPDATE agreed = 1",
+                    bytes(userId), type);
+        }
+    }
+
     // ===== 챌린지 픽스처 =====
 
     /**

@@ -62,8 +62,12 @@ public class SignalPartitionMaintainer {
     public void maintain() {
         LocalDate today = LocalDate.now(KST);
         for (SignalDomain domain : SignalDomain.values()) {
-            addFuturePartitions(domain, today);
-            dropExpiredPartitions(domain, today);
+            // 판정 원본 — 현재 귀속일과 직전 유예 귀속일만 필요한 hot storage.
+            addFuturePartitions(domain.table(), today);
+            dropExpiredPartitions(domain.table(), today, properties.signalRetentionDays());
+            // 이상탐지 입력 — 스펙이 못 박은 최대 30일. 같은 파티션 전략으로 걷는다.
+            addFuturePartitions(domain.anomalyTable(), today);
+            dropExpiredPartitions(domain.anomalyTable(), today, properties.anomalyRetentionDays());
         }
     }
 
@@ -84,8 +88,8 @@ public class SignalPartitionMaintainer {
      * <p>MySQL 은 MAXVALUE 파티션 뒤에 새 파티션을 붙일 수 없어 <b>REORGANIZE</b> 로 잘라낸다.
      * {@code pFuture} 가 비어 있는 한(= 앞서 파티션을 확보해 둔 한) 이 작업은 데이터 복사가 없다.
      */
-    private void addFuturePartitions(SignalDomain domain, LocalDate today) {
-        Set<String> existing = existingPartitions(domain);
+    private void addFuturePartitions(String table, LocalDate today) {
+        Set<String> existing = existingPartitions(table);
         List<LocalDate> missing = new ArrayList<>();
         for (int i = 0; i <= properties.signalPartitionLookaheadDays(); i++) {
             LocalDate date = today.plusDays(i);
@@ -93,7 +97,7 @@ public class SignalPartitionMaintainer {
         }
         if (missing.isEmpty()) return;
 
-        StringBuilder sql = new StringBuilder("ALTER TABLE ").append(domain.table())
+        StringBuilder sql = new StringBuilder("ALTER TABLE ").append(table)
                 .append(" REORGANIZE PARTITION ").append(FUTURE_PARTITION).append(" INTO (");
         for (LocalDate date : missing) {
             sql.append("PARTITION ").append(partitionName(date))
@@ -103,9 +107,9 @@ public class SignalPartitionMaintainer {
 
         try {
             jdbc.execute(sql.toString());
-            log.info("신호 파티션 확보 table={} added={}", domain.table(), missing.size());
+            log.info("신호 파티션 확보 table={} added={}", table, missing.size());
         } catch (RuntimeException e) {
-            log.warn("신호 파티션 확보 실패 table={} err={}", domain.table(), e.toString());
+            log.warn("신호 파티션 확보 실패 table={} err={}", table, e.toString());
         }
     }
 
@@ -116,27 +120,26 @@ public class SignalPartitionMaintainer {
      * 오늘·D-1·D-2 를 남기는 3일이다 — 확정이 방금 끝난 날짜까지 하루 더 붙잡고 있는 셈이라
      * 배치가 밀려도 원본이 먼저 사라지지 않는다.
      */
-    private void dropExpiredPartitions(SignalDomain domain, LocalDate today) {
-        LocalDate oldestKept = today.minusDays(properties.signalRetentionDays());
-        for (String name : existingPartitions(domain)) {
+    private void dropExpiredPartitions(String table, LocalDate today, int retentionDays) {
+        LocalDate oldestKept = today.minusDays(retentionDays);
+        for (String name : existingPartitions(table)) {
             LocalDate date = dateOf(name);
             if (date == null || !date.isBefore(oldestKept)) continue;
             try {
-                jdbc.execute("ALTER TABLE " + domain.table() + " DROP PARTITION " + name);
-                log.info("신호 파티션 파기 table={} partition={}", domain.table(), name);
+                jdbc.execute("ALTER TABLE " + table + " DROP PARTITION " + name);
+                log.info("신호 파티션 파기 table={} partition={}", table, name);
             } catch (RuntimeException e) {
-                log.warn("신호 파티션 파기 실패 table={} partition={} err={}",
-                        domain.table(), name, e.toString());
+                log.warn("신호 파티션 파기 실패 table={} partition={} err={}", table, name, e.toString());
             }
         }
     }
 
-    private Set<String> existingPartitions(SignalDomain domain) {
+    private Set<String> existingPartitions(String table) {
         List<String> names = jdbc.queryForList(
                 "SELECT PARTITION_NAME FROM information_schema.PARTITIONS"
                         + " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?"
                         + " AND PARTITION_NAME IS NOT NULL",
-                String.class, domain.table());
+                String.class, table);
         return new LinkedHashSet<>(names);
     }
 

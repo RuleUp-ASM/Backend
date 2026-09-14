@@ -73,6 +73,8 @@ public class VerificationFinalizeService {
     private final ApplicationEventPublisher eventPublisher;
     private final VerificationSignalReader signalReader;
     private final MemberSettingsResolver settingsResolver;
+    private final AnomalyEventRecorder anomalyRecorder;
+    private final LocationPurgeService locationPurge;
     private final Map<VerificationMethod, MethodEvaluator> evaluators;
 
     public VerificationFinalizeService(VerificationDailyRepository dailyRepo,
@@ -86,6 +88,8 @@ public class VerificationFinalizeService {
                                        ApplicationEventPublisher eventPublisher,
                                        VerificationSignalReader signalReader,
                                        MemberSettingsResolver settingsResolver,
+                                       AnomalyEventRecorder anomalyRecorder,
+                                       LocationPurgeService locationPurge,
                                        List<MethodEvaluator> evaluatorList) {
         this.dailyRepo = dailyRepo;
         this.methodResultRepo = methodResultRepo;
@@ -98,6 +102,8 @@ public class VerificationFinalizeService {
         this.eventPublisher = eventPublisher;
         this.signalReader = signalReader;
         this.settingsResolver = settingsResolver;
+        this.anomalyRecorder = anomalyRecorder;
+        this.locationPurge = locationPurge;
         this.evaluators = evaluatorList.stream().collect(
                 java.util.stream.Collectors.toMap(MethodEvaluator::method, e -> e, (a, b) -> a));
     }
@@ -203,6 +209,13 @@ public class VerificationFinalizeService {
         // 확정 시점에 판정에서 뺀 신호를 배제 로그로 옮긴다 — 성공·실패를 가리지 않는다.
         // 신호 위생 이상은 인증 결과와 무관하게 탐지 입력으로 남겨야 한다(공통 3절 ①).
         exclusionRecorder.recordEvaluationHygiene(daily.getUserId(), daily.getId(), method, evidence, now);
+        if (!confirmedFail) {
+            // 성공 인증만 탐지 feature 로 승격한다 — 실패 인증은 anomaly 데이터셋을 만들지 않는다.
+            anomalyRecorder.recordSuccessFeature(daily.getUserId(), daily.getId(), method,
+                    daily.getTargetDate(), evidence, now);
+        }
+        // 성공이든 실패든 확정은 확정이다. 좌표 파기 타이머는 여기서 시작된다(공통 5-6).
+        locationPurge.scheduleFor(daily.getUserId(), daily.getTargetDate(), daily.getId(), now);
 
         refreshProgress(member, daily);
 

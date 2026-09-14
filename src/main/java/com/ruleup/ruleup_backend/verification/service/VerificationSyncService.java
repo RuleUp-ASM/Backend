@@ -83,7 +83,10 @@ public class VerificationSyncService {
     private final com.ruleup.ruleup_backend.common.web.CountryResolver countryResolver;
     private final VerificationProperties properties;
     private final SignalExclusionRecorder exclusionRecorder;
+    private final AnomalyEventRecorder anomalyRecorder;
+    private final LocationPurgeService locationPurge;
     private final VerificationSyncSessionStore sessionStore;
+    private final SignalConsentGate consentGate;
     private final Map<VerificationMethod, MethodEvaluator> evaluators;
 
     public VerificationSyncService(ChallengeQueryService challengeQuery,
@@ -103,7 +106,10 @@ public class VerificationSyncService {
                                    com.ruleup.ruleup_backend.common.web.CountryResolver countryResolver,
                                    VerificationProperties properties,
                                    SignalExclusionRecorder exclusionRecorder,
+                                   AnomalyEventRecorder anomalyRecorder,
+                                   LocationPurgeService locationPurge,
                                    VerificationSyncSessionStore sessionStore,
+                                   SignalConsentGate consentGate,
                                    List<MethodEvaluator> evaluatorList) {
         this.challengeQuery = challengeQuery;
         this.dailyRepo = dailyRepo;
@@ -122,7 +128,10 @@ public class VerificationSyncService {
         this.countryResolver = countryResolver;
         this.properties = properties;
         this.exclusionRecorder = exclusionRecorder;
+        this.anomalyRecorder = anomalyRecorder;
+        this.locationPurge = locationPurge;
         this.sessionStore = sessionStore;
+        this.consentGate = consentGate;
         this.evaluators = evaluatorList.stream()
                 .collect(Collectors.toMap(MethodEvaluator::method, e -> e, (a, b) -> a));
     }
@@ -149,11 +158,16 @@ public class VerificationSyncService {
         com.ruleup.ruleup_backend.user.domain.User user = userRepository.findById(userId).orElse(null);
         sessionStore.touch(userId, req.sessionId(), now);
 
+        // 개별 동의가 없는 위치·건강 신호는 적재 이전에 떨어뜨린다. 신호 위생과 달리 이건
+        // 「받아서 안 쓴다」가 아니라 「받으면 안 된다」다(공통 5-6).
+        SignalConsentGate.Decision consent = consentGate.apply(userId, signals);
+        List<SyncSignal> collectible = consent.accepted();
+
         // 원본 저장 + 영속 멱등. 못 믿을 봉투(VPN·무결성 실패·비활성 기기)의 신호는 저장하되
         // 배제 사유를 행에 새긴다 — 제외와 제재는 분리하고, 원본은 이상탐지 자료로 남긴다.
-        VerificationSignalIngestService.Ingested ingested = signalIngest.ingest(userId, signals, now,
+        VerificationSignalIngestService.Ingested ingested = signalIngest.ingest(userId, collectible, now,
                 new VerificationSignalIngestService.Source(req.deviceId(), gateFor(user, req)));
-        trustGate.record(userId, req, signals);
+        trustGate.record(userId, req, collectible);
 
         // 판정 입력은 저장된 원본이다. 오늘과 유예 중인 어제를 한 번씩만 읽어 멤버들이 나눠 쓴다 —
         // 같은 사용자 신호를 챌린지별로 복제해 읽지 않는다(백엔드 4-1-1 「사용자 신호 1회 저장」).
@@ -211,9 +225,9 @@ public class VerificationSyncService {
                     member.getProgressRate()));
         }
         // sync_result — 자동 판정 커버리지·중복 비율·압축 도입 판단의 1차 근거(로깅 스펙 §9).
-        log.info("sync_result userId={} signalCount={} dedupDropped={} ignoredTypes={} gapReasons={} " +
-                        "activeMembers={} updated={} backlog={}",
-                userId, signals.size(), ingested.droppedCount(), ignored,
+        log.info("sync_result userId={} signalCount={} dedupDropped={} ignoredTypes={} consentRejected={} " +
+                        "gapReasons={} activeMembers={} updated={} backlog={}",
+                userId, signals.size(), ingested.droppedCount(), ignored, consent.rejectedTypes(),
                 gaps.stream().map(SyncRequest.Gap::reason).filter(java.util.Objects::nonNull).distinct().toList(),
                 members.size(), updated.size(), Boolean.TRUE.equals(req.backlog()));
         // flushIntervalSec: 기기 스펙 기반 산정값을 매 ACK마다 전체값으로 회신(§6 제어 모델).
@@ -222,7 +236,8 @@ public class VerificationSyncService {
         int flushIntervalSec = FlushIntervalPolicy.forUser(user);
         return new SyncResponse(
                 ZonedDateTime.ofInstant(now, KST).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
-                flushIntervalSec, updated, ignored, properties.maxPayloadBytes(), ingested.droppedCount());
+                flushIntervalSec, updated, ignored, properties.maxPayloadBytes(), ingested.droppedCount(),
+                consent.consentRequired());
     }
 
     /**
@@ -412,6 +427,11 @@ public class VerificationSyncService {
                 // sync 마다 누적되므로 매번 옮기면 같은 배제가 여러 행이 된다(공통 5-3).
                 exclusionRecorder.recordEvaluationHygiene(
                         member.getUserId(), daily.getId(), method, evidence, now);
+                // 성공 인증만 탐지 feature 로 승격한다(스펙: 실패 인증은 anomaly 데이터셋을 만들지 않음).
+                anomalyRecorder.recordSuccessFeature(
+                        member.getUserId(), daily.getId(), method, today, evidence, now);
+                // 확정됐으니 그날 좌표의 파기 타이머가 시작된다 — 고정 일괄 시각이 아니라 건별이다.
+                locationPurge.scheduleFor(member.getUserId(), today, daily.getId(), now);
                 // 즉시 확정된 성공은 확정 배치를 거치지 않는다 — finalizeDue 는 미확정 건만 집어가고
                 // finalizeOne 은 초입에서 isTerminal() 로 되돌아간다. 그래서 성공 고지를 여기서
                 // 하지 않으면 「성공한 날」만 알림이 없는 비대칭이 생긴다(실패는 확정 배치가 고지한다).

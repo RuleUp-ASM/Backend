@@ -21,12 +21,19 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param signalPartitionLookaheadDays 미리 만들어 둘 미래 파티션 일수. 스펙이 <b>최소 7일</b>을
  *                          요구한다 — 잡이 하루 이틀 밀려도 적재가 MAXVALUE 파티션으로 몰리지
  *                          않게 하는 여유다
+ * @param gpsRetentionDays  GPS 원본 좌표를 <b>확정 이후</b> 유지할 일수. 위치정보법의 목적 달성 시
+ *                          즉시 파기 원칙 대상이라 다른 신호와 규칙이 다르다. 기준은 고정 일괄
+ *                          시각이 아니라 <b>건별 확정 시각 + 이 값</b>이다 — 일괄로 잡으면 아직
+ *                          확정 전인 건까지 지워진다. 기본 30일이며 이상탐지 윈도우에 맞춰 조정한다
+ * @param anomalyRetentionDays 이상탐지 입력(유형별 anomaly 도메인)의 보관 일수. 스펙이 <b>최대 30일</b>
+ *                          이라고 못 박았고, 만료분은 행 삭제가 아니라 일자 파티션 DROP 으로 걷는다
  */
 @ConfigurationProperties(prefix = "app.verification")
 public record VerificationProperties(Integer geofenceRadiusM, Integer maxPayloadBytes,
                                      Integer syncMinIntervalSec, Integer syncBacklogMinIntervalSec,
                                      Integer avoidGraceMinutes, Integer signalRetentionDays,
-                                     Integer signalPartitionLookaheadDays) {
+                                     Integer signalPartitionLookaheadDays,
+                                     Integer gpsRetentionDays, Integer anomalyRetentionDays) {
 
     private static final int DEFAULT_GEOFENCE_RADIUS_M = 500;
     private static final int DEFAULT_MAX_PAYLOAD_BYTES = 1_048_576;
@@ -35,6 +42,8 @@ public record VerificationProperties(Integer geofenceRadiusM, Integer maxPayload
     private static final int DEFAULT_AVOID_GRACE_MINUTES = 5;
     private static final int DEFAULT_SIGNAL_RETENTION_DAYS = 3;
     private static final int DEFAULT_SIGNAL_PARTITION_LOOKAHEAD_DAYS = 10;
+    private static final int DEFAULT_GPS_RETENTION_DAYS = 30;
+    private static final int DEFAULT_ANOMALY_RETENTION_DAYS = 30;
 
     public VerificationProperties {
         geofenceRadiusM = positiveOrDefault(geofenceRadiusM, DEFAULT_GEOFENCE_RADIUS_M);
@@ -46,6 +55,8 @@ public record VerificationProperties(Integer geofenceRadiusM, Integer maxPayload
         signalRetentionDays = positiveOrDefault(signalRetentionDays, DEFAULT_SIGNAL_RETENTION_DAYS);
         signalPartitionLookaheadDays = positiveOrDefault(
                 signalPartitionLookaheadDays, DEFAULT_SIGNAL_PARTITION_LOOKAHEAD_DAYS);
+        gpsRetentionDays = positiveOrDefault(gpsRetentionDays, DEFAULT_GPS_RETENTION_DAYS);
+        anomalyRetentionDays = positiveOrDefault(anomalyRetentionDays, DEFAULT_ANOMALY_RETENTION_DAYS);
     }
 
     private static int positiveOrDefault(Integer value, int fallback) {

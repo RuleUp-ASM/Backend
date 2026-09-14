@@ -39,6 +39,7 @@ public class SignalExclusionRecorder {
     private static final Logger log = LoggerFactory.getLogger(SignalExclusionRecorder.class);
 
     private final SignalExclusionRepository repository;
+    private final AnomalyEventRecorder anomalyRecorder;
 
     /**
      * 게이트 단계 배제 — 같은 신호 타입끼리 묶어 한 행으로 센다. 신호 하나에 한 행이면
@@ -110,7 +111,11 @@ public class SignalExclusionRecorder {
         } catch (RuntimeException e) {
             // 판정은 이미 끝났다. 탐지 입력 한 줄 때문에 되돌리지 않는다.
             log.warn("신호 배제 기록 실패 — 판정은 유지한다. count={} err={}", rows.size(), e.toString());
+            return;
         }
+        // 같은 사건을 유형별 anomaly 도메인에도 남긴다. signal_exclusions 는 「무엇이 빠졌는가」의
+        // 기록이고, anomaly 도메인은 원본 없이도 탐지가 읽을 수 있는 30일 창이다(백엔드 4-1).
+        anomalyRecorder.recordHygiene(rows);
     }
 
     /** {@code ["fitbit:UNTRUSTED_ORIGIN", "user:MANUAL"]} → 사유별 건수. */
