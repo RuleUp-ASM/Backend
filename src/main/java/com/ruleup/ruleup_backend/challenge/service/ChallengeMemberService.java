@@ -67,14 +67,19 @@ public class ChallengeMemberService {
 
     private final ChallengeRepository challengeRepository;
     private final ChallengeMemberRepository memberRepository;
-    private final UserChallengeCounterRepository counterRepository;
-    private final UserJoinCounterService joinCounterService;
-    private final ConcurrentChallengeLimitPolicy limitPolicy;
     private final UserRepository userRepository;
     private final UserScoreSummaryRepository scoreSummaryRepository;
     private final VerificationDailyRepository verificationDailyRepository;
     private final NotificationMuteCleaner muteCleaner;
     private final ApplicationEventPublisher eventPublisher;
+    /**
+     * 자기 자신의 프록시. 정원 유무를 <b>트랜잭션 밖에서</b> 읽고 들어가야 하므로, 진입 메서드는
+     * 트랜잭션이 없고 본체만 트랜잭션이다. 같은 빈의 메서드를 그냥 부르면 프록시를 거치지 않아
+     * {@code @Transactional} 이 붙지 않는다.
+     */
+    private final org.springframework.beans.factory.ObjectProvider<ChallengeMemberService> selfProvider;
+
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
     private final RoomAuthority roomAuthority;
     private final BlockService blockService;
     private final com.ruleup.ruleup_backend.score.ScoreService scoreService;
@@ -82,30 +87,78 @@ public class ChallengeMemberService {
     // ===== 가입 =====
     /**
      * 챌린지 가입. 판정 순서:
-     * ① 종료 → ② 비공개(초대로만) → ③ 재입장 대기 → ④ 동시 3개(사용자 행 락)
-     * → ⑤ 정원(챌린지 행 락) → ⑥ 최소 티어(표시 티어 기준).
+     * ① 종료 → ② 비공개(초대로만) → ③ 재입장 대기 → ④ 정원(정원 있는 방만, 챌린지 행 락)
+     * → ⑤ 최소 티어(표시 티어 기준).
+     *
+     * <p>동시 참여 개수 상한은 탐색 스펙 개정으로 사라졌다(5-1). 그 판정을 직렬화하려고 잡던
+     * 사용자 행 락도 함께 걷었다 — 막을 것이 없는데 모든 가입을 사용자 단위로 줄 세울 이유가 없다.
      */
-    @Transactional
     public JoinResponse join(UUID userId, UUID challengeId) {
         return join(userId, challengeId, false);
     }
 
     /**
      * 가입 본체. {@code invited=true} 면 ②(비공개 초대 전용)만 건너뛴다 —
-     * 초대장은 "이 방을 볼 자격"을 대신할 뿐, 재입장 대기·동시 3개·정원·티어까지 면제하지는 않는다.
+     * 초대장은 "이 방을 볼 자격"을 대신할 뿐, 재입장 대기·정원·티어까지 면제하지는 않는다.
      * 그래서 초대 수락도 정원이 차 있으면 일반 가입과 똑같이 409 {@code JOIN_BLOCKED + FULL} 이다.
+     *
+     * <p>정원 유무만 <b>트랜잭션을 열기 전에</b> 읽는다. 안에서 일반 SELECT 로 읽으면 그 시점에
+     * 읽기 스냅샷이 고정돼, 뒤따르는 정원 COUNT 가 락을 기다리는 동안 커밋된 가입을 보지 못한다.
+     * 잠금 읽기는 스냅샷을 만들지 않으므로, 정원 있는 방에서는 그 잠금 읽기가 트랜잭션의 첫 문장이다.
      */
-    @Transactional
     public JoinResponse join(UUID userId, UUID challengeId, boolean invited) {
+        List<Integer> capacityRow = challengeRepository.findCapacityById(challengeId);
+        if (capacityRow.isEmpty()) throw new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND);
+        Integer capacityKnown = capacityRow.get(0);   // null 이면 무제한
+        try {
+            return selfProvider.getObject().joinInTransaction(userId, challengeId, invited, capacityKnown);
+        } catch (CapacityAppearedException e) {
+            // 트랜잭션 밖에서 「무제한」으로 읽은 사이에 방장이 정원을 걸었다. 그 트랜잭션은
+            // 이미 일반 읽기로 스냅샷을 고정해 버려서 정원을 세도 믿을 수 없다 — 락을 첫 문장
+            // 으로 다시 열어야 한다. 정원이 생긴 것을 확인했으니 이번에는 잠그고 들어간다.
+            return selfProvider.getObject().joinInTransaction(userId, challengeId, invited, e.capacity());
+        }
+    }
+
+    /**
+     * 정원 유무를 읽은 뒤 가입 트랜잭션이 열리기 전에 방장이 정원을 건 경우.
+     *
+     * <p>그대로 진행하면 여러 가입 요청이 <b>챌린지 행 락 없이</b> 같은 인원수를 보고 모두
+     * 통과해 정원을 넘길 수 있다. 되돌리고 잠금 경로로 한 번 다시 간다.
+     */
+    private static class CapacityAppearedException extends RuntimeException {
+        private final Integer capacity;
+        CapacityAppearedException(Integer capacity) { super(null, null, false, false); this.capacity = capacity; }
+        Integer capacity() { return capacity; }
+    }
+
+    @Transactional
+    public JoinResponse joinInTransaction(UUID userId, UUID challengeId, boolean invited, Integer capacityKnown) {
         Instant now = Instant.now();
 
-        // 락 순서 고정: 사용자 행을 먼저 잡는다. 챌린지 행만 잠그면 서로 다른 두 방에 동시 가입할 때
-        // 각자 다른 행을 잡아 둘 다 "현재 2개"로 읽어 동시 3개 제한이 뚫린다(P0).
-        counterRepository.ensureRow(userId);
-        counterRepository.lockCount(userId);   // 락만 잡는다 — 판정은 ④에서 원천을 세서 한다
-
-        Challenge c = challengeRepository.findByIdForUpdate(challengeId)
+        // 정원이 있는 방은 <b>쓰기 잠금</b>으로 마지막 한 자리를 직렬화한다(탐색 백엔드 5-1).
+        //
+        // ⚠️ 정원 유무는 트랜잭션 밖에서 미리 읽는다. REPEATABLE READ 에서 일반 SELECT 는 읽기
+        // 스냅샷을 그 시점에 고정하는데, 락을 기다리기 전에 스냅샷이 잡히면 뒤의 정원 COUNT 가
+        // 그 사이 커밋된 가입을 못 본다 → 마지막 한 자리에 여러 명이 들어간다. 잠금 읽기는
+        // 스냅샷을 만들지 않으므로, 정원 있는 방에서는 이 잠금 읽기가 트랜잭션의 첫 문장이다.
+        //
+        // 무제한 방은 <b>공유 잠금</b>이다. 스펙은 「락과 COUNT 를 모두 생략」이라고 적었지만,
+        // 정말 잠그지 않으면 정원을 거는 설정 변경과의 경합이 열린다 — 설정이 아직 커밋되기
+        // 전이라 가입은 여전히 「무제한」을 보고 정원 검사 없이 들어가고, 설정 쪽은 그 가입을
+        // 못 센 채 커밋해 정원을 넘긴다. 스펙이 생략하라는 이유는 <b>가입끼리의 경합</b>을
+        // 없애려는 것이고, 공유 잠금은 서로 막지 않으므로 그 목적은 그대로 지켜진다.
+        // COUNT 는 스펙대로 하지 않는다 — 셀 값이 없으므로 애초에 할 일이 없다.
+        Challenge c = (capacityKnown != null
+                ? challengeRepository.findByIdForUpdate(challengeId)
+                : challengeRepository.findByIdForShare(challengeId))
                 .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
+
+        // 무제한인 줄 알고 잠그지 않았는데 정원이 걸려 있다면, 이 트랜잭션의 스냅샷은 이미
+        // 고정돼 정원을 세도 믿을 수 없다. 되돌리고 잠금 경로로 다시 들어간다.
+        if (capacityKnown == null && c.getMaxParticipants() != null) {
+            throw new CapacityAppearedException(c.getMaxParticipants());
+        }
 
         // 솔로 방은 본인만 — 타인에겐 존재를 숨긴다(상세 조회 404 규칙과 동일).
         if (!c.isGroup() && !c.isOwner(userId))
@@ -132,20 +185,14 @@ public class ChallengeMemberService {
                         JoinBlockReason.REJOIN_COOLDOWN.name(), availableAt.toString());
         }
 
-        // ④ 동시 참여 3개(사용자 행 락 하에서 판정)
-        // 저장 카운터가 아니라 원천(멤버십)을 센다. 저장값으로 판정하면 어딘가에서 해제가 한 번 누락된
-        // 사용자가 "실제로는 0개 참여 중인데 가입 불가"에 갇히고, 종료된 방은 탈퇴도 못 해 스스로 풀 수 없다.
-        //
-        // ⚠️ 이 COUNT 를 챌린지 행 락보다 <b>앞</b>으로 옮기면 안 된다. MySQL REPEATABLE READ 에서
-        // 트랜잭션의 읽기 스냅샷은 "첫 일반 SELECT" 시점에 고정되는데, 락을 기다리기 전에 스냅샷이
-        // 잡히면 ⑤의 정원 카운트가 그 사이 커밋된 다른 가입을 못 본다 → 마지막 한 자리에 여러 명이 들어간다.
-        int activeJoinCount = joinCounterService.countActiveSlots(userId);
-        if (limitPolicy.exceeded(activeJoinCount)) throw blocked(JoinBlockReason.FREE_LIMIT);
-
-        // ⑤ 정원(챌린지 행 락 하에서 판정 — "마지막 1자리 동시 가입" 차단)
+        // ④ 정원 — 챌린지 행 락 하에서만 판정한다("마지막 1자리 동시 가입" 차단).
+        //    무제한 방은 락도 COUNT 도 하지 않는다(탐색 백엔드 12 체크리스트).
+        //    동시 참여 개수 상한은 개정으로 사라졌다 — 사용자 행 락도 함께 걷었다.
         Integer cap = c.getMaxParticipants();
-        long activeCount = memberRepository.countByChallengeIdAndStatus(challengeId, MemberStatus.ACTIVE);
-        if (cap != null && activeCount >= cap) throw blocked(JoinBlockReason.FULL);
+        if (cap != null) {
+            long activeCount = memberRepository.countByChallengeIdAndStatus(challengeId, MemberStatus.ACTIVE);
+            if (activeCount >= cap) throw blocked(JoinBlockReason.FULL);
+        }
 
         // ⑥ 최소 티어 — 표시 티어 기준
         if (c.getMinTier() != null && displayTier(userId).ordinal() < c.getMinTier().ordinal())
@@ -154,17 +201,24 @@ public class ChallengeMemberService {
         // 즉시 ACTIVE 등록. uq_member 로 동시 INSERT는 1건만 성공, 나머지는 중복으로 변환.
         if (existing != null) {
             existing.rejoin();
+            recordJoinEvent(challengeId, userId);
         } else {
             try {
                 memberRepository.saveAndFlush(ChallengeMember.join(challengeId, userId, MemberStatus.ACTIVE));
+                recordJoinEvent(challengeId, userId);
             } catch (DataIntegrityViolationException dup) {
                 throw blocked(JoinBlockReason.ALREADY_JOINED);
             }
         }
-        challengeRepository.incrementParticipantCount(challengeId);
-        counterRepository.increment(userId);
-        c.bumpVersion();   // 참여 인원 변화 = 수정 가능 범위가 바뀔 수 있음 → 설정 수정과 충돌 감지
-        // 통계는 커밋 뒤에 다시 센다 — 실패해도 가입을 되돌리지 않는다
+        // 버전 증가는 <b>정원 있는 방만</b>. 참여 인원이 늘면 정원을 그 아래로 줄일 수 없게 되므로
+        // 설정 수정과의 충돌을 감지해야 하지만, 무제한 방에는 인원이 좁히는 값이 없다.
+        // 무제한 방에서 이걸 올리면 커밋 시 challenges 행에 쓰기 락이 잡혀, 잠금 읽기를
+        // 걷어낸 의미가 사라진다 — 락을 뒷문으로 다시 들이는 셈이다.
+        if (cap != null) c.bumpVersion();
+        // 표시용 참여자 수는 여기서 올리지 않는다. 그 행을 가입 트랜잭션 안에서 쓰면 같은 방의
+        // 모든 가입이 그 한 행에서 직렬화되고, 무제한 방에 락을 걷은 의미가 사라진다.
+        // 정확해야 하는 값은 멤버십 행이고, 표시값은 커밋 뒤 원천에서 다시 센다(탐색 백엔드 5-2).
+        // 통계도 같은 자리에서 다시 센다 — 실패해도 가입을 되돌리지 않는다
         eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "JOIN"));
 
         // 사이클은 1주 고정 — 주 중간에 들어오면 판정은 다음 사이클 경계부터.
@@ -193,8 +247,6 @@ public class ChallengeMemberService {
         if (existing != null && existing.getRejoinAvailableAt() != null
                 && Instant.now().isBefore(existing.getRejoinAvailableAt()))
             return JoinBlockReason.REJOIN_COOLDOWN;
-        if (limitPolicy.exceeded(joinCounterService.countActiveSlots(userId))) return JoinBlockReason.FREE_LIMIT;
-
         Integer cap = c.getMaxParticipants();
         if (cap != null && memberRepository.countByChallengeIdAndStatus(c.getId(), MemberStatus.ACTIVE) >= cap)
             return JoinBlockReason.FULL;
@@ -214,11 +266,10 @@ public class ChallengeMemberService {
     public LeaveResponse leave(UUID userId, UUID challengeId) {
         Instant now = Instant.now();
 
-        // 가입과 같은 락 순서(사용자 → 챌린지)를 유지한다.
-        counterRepository.ensureRow(userId);
-        counterRepository.lockCount(userId);
-
-        Challenge c = challengeRepository.findByIdForUpdate(challengeId)
+        // 가입과 같은 규칙 — 정원 있는 방만 같은 챌린지 락으로 직렬화한다(탐색 백엔드 5-2).
+        Challenge c = challengeRepository.findById(challengeId)
+                .flatMap(found -> found.getMaxParticipants() != null
+                        ? challengeRepository.findByIdForUpdate(challengeId) : java.util.Optional.of(found))
                 .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
 
         if (c.getStatus() == ChallengeStatus.COMPLETED)
@@ -244,8 +295,7 @@ public class ChallengeMemberService {
         // 참여 인원 변화 → version 증가. decrementParticipantCount 는 clearAutomatically 라
         // 그 뒤에서 부르면 c 가 준영속이 되어 증가가 조용히 사라진다(반드시 앞에서).
         c.bumpVersion();
-        challengeRepository.decrementParticipantCount(challengeId);
-        counterRepository.decrement(userId);
+        // 표시용 참여자 수는 커밋 뒤 원천에서 다시 센다 — 가입과 같은 이유다.
         // 나간 방의 음소거는 설정 목록에 남을 이유가 없고, 재입장 시 되살아나면 안 된다.
         muteCleaner.clearMute(userId, challengeId);
         eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "LEAVE"));
@@ -282,13 +332,8 @@ public class ChallengeMemberService {
     @Transactional
     public int leaveAllForWithdrawal(UUID userId) {
         Instant now = Instant.now();
-        // 락 순서 고정(사용자 → 챌린지). 탈퇴도 예외가 아니다.
-        counterRepository.ensureRow(userId);
-        counterRepository.lockCount(userId);
 
-        // 엔티티가 아니라 id 만 먼저 모은다. decrementParticipantCount 가 clearAutomatically 라
-        // 방 하나를 처리할 때마다 영속성 컨텍스트가 비워져, 미리 들고 있던 엔티티는 준영속이 되고
-        // 그 뒤의 변경(leave·봇방장 전환)이 조용히 사라진다. 반복마다 새로 읽는다.
+        // 엔티티가 아니라 id 만 먼저 모은다 — 반복마다 새로 읽어 준영속 사고를 피한다.
         List<UUID> challengeIds = memberRepository.findByUserIdAndStatus(userId, MemberStatus.ACTIVE)
                 .stream().map(ChallengeMember::getChallengeId).toList();
 
@@ -297,7 +342,7 @@ public class ChallengeMemberService {
             ChallengeMember me = memberRepository.findByChallengeIdAndUserId(challengeId, userId)
                     .filter(ChallengeMember::isActive).orElse(null);
             if (me == null) continue;
-            Challenge c = challengeRepository.findByIdForUpdate(challengeId).orElse(null);
+            Challenge c = challengeRepository.findById(challengeId).orElse(null);
             if (c == null) continue;   // 이미 삭제된 방 — 멤버 행도 곧 사라진다
 
             if (me.isOwner()) {
@@ -306,18 +351,13 @@ public class ChallengeMemberService {
             }
             me.leave(now, null);       // rejoinAt=null — 재입장 대기 없음
             c.bumpVersion();
-            // flushAutomatically 라 위 변경들이 먼저 반영된 뒤 실행된다(그 다음 컨텍스트가 비워진다).
-            challengeRepository.decrementParticipantCount(challengeId);
             eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "WITHDRAW"));
             left++;
         }
 
-        // 루프 뒤에 한 번만 지운다. 루프 안 decrementParticipantCount 가 clearAutomatically 라
-        // 매 회 영속성 컨텍스트가 비워지므로, 그 사이에 끼워 넣을 이유가 없다.
         // 계정이 사라지므로 참여 중이던 방·종료된 방을 가리지 않고 전부 정리한다.
         muteCleaner.clearMutesOfUser(userId);
 
-        counterRepository.setCount(userId, joinCounterService.countActiveSlots(userId));
         if (left > 0) log.info("회원 탈퇴 정리 userId={} 나간 방 {}건", userId, left);
         return left;
     }
@@ -412,4 +452,24 @@ public class ChallengeMemberService {
         return (tier == Tier.UNRANKED) ? Tier.BRONZE : tier;
     }
 
+
+    /**
+     * 가입 <b>사건</b>을 남긴다. 멤버십은 사람당 한 줄인 상태라 여러 번의 가입을 담을 수 없다 —
+     * 인기 점수가 보는 「최근 24시간 신규 참여」는 이 표가 센다.
+     *
+     * <p>같은 트랜잭션 안이다. 이건 파생값이 아니라 <b>일어난 일의 기록</b>이라, 가입이 커밋됐는데
+     * 사건이 없거나 그 반대인 상태가 생기면 인기 점수를 원천에서 복원할 수 없다.
+     */
+    private void recordJoinEvent(UUID challengeId, UUID userId) {
+        jdbc.update("INSERT INTO challenge_join_events (id, challenge_id, user_id) VALUES (?, ?, ?)",
+                uuidBytes(com.ruleup.ruleup_backend.common.UuidGenerator.generate()),
+                uuidBytes(challengeId), uuidBytes(userId));
+    }
+
+    private static byte[] uuidBytes(UUID id) {
+        java.nio.ByteBuffer bb = java.nio.ByteBuffer.allocate(16);
+        bb.putLong(id.getMostSignificantBits());
+        bb.putLong(id.getLeastSignificantBits());
+        return bb.array();
+    }
 }

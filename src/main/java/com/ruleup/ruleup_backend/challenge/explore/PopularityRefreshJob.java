@@ -83,7 +83,9 @@ public class PopularityRefreshJob {
                 "SELECT c.id, COALESCE(j.c, 0) AS recent_joins, j.last_joined_at " +
                         "FROM challenges c " +
                         "LEFT JOIN (SELECT challenge_id, COUNT(*) AS c, MAX(joined_at) AS last_joined_at " +
-                        "           FROM challenge_members " +
+                        // 멤버십이 아니라 <b>가입 사건</b>을 센다 — 멤버십 한 줄로는 재입장이
+                        // 잡히지 않는다(같은 이유로 인덱서도 이 표를 본다).
+                        "           FROM challenge_join_events " +
                         "           WHERE joined_at >= DATE_SUB(NOW(6), INTERVAL 24 HOUR) " +
                         "           GROUP BY challenge_id) j ON j.challenge_id = c.id " +
                         "WHERE c.mode = 'GROUP' AND c.visibility = 'PUBLIC' " +

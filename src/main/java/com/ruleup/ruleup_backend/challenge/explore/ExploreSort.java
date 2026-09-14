@@ -14,12 +14,17 @@ import com.ruleup.ruleup_backend.common.error.ErrorCode;
  */
 public enum ExploreSort {
 
+    // 2차 정렬값(secondary)은 <b>동점을 무엇으로 가르는가</b>이다. 비워 두면 그 자리를 UUID 가
+    // 대신해 순서가 무작위로 보인다 — 참여자 수·비율처럼 동점이 흔한 정렬에서는 목록 대부분이
+    // 그 상태가 된다. RECENT 는 1차 정렬 자체가 생성 시각이라 가를 것이 없다.
     POPULAR("s.recent_joins_24h", false, "s.last_joined_at_24h", null),
-    PARTICIPANTS("c.participant_count", false, null, null),
-    COMPLETION_RATE("s.completion_rate", false, null, "s.completion_rate IS NOT NULL"),
-    SUCCESS_FAIL_RATIO("s.retention_rate", false, null, "s.retention_rate IS NOT NULL"),
+    PARTICIPANTS("c.participant_count", false, "c.created_at", null),
+    // 표본 미달 방은 <b>정렬 ZSET 에 애초에 들어가지 않는다</b>(인덱서가 null 이면 넣지 않는다).
+    // 조회 SQL 에서 다시 거를 필요가 없고, 통계 조인을 걷어낸 지금은 그 조건이 오류가 된다.
+    COMPLETION_RATE("s.completion_rate", false, "c.created_at", null),
+    SUCCESS_FAIL_RATIO("s.retention_rate", false, "c.created_at", null),
     RECENT("c.created_at", false, null, null),
-    DEADLINE("c.end_date", true, null, null);
+    DEADLINE("c.end_date", true, "c.created_at", null);
 
     /** 1차 정렬 컬럼. */
     private final String primary;

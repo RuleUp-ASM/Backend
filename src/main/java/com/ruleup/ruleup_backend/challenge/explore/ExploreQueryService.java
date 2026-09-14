@@ -65,13 +65,20 @@ public class ExploreQueryService {
     /** 티어 비교는 문자열이 아니라 순서로 해야 한다 — MySQL ENUM 을 문자열과 비교하면 사전순이 된다. */
     private static final String TIER_ORDER = "'BRONZE','SILVER','GOLD','DIAMOND','RUBY'";
 
-    /** 두 경로가 같은 컬럼을 읽는다 — 어느 쪽으로 내려가든 카드 표시값이 달라지면 안 된다. */
+    /**
+     * 카드의 <b>원천</b> 필드만 읽는다. 표시값(참여자 수·완주율·유지율)은 Redis HASH 가 정본이라
+     * 여기서 읽지 않는다 — 조인해 두면 HASH 가 비었을 때 조용히 표 값으로 채워져, 정렬은
+     * 인덱스가 하고 숫자는 표가 하는 이중 출처가 된다.
+     *
+     * <p>{@code challenge_stats} 를 조인하지 않는 이유가 하나 더 있다. 그 표는 재계산 작업본이라
+     * 행이 아직 없을 수 있는데, INNER JOIN 이면 <b>후보 자체가 사라진다</b> — 방이 목록에서
+     * 통째로 빠지는 것을 표시값 하나가 결정하게 된다.
+     */
     private static final String SELECT_COLUMNS =
             "SELECT c.id, c.title, c.ai_title, c.moderation_title, c.image_url, c.moderation_image, " +
-            "       c.category, c.verification_type, c.status, c.participant_count, c.capacity, " +
-            "       c.min_tier, c.start_date, c.end_date, c.created_at, " +
-            "       s.completion_rate, s.retention_rate, s.recent_joins_24h, s.last_joined_at_24h " +
-            "FROM challenges c JOIN challenge_stats s ON s.challenge_id = c.id ";
+            "       c.category, c.verification_type, c.status, c.capacity, " +
+            "       c.min_tier, c.start_date, c.end_date, c.created_at " +
+            "FROM challenges c ";
 
     /** Redis 후보를 한 번에 읽어올 크기. 필터로 걸러지는 비율을 감안해 페이지보다 넉넉히 잡는다. */
     private static final int SCAN_CHUNK = 100;
@@ -115,18 +122,23 @@ public class ExploreQueryService {
 
         // 경로를 먼저 정하고 그 경로의 커서만 받는다 — 경로가 바뀌면 커서의 의미가 달라진다.
         ExploreDataSource source = chooseSource();
+        // 준비되지 않았으면 커서를 해석하기 전에 끝낸다. 먼저 해석하면 「경로가 다른 커서」로
+        // 읽혀 CURSOR_INVALID 가 나가는데, 그건 클라에게 <b>첫 페이지부터 다시 받으라</b>는
+        // 말이라 장애 상황에서 사용자를 목록 맨 위로 돌려보낸다. 사실은 잠시 뒤 이어 받으면 된다.
+        if (source == ExploreDataSource.MYSQL) {
+            throw new BusinessException(ErrorCode.EXPLORE_TEMPORARILY_UNAVAILABLE);
+        }
         ExploreCursor cursor = ExploreCursor.decode(cursorRaw, sort, source);
         Query query = new Query(userId, categories, verification, eligibleOnly, sort, size,
                 myTier, myChallengeIds);
 
-        if (source == ExploreDataSource.MYSQL) return fromMysql(query, cursor);
         try {
             return fromRedis(query, cursor);
+        } catch (BusinessException e) {
+            throw e;
         } catch (RuntimeException e) {
             circuit.recordFailure(e);                     // 연속 실패면 회로가 열린다
-            // 커서를 들고 있었다면 이어 붙일 수 없다 — 첫 페이지부터 다시 받게 한다.
-            if (cursor != null) throw new BusinessException(ErrorCode.CURSOR_INVALID);
-            return fromMysql(query, null);
+            throw new BusinessException(ErrorCode.EXPLORE_TEMPORARILY_UNAVAILABLE);
         }
     }
 
@@ -197,9 +209,12 @@ public class ExploreQueryService {
             List<Row> page = kept.subList(0, q.size());
             return render(q, page, redisCursor(q.sort(), keptMembers.get(q.size() - 1)), true);
         }
-        // 페이지를 못 채웠다. ZSET 을 끝까지 봤으면 정말 끝이고, 상한에 걸린 것이면 아직 남아 있다.
-        boolean hasNext = !zsetExhausted && afterMember != null;
-        return render(q, kept, hasNext ? redisCursor(q.sort(), afterMember) : null, hasNext);
+        // 페이지를 못 채운 채 스캔 상한에 걸렸다면, 짧은 페이지를 정상인 척 내리지 않는다 —
+        // 클라는 「결과가 이것뿐」과 「더 보려면 더 훑어야 한다」를 구분할 수 없다(공통 5-4).
+        if (!zsetExhausted && kept.size() < q.size()) {
+            throw new BusinessException(ErrorCode.EXPLORE_TEMPORARILY_UNAVAILABLE);
+        }
+        return render(q, kept, null, false);
     }
 
     /** 멤버 문자열 하나가 커서의 전부다 — id 는 거기서 꺼내 검증용으로 함께 싣는다. */
@@ -253,6 +268,20 @@ public class ExploreQueryService {
             sql.append("AND (c.min_tier IS NULL OR FIELD(c.min_tier, ").append(TIER_ORDER).append(") <= ?) ");
             args.add(tierRank(q.myTier()));
         }
+        // 필터 조건을 <b>여기서 한 번 더</b> 건다. 후보는 Redis 집합 교차로 좁혔지만, 그 집합은
+        // 파생값이라 원천보다 늦을 수 있다 — 인증 방식을 방금 바꾼 방이 옛 집합에 남아 있으면
+        // 「AUTO 로 걸렀는데 MANUAL 방이 보이는」 결과가 된다. 노출 안전 검증과 같은 자리에서
+        // 함께 확인하면 그 창이 닫힌다(공통 5-1 「노출 안전」).
+        if (q.categories() != null && !q.categories().isEmpty()) {
+            sql.append("AND c.category IN (")
+                    .append(String.join(",", java.util.Collections.nCopies(q.categories().size(), "?")))
+                    .append(") ");
+            args.addAll(q.categories());
+        }
+        if (q.verification() != null) {
+            sql.append("AND c.verification_type = ? ");
+            args.add(q.verification());
+        }
         if (q.sort().extraCondition() != null) sql.append("AND ").append(q.sort().extraCondition()).append(' ');
 
         sql.append("AND c.id IN (")
@@ -263,7 +292,52 @@ public class ExploreQueryService {
         Map<UUID, Row> byId = new java.util.HashMap<>();
         jdbc.query(sql.toString(), rs -> { Row row = mapRow(rs); byId.put(row.id, row); },
                 args.toArray());
-        return byId;
+        return withDisplayValues(byId);
+    }
+
+    /**
+     * 표시값은 <b>파생 인덱스에서</b> 읽는다 (탐색 공통 5-1·5-3).
+     *
+     * <p>MySQL 은 여기서 「이 방이 지금도 공개·진행 중인가」를 최종 확인하는 데만 쓴다. 참여자 수와
+     * 완주율·유지율은 파생값이고, 그 정본은 HASH 다 — 표를 조인해 읽으면 정렬은 인덱스가 하고
+     * 표시는 표가 하는 <b>두 출처</b>가 생겨, 순서와 숫자가 서로 어긋나는 카드가 나온다.
+     *
+     * <p>HASH 가 아직 없는 방은 표의 값을 그대로 둔다. 투영 직전의 짧은 창이고, 그 구간에 숫자를
+     * 비우면 카드가 깜빡인다.
+     */
+    private Map<UUID, Row> withDisplayValues(Map<UUID, Row> byId) {
+        Map<UUID, Row> merged = new java.util.HashMap<>(byId.size());
+        byId.forEach((id, row) -> {
+            Map<Object, Object> hash = store.getStats(id);
+            // 정렬 인덱스에는 있는데 표시값이 없다 = <b>투영이 덜 끝났다.</b> 그 방만 빼고
+            // 200 을 내면 있는 방이 조용히 사라지고, MySQL 로 채우면 정렬과 숫자의 출처가
+            // 갈린다. 둘 다 장애를 감추므로 드러낸다(공통 5-4).
+            //
+            // 「정상적으로 후보에서 빠진 방」과 구분되는 이유는, 그런 방은 애초에 정렬 ZSET 에
+            // 없어 여기까지 오지 않기 때문이다. 여기 온 방은 인덱스가 보증한 방이다.
+            if (hash.isEmpty() || hash.get(ExploreRedisStore.VERSION_FIELD) == null) {
+                throw new BusinessException(ErrorCode.EXPLORE_TEMPORARILY_UNAVAILABLE);
+            }
+            merged.put(id, new Row(row.id, row.title, row.aiTitle, row.moderationTitle,
+                    row.imageUrl, row.moderationImage, row.category, row.verificationType, row.status,
+                    intOf(hash.get("participantCount")),
+                    row.capacity, row.minTier, row.startDate, row.endDate, row.createdAt,
+                    doubleOf(hash.get("completionRate")),
+                    doubleOf(hash.get("retentionRate")),
+                    intOf(hash.get("recentJoins24h")), row.lastJoinedAt24h));
+        });
+        return merged;
+    }
+
+    private static int intOf(Object raw) {
+        try { return raw == null ? 0 : Integer.parseInt(raw.toString()); }
+        catch (NumberFormatException e) { return 0; }
+    }
+
+    /** HASH 에 없으면 {@code null} — 표본 미달이라 값이 없는 것과 같은 뜻이다. */
+    private static Double doubleOf(Object raw) {
+        try { return raw == null ? null : Double.valueOf(raw.toString()); }
+        catch (NumberFormatException e) { return null; }
     }
 
     // =====================================================================
@@ -435,19 +509,16 @@ public class ExploreQueryService {
                        int recentJoins24h, String lastJoinedAt24h) {}
 
     private Row mapRow(ResultSet rs) throws SQLException {
+        // 표시값 자리는 비워 둔다 — HASH 에서 채운다. 채워지지 않으면 그 방은 후보에서 뺀다.
         return new Row(
                 toUuid(rs.getBytes("id")),
                 rs.getString("title"), rs.getString("ai_title"), rs.getString("moderation_title"),
                 rs.getString("image_url"), rs.getString("moderation_image"),
                 rs.getString("category"), rs.getString("verification_type"), rs.getString("status"),
-                rs.getInt("participant_count"), (Integer) rs.getObject("capacity"), rs.getString("min_tier"),
+                0, (Integer) rs.getObject("capacity"), rs.getString("min_tier"),
                 String.valueOf(rs.getDate("start_date")), String.valueOf(rs.getDate("end_date")),
                 String.valueOf(rs.getTimestamp("created_at")),
-                (Double) rs.getObject("completion_rate", Double.class),
-                (Double) rs.getObject("retention_rate", Double.class),
-                rs.getInt("recent_joins_24h"),
-                rs.getTimestamp("last_joined_at_24h") == null
-                        ? null : String.valueOf(rs.getTimestamp("last_joined_at_24h")));
+                null, null, 0, null);
     }
 
     private static byte[] toBytes(UUID u) {

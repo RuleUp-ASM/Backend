@@ -78,6 +78,11 @@ public class ChallengeCompletionService {
         Set<UUID> members = new LinkedHashSet<>();   // 여러 방이 동시에 끝난 사용자는 한 번만 재계산하면 된다
         for (Challenge c : due) {
             c.complete();
+            // 종료된 방은 탐색 후보에서 <b>즉시</b> 빠져야 한다. 5분 보정의 유령 제거만 믿으면 그
+            // 사이 정렬 ZSET 과 후보 집합에 남아, 목록이 끝난 방을 걸러 내느라 더 읽고(overfetch)
+            // 필터가 선택적일 때는 스캔 상한에 걸려 503 까지 난다. 커밋 뒤에 발행된다.
+            eventPublisher.publishEvent(
+                    new com.ruleup.ruleup_backend.challenge.explore.ChallengeExploreProjectionRequested(c.getId()));
             // 끝난 방의 음소거는 의미를 잃는다. 남겨 두면 설정 목록에 영영 쌓인다.
             muteCleaner.clearMutesOfChallenge(c.getId());
 

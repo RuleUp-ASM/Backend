@@ -241,9 +241,26 @@ class ChallengeModerationFlowIT extends ChallengeApiSupport {
             jdbcTemplate.update("UPDATE challenges SET moderation_title = 'IN_REVIEW', title = '고친 제목', " +
                     "updated_at = DATE_SUB(NOW(), INTERVAL 1 DAY) WHERE id = UNHEX(REPLACE(?, '-', ''))", id);
 
-            retryService.retryStalledModeration();
-
-            assertThat(moderationRow(id).get("moderation_title")).isEqualTo("APPROVED");
+            assertThat(convergesToApproved(id))
+                    .as("지체된 건은 배치가 돌면 재심사돼 수렴해야 한다")
+                    .isTrue();
         }
+    }
+
+    /**
+     * 배치를 돌려 APPROVED 로 수렴하는지 — <b>다시 돌려 가며</b> 본다.
+     *
+     * <p>선점이 {@code FOR UPDATE SKIP LOCKED} 라, 그 순간 누군가 그 행을 잡고 있으면
+     * (통계 파생값 갱신 같은 커밋 후 작업) 이번 실행은 그 행을 건너뛴다. 건너뛴 것은 실패가
+     * 아니라 다음 차례로 미룬 것이므로, 한 번 돌리고 단정하면 「하필 그때 잡혀 있었는가」를
+     * 시험하게 된다. 배치가 <b>결국 수렴시키는가</b>가 이 테스트의 주장이다.
+     */
+    private boolean convergesToApproved(String challengeId) throws Exception {
+        for (int i = 0; i < 5; i++) {
+            retryService.retryStalledModeration();
+            if ("APPROVED".equals(moderationRow(challengeId).get("moderation_title"))) return true;
+            Thread.sleep(300);   // 잡고 있던 커밋 후 작업이 끝날 만큼만 — 배치는 무겁다
+        }
+        return false;
     }
 }

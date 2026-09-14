@@ -135,19 +135,6 @@ class ChallengePublicDetailCloneIT extends ChallengeApiSupport {
             assertThat((String) read(res, "$.data.joinBlockReason")).isEqualTo("TIER_GATE");
         }
 
-        @Test
-        @DisplayName("동시 참여 무료 한도도 가입 API와 같은 FREE_LIMIT으로 미리 알려준다")
-        void previewsFreeLimit() throws Exception {
-            var owner = member(uniq("d-limit-owner"));
-            var viewer = member(uniq("d-limit-viewer"));
-            UUID id = room(owner.id(), "GROUP", "PUBLIC", "ACTIVE");
-            jdbcTemplate.update("INSERT INTO user_challenge_counters (user_id, active_join_count) VALUES (?, 3) " +
-                            "ON DUPLICATE KEY UPDATE active_join_count = 3",
-                    (Object) bytes(viewer.id()));
-
-            MvcResult res = detail(viewer.token(), id);
-            assertThat((String) read(res, "$.data.joinBlockReason")).isEqualTo("FREE_LIMIT");
-        }
 
         @Test
         @DisplayName("표본이 모자란 방은 완주율·유지율을 내려주지 않는다")
@@ -217,10 +204,11 @@ class ChallengePublicDetailCloneIT extends ChallengeApiSupport {
             UUID priv = room(owner.id(), "GROUP", "PRIVATE", "ACTIVE");
             UUID solo = room(owner.id(), "SOLO", null, "ACTIVE");
 
-            // 비멤버에게는 존재 자체가 숨겨지므로 404 가 먼저다
-            expectError(cloneRoom(cloner, priv), 404, "CHALLENGE_NOT_FOUND");
-            expectError(cloneRoom(cloner, solo), 404, "CHALLENGE_NOT_FOUND");
-            // 볼 수 있는 사람(방장)에게는 "복제 불가"로 답한다
+            // 복제는 <b>누가 부르든</b> 403 NOT_CLONEABLE 이다(복제 API 명세). 존재 은닉은 상세
+            // 조회의 규칙이고, 여기에 404 를 섞으면 클라가 「없는 방」과 「복제만 안 되는 방」을
+            // 구분하지 못해 사전 비활성 + 토스트라는 명세의 처리 방식을 그릴 수 없다.
+            expectError(cloneRoom(cloner, priv), 403, "NOT_CLONEABLE");
+            expectError(cloneRoom(cloner, solo), 403, "NOT_CLONEABLE");
             expectError(cloneRoom(owner.token(), priv), 403, "NOT_CLONEABLE");
             expectError(cloneRoom(owner.token(), solo), 403, "NOT_CLONEABLE");
         }

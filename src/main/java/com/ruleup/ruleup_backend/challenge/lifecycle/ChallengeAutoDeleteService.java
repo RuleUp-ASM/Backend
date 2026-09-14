@@ -62,7 +62,11 @@ public class ChallengeAutoDeleteService {
     public void runOnce() {
         List<byte[]> targets = jdbc.query(
                 "SELECT c.id FROM challenges c " +
-                        "WHERE (c.status = 'COMPLETED' AND c.end_date < DATE_SUB(CURDATE(), INTERVAL 2 DAY)) " +
+                        // CURDATE() 는 DB 세션(UTC) 기준이라 00~09시 KST 사이에는 하루가 어긋난다.
+                        // end_date 는 KST 달력 날짜이므로 같은 기준으로 비교해야 한다 — 그렇지
+                        // 않으면 매일 아침 9시간 동안 유예가 하루 짧아지거나 길어진다.
+                        "WHERE (c.status = 'COMPLETED' AND c.end_date < DATE_SUB(" +
+                        "        DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 2 DAY)) " +
                         "   OR NOT EXISTS (SELECT 1 FROM challenge_members m " +
                         "                  WHERE m.challenge_id = c.id AND m.status = 'ACTIVE')",
                 (rs, i) -> rs.getBytes(1));

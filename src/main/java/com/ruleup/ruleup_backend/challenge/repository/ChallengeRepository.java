@@ -33,6 +33,22 @@ public interface ChallengeRepository extends JpaRepository<Challenge, UUID> {
     Optional<Challenge> findByIdForUpdate(@Param("id") UUID id);
 
     /**
+     * 무제한 방 가입이 쓰는 <b>공유 잠금</b> 읽기.
+     *
+     * <p>무제한 방은 셀 정원이 없어 쓰기 잠금을 잡지 않는다 — 잡으면 같은 방 가입이 서로를
+     * 기다린다. 그렇다고 잠그지 않으면 <b>정원을 거는 설정 변경과의 경합</b>이 열린다:
+     * 설정 트랜잭션이 아직 커밋되기 전이라 가입이 여전히 「무제한」을 보고, 정원 검사 없이
+     * 들어간다. 설정 쪽은 그 가입을 못 세고 커밋해 정원을 넘긴다.
+     *
+     * <p>공유 잠금이 정확히 이 틈을 메운다. 공유 잠금끼리는 <b>서로 막지 않으므로</b> 가입이
+     * 가입을 기다리지 않고, 설정 변경의 쓰기 잠금과는 충돌하므로 둘 중 하나가 반드시 뒤에 선다.
+     * 또한 잠금 읽기라 읽기 스냅샷을 고정하지 않아, 뒤따르는 정원 검사가 최신 값을 본다.
+     */
+    @Lock(LockModeType.PESSIMISTIC_READ)
+    @Query("SELECT c FROM Challenge c WHERE c.id = :id AND c.deletedAt IS NULL")
+    Optional<Challenge> findByIdForShare(@Param("id") UUID id);
+
+    /**
      * 활성화 배치: 시작일(start_date)이 도달한 UPCOMING 챌린지를 FOR UPDATE SKIP LOCKED 로 선점.
      * 심사 상태와 무관하게 활성화한다(심사 중 기능 제한 없음 — 대체 표시가 노출을 가린다).
      * 다중 인스턴스에서도 중복 전환 불가(DB 멱등 패턴).
@@ -64,6 +80,19 @@ public interface ChallengeRepository extends JpaRepository<Challenge, UUID> {
             "WHERE status = 'ACTIVE' AND end_date < :today AND deleted_at IS NULL " +
             "ORDER BY end_date LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
     List<Challenge> findActiveDueForCompletionForUpdate(@Param("today") LocalDate today, @Param("limit") int limit);
+
+    /**
+     * 그 방의 정원만 읽는다 — 값이 없으면 무제한이다.
+     *
+     * <p>가입 경로가 <b>트랜잭션을 열기 전에</b> 부른다. 정원이 있는 방에서는 잠금 읽기가 트랜잭션의
+     * 첫 문장이어야 하는데(읽기 스냅샷이 먼저 고정되면 정원 COUNT 가 락 대기 중 커밋된 가입을
+     * 놓친다), 그러려면 잠글지 말지를 트랜잭션 밖에서 알아야 한다.
+     *
+     * @return 그 방이 없으면 빈 리스트. 있으면 한 줄이며, 그 값이 {@code null} 이면 무제한이다
+     *         (정원은 없을 수 있는 값이라 {@code Optional} 로는 「방이 없음」과 구분되지 않는다)
+     */
+    @Query("SELECT c.maxParticipants FROM Challenge c WHERE c.id = :id")
+    List<Integer> findCapacityById(@Param("id") UUID id);
 
     /**
      * participant_count 원자적 +1 (동시 참여 시 read-modify-write 유실 방지).

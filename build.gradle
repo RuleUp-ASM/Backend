@@ -130,10 +130,6 @@ tasks.named('test') {
 	// 20초씩 기다리는데, 캐시된 컨텍스트가 열댓 개라 그것만으로 빌드 끝에 5분 넘게 버려진다.
 	// (로그에 "Timed out while waiting for executor 'taskScheduler' to terminate" 로 남는다)
 	// 테스트는 진행 중인 배치 한 사이클을 지켜야 할 이유가 없으므로 기다리지 않는다.
-	systemProperty 'spring.task.scheduling.shutdown.await-termination', 'false'
-	systemProperty 'spring.task.scheduling.shutdown.await-termination-period', '0s'
-	systemProperty 'spring.lifecycle.timeout-per-shutdown-phase', '1s'
-
 	// 테스트가 끝나면 커버리지 리포트를 자동 생성
 	finalizedBy tasks.named('jacocoTestReport')
 }

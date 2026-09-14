@@ -96,10 +96,12 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
             assertThat((Integer) read(res, "$.data.requiredPermissions.length()")).isZero();
             assertThat((Boolean) read(res, "$.data.personalSetupRequired")).isFalse();
 
-            Integer count = jdbcTemplate.queryForObject(
-                    "SELECT active_join_count FROM user_challenge_counters WHERE user_id = ?",
-                    Integer.class, bytes(joiner.id()));
-            assertThat(count).isEqualTo(1);
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM challenge_members WHERE challenge_id = ? AND user_id = ? "
+                            + "AND status = 'ACTIVE'",
+                    Integer.class, bytes(challengeId), bytes(joiner.id())))
+                    .as("참여 사실의 원천은 멤버십 행 하나다 — 동시 참여 카운터는 개정으로 사라졌다")
+                    .isEqualTo(1);
         }
 
         @Test
@@ -127,16 +129,6 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
             expectBlocked(join(joiner.token(), challengeId), "PRIVATE_INVITE_ONLY");
         }
 
-        @Test
-        @DisplayName("동시 참여 3개 초과 → FREE_LIMIT")
-        void freeLimit() throws Exception {
-            Member owner = member(uniq("gate-limit-owner"));
-            Member joiner = member(uniq("gate-limit-joiner"));
-            UUID challengeId = openGroup(owner.id());
-            occupySlots(joiner.id(), 3);   // 카운터만 심으면 안 된다 — 게이트는 원천(멤버십)을 센다
-
-            expectBlocked(join(joiner.token(), challengeId), "FREE_LIMIT");
-        }
 
         @Test
         @DisplayName("정원 마감 → FULL")
@@ -192,28 +184,6 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
             assertThat((Boolean) read(res, "$.data.personalSetupRequired")).isTrue();
         }
 
-        @Test
-        @DisplayName("같은 사용자가 서로 다른 두 방에 동시에 가입해도 동시 참여 3개를 넘지 않는다")
-        void concurrentJoinsForSameUserRespectFreeLimit() throws Exception {
-            Member joiner = member(uniq("race-user"));
-            UUID first = openGroup(member(uniq("race-owner-a")).id());
-            UUID second = openGroup(member(uniq("race-owner-b")).id());
-            occupySlots(joiner.id(), 2);
-
-            List<MvcResult> results = joinConcurrently(
-                    List.of(joiner.token(), joiner.token()), List.of(first, second));
-
-            assertThat(results.stream().filter(r -> r.getResponse().getStatus() == 200)).hasSize(1);
-            List<String> reasons = new ArrayList<>();
-            for (MvcResult result : results) {
-                if (result.getResponse().getStatus() == 409) reasons.add(read(result, "$.error.reason"));
-            }
-            assertThat(reasons).containsExactly("FREE_LIMIT");
-            Integer count = jdbcTemplate.queryForObject(
-                    "SELECT active_join_count FROM user_challenge_counters WHERE user_id = ?",
-                    Integer.class, bytes(joiner.id()));
-            assertThat(count).isEqualTo(3);
-        }
 
         @Test
         @DisplayName("마지막 한 자리에 20명이 동시에 가입해도 정확히 한 명만 성공한다")
@@ -240,11 +210,10 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
             Integer activeMembers = jdbcTemplate.queryForObject(
                     "SELECT COUNT(*) FROM challenge_members WHERE challenge_id = ? AND status = 'ACTIVE'",
                     Integer.class, bytes(challengeId));
-            Integer participantCount = jdbcTemplate.queryForObject(
-                    "SELECT participant_count FROM challenges WHERE id = ?",
-                    Integer.class, bytes(challengeId));
-            assertThat(activeMembers).isEqualTo(2);
-            assertThat(participantCount).isEqualTo(2);
+            assertThat(activeMembers)
+                    .as("정원 판정의 근거는 멤버십 행이다. 표시용 participant_count 는 커밋 뒤 "
+                            + "원천에서 다시 세므로 이 시점에 맞아떨어질 필요가 없다")
+                    .isEqualTo(2);
         }
     }
 
@@ -316,11 +285,11 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
             assertThat((String) read(res, "$.data.rejoinAvailableAt")).isNotBlank();
             assertThat((Boolean) read(res, "$.data.botOwnerActivated")).isFalse();
 
-            // 카운터 해제 확인 — 안 풀리면 3개 한도를 계속 잡아먹는다
-            Integer count = jdbcTemplate.queryForObject(
-                    "SELECT active_join_count FROM user_challenge_counters WHERE user_id = ?",
-                    Integer.class, bytes(joiner.id()));
-            assertThat(count).isZero();
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM challenge_members WHERE challenge_id = ? AND user_id = ? "
+                            + "AND status = 'ACTIVE'",
+                    Integer.class, bytes(challengeId), bytes(joiner.id())))
+                    .as("나갔으면 ACTIVE 멤버십이 남아 있으면 안 된다").isZero();
 
             MvcResult blocked = join(joiner.token(), challengeId);
             expectBlocked(blocked, "REJOIN_COOLDOWN");
@@ -362,11 +331,11 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
             assertThat((String) read(detail, "$.data.joinBlockReason")).isEqualTo("BANNED");
             assertThat((Object) read(detail, "$.data.rejoinAvailableAt")).isNull();
 
-            // 동시 참여 한도에서 빠진다 — 쫓겨난 방이 3개 슬롯을 잡아먹으면 안 된다.
-            Integer count = jdbcTemplate.queryForObject(
-                    "SELECT active_join_count FROM user_challenge_counters WHERE user_id = ?",
-                    Integer.class, bytes(cheater.id()));
-            assertThat(count).isZero();
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM challenge_members WHERE challenge_id = ? AND user_id = ? "
+                            + "AND status = 'ACTIVE'",
+                    Integer.class, bytes(challengeId), bytes(cheater.id())))
+                    .as("쫓겨났으면 ACTIVE 멤버십이 남아 있으면 안 된다").isZero();
 
             // 제재 이력에는 영구로 찍힌다.
             MvcResult sanctions = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders

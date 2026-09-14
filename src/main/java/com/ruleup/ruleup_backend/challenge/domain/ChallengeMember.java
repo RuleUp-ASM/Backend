@@ -61,9 +61,16 @@ public class ChallengeMember extends AssignedIdEntity {
     @Column(name = "status", nullable = false)
     private MemberStatus status;
 
+    /**
+     * <b>처음</b> 들어온 시각. 재입장해도 바뀌지 않는다.
+     *
+     * <p>인기 점수가 보는 「최근 24시간 신규 참여」는 이 값이 아니라 {@code challenge_join_events}
+     * 가 센다 — 멤버십은 사람당 한 줄인 <b>상태</b>라 여러 번의 가입을 담을 수 없다.
+     * 한때 재입장마다 이 값을 덮었지만, 그러면 처음 들어온 날이 사라져 둘 중 하나만 갖게 된다.
+     */
     @Generated(event = EventType.INSERT)
     @Column(name = "joined_at", nullable = false, updatable = false)
-    private Instant joinedAt;            // 참여(또는 신청) 시각
+    private Instant joinedAt;
 
     // ===== 진행률 비정규화 (인증 스펙 §4.2) — 인증 sync·확정 배치가 유지 =====
     @Enumerated(EnumType.STRING)
@@ -243,7 +250,12 @@ public class ChallengeMember extends AssignedIdEntity {
         this.rejoinBanned = true;
     }
 
-    /** 대기 기간이 끝난 뒤 재입장(자진 탈퇴·강퇴 공통). kickCount 는 배수 계산 근거라 남긴다. */
+    /**
+     * 대기 기간이 끝난 뒤 재입장(자진 탈퇴·강퇴 공통). kickCount 는 배수 계산 근거라 남긴다.
+     *
+     * <p>{@code joinedAt} 은 건드리지 않는다 — 그건 <b>처음</b> 들어온 날이다. 이번 재입장이라는
+     * 사건은 {@code challenge_join_events} 에 한 줄로 쌓이며, 인기 점수는 그쪽을 센다.
+     */
     public void rejoin() {
         this.status = MemberStatus.ACTIVE;
         this.role = MemberRole.MEMBER;

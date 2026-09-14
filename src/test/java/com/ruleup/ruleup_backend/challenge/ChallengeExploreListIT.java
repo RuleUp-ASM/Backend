@@ -28,9 +28,34 @@ import static org.springframework.security.test.web.servlet.setup.SecurityMockMv
  * <p>처리 순서는 <b>① 노출 제외 → ② 필터 AND → ③ 정렬</b>이다. 이 순서가 흐트러지면
  * 비공개 방이 필터를 타고 새거나, 표본 미달 방이 완주율 정렬에 끼어 왜곡된 순위를 만든다.
  */
-@SpringBootTest
-@Import(TestcontainersConfiguration.class)
+@SpringBootTest(properties = {
+        "app.explore.redis.enabled=true",
+        "app.explore.redis.open-duration-ms=200"
+})
+@Import({TestcontainersConfiguration.class, ChallengeExploreListIT.RedisTestConfig.class})
 class ChallengeExploreListIT extends ChallengeApiSupport {
+
+    /**
+     * 목록은 파생 인덱스로만 응답한다 — 준비되지 않으면 503 이다(공통 5-4).
+     * 예전에는 MySQL 폴백이 있어 Redis 없이도 이 테스트가 돌았지만, 그 폴백이 곧 스펙 위반이었다.
+     */
+    @org.springframework.boot.test.context.TestConfiguration(proxyBeanMethods = false)
+    static class RedisTestConfig {
+        @org.springframework.context.annotation.Bean
+        @org.springframework.boot.testcontainers.service.connection.ServiceConnection
+        com.redis.testcontainers.RedisContainer redisContainer() {
+            return new com.redis.testcontainers.RedisContainer(
+                    org.testcontainers.utility.DockerImageName.parse("redis:7-alpine"));
+        }
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    com.ruleup.ruleup_backend.challenge.explore.store.ExploreIndexer exploreIndexer;
+
+    /** MySQL 에 심은 픽스처를 파생 인덱스에 반영한다 — 운영에서는 COMMIT 후 갱신과 5분 스윕이 한다. */
+    private void reindex() {
+        exploreIndexer.reindexAll();
+    }
 
     @Autowired WebApplicationContext wac;
     @Autowired JdbcTemplate jdbcTemplate;
@@ -63,12 +88,26 @@ class ChallengeExploreListIT extends ChallengeApiSupport {
         jdbcTemplate.update("UPDATE challenges SET " + column + " = ? WHERE id = ?", value, bytes(challengeId));
     }
 
+    /**
+     * 최근 24시간 안에 들어온 참여를 {@code count} 명 만든다.
+     *
+     * <p>인기 점수는 <b>원천(멤버 행)에서 센다</b> — challenge_stats 스냅샷을 심어도 파생 인덱스는
+     * 그 값을 보지 않는다. 스냅샷을 심는 픽스처는 두 저장소가 서로 다른 값을 보게 만들 뿐이다.
+     */
+    private void recentJoins(UUID challengeId, int count) throws Exception {
+        for (int i = 0; i < count; i++) {
+            UUID joiner = member(uniq("exj")).id();
+            insertActiveMembership(challengeId, joiner, "MEMBER");
+        }
+    }
+
     private void stats(UUID challengeId, String column, Object value) {
         jdbcTemplate.update("UPDATE challenge_stats SET " + column + " = ? WHERE challenge_id = ?",
                 value, bytes(challengeId));
     }
 
     private MvcResult explore(String token, String query) throws Exception {
+        reindex();   // 픽스처를 파생 인덱스에 반영한 뒤 조회한다
         return getAuth("/api/v1/challenges/explore" + (query.isEmpty() ? "" : "?" + query), token);
     }
 
@@ -198,9 +237,9 @@ class ChallengeExploreListIT extends ChallengeApiSupport {
         void defaultIsPopular() throws Exception {
             String token = memberToken(uniq("ex-pop"));
             UUID low = room("EXERCISE", "ACTIVE");
-            stats(low, "recent_joins_24h", 1);
+            recentJoins(low, 1);
             UUID high = room("EXERCISE", "ACTIVE");
-            stats(high, "recent_joins_24h", 9);
+            recentJoins(high, 9);
 
             assertThat(ids(explore(token, ""))).containsExactly(high.toString(), low.toString());
         }
