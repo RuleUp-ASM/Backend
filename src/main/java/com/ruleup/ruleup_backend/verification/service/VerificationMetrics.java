@@ -45,6 +45,7 @@ public class VerificationMetrics {
     private final Counter finalized;
     private final Counter finalizeLate;
     private final Counter finalizeFailed;
+    private final Counter deviceIdMissing;
 
     /** 마지막으로 확정 배치가 대상을 비운 시각(epoch millis). 0 이면 아직 돈 적이 없다. */
     private final AtomicLong lastFinalizeCompletedAt = new AtomicLong();
@@ -75,6 +76,10 @@ public class VerificationMetrics {
         // 이 카운터가 없으면 「확정되지 않은 채 계속 밀리는 판정」을 아무도 모른다.
         this.finalizeFailed = Counter.builder("verification.finalize.failed")
                 .description("대상 단위 확정 실패 — 격리 후 뒤로 미뤄진 판정 수").register(registry);
+        // 활성 기기 검증을 엄격 모드로 켤 수 있는 시점을 이 값이 알려 준다. 0 이 되기 전에 켜면
+        // 기기를 안 보내는 구버전 앱이 전부 인증 불가가 된다.
+        this.deviceIdMissing = Counter.builder("verification.sync.device_id_missing")
+                .description("기기 식별자 없이 들어온 sync 요청 수").register(registry);
         registry.gauge("verification.finalize.last_completed_epoch_ms", lastFinalizeCompletedAt,
                 AtomicLong::doubleValue);
     }
@@ -86,6 +91,11 @@ public class VerificationMetrics {
         if (deduped > 0) signalsDeduped.increment(deduped);
         if (gateDropped > 0) signalsGateDropped.increment(gateDropped);
         if (consentRejected > 0) signalsConsentRejected.increment(consentRejected);
+    }
+
+    /** 기기 식별자 없이 sync 가 들어왔다(관대 모드에서만 도달한다). */
+    public void deviceIdMissing() {
+        deviceIdMissing.increment();
     }
 
     /** 한 건의 확정이 실패해 격리·연기됐다. */

@@ -261,9 +261,19 @@ public class VerificationSyncService {
         return type -> SignalExclusionReason.UNTRUSTED_SOURCE;
     }
 
-    /** 활성 기기가 아닌지. 양쪽 다 값이 있고 서로 다를 때만 그렇게 본다. */
+    /**
+     * 활성 기기가 아닌지.
+     *
+     * <p>기기를 밝히지 않은 요청은 <b>엄격 모드가 아니면 통과</b>시킨다(엄격 모드에서는 봉투 검증이
+     * 이미 거절했다). 다만 그냥 넘기지 않고 센다 — 이 카운터가 0 으로 떨어져야 엄격 모드를 켤 수
+     * 있고, 그 전에는 「검증하고 있다」고 말할 수 없다.
+     */
     private boolean inactiveDevice(com.ruleup.ruleup_backend.user.domain.User user, String deviceId) {
-        if (user == null || deviceId == null || deviceId.isBlank()) return false;
+        if (blank(deviceId)) {
+            metrics.deviceIdMissing();
+            return false;
+        }
+        if (user == null) return false;
         String active = user.getDeviceId();
         return active != null && !active.isBlank() && !active.equals(deviceId.trim());
     }
@@ -289,6 +299,16 @@ public class VerificationSyncService {
                 || req.coveredUntil() < req.coveredFrom()) {
             throw new BusinessException(ErrorCode.INVALID_SIGNAL_PAYLOAD);
         }
+        // 「AT + 활성 기기 검증」을 엄격히 적용하는 모드. 기기를 밝히지 않으면 <b>어느 기기 신호인지
+        // 알 수 없어</b> 활성 여부를 물을 수조차 없으므로 받지 않는다. 기본값은 꺼짐 —
+        // 계약에 기기가 없던 시절의 앱을 한 번에 인증 불가로 만들지 않기 위해서다.
+        if (properties.requireActiveDevice() && blank(req.deviceId())) {
+            throw new BusinessException(ErrorCode.INVALID_SIGNAL_PAYLOAD);
+        }
+    }
+
+    private static boolean blank(String value) {
+        return value == null || value.isBlank();
     }
 
     private boolean becameFinal(VerificationStatus before, VerificationStatus after) {
