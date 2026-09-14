@@ -5,6 +5,7 @@ import com.ruleup.ruleup_backend.user.domain.InterestCategory;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -31,10 +32,68 @@ public class CategoryCountService {
 
     public static final String CACHE = "challengeCategories";
 
-    private final JdbcTemplate jdbc;
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(CategoryCountService.class);
 
-    @Cacheable(value = CACHE, key = "'grid'")
+    private final JdbcTemplate jdbc;
+    private final com.ruleup.ruleup_backend.challenge.explore.store.ExploreRedisStore store;
+
+    /**
+     * 카테고리 그리드. <b>10분 집계가 채운 Redis HASH</b>를 읽는다(공통 5-3 · 백엔드 7-3).
+     *
+     * <p>요청마다 MySQL 을 GROUP BY 하고 인스턴스 로컬 캐시에 담으면 인스턴스마다 다른 수가
+     * 보인다 — 같은 화면을 새로고침했을 뿐인데 숫자가 오르내린다. 모든 인스턴스가 같은 값을
+     * 보려면 캐시가 아니라 <b>공유 저장소</b>여야 한다.
+     *
+     * <p>HASH 가 아직 없으면(집계 전·Redis 장애) 직접 집계로 내려간다. 스펙이 카테고리 수만은
+     * 「필요 시 challenges 직접 집계로 제한 대응」이라고 허용한 지점이다 — 목록·인기와 달리
+     * 순위가 걸려 있지 않아, 조금 낡은 수를 보여 주는 편이 그리드를 통째로 비우는 것보다 낫다.
+     */
     public CategoryGridResponse getCategories() {
+        try {
+            Map<Object, Object> cached = store.categoryCounts();
+            if (!cached.isEmpty()) {
+                return grid(key -> {
+                    Object raw = cached.get(key);
+                    try { return raw == null ? 0 : Integer.parseInt(raw.toString()); }
+                    catch (NumberFormatException e) { return 0; }
+                });
+            }
+        } catch (RuntimeException e) {
+            // Redis 가 죽으면 읽기 자체가 예외다 — 잡지 않으면 폴백에 닿지도 못하고 500 이 된다.
+            log.warn("카테고리 수 조회 실패 — 직접 집계로 내려간다: {}", e.toString());
+        }
+        Map<String, Integer> fallback = countFromSource();
+        return grid(key -> fallback.getOrDefault(key, 0));
+    }
+
+    /** 10분마다 — 모든 인스턴스가 같은 수를 보도록 공유 저장소에 새겨 둔다. */
+    @Scheduled(cron = "0 */10 * * * *", zone = "Asia/Seoul")
+    public void refreshCounts() {
+        try {
+            // 12종을 <b>전부</b> 쓴다. 집계 결과에 없는 카테고리를 빼면 그 자리에 옛 수치가
+            // 남고, 모든 카테고리가 0 이 된 경우에는 아무것도 쓰지 않아 화면이 옛 수를 계속 보여 준다.
+            Map<String, Integer> fresh = countFromSource();
+            Map<String, String> counts = new HashMap<>();
+            for (InterestCategory c : InterestCategory.values()) {
+                counts.put(c.name(), String.valueOf(fresh.getOrDefault(c.name(), 0)));
+            }
+            store.putCategoryCounts(counts);
+        } catch (RuntimeException e) {
+            // 실패해도 직전 값이 남아 있고, 없으면 조회가 직접 집계로 내려간다.
+            log.warn("카테고리 수 집계 실패 — 직전 값을 유지한다: {}", e.toString());
+        }
+    }
+
+    private CategoryGridResponse grid(java.util.function.ToIntFunction<String> countOf) {
+        List<CategoryGridResponse.Item> items = Arrays.stream(InterestCategory.values())
+                .map(c -> new CategoryGridResponse.Item(
+                        c.name(), c.getLabel(), countOf.applyAsInt(c.name())))
+                .toList();
+        return new CategoryGridResponse(items);
+    }
+
+    private Map<String, Integer> countFromSource() {
         Map<String, Integer> counts = new HashMap<>();
         jdbc.query("SELECT category, COUNT(*) FROM challenges " +
                         // 진행 중인 방만 센다. 인기·목록은 모집 중(UPCOMING) 방을 포함하지만
@@ -44,12 +103,7 @@ public class CategoryCountService {
                         "  AND deleted_at IS NULL " +
                         "GROUP BY category",
                 rs -> { counts.put(rs.getString(1), rs.getInt(2)); });
-
-        List<CategoryGridResponse.Item> items = Arrays.stream(InterestCategory.values())
-                .map(c -> new CategoryGridResponse.Item(
-                        c.name(), c.getLabel(), counts.getOrDefault(c.name(), 0)))
-                .toList();
-        return new CategoryGridResponse(items);
+        return counts;
     }
 
     /**

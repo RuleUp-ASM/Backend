@@ -65,13 +65,20 @@ public class ExploreQueryService {
     /** 티어 비교는 문자열이 아니라 순서로 해야 한다 — MySQL ENUM 을 문자열과 비교하면 사전순이 된다. */
     private static final String TIER_ORDER = "'BRONZE','SILVER','GOLD','DIAMOND','RUBY'";
 
-    /** 두 경로가 같은 컬럼을 읽는다 — 어느 쪽으로 내려가든 카드 표시값이 달라지면 안 된다. */
+    /**
+     * 카드의 <b>원천</b> 필드만 읽는다. 표시값(참여자 수·완주율·유지율)은 Redis HASH 가 정본이라
+     * 여기서 읽지 않는다 — 조인해 두면 HASH 가 비었을 때 조용히 표 값으로 채워져, 정렬은
+     * 인덱스가 하고 숫자는 표가 하는 이중 출처가 된다.
+     *
+     * <p>{@code challenge_stats} 를 조인하지 않는 이유가 하나 더 있다. 그 표는 재계산 작업본이라
+     * 행이 아직 없을 수 있는데, INNER JOIN 이면 <b>후보 자체가 사라진다</b> — 방이 목록에서
+     * 통째로 빠지는 것을 표시값 하나가 결정하게 된다.
+     */
     private static final String SELECT_COLUMNS =
             "SELECT c.id, c.title, c.ai_title, c.moderation_title, c.image_url, c.moderation_image, " +
-            "       c.category, c.verification_type, c.status, c.participant_count, c.capacity, " +
-            "       c.min_tier, c.start_date, c.end_date, c.created_at, " +
-            "       s.completion_rate, s.retention_rate, s.recent_joins_24h, s.last_joined_at_24h " +
-            "FROM challenges c JOIN challenge_stats s ON s.challenge_id = c.id ";
+            "       c.category, c.verification_type, c.status, c.capacity, " +
+            "       c.min_tier, c.start_date, c.end_date, c.created_at " +
+            "FROM challenges c ";
 
     /** Redis 후보를 한 번에 읽어올 크기. 필터로 걸러지는 비율을 감안해 페이지보다 넉넉히 잡는다. */
     private static final int SCAN_CHUNK = 100;
@@ -302,26 +309,35 @@ public class ExploreQueryService {
         Map<UUID, Row> merged = new java.util.HashMap<>(byId.size());
         byId.forEach((id, row) -> {
             Map<Object, Object> hash = store.getStats(id);
-            if (hash.isEmpty()) { merged.put(id, row); return; }
+            // 정렬 인덱스에는 있는데 표시값이 없다 = <b>투영이 덜 끝났다.</b> 그 방만 빼고
+            // 200 을 내면 있는 방이 조용히 사라지고, MySQL 로 채우면 정렬과 숫자의 출처가
+            // 갈린다. 둘 다 장애를 감추므로 드러낸다(공통 5-4).
+            //
+            // 「정상적으로 후보에서 빠진 방」과 구분되는 이유는, 그런 방은 애초에 정렬 ZSET 에
+            // 없어 여기까지 오지 않기 때문이다. 여기 온 방은 인덱스가 보증한 방이다.
+            if (hash.isEmpty() || hash.get(ExploreRedisStore.VERSION_FIELD) == null) {
+                throw new BusinessException(ErrorCode.EXPLORE_TEMPORARILY_UNAVAILABLE);
+            }
             merged.put(id, new Row(row.id, row.title, row.aiTitle, row.moderationTitle,
                     row.imageUrl, row.moderationImage, row.category, row.verificationType, row.status,
-                    intOf(hash.get("participantCount"), row.participantCount),
+                    intOf(hash.get("participantCount")),
                     row.capacity, row.minTier, row.startDate, row.endDate, row.createdAt,
-                    doubleOf(hash.get("completionRate"), row.completionRate),
-                    doubleOf(hash.get("retentionRate"), row.retentionRate),
-                    intOf(hash.get("recentJoins24h"), row.recentJoins24h), row.lastJoinedAt24h));
+                    doubleOf(hash.get("completionRate")),
+                    doubleOf(hash.get("retentionRate")),
+                    intOf(hash.get("recentJoins24h")), row.lastJoinedAt24h));
         });
         return merged;
     }
 
-    private static int intOf(Object raw, int fallback) {
-        try { return raw == null ? fallback : Integer.parseInt(raw.toString()); }
-        catch (NumberFormatException e) { return fallback; }
+    private static int intOf(Object raw) {
+        try { return raw == null ? 0 : Integer.parseInt(raw.toString()); }
+        catch (NumberFormatException e) { return 0; }
     }
 
-    private static Double doubleOf(Object raw, Double fallback) {
-        try { return raw == null ? fallback : Double.valueOf(raw.toString()); }
-        catch (NumberFormatException e) { return fallback; }
+    /** HASH 에 없으면 {@code null} — 표본 미달이라 값이 없는 것과 같은 뜻이다. */
+    private static Double doubleOf(Object raw) {
+        try { return raw == null ? null : Double.valueOf(raw.toString()); }
+        catch (NumberFormatException e) { return null; }
     }
 
     // =====================================================================
@@ -493,19 +509,16 @@ public class ExploreQueryService {
                        int recentJoins24h, String lastJoinedAt24h) {}
 
     private Row mapRow(ResultSet rs) throws SQLException {
+        // 표시값 자리는 비워 둔다 — HASH 에서 채운다. 채워지지 않으면 그 방은 후보에서 뺀다.
         return new Row(
                 toUuid(rs.getBytes("id")),
                 rs.getString("title"), rs.getString("ai_title"), rs.getString("moderation_title"),
                 rs.getString("image_url"), rs.getString("moderation_image"),
                 rs.getString("category"), rs.getString("verification_type"), rs.getString("status"),
-                rs.getInt("participant_count"), (Integer) rs.getObject("capacity"), rs.getString("min_tier"),
+                0, (Integer) rs.getObject("capacity"), rs.getString("min_tier"),
                 String.valueOf(rs.getDate("start_date")), String.valueOf(rs.getDate("end_date")),
                 String.valueOf(rs.getTimestamp("created_at")),
-                (Double) rs.getObject("completion_rate", Double.class),
-                (Double) rs.getObject("retention_rate", Double.class),
-                rs.getInt("recent_joins_24h"),
-                rs.getTimestamp("last_joined_at_24h") == null
-                        ? null : String.valueOf(rs.getTimestamp("last_joined_at_24h")));
+                null, null, 0, null);
     }
 
     private static byte[] toBytes(UUID u) {

@@ -15,17 +15,24 @@ public final class ExploreKeys {
 
     private ExploreKeys() {}
 
-    private static final String PREFIX = "explore:";
+    /** 파생 키의 유일한 접두사 — <b>재구성 단위가 곧 삭제 단위</b>다. */
+    static final String PREFIX = "explore:";
 
     /** 워밍업 완료 플래그. <b>부재가 곧 폴백 조건</b>이다 — 반쯤 채워진 인덱스로 목록을 내리면 방이 사라진다. */
-    public static final String WARMED = "trending:warmed";
+    public static final String WARMED = PREFIX + "ready";
 
-    /** 전체 인기 ZSET. 대상은 공개 그룹 챌린지의 UPCOMING·ACTIVE 뿐이다. */
-    public static final String TRENDING_ALL = "trending:all";
+    /**
+     * 전체 인기 ZSET. 대상은 공개 그룹 챌린지의 UPCOMING·ACTIVE 뿐이다.
+     *
+     * <p>정렬 ZSET({@code explore:z:*})과 <b>접두사를 달리한다.</b> 둘 다 ZSET 이지만 읽는 법이
+     * 정반대다 — 정렬은 score 를 0 으로 두고 멤버 사전순으로 페이징하고, 인기는 score 로 Top N 을
+     * 뽑는다. 한 이름 아래 두면 어느 쪽 규칙이 적용되는지 키만 보고 알 수 없다.
+     */
+    public static final String TRENDING_ALL = PREFIX + "t:all";
 
     /** 카테고리별 인기 ZSET. */
     public static String trendingCategory(String category) {
-        return "trending:cat:" + category;
+        return PREFIX + "t:cat:" + category;
     }
 
     /** 정렬 6종의 ZSET. 정렬마다 키가 갈리는 이유는 멤버에 정렬 키가 박혀 있기 때문이다. */
@@ -34,6 +41,10 @@ public final class ExploreKeys {
     }
 
     /** 방 표시값 HASH — 참여자 수·완주율·유지율·인기 점수. */
+    public static String statsByHex(String hex) {
+        return PREFIX + "h:" + hex;
+    }
+
     public static String stats(UUID challengeId) {
         return PREFIX + "h:" + hex(challengeId);
     }
@@ -49,6 +60,18 @@ public final class ExploreKeys {
     /** 인증 방식 필터 집합(AUTO / MANUAL). */
     /** 파생 인덱스를 마지막으로 계산한 시각. 인기 응답의 calculatedAt 이 이 값이다. */
     public static final String CALCULATED_AT = PREFIX + "calculated_at";
+
+    /** 카테고리별 진행 중 공개 그룹 수. 10분 집계가 갱신하고 모든 인스턴스가 같은 값을 본다. */
+    public static final String CATEGORY_COUNTS = PREFIX + "cnt:category";
+
+    /** 5분 보정 잠금 — 여러 인스턴스가 같은 회차를 겹쳐 돌지 않게. */
+    public static final String SWEEP_LOCK = PREFIX + "sweep_lock";
+
+    /** 마지막으로 성공한 보정 시각. 다음 회차가 「그 뒤에 움직인 방」을 찾는 기준. */
+    public static final String SWEPT_AT = PREFIX + "swept_at";
+
+    /** 마지막으로 값까지 대조한 시각 — 구조 대조보다 드물게 도는 검사의 기준. */
+    public static final String VERIFIED_AT = PREFIX + "verified_at";
 
     /** 전수 재구성 잠금. 여러 인스턴스가 동시에 비우고 채우면 서로의 중간 상태를 지운다. */
     public static final String REBUILD_LOCK = PREFIX + "rebuild_lock";
