@@ -8,6 +8,20 @@ spring:
     deserialization:
       fail-on-null-for-primitives: false
 
+  # 종료 예산. 컨테이너의 stopTimeout(60초)보다 짧게 잡아야 의미가 있다 —
+  # 이 값을 넘기면 어차피 SIGKILL 이라 "기다렸는데 잘리는" 최악이 된다.
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+  task:
+    scheduling:
+      # 확정 배치·정산·파기처럼 @Scheduled 로 도는 작업이 많다. 종료 시 스케줄러를 곧바로
+      # 끊으면 그 작업이 중간에 죽는데, 대부분 청크 트랜잭션이라 롤백은 깨끗해도 그만큼
+      # 다음 주기까지 처리가 밀린다. 짧게 기다려 진행 중인 한 사이클만 마치게 한다.
+      shutdown:
+        await-termination: true
+        await-termination-period: 20s
+
   datasource:
     # 접속 주소는 env(DB_URL)로 주입한다. 미설정 시 로컬 기본값(localhost)으로 폴백.
     #  · 운영(RDS): DB_URL=jdbc:mysql://<rds-endpoint>:3306/RuleUp7?serverTimezone=UTC&characterEncoding=UTF-8&rewriteBatchedStatements=true&sslMode=REQUIRED
@@ -279,6 +293,10 @@ logging:
 
 server:
   forward-headers-strategy: framework
+  # SIGTERM 을 받으면 <b>진행 중인 요청을 끝내고</b> 내려간다. 기본값(immediate)은 그 자리에서
+  # 커넥터를 닫아 버려, 배포·Spot 회수·스케일인 때마다 처리 중이던 요청이 그대로 잘린다.
+  # ALB 의 deregistration_delay 는 <b>새 요청</b>만 막아 줄 뿐 이미 들어온 요청은 보호하지 못한다.
+  shutdown: graceful
   # 요청·응답 charset 을 UTF-8 로 못 박는다(CharacterEncodingFilter).
   # JSON 은 규격상 UTF-8 이지만 Content-Type 에 charset 이 없으면 latin1 로 디코딩하는
   # 클라이언트가 아직 있어서, 한글이 깨져 보이는 사고의 단골 원인이 된다.
