@@ -28,14 +28,19 @@ import java.util.UUID;
  * 보다 먼저 오면, 짝을 못 찾은 앞 이벤트가 영구히 버려진다. 스펙이 "나누어 보낸 요청은 순서가
  * 바뀌어도 되도록 신호 단위로 처리함"이라고 못 박은 지점이다.
  *
- * <p>그래서 평가할 때마다 그 귀속일의 원본을 <b>전량</b> 읽어 처음부터 다시 계산한다. 같은 신호
- * 집합이면 언제 평가하든 같은 결과가 나오고(멱등), 요약을 이월할 필요가 사라진다.
+ * <p>그래서 평가할 때마다 그 귀속일의 원본을 <b>전량</b> 읽어 처음부터 다시 계산한다.
+ *
+ * <h4>전량이란 진짜 전량이다</h4>
+ * 한 번에 상한만큼만 읽고 자르면 「전량 재평가」가 아니라 <b>잘린 일부로 내린 결론</b>이다.
+ * 그래서 날짜별로 <b>페이지를 이어 읽는다.</b> 그래도 절대 상한을 넘으면 잘린 값으로 확정하지
+ * 않고 {@link IncompleteSignalWindowException} 을 던져 판정을 미룬다 — 잘린 쪽에 위반 신호가
+ * 있었다면 규칙 지키기형이 잘못 성공한다.
  *
  * <h4>왜 사흘치를 읽는가</h4>
  * 적재 시 귀속일은 <b>신호 봉투의 관측 시각</b>으로 정해지는데, 그 안의 항목은 날짜 경계를
  * 걸칠 수 있다 — 23:50 에 관측된 앱 사용 묶음에 00:10 이벤트가 들어 있는 식이다. 수면은 아예
- * "밤이 시작된 날짜"라는 별도 규칙을 쓴다. 그래서 D-1\~D+1 파티션을 읽어 항목 단위 귀속은
- * {@code DaySignals}·평가기에 맡긴다. 파티션 셋과 {@code userId} 로 좁히므로 전체 스캔이 아니다.
+ * "밤이 시작된 날짜"라는 별도 규칙을 쓴다. 그래서 D-1\~D+1 을 읽어 항목 단위 귀속은
+ * {@code DaySignals}·평가기에 맡긴다. <b>하루씩 따로 읽어</b> 매 질의가 파티션 하나로 좁혀진다.
  *
  * <h4>배제된 행은 읽지 않는다</h4>
  * 게이트가 사유를 새긴 행({@code excludeReason})은 판정 입력에서 뺀다. 원본은 남아 있고
@@ -49,64 +54,102 @@ public class VerificationSignalReader {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
+    /** 한 번에 읽어 올 행 수. 키셋으로 이어 읽으므로 깊은 OFFSET 비용이 없다. */
+    private static final int PAGE_SIZE = 5_000;
+
     /**
-     * 한 귀속일·한 도메인에서 읽을 원본 상한(방어적).
+     * 한 도메인·한 날짜에서 읽을 절대 상한.
      *
-     * <p>여기 걸리면 <b>그 날 판정은 전량 재평가가 아니다</b> — 잘린 만큼이 근거에서 빠진다.
-     * 조용히 넘어가면 「원본이 곧 판정의 원본」이라는 전제가 소리 없이 깨지므로, 걸린 사실을
-     * 세고 남긴다. 정상 사용자는 근처에도 오지 않는 수치다(1분 sync 를 하루 종일 해도 1,440건).
+     * <p>여기 닿으면 그 날 판정을 <b>확정하지 않는다.</b> 정상 사용자는 근처에도 오지 않는
+     * 수치다 — 1분 sync 를 하루 종일 해도 1,440건이다. 닿았다면 클라이언트 이상이거나
+     * 공격이고, 어느 쪽이든 그 데이터로 결론을 내면 안 된다.
      */
-    private static final int MAX_ROWS_PER_DAY = 20_000;
+    private static final int MAX_ROWS_PER_DAY = 200_000;
 
     private final JdbcTemplate jdbc;
     private final VerificationMetrics metrics;
+
+    /** 하루치 원본과 <b>전부 읽었는지</b>. 전부가 아니면 판정을 미뤄야 한다. */
+    public record DaySignalSet(List<SyncSignal> signals, boolean complete) {
+        static DaySignalSet complete(List<SyncSignal> signals) { return new DaySignalSet(signals, true); }
+        static DaySignalSet truncated(List<SyncSignal> signals) { return new DaySignalSet(signals, false); }
+    }
 
     /**
      * 그 귀속일 판정에 쓸 원본 신호 전부.
      *
      * <p>여러 챌린지가 같은 사용자 신호를 공유하므로 챌린지별로 복제해 읽지 않는다 — 호출부가
      * 한 번 읽어 멤버들에게 돌린다.
+     *
+     * @throws IncompleteSignalWindowException 상한에 닿아 전량을 읽지 못한 경우
      */
     @Transactional(readOnly = true)
     public List<SyncSignal> forDay(UUID userId, LocalDate targetDate) {
-        List<SyncSignal> out = new ArrayList<>();
-        for (SignalDomain domain : SignalDomain.values()) {
-            out.addAll(read(userId, domain, targetDate));
+        DaySignalSet set = read(userId, targetDate);
+        if (!set.complete()) {
+            throw new IncompleteSignalWindowException(userId, targetDate, "verification_*_signals", MAX_ROWS_PER_DAY);
         }
-        return out;
+        return set.signals();
     }
 
-    /** 여러 귀속일을 한 번에. sync 는 오늘과 유예 중인 어제를 함께 평가한다. */
+    /**
+     * 여러 귀속일을 한 번에. sync 는 오늘과 유예 중인 어제를 함께 평가한다.
+     *
+     * <p>전량을 못 읽은 날은 <b>예외 대신 표시</b>로 돌려준다 — sync 요청 하나를 통째로 실패시키면
+     * 그 유저의 다른 날짜·다른 챌린지 판정까지 함께 멈춘다. 호출부가 그 날만 건너뛴다.
+     */
     @Transactional(readOnly = true)
-    public Map<LocalDate, List<SyncSignal>> forDays(UUID userId, List<LocalDate> targetDates) {
-        Map<LocalDate, List<SyncSignal>> byDate = new HashMap<>();
-        for (LocalDate date : targetDates) byDate.put(date, forDay(userId, date));
+    public Map<LocalDate, DaySignalSet> forDays(UUID userId, List<LocalDate> targetDates) {
+        Map<LocalDate, DaySignalSet> byDate = new HashMap<>();
+        for (LocalDate date : targetDates) byDate.put(date, read(userId, date));
         return byDate;
     }
 
-    private List<SyncSignal> read(UUID userId, SignalDomain domain, LocalDate targetDate) {
-        List<String> payloads = jdbc.queryForList(
-                "SELECT payload FROM " + domain.table()
-                        + " WHERE observedDate BETWEEN ? AND ? AND userId = ? AND excludeReason IS NULL"
-                        + " ORDER BY occurredAt, id LIMIT " + (MAX_ROWS_PER_DAY + 1),
-                String.class,
-                Date.valueOf(targetDate.minusDays(1)), Date.valueOf(targetDate.plusDays(1)), bytes(userId));
-
-        if (payloads.size() > MAX_ROWS_PER_DAY) {
-            // 잘린 채로 판정하면 사용 시간·체류가 실제보다 작게 나온다. 유저에게 불리한 방향이라
-            // 더더욱 묻어 두면 안 된다.
-            metrics.signalsReadTruncated();
-            log.error("일별 원본 조회가 상한에 걸렸다 — 이 날 판정은 전량 재평가가 아니다. "
-                    + "table={} userId={} date={} limit={}", domain.table(), userId, targetDate, MAX_ROWS_PER_DAY);
-            payloads = payloads.subList(0, MAX_ROWS_PER_DAY);
+    private DaySignalSet read(UUID userId, LocalDate targetDate) {
+        List<SyncSignal> out = new ArrayList<>();
+        boolean complete = true;
+        for (SignalDomain domain : SignalDomain.values()) {
+            // 항목이 날짜 경계를 걸치므로 앞뒤 하루를 함께 읽는다. 하루씩 따로 질의해
+            // 매 질의가 파티션 하나로 좁혀진다.
+            for (LocalDate date : List.of(targetDate.minusDays(1), targetDate, targetDate.plusDays(1))) {
+                complete &= readDay(userId, domain, date, out);
+            }
         }
+        return complete ? DaySignalSet.complete(out) : DaySignalSet.truncated(out);
+    }
 
-        List<SyncSignal> signals = new ArrayList<>(payloads.size());
-        for (String payload : payloads) {
-            SyncSignal signal = parse(payload);
-            if (signal != null) signals.add(signal);
+    /**
+     * 한 도메인·한 날짜를 키셋으로 이어 읽는다.
+     *
+     * @return 전부 읽었으면 true, 절대 상한에 닿아 멈췄으면 false
+     */
+    private boolean readDay(UUID userId, SignalDomain domain, LocalDate date, List<SyncSignal> out) {
+        byte[] cursor = new byte[16];   // binary(16) 최솟값 — 첫 페이지
+        int read = 0;
+        while (true) {
+            List<Map<String, Object>> page = jdbc.queryForList(
+                    "SELECT id, payload FROM " + domain.table()
+                            + " WHERE observedDate = ? AND userId = ? AND excludeReason IS NULL AND id > ?"
+                            + " ORDER BY id LIMIT " + PAGE_SIZE,
+                    Date.valueOf(date), bytes(userId), cursor);
+            if (page.isEmpty()) return true;
+
+            for (Map<String, Object> row : page) {
+                SyncSignal signal = parse((String) row.get("payload"));
+                if (signal != null) out.add(signal);
+                cursor = (byte[]) row.get("id");
+            }
+            read += page.size();
+            if (page.size() < PAGE_SIZE) return true;   // 마지막 페이지
+
+            if (read >= MAX_ROWS_PER_DAY) {
+                metrics.signalsReadTruncated();
+                log.error("일별 원본이 절대 상한을 넘었다 — 이 날 판정을 확정하지 않는다. "
+                                + "table={} userId={} date={} read={}",
+                        domain.table(), userId, date, read);
+                return false;
+            }
         }
-        return signals;
     }
 
     /**

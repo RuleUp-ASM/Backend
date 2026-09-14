@@ -178,7 +178,7 @@ public class VerificationSyncService {
         // 판정 입력은 저장된 원본이다. 오늘과 유예 중인 어제를 한 번씩만 읽어 멤버들이 나눠 쓴다 —
         // 같은 사용자 신호를 챌린지별로 복제해 읽지 않는다(백엔드 4-1-1 「사용자 신호 1회 저장」).
         LocalDate yesterday = today.minusDays(1);
-        Map<LocalDate, List<SyncSignal>> daySignals =
+        Map<LocalDate, VerificationSignalReader.DaySignalSet> daySignals =
                 signalReader.forDays(userId, List.of(yesterday, today));
 
         List<ChallengeMember> members = challengeQuery.findActiveMemberships(userId);
@@ -217,7 +217,7 @@ public class VerificationSyncService {
             VerificationDaily daily = loadOrCreateDaily(member, challenge, today);
             VerificationStatus before = daily.getStatus();
             VerificationStatus todayStatus = processMember(member, challenge, config, daily,
-                    daySignals.getOrDefault(today, List.of()), gaps, today, now);
+                    daySignals.get(today), gaps, today, now);
 
             progressService.updateAfterSync(member, todayStatus, now);
             if (becameFinal(before, todayStatus) || graceChanged) {
@@ -354,8 +354,8 @@ public class VerificationSyncService {
      * @return 이 재평가로 어제 건이 확정됐으면 true
      */
     private boolean evaluateGraceDay(ChallengeMember member, Challenge challenge, VerificationConfig config,
-                                     Map<LocalDate, List<SyncSignal>> daySignals, List<SyncRequest.Gap> gaps,
-                                     LocalDate today, Instant now) {
+                                     Map<LocalDate, VerificationSignalReader.DaySignalSet> daySignals,
+                                     List<SyncRequest.Gap> gaps, LocalDate today, Instant now) {
         LocalDate yesterday = today.minusDays(1);
         if (VerificationDeadlines.finalizeDue(yesterday, now)) return false;   // 확정 배치 몫
         if (VerificationTargetDays.of(config, challenge, member, yesterday)
@@ -368,7 +368,7 @@ public class VerificationSyncService {
 
         VerificationStatus before = daily.getStatus();
         VerificationStatus after = processMember(member, challenge, config, daily,
-                daySignals.getOrDefault(yesterday, List.of()), gaps, yesterday, now);
+                daySignals.get(yesterday), gaps, yesterday, now);
         if (!becameFinal(before, after)) return false;
         progressService.recount(member);
         return true;
@@ -387,10 +387,19 @@ public class VerificationSyncService {
     }
 
     private VerificationStatus processMember(ChallengeMember member, Challenge challenge, VerificationConfig config,
-                                             VerificationDaily daily, List<SyncSignal> signals,
+                                             VerificationDaily daily,
+                                             VerificationSignalReader.DaySignalSet daySignals,
                                              List<SyncRequest.Gap> gaps, LocalDate today, Instant now) {
         // 확정 이후 도착분은 저장만 하고 판정에 쓰지 않는다(인증 정책 §2 지연 데이터). 구제는 이의제기로만.
         if (daily.isTerminal()) return daily.getStatus();
+        // 원본을 전부 읽지 못한 날은 평가하지 않는다. 잘린 값으로 「실패 예정」이나 성공을 찍으면
+        // 사용자에게 잘못된 결과가 그대로 보인다 — 판정을 미루는 편이 낫다.
+        if (daySignals == null || !daySignals.complete()) {
+            log.warn("원본을 전부 읽지 못해 이 날 평가를 건너뛴다 userId={} targetDate={}",
+                    member.getUserId(), today);
+            return daily.getStatus();
+        }
+        List<SyncSignal> signals = daySignals.signals();
         VerificationTargetDays.Disposition disp =
                 VerificationTargetDays.of(config, challenge, member, today);
         if (disp == VerificationTargetDays.Disposition.NOT_TARGET) {
