@@ -47,8 +47,11 @@ public class OutboxDispatcher {
     /** 자동 재적재 대상 창. 이보다 오래된 포기 건은 사람이 봐야 하는 건이다. */
     private static final Duration RECENT_REDRIVE_WINDOW = Duration.ofDays(1);
 
-    /** 자동 재적재 상한. 한꺼번에 몰아 태우지 않는다. */
-    private static final int RECENT_REDRIVE_LIMIT = 500;
+    /** 자동 재적재 한 묶음 크기. 남은 게 없을 때까지 이어 돌린다. */
+    private static final int REDRIVE_BATCH = 500;
+
+    /** 이어 돌릴 최대 횟수. 한 번에 25만 건이면 어떤 장애 복구에도 충분하고, 폭주도 막는다. */
+    private static final int MAX_REDRIVE_PASSES = 500;
 
     private final OutboxRepository repository;
     /**
@@ -188,7 +191,17 @@ public class OutboxDispatcher {
      */
     @Scheduled(cron = "0 40 4 * * *", zone = "Asia/Seoul")
     public int redriveRecentDeadLettered() {
-        return self.redriveDeadLettered(RECENT_REDRIVE_LIMIT, Instant.now().minus(RECENT_REDRIVE_WINDOW));
+        Instant since = Instant.now().minus(RECENT_REDRIVE_WINDOW);
+        int total = 0;
+        // <b>남은 게 없을 때까지</b> 이어 돌린다. 한 묶음만 처리하고 끝내면 그 수를 넘긴 건은
+        // 창이 지나 영구 잔류한다 — 「성공할 때까지 멱등 재시도」가 한 번으로 끝나 버린다.
+        for (int pass = 0; pass < MAX_REDRIVE_PASSES; pass++) {
+            int redriven = self.redriveDeadLettered(REDRIVE_BATCH, since);
+            total += redriven;
+            if (redriven < REDRIVE_BATCH) break;
+        }
+        if (total > 0) safeFlush();   // 되살린 건을 곧바로 흘린다
+        return total;
     }
 
     /**

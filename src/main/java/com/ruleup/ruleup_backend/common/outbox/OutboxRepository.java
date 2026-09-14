@@ -51,6 +51,21 @@ public interface OutboxRepository extends JpaRepository<OutboxMessage, UUID> {
     @Query("SELECT m FROM OutboxMessage m WHERE m.id = :id")
     Optional<OutboxMessage> findByIdForUpdate(@Param("id") UUID id);
 
+    /** 아직 나가지 못한 건수 — 스펙이 요구하는 「잔여 건수」. */
+    long countByProcessedAtIsNullAndDeadLetteredAtIsNull();
+
+    /** 끝내 포기한 건수. 정상 경로에서는 0 이어야 한다. */
+    long countByDeadLetteredAtIsNotNull();
+
+    /** 가장 오래 기다린 미처리 건의 적재 시각 — 「최장 지연」의 기준점. */
+    @Query("SELECT MIN(m.createdAt) FROM OutboxMessage m "
+            + "WHERE m.processedAt IS NULL AND m.deadLetteredAt IS NULL")
+    Instant oldestPendingCreatedAt();
+
+    /** 가장 오래된 포기 건의 시각. */
+    @Query("SELECT MIN(m.deadLetteredAt) FROM OutboxMessage m WHERE m.deadLetteredAt IS NOT NULL")
+    Instant oldestDeadLetteredAt();
+
     /** 보관 기간이 지난 처리 완료분 정리용. */
     @Query("""
             SELECT m FROM OutboxMessage m
