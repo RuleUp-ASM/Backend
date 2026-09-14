@@ -44,6 +44,15 @@ public class OutboxDispatcher {
     /** 처리 완료분 보관 기간 — 장애 조사에 쓰고 그 뒤에는 지운다. */
     private static final Duration RETENTION = Duration.ofDays(14);
 
+    /** 자동 재적재 대상 창. 이보다 오래된 포기 건은 사람이 봐야 하는 건이다. */
+    private static final Duration RECENT_REDRIVE_WINDOW = Duration.ofDays(1);
+
+    /** 자동 재적재 한 묶음 크기. 남은 게 없을 때까지 이어 돌린다. */
+    private static final int REDRIVE_BATCH = 500;
+
+    /** 이어 돌릴 최대 횟수. 한 번에 25만 건이면 어떤 장애 복구에도 충분하고, 폭주도 막는다. */
+    private static final int MAX_REDRIVE_PASSES = 500;
+
     private final OutboxRepository repository;
     /**
      * 포기 카운터. 정정 전파 실패를 포함해 <b>끝내 나가지 못한 발행</b>이 여기 모인다 —
@@ -170,6 +179,32 @@ public class OutboxDispatcher {
     }
 
     /**
+     * 매일 04:40 KST — 최근에 포기한 발행을 <b>한 번 더</b> 돌린다.
+     *
+     * <p>포기 사유의 대부분은 수신측의 일시 장애다. 그런데 재시도 상한(5회·누적 15분)이 짧아
+     * 몇 시간짜리 장애에는 통째로 걸린다 — 이의 인용 점수 정정이 그 사이 5회 실패하면
+     * <b>사용자에게는 인용됐다고 응답해 놓고 점수는 끝내 안 돌아온다.</b>
+     *
+     * <p>대상을 <b>최근 하루</b>로 묶는 것이 요점이다. 전부 다시 돌리면 영구히 고칠 수 없는
+     * 메시지를 매일 다시 태우게 되고, 그러면 「죽은 메시지」 목록이 영원히 비지 않아 알람이
+     * 무의미해진다. 하루가 지나도 살아나지 않은 건은 사람이 봐야 하는 건이다.
+     */
+    @Scheduled(cron = "0 40 4 * * *", zone = "Asia/Seoul")
+    public int redriveRecentDeadLettered() {
+        Instant since = Instant.now().minus(RECENT_REDRIVE_WINDOW);
+        int total = 0;
+        // <b>남은 게 없을 때까지</b> 이어 돌린다. 한 묶음만 처리하고 끝내면 그 수를 넘긴 건은
+        // 창이 지나 영구 잔류한다 — 「성공할 때까지 멱등 재시도」가 한 번으로 끝나 버린다.
+        for (int pass = 0; pass < MAX_REDRIVE_PASSES; pass++) {
+            int redriven = self.redriveDeadLettered(REDRIVE_BATCH, since);
+            total += redriven;
+            if (redriven < REDRIVE_BATCH) break;
+        }
+        if (total > 0) safeFlush();   // 되살린 건을 곧바로 흘린다
+        return total;
+    }
+
+    /**
      * 발행에 실패한 채 닫힌 메시지를 다시 줄에 세운다 — 운영 복구 경로.
      *
      * <p>원인(수신측 장애·배포 롤백 등)이 해소된 뒤 부르면 그때부터 정상 재시도가 돈다.
@@ -179,10 +214,18 @@ public class OutboxDispatcher {
      */
     @Transactional
     public int redriveDeadLettered(int limit) {
-        List<OutboxMessage> dead = repository.findDeadLettered(Limit.of(limit));
+        return redriveDeadLettered(limit, Instant.EPOCH);
+    }
+
+    /**
+     * @param since 이 시각 이후에 포기한 건만 대상으로 한다. 전체를 보려면 {@link Instant#EPOCH}.
+     */
+    @Transactional
+    public int redriveDeadLettered(int limit, Instant since) {
+        List<OutboxMessage> dead = repository.findDeadLetteredSince(since, Limit.of(limit));
         Instant now = Instant.now();
         dead.forEach(m -> m.redrive(now));
-        if (!dead.isEmpty()) log.warn("아웃박스 포기분 재적재 {}건", dead.size());
+        if (!dead.isEmpty()) log.warn("아웃박스 포기분 재적재 {}건 (since={})", dead.size(), since);
         return dead.size();
     }
 
