@@ -50,6 +50,14 @@ public class VerificationMetrics {
     private final Counter deviceIdMissing;
     private final Counter signalsStored;
     private final Counter coordinatesPurged;
+    private final Counter duplicateConfirm;
+    private final Counter mutatedAfterConfirm;
+    private final Counter confirmedTooEarly;
+    private final Counter appealSubmitted;
+    private final Counter appealAccepted;
+    private final Counter appealDuplicate;
+    private final Counter appealAbuseSampled;
+    private final Counter backlogRequests;
     private final Counter signalsReadTruncated;
     private final Counter payloadRejected;
     private final DistributionSummary payloadBytes;
@@ -82,6 +90,7 @@ public class VerificationMetrics {
                 .register(registry);
         // 스펙상 0 이어야 하는 값이라 1건이라도 세어져야 한다. 격리된 건은 조용히 미뤄지므로
         // 이 카운터가 없으면 「확정되지 않은 채 계속 밀리는 판정」을 아무도 모른다.
+        // 스펙 7절이 <b>0건</b>을 요구하는 두 값. 0 을 확인하려면 세는 자리가 있어야 한다.
         this.finalizeFailed = Counter.builder("verification.finalize.failed")
                 .description("대상 단위 확정 실패 — 격리 후 뒤로 미뤄진 판정 수").register(registry);
         // 채우기에 실패한 멤버는 그 날짜가 통계에서 비어 버린다. 확정 실패와 원인이 달라 따로 센다.
@@ -109,6 +118,33 @@ public class VerificationMetrics {
         this.backlogSpanSeconds = DistributionSummary.builder("verification.sync.backlog_span_seconds")
                 .description("한 요청이 선언한 커버리지 구간 길이 — 오프라인 복구 규모")
                 .baseUnit("seconds").publishPercentiles(0.5, 0.95, 0.99).register(registry);
+        // 아래 넷은 스펙 7절이 <b>0건</b>을 요구하는 값이다. 0 을 확인하려면 세는 자리가 있어야 한다.
+        this.duplicateConfirm = Counter.builder("verification.confirm.duplicate")
+                .description("같은 멤버·날짜에 확정이 두 번 시도된 횟수 — 유일 제약이 막은 수")
+                .register(registry);
+        // <b>오류 지표가 아니다.</b> 확정된 날짜로 신호가 계속 들어오는 것은 정상이고(오프라인
+        // 복구·재전송), 결과가 바뀌지 않는 것은 early-return 이 구조적으로 보장한다. 스펙 7절의
+        // 「확정 후 자동 정정 0건」은 그래서 셀 자리가 없다 — 대신 그 경로로 들어오는 <b>양</b>을
+        // 관찰해 재전송이 비정상적으로 늘어나는지를 본다.
+        this.mutatedAfterConfirm = Counter.builder("verification.sync.terminal_day_signals")
+                .description("이미 확정된 날짜로 들어온 sync 평가 시도 — 관찰값(정상 경로)")
+                .register(registry);
+        this.confirmedTooEarly = Counter.builder("verification.confirm.too_early")
+                .description("확정 시각 전에 실패를 확정하려 한 횟수").register(registry);
+        // 인정률은 분자만으로 계산할 수 없다. 형식 요건에서 걸린 건까지 포함한 <b>전체 신청</b>이
+        // 분모다 — 그게 없으면 「인정률 급변」 알람을 걸 수 없다.
+        this.appealSubmitted = Counter.builder("verification.appeal.submitted")
+                .description("이의 신청 시도 — 인정률의 분모(형식 요건 탈락 포함)").register(registry);
+        this.appealAccepted = Counter.builder("verification.appeal.accepted")
+                .description("이의 인용 건수 — 인정률의 분자").register(registry);
+        this.appealDuplicate = Counter.builder("verification.appeal.duplicate_blocked")
+                .description("같은 판정에 두 번째 이의가 막힌 횟수 — 중복 정정·중복 지급의 방어선")
+                .register(registry);
+        this.appealAbuseSampled = Counter.builder("verification.appeal.abuse_sampled")
+                .description("이의 남용 이상탐지 집계가 실제로 돈 횟수").register(registry);
+        this.backlogRequests = Counter.builder("verification.sync.backlog_requests")
+                .description("복구 전송(backlog=true)으로 들어온 요청 수 — 구간당 요청 수의 분자")
+                .register(registry);
         registry.gauge("verification.finalize.last_completed_epoch_ms", lastFinalizeCompletedAt,
                 AtomicLong::doubleValue);
     }
@@ -138,6 +174,24 @@ public class VerificationMetrics {
         payloadRejected.increment();
     }
 
+    /**
+     * 이미 확정된 날짜로 sync 가 들어왔다 — <b>정상 경로</b>다. 결과는 바뀌지 않는다.
+     * 오류 지표가 아니라 재전송·오프라인 복구의 규모를 보는 관찰값이다.
+     */
+    public void terminalDaySignals() { mutatedAfterConfirm.increment(); }
+
+    /** 이의 신청이 들어왔다(결과와 무관) — 인정률의 분모. */
+    public void appealSubmitted() { appealSubmitted.increment(); }
+
+    /** 이의가 인용됐다. */
+    public void appealAccepted() { appealAccepted.increment(); }
+
+    /** 같은 판정의 두 번째 이의가 막혔다. */
+    public void appealDuplicateBlocked() { appealDuplicate.increment(); }
+
+    /** 이의 남용 이상탐지 집계가 돌았다. */
+    public void appealAbuseSampled() { appealAbuseSampled.increment(); }
+
     /** GPS 좌표를 실제로 파기했다. */
     public void locationCoordinatesPurged(int count) {
         if (count > 0) coordinatesPurged.increment(count);
@@ -162,6 +216,12 @@ public class VerificationMetrics {
     public void materializeFailed() {
         materializeFailed.increment();
     }
+
+    /** 같은 멤버·날짜에 확정이 두 번 시도됐다(유일 제약이 막았다). */
+    public void duplicateConfirm() { duplicateConfirm.increment(); }
+
+    /** 확정 시각 전에 실패를 확정하려 했다. 스펙상 0 이어야 한다. */
+    public void confirmedTooEarly() { confirmedTooEarly.increment(); }
 
     /** 한 건의 확정이 실패해 격리·연기됐다. */
     public void finalizeFailed() {

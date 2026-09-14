@@ -1,6 +1,7 @@
 package com.ruleup.ruleup_backend.verification;
 
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
+import com.ruleup.ruleup_backend.verification.domain.VerificationDeadlines;
 import com.ruleup.ruleup_backend.verification.service.VerificationFinalizeService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -73,25 +74,60 @@ class VerificationAppealIT extends VerificationApiSupport {
                 "{\"duration_min\":30,\"radius_m\":100}");
         UUID memberId = insertReadyMember(challengeId, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
 
-        // 10분만 머물러 목표 미달 → 확정 시각을 넘겨 실패 확정.
+        // 어제 10분만 머물러 목표 미달 → <b>실패 예정</b>. 이의는 바로 이 상태에서 받는다.
+        //
+        // 예전 픽스처는 오늘 날짜 행의 finalizeAfter 만 과거로 돌려 「확정된 FAILED + 이의 창
+        // 열림」을 만들었는데, 그 조합은 <b>운영에서 생길 수 없다</b> — 이의 기한이 확정 시각과
+        // 같아서, 확정되는 순간 창도 닫히기 때문이다(공통 5-1 「이의는 확정 전에 받는다」).
+        // 그 불가능한 상태에 기대면 「확정 시각 전 확정 금지」 같은 불변식을 테스트가 우회한다.
+        startedDaysAgo(challengeId, 5);
         MvcResult res = postJsonAuth("/api/v1/verifications/sync", me.token(), syncBody(List.of(
-                geofenceSignal(memberId, "ENTER", todayAt(9, 0)),
-                geofenceSignal(memberId, "EXIT", todayAt(9, 10)))));
+                geofenceSignal(memberId, "ENTER", yesterdayAt(9, 0)),
+                geofenceSignal(memberId, "EXIT", yesterdayAt(9, 10)))));
         assertThat(res.getResponse().getStatus()).isEqualTo(200);
-
-        jdbc().update("UPDATE VerificationDaily SET finalizeAfter = UTC_TIMESTAMP(6) - INTERVAL 1 MINUTE " +
-                        "WHERE challengeMemberId = ? AND targetDate = ?",
-                bytes(memberId), java.sql.Date.valueOf(LocalDate.now(KST)));
-        finalizeService.finalizeDue();
-        assertThat(todayStatusOf(memberId)).isEqualTo("FAILED");
+        assertThat(statusOn(memberId, appealableDate()))
+                .as("귀속일이 끝났는데 미달이면 실패 예정이다 — 저장 상태는 PENDING")
+                .isEqualTo("PENDING");
 
         return new FailedVerification(me, challengeId, memberId, verificationIdOf(memberId));
     }
 
+    /**
+     * 이의를 받을 수 있는 귀속일 — <b>어제</b>.
+     *
+     * <p>귀속일은 끝났고(더 채울 기회가 없다) 확정은 아직이다(D+2 00:00 전). 스펙이 말하는
+     * 「실패 예정」이 정확히 이 구간이고, 이의 창도 여기서만 열린다.
+     */
+    private static LocalDate appealableDate() {
+        return LocalDate.now(KST).minusDays(1);
+    }
+
+    /** 어제(KST) 시:분. */
+    private static java.time.Instant yesterdayAt(int hour, int minute) {
+        return todayAt(hour, minute).minusSeconds(86_400);
+    }
+
+    /** 챌린지 시작일을 당겨 과거 귀속일도 인증 대상이 되게 한다. */
+    private void startedDaysAgo(UUID challengeId, int days) {
+        jdbc().update("UPDATE challenges SET start_date = " +
+                        " DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL ? DAY) " +
+                        "WHERE id = ?", days, bytes(challengeId));
+    }
+
+    private String statusOn(UUID challengeMemberId, LocalDate date) {
+        return jdbc().queryForObject(
+                "SELECT status FROM VerificationDaily WHERE challengeMemberId = ? AND targetDate = ?",
+                String.class, bytes(challengeMemberId), java.sql.Date.valueOf(date));
+    }
+
     private UUID verificationIdOf(UUID challengeMemberId) {
+        return verificationIdOn(challengeMemberId, appealableDate());
+    }
+
+    private UUID verificationIdOn(UUID challengeMemberId, LocalDate date) {
         byte[] raw = jdbc().queryForObject(
                 "SELECT id FROM VerificationDaily WHERE challengeMemberId = ? AND targetDate = ?",
-                byte[].class, bytes(challengeMemberId), java.sql.Date.valueOf(LocalDate.now(KST)));
+                byte[].class, bytes(challengeMemberId), java.sql.Date.valueOf(date));
         java.nio.ByteBuffer bb = java.nio.ByteBuffer.wrap(raw);
         return new UUID(bb.getLong(), bb.getLong());
     }
@@ -127,7 +163,7 @@ class VerificationAppealIT extends VerificationApiSupport {
             assertThat((String) read(res, "$.data.restored.verification")).isEqualTo("DONE");
             assertThat((Integer) read(res, "$.data.restored.streak")).isNotNull();
 
-            assertThat(todayStatusOf(f.memberId()))
+            assertThat(statusOn(f.memberId(), appealableDate()))
                     .as("정상 성공과 같게 완료로 정정된다")
                     .isEqualTo("SUCCESS");
         }
@@ -183,7 +219,8 @@ class VerificationAppealIT extends VerificationApiSupport {
             FailedVerification f = failedVerification("appeal-quota");
 
             // 과거 실패 2건을 더 심는다(같은 멤버, 다른 날짜).
-            for (int daysAgo = 1; daysAgo <= 2; daysAgo++) {
+            // 어제는 픽스처가 이미 쓰고 있다 — uq(challengeMemberId, targetDate) 와 부딪히지 않게 비킨다.
+            for (int daysAgo = 2; daysAgo <= 3; daysAgo++) {
                 UUID id = UUID.randomUUID();
                 jdbc().update("INSERT INTO VerificationDaily " +
                                 "(id, challengeMemberId, challengeId, userId, targetDate, status, method, " +
@@ -248,7 +285,8 @@ class VerificationAppealIT extends VerificationApiSupport {
                     geofenceSignal(memberId, "ENTER", todayAt(9, 0)),
                     geofenceSignal(memberId, "EXIT", todayAt(9, 10)))));
 
-            expectError(appeal(me.token(), verificationIdOf(memberId), REASON, null), 409, "NOT_FAILED");
+            expectError(appeal(me.token(), verificationIdOn(memberId, LocalDate.now(KST)), REASON, null),
+                    409, "NOT_FAILED");
         }
     }
 
@@ -264,7 +302,8 @@ class VerificationAppealIT extends VerificationApiSupport {
             MvcResult res = appeal(f.owner().token(), f.verificationId(), "짧은사유", null);
 
             expectError(res, 400, "INVALID_REASON");
-            assertThat(todayStatusOf(f.memberId())).as("정정되지 않는다").isEqualTo("FAILED");
+            assertThat(statusOn(f.memberId(), appealableDate()))
+                    .as("정정되지 않는다 — 실패 예정 그대로다").isEqualTo("PENDING");
             assertThat(appealCountOf(f.verificationId())).as("접수 이력이 없다").isZero();
         }
 
@@ -288,7 +327,8 @@ class VerificationAppealIT extends VerificationApiSupport {
                     geofenceSignal(memberId, "EXIT", todayAt(10, 0)))));
             assertThat(todayStatusOf(memberId)).isEqualTo("SUCCESS");
 
-            expectError(appeal(me.token(), verificationIdOf(memberId), REASON, null), 409, "NOT_FAILED");
+            expectError(appeal(me.token(), verificationIdOn(memberId, LocalDate.now(KST)), REASON, null),
+                    409, "NOT_FAILED");
         }
 
         @Test
@@ -299,7 +339,7 @@ class VerificationAppealIT extends VerificationApiSupport {
                     bytes(f.verificationId()));
 
             expectError(appeal(f.owner().token(), f.verificationId(), REASON, null), 409, "APPEAL_WINDOW_CLOSED");
-            assertThat(todayStatusOf(f.memberId())).isEqualTo("FAILED");
+            assertThat(statusOn(f.memberId(), appealableDate())).isEqualTo("PENDING");
         }
 
         @Test
@@ -309,7 +349,7 @@ class VerificationAppealIT extends VerificationApiSupport {
             Member other = member(uniq("appeal-other"));
 
             expectError(appeal(other.token(), f.verificationId(), REASON, null), 404, "VERIFICATION_NOT_FOUND");
-            assertThat(todayStatusOf(f.memberId())).isEqualTo("FAILED");
+            assertThat(statusOn(f.memberId(), appealableDate())).isEqualTo("PENDING");
         }
 
         @Test
@@ -336,7 +376,7 @@ class VerificationAppealIT extends VerificationApiSupport {
             expectError(appeal(f.owner().token(), f.verificationId(), REASON, null), 409, "NOT_FAILED");
 
             assertThat(appealCountOf(f.verificationId())).isEqualTo(1);
-            assertThat(todayStatusOf(f.memberId())).isEqualTo("SUCCESS");
+            assertThat(statusOn(f.memberId(), appealableDate())).isEqualTo("SUCCESS");
         }
     }
 
