@@ -125,6 +125,35 @@ class VerificationTransportGateIT extends VerificationApiSupport {
         }
 
         @Test
+        @DisplayName("[P2] 압축된 본문 자체가 상한을 넘으면 풀어 보기 전에 반려된다")
+        void compressedBodyOverTheLimitIsRejectedBeforeInflating() throws Exception {
+            Member me = member(uniq("gz-raw"));
+            UUID challenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
+            UUID memberId = insertReadyMember(challenge, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+
+            // 잘 안 눌리는 본문 — 압축 <b>후에도</b> 상한(4KB)을 넘는다.
+            List<Map<String, Object>> many = new ArrayList<>();
+            for (int i = 0; i < 400; i++) {
+                many.add(geofenceSignal(UUID.randomUUID(), "ENTER", todayAt(1 + i / 60, i % 60)));
+            }
+            byte[] compressed = gzip(OM.writeValueAsString(syncBody(many)));
+            assertThat(compressed.length)
+                    .as("이 시험의 전제 — 압축 후에도 상한을 넘어야 한다").isGreaterThan(4096);
+
+            MvcResult res = mvc.perform(post("/api/v1/verifications/sync")
+                    .header("Authorization", "Bearer " + me.token())
+                    .header("Content-Encoding", "gzip")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(compressed)).andReturn();
+
+            expectError(res, 413, "SYNC_PAYLOAD_TOO_LARGE");
+            assertThat(storedSignalsOf(me.id()))
+                    .as("해제 래퍼가 Content-Length 를 감추므로 뒤 필터는 압축 전 크기를 볼 수 없다 — "
+                            + "여기서 막지 않으면 스펙의 이중 상한 중 본문 바이트 쪽이 무제한이 된다")
+                    .isZero();
+        }
+
+        @Test
         @DisplayName("압축 후에는 작아도 풀면 상한을 넘는 요청은 반려된다 — 압축률로 힙을 노릴 수 없다")
         void highlyCompressibleBombIsRejected() throws Exception {
             Member me = member(uniq("gz-bomb"));
