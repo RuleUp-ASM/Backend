@@ -261,6 +261,20 @@ public class ExploreQueryService {
             sql.append("AND (c.min_tier IS NULL OR FIELD(c.min_tier, ").append(TIER_ORDER).append(") <= ?) ");
             args.add(tierRank(q.myTier()));
         }
+        // 필터 조건을 <b>여기서 한 번 더</b> 건다. 후보는 Redis 집합 교차로 좁혔지만, 그 집합은
+        // 파생값이라 원천보다 늦을 수 있다 — 인증 방식을 방금 바꾼 방이 옛 집합에 남아 있으면
+        // 「AUTO 로 걸렀는데 MANUAL 방이 보이는」 결과가 된다. 노출 안전 검증과 같은 자리에서
+        // 함께 확인하면 그 창이 닫힌다(공통 5-1 「노출 안전」).
+        if (q.categories() != null && !q.categories().isEmpty()) {
+            sql.append("AND c.category IN (")
+                    .append(String.join(",", java.util.Collections.nCopies(q.categories().size(), "?")))
+                    .append(") ");
+            args.addAll(q.categories());
+        }
+        if (q.verification() != null) {
+            sql.append("AND c.verification_type = ? ");
+            args.add(q.verification());
+        }
         if (q.sort().extraCondition() != null) sql.append("AND ").append(q.sort().extraCondition()).append(' ');
 
         sql.append("AND c.id IN (")
@@ -271,7 +285,43 @@ public class ExploreQueryService {
         Map<UUID, Row> byId = new java.util.HashMap<>();
         jdbc.query(sql.toString(), rs -> { Row row = mapRow(rs); byId.put(row.id, row); },
                 args.toArray());
-        return byId;
+        return withDisplayValues(byId);
+    }
+
+    /**
+     * 표시값은 <b>파생 인덱스에서</b> 읽는다 (탐색 공통 5-1·5-3).
+     *
+     * <p>MySQL 은 여기서 「이 방이 지금도 공개·진행 중인가」를 최종 확인하는 데만 쓴다. 참여자 수와
+     * 완주율·유지율은 파생값이고, 그 정본은 HASH 다 — 표를 조인해 읽으면 정렬은 인덱스가 하고
+     * 표시는 표가 하는 <b>두 출처</b>가 생겨, 순서와 숫자가 서로 어긋나는 카드가 나온다.
+     *
+     * <p>HASH 가 아직 없는 방은 표의 값을 그대로 둔다. 투영 직전의 짧은 창이고, 그 구간에 숫자를
+     * 비우면 카드가 깜빡인다.
+     */
+    private Map<UUID, Row> withDisplayValues(Map<UUID, Row> byId) {
+        Map<UUID, Row> merged = new java.util.HashMap<>(byId.size());
+        byId.forEach((id, row) -> {
+            Map<Object, Object> hash = store.getStats(id);
+            if (hash.isEmpty()) { merged.put(id, row); return; }
+            merged.put(id, new Row(row.id, row.title, row.aiTitle, row.moderationTitle,
+                    row.imageUrl, row.moderationImage, row.category, row.verificationType, row.status,
+                    intOf(hash.get("participantCount"), row.participantCount),
+                    row.capacity, row.minTier, row.startDate, row.endDate, row.createdAt,
+                    doubleOf(hash.get("completionRate"), row.completionRate),
+                    doubleOf(hash.get("retentionRate"), row.retentionRate),
+                    intOf(hash.get("recentJoins24h"), row.recentJoins24h), row.lastJoinedAt24h));
+        });
+        return merged;
+    }
+
+    private static int intOf(Object raw, int fallback) {
+        try { return raw == null ? fallback : Integer.parseInt(raw.toString()); }
+        catch (NumberFormatException e) { return fallback; }
+    }
+
+    private static Double doubleOf(Object raw, Double fallback) {
+        try { return raw == null ? fallback : Double.valueOf(raw.toString()); }
+        catch (NumberFormatException e) { return fallback; }
     }
 
     // =====================================================================

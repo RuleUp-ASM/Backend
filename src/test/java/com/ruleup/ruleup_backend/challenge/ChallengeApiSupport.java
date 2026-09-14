@@ -90,10 +90,18 @@ public abstract class ChallengeApiSupport extends AuthApiSupport {
         return id;
     }
 
+    /**
+     * ACTIVE 멤버십 하나. <b>가입 사건도 함께</b> 남긴다.
+     *
+     * <p>운영에서 멤버십과 가입 사건은 같은 트랜잭션에서 함께 생긴다. 픽스처가 멤버십만 심으면
+     * 인기 집계(가입 사건을 센다)가 0 을 보게 되어, 구현이 아니라 픽스처 때문에 테스트가 깨진다.
+     */
     protected void insertActiveMembership(UUID challengeId, UUID userId, String role) {
         jdbc().update("INSERT INTO challenge_members (id, challenge_id, user_id, role, status) " +
                         "VALUES (?, ?, ?, ?, 'ACTIVE')",
                 bytes(UUID.randomUUID()), bytes(challengeId), bytes(userId), role);
+        jdbc().update("INSERT INTO challenge_join_events (id, challenge_id, user_id) VALUES (?, ?, ?)",
+                bytes(UUID.randomUUID()), bytes(challengeId), bytes(userId));
     }
 
     /**

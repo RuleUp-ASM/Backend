@@ -50,12 +50,14 @@ public class ExploreIndexer {
             "       c.deleted_at, c.participant_count, c.created_at, c.end_date, " +
             "       s.completion_rate, s.retention_rate, " +
             // 인기는 상승이 즉시여야 하므로 배치가 채운 값이 아니라 지금 센 값을 쓴다.
-            "       (SELECT COUNT(*) FROM challenge_members m " +
-            "         WHERE m.challenge_id = c.id " +
-            "           AND m.joined_at >= DATE_SUB(NOW(6), INTERVAL 24 HOUR)) AS recent_joins, " +
-            "       (SELECT MAX(m.joined_at) FROM challenge_members m " +
-            "         WHERE m.challenge_id = c.id " +
-            "           AND m.joined_at >= DATE_SUB(NOW(6), INTERVAL 24 HOUR)) AS last_joined " +
+            // 세는 대상은 <b>가입 사건</b>이다 — 멤버십은 사람당 한 줄인 상태라, 그 줄의 시각으로
+            // 세면 재입장이 잡히지 않고(처음 들어온 날이 굳어 있다) 덮어쓰면 첫 가입일이 사라진다.
+            "       (SELECT COUNT(*) FROM challenge_join_events e " +
+            "         WHERE e.challenge_id = c.id " +
+            "           AND e.joined_at >= DATE_SUB(NOW(6), INTERVAL 24 HOUR)) AS recent_joins, " +
+            "       (SELECT MAX(e.joined_at) FROM challenge_join_events e " +
+            "         WHERE e.challenge_id = c.id " +
+            "           AND e.joined_at >= DATE_SUB(NOW(6), INTERVAL 24 HOUR)) AS last_joined " +
             "FROM challenges c LEFT JOIN challenge_stats s ON s.challenge_id = c.id ";
 
     private final JdbcTemplate jdbc;
@@ -109,12 +111,50 @@ public class ExploreIndexer {
      */
     public int reindexAll() {
         List<Row> rows = jdbc.query(SELECT_ROW + "WHERE " + VISIBLE_CONDITION, (rs, i) -> mapRow(rs));
-        store.flushDerived();
+
+        // <b>먼저 채우고 나중에 걷어낸다.</b> 예전에는 비우고 채웠는데, 파생 인덱스로만 응답하게
+        // 된 뒤로는 그 사이가 곧 503 구간이다 — 매일 밤 03:30 마다 목록이 잠시 사라진다.
+        // 채우는 동안 인덱스는 「현재 + 사라질 것들」의 합집합이라 한 번도 비지 않고, 마지막에
+        // 원천에 없는 멤버만 빼면 유령 제거라는 이 배치의 존재 이유도 그대로 지켜진다.
         for (Row row : rows) apply(row);
+        pruneGhosts(rows);
+
         store.markCalculatedAt(java.time.Instant.now());
         store.markWarmed();
         log.info("explore_reindex rows={}", rows.size());
         return rows.size();
+    }
+
+    /**
+     * 원천에 없는데 파생에만 남은 멤버를 걷어낸다.
+     *
+     * <p>증분 갱신은 이런 행을 발견할 방법이 없다 — 「사라졌다」는 이벤트가 유실되면 그 방은
+     * 영영 목록에 뜬다. 노출 후보 집합과 인기 ZSET 만 훑으면 된다. 카테고리·인증 방식 집합은
+     * 노출 후보와 교차해 쓰이므로, 후보에서 빠지면 결과에도 나오지 않는다.
+     */
+    private void pruneGhosts(List<Row> rows) {
+        java.util.Set<String> alive = rows.stream()
+                .map(r -> ExploreKeys.hex(r.id())).collect(java.util.stream.Collectors.toSet());
+
+        java.util.Set<String> stale = new java.util.HashSet<>(store.membersOf(ExploreKeys.VISIBLE));
+        stale.removeAll(alive);
+        store.removeMembers(ExploreKeys.VISIBLE, stale);
+
+        java.util.Set<String> staleTrending = new java.util.HashSet<>(
+                store.zsetMembersOf(ExploreKeys.TRENDING_ALL));
+        staleTrending.removeAll(alive);
+        store.removeZsetMembers(ExploreKeys.TRENDING_ALL, staleTrending);
+        for (com.ruleup.ruleup_backend.user.domain.InterestCategory c
+                : com.ruleup.ruleup_backend.user.domain.InterestCategory.values()) {
+            String key = ExploreKeys.trendingCategory(c.name());
+            java.util.Set<String> staleCat = new java.util.HashSet<>(store.zsetMembersOf(key));
+            staleCat.removeAll(alive);
+            store.removeZsetMembers(key, staleCat);
+            java.util.Set<String> staleSet = new java.util.HashSet<>(
+                    store.membersOf(ExploreKeys.category(c.name())));
+            staleSet.removeAll(alive);
+            store.removeMembers(ExploreKeys.category(c.name()), staleSet);
+        }
     }
 
     /** 워밍업이 끝났는가. 끝나기 전에는 조회를 Redis 로 보내면 안 된다 — 반쯤 찬 목록이 나간다. */

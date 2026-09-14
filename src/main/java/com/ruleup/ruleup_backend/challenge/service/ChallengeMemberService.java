@@ -79,6 +79,7 @@ public class ChallengeMemberService {
      */
     private final org.springframework.beans.factory.ObjectProvider<ChallengeMemberService> selfProvider;
 
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
     private final RoomAuthority roomAuthority;
     private final BlockService blockService;
     private final com.ruleup.ruleup_backend.score.ScoreService scoreService;
@@ -169,9 +170,11 @@ public class ChallengeMemberService {
         // 즉시 ACTIVE 등록. uq_member 로 동시 INSERT는 1건만 성공, 나머지는 중복으로 변환.
         if (existing != null) {
             existing.rejoin();
+            recordJoinEvent(challengeId, userId);
         } else {
             try {
                 memberRepository.saveAndFlush(ChallengeMember.join(challengeId, userId, MemberStatus.ACTIVE));
+                recordJoinEvent(challengeId, userId);
             } catch (DataIntegrityViolationException dup) {
                 throw blocked(JoinBlockReason.ALREADY_JOINED);
             }
@@ -418,4 +421,24 @@ public class ChallengeMemberService {
         return (tier == Tier.UNRANKED) ? Tier.BRONZE : tier;
     }
 
+
+    /**
+     * 가입 <b>사건</b>을 남긴다. 멤버십은 사람당 한 줄인 상태라 여러 번의 가입을 담을 수 없다 —
+     * 인기 점수가 보는 「최근 24시간 신규 참여」는 이 표가 센다.
+     *
+     * <p>같은 트랜잭션 안이다. 이건 파생값이 아니라 <b>일어난 일의 기록</b>이라, 가입이 커밋됐는데
+     * 사건이 없거나 그 반대인 상태가 생기면 인기 점수를 원천에서 복원할 수 없다.
+     */
+    private void recordJoinEvent(UUID challengeId, UUID userId) {
+        jdbc.update("INSERT INTO challenge_join_events (id, challenge_id, user_id) VALUES (?, ?, ?)",
+                uuidBytes(com.ruleup.ruleup_backend.common.UuidGenerator.generate()),
+                uuidBytes(challengeId), uuidBytes(userId));
+    }
+
+    private static byte[] uuidBytes(UUID id) {
+        java.nio.ByteBuffer bb = java.nio.ByteBuffer.allocate(16);
+        bb.putLong(id.getMostSignificantBits());
+        bb.putLong(id.getLeastSignificantBits());
+        return bb.array();
+    }
 }

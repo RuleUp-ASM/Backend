@@ -50,6 +50,12 @@ public final class ExploreKeys {
     /** 파생 인덱스를 마지막으로 계산한 시각. 인기 응답의 calculatedAt 이 이 값이다. */
     public static final String CALCULATED_AT = PREFIX + "calculated_at";
 
+    /** 전수 재구성 잠금. 여러 인스턴스가 동시에 비우고 채우면 서로의 중간 상태를 지운다. */
+    public static final String REBUILD_LOCK = PREFIX + "rebuild_lock";
+
+    /** 전수 재구성이 실제로 수행된 횟수. 잠금에 막힌 호출은 세지 않는다 — 관측·테스트용. */
+    public static final String RECONCILE_RUNS = PREFIX + "reconcile_runs";
+
     public static String verifyType(String verifyType) {
         return PREFIX + "s:verify:" + verifyType;
     }

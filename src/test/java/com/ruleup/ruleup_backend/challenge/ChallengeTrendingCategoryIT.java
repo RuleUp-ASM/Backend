@@ -90,6 +90,9 @@ class ChallengeTrendingCategoryIT extends ChallengeApiSupport {
             insertActiveMembership(id, joiner, "MEMBER");
             jdbcTemplate.update("UPDATE challenge_members SET joined_at = DATE_SUB(NOW(6), INTERVAL ? MINUTE) " +
                     "WHERE challenge_id = ? AND user_id = ?", minutesAgo, bytes(id), bytes(joiner));
+            // 인기 집계가 세는 것은 <b>가입 사건</b>이다 — 멤버십만 뒤로 미루면 창이 움직이지 않는다.
+            jdbcTemplate.update("UPDATE challenge_join_events SET joined_at = DATE_SUB(NOW(6), INTERVAL ? MINUTE) " +
+                    "WHERE challenge_id = ? AND user_id = ?", minutesAgo, bytes(id), bytes(joiner));
         }
         jdbcTemplate.update("UPDATE challenges SET participant_count = ? WHERE id = ?", joins, bytes(id));
         return id;

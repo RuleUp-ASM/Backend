@@ -137,17 +137,20 @@ class ExploreSpecAlignmentIT extends ChallengeApiSupport {
                     + "joined_at = DATE_SUB(NOW(6), INTERVAL 10 DAY), "
                     + "left_at = DATE_SUB(NOW(6), INTERVAL 9 DAY), rejoin_available_at = NULL "
                     + "WHERE challenge_id = ? AND user_id = ?", bytes(room), bytes(me.id()));
+            // 그때의 가입 사건도 10일 전으로 — 그대로면 24시간 창 안이라 시험이 성립하지 않는다.
+            jdbc().update("UPDATE challenge_join_events SET joined_at = DATE_SUB(NOW(6), INTERVAL 10 DAY) "
+                    + "WHERE challenge_id = ? AND user_id = ?", bytes(room), bytes(me.id()));
 
             assertThat(postJsonAuth("/api/v1/challenges/" + room + "/members", me.token(), Map.of())
                     .getResponse().getStatus()).isEqualTo(200);
 
             Integer recent = jdbc().queryForObject(
-                    "SELECT COUNT(*) FROM challenge_members WHERE challenge_id = ? AND user_id = ? "
+                    "SELECT COUNT(*) FROM challenge_join_events WHERE challenge_id = ? AND user_id = ? "
                             + "AND joined_at >= DATE_SUB(NOW(6), INTERVAL 24 HOUR)",
                     Integer.class, bytes(room), bytes(me.id()));
             assertThat(recent)
-                    .as("joined_at 을 그대로 두면 재입장이 인기 상승에 영영 잡히지 않는다 — "
-                            + "「최근 24시간 신규 참여」가 사실과 달라진다")
+                    .as("멤버십 한 줄로는 여러 번의 가입을 담을 수 없다 — 사건을 사건으로 남겨야 "
+                            + "「최근 24시간 신규 참여」가 사실과 맞는다")
                     .isGreaterThanOrEqualTo(1);
         }
     }

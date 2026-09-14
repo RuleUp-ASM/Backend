@@ -171,6 +171,11 @@ public class ExploreRedisStore {
         return out;
     }
 
+    /** 그 방의 표시값 HASH. 없으면 비어 있다 — 아직 투영되지 않은 방이다. */
+    public Map<Object, Object> getStats(UUID challengeId) {
+        return redis.opsForHash().entries(ExploreKeys.stats(challengeId));
+    }
+
     public void putStats(UUID challengeId, Map<String, String> values) {
         redis.opsForHash().putAll(ExploreKeys.stats(challengeId), values);
     }
@@ -206,6 +211,49 @@ public class ExploreRedisStore {
     }
 
     /** 접두사 전체 삭제 — 재구성 전에 부른다. 파생이라 지워도 잃는 것이 없다. */
+    /**
+     * 전수 재구성 잠금을 잡는다. 잡으면 true.
+     *
+     * <p>TTL 을 둔다 — 잠근 인스턴스가 죽으면 다음 회차가 영영 못 돌게 되기 때문이다.
+     * 재구성은 멱등이라 만료 뒤 겹쳐 도는 최악의 경우도 결과가 같다.
+     */
+    public boolean tryLockRebuild(java.time.Duration ttl) {
+        return Boolean.TRUE.equals(
+                redis.opsForValue().setIfAbsent(ExploreKeys.REBUILD_LOCK, "1", ttl));
+    }
+
+    public void unlockRebuild() {
+        redis.delete(ExploreKeys.REBUILD_LOCK);
+    }
+
+    /** 전수 재구성이 실제로 수행된 횟수를 하나 올린다. */
+    public void countRebuild() {
+        redis.opsForValue().increment(ExploreKeys.RECONCILE_RUNS);
+    }
+
+    /** 그 집합에서 주어진 멤버들을 뺀다. 재구성이 원천에 없는 유령을 걷어낼 때 쓴다. */
+    public void removeMembers(String key, java.util.Collection<String> members) {
+        if (members.isEmpty()) return;
+        redis.opsForSet().remove(key, members.toArray());
+    }
+
+    /** 그 집합의 멤버 전부. */
+    public java.util.Set<String> membersOf(String key) {
+        java.util.Set<String> members = redis.opsForSet().members(key);
+        return members == null ? java.util.Set.of() : members;
+    }
+
+    /** ZSET 에서 주어진 멤버들을 뺀다. */
+    public void removeZsetMembers(String key, java.util.Collection<String> members) {
+        if (members.isEmpty()) return;
+        redis.opsForZSet().remove(key, members.toArray());
+    }
+
+    public java.util.Set<String> zsetMembersOf(String key) {
+        java.util.Set<String> members = redis.opsForZSet().range(key, 0, -1);
+        return members == null ? java.util.Set.of() : members;
+    }
+
     public void flushDerived() {
         deleteByPattern("explore:*");
         deleteByPattern("trending:*");

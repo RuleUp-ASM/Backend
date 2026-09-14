@@ -31,6 +31,12 @@ public class ExploreIndexJobs {
     private final ExploreIndexer indexer;
     private final ExploreRedisStore store;
     private final ExploreCircuitBreaker circuit;
+    /**
+     * 원천 재계산. 03:30 대조가 <b>먼저</b> 부른다 — 04:40 에 따로 돌던 것을 앞으로 당긴 것이
+     * 아니라, 대조가 독립적으로 복구할 수 있으려면 같은 회차 안에서 원천을 다시 봐야 한다.
+     */
+    private final com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsReconciliationService
+            statsReconciliation;
 
     /**
      * 기동 워밍업. <b>플래그가 없을 때만</b> 전체를 만든다 — 인스턴스가 늘 때마다 전수 재구성이
@@ -71,10 +77,27 @@ public class ExploreIndexJobs {
     @Scheduled(cron = "0 30 3 * * *", zone = "Asia/Seoul")
     public void reconcile() {
         if (circuit.isOpen()) return;
+        // 전수 재구성이 여러 인스턴스에서 겹치면 서로의 중간 상태를 지우며 경합한다.
+        // 잠금에는 TTL 을 둔다 — 잡은 인스턴스가 죽으면 다음 회차가 영영 못 돌기 때문이고,
+        // 재구성은 멱등이라 만료 뒤 겹쳐 도는 최악의 경우에도 결과가 같다.
+        if (!store.tryLockRebuild(REBUILD_LOCK_TTL)) {
+            log.info("탐색 인덱스 대조 건너뜀 — 다른 인스턴스가 수행 중이다");
+            return;
+        }
         try {
+            // <b>먼저 원천에서 통계를 다시 계산한다.</b> 이미 계산된 값을 읽어 옮기기만 하면,
+            // 그 값이 틀어졌을 때 대조가 틀린 값을 충실히 복사한다 — 그건 복구가 아니다.
+            // 스펙이 이 배치에 요구하는 것은 「원천으로 재계산하고 비교·보정」이다(백엔드 9).
+            statsReconciliation.runOnce();
             indexer.reindexAll();
+            store.countRebuild();
         } catch (RuntimeException e) {
             log.error("탐색 인덱스 대조 실패 — 다음 회차가 다시 시도한다: {}", e.toString());
+        } finally {
+            store.unlockRebuild();
         }
     }
+
+    /** 전수 재구성 잠금의 수명. 한 회차가 이보다 오래 걸리면 다음 회차가 겹칠 수 있다. */
+    private static final java.time.Duration REBUILD_LOCK_TTL = java.time.Duration.ofMinutes(30);
 }
