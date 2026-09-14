@@ -10,10 +10,16 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import jakarta.annotation.PreDestroy;
+
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -49,6 +55,15 @@ public class OutboxDispatcher {
 
     /** 이어 돌릴 최대 횟수. 한 번에 25만 건이면 어떤 장애 복구에도 충분하고, 폭주도 막는다. */
     private static final int MAX_REDRIVE_PASSES = 500;
+
+    /**
+     * 즉시 경로 전용 스레드. 큐가 1 인 것은 의도다 — 「한 번 더 흘려라」가 여러 건 쌓여 봐야
+     * 하는 일은 같고, 넘치면 버려도 스윕이 받쳐 준다.
+     */
+    private final ThreadPoolExecutor flusher = new ThreadPoolExecutor(
+            1, 1, 0L, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(1),
+            r -> Thread.ofPlatform().name("outbox-flush").daemon(true).unstarted(r),
+            new ThreadPoolExecutor.DiscardPolicy());
 
     private final OutboxRepository repository;
     /**
@@ -89,22 +104,48 @@ public class OutboxDispatcher {
     }
 
     /**
-     * 커밋 직후 한 번 흘려 달라는 요청. 트랜잭션이 없으면 즉시 흘린다.
+     * 커밋 직후 한 번 흘려 달라는 요청.
      *
-     * <p>여기서 실패해도 조용히 넘어간다 — 스윕이 다시 집기 때문이다. 이 호출이 실패했다고
-     * 도메인 트랜잭션에 영향을 주면 아웃박스를 쓰는 이유가 없어진다.
+     * <p><b>부른 스레드에서 흘리지 않는다.</b> 예전에는 {@code afterCommit} 콜백이 그대로
+     * 발행까지 수행했는데, 그러면 요청을 처리하던 HTTP 스레드가 한 묶음(200건)을 다 밀어낼
+     * 때까지 붙잡힌다 — 이의 한 건을 넣었을 뿐인데 남의 알림·정정까지 그 응답이 떠안고,
+     * 아웃박스로 옮겨 비동기로 만든 이상탐지의 30일 조회도 응답 전에 돌아 버린다.
+     * 아웃박스의 요점은 <b>커밋과 발행을 떼는 것</b>인데 스레드가 붙어 있으면 뗀 것이 아니다.
+     *
+     * <p>그래서 신호만 보내고 전용 스레드가 흘린다. 큐가 차 있으면 그냥 버린다 — 이미 흘릴
+     * 일이 예약돼 있다는 뜻이고, 무엇보다 <b>유실을 막는 것은 스윕</b>이라 이 경로는 처음부터
+     * 지연을 줄이는 최적화일 뿐이다. 그래서 여기서 실패해도 조용히 넘어간다.
      */
     public void requestFlush() {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            safeFlush();
+            submitFlush();
             return;
         }
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                safeFlush();
+                submitFlush();
             }
         });
+    }
+
+    private void submitFlush() {
+        try {
+            flusher.execute(this::safeFlush);
+        } catch (RejectedExecutionException ignored) {
+            // 이미 흘릴 일이 예약돼 있거나 종료 중이다. 스윕이 집는다.
+        }
+    }
+
+    @PreDestroy
+    void shutdownFlusher() {
+        flusher.shutdown();
+        try {
+            if (!flusher.awaitTermination(5, TimeUnit.SECONDS)) flusher.shutdownNow();
+        } catch (InterruptedException e) {
+            flusher.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 
     /** 주기 스윕 — 유실을 막는 쪽. 즉시 경로가 죽어도 여기서 반드시 복구된다. */

@@ -30,6 +30,17 @@ public class VerificationConfigFactory {
     private static final List<String> DEFAULT_TRUSTED_ORIGINS =
             List.of("com.sec.android.app.shealth", "com.google.android.apps.fitness");
 
+    /**
+     * 수면 기록의 신뢰 writer. 걸음·거리보다 <b>넓다</b> — 수면은 Health Connect 플랫폼 자신과
+     * Play 서비스의 Sleep API 도 기록자로 올라오기 때문이다. 목록 밖 출처는 AUTO 로 적혀 있어도
+     * 판정에 쓰지 않는다(스펙 §5-1 「신뢰 가능한 Health Connect 수면 기록만 사용」).
+     */
+    private static final List<String> DEFAULT_TRUSTED_SLEEP_ORIGINS = List.of(
+            "com.sec.android.app.shealth",          // 삼성헬스
+            "com.google.android.apps.fitness",      // 구글 피트니스
+            "com.google.android.apps.healthdata",   // Health Connect 플랫폼
+            "com.google.android.gms");              // Play 서비스 Sleep API
+
     private final RoutineCatalog catalog;
     private final com.ruleup.ruleup_backend.verification.config.VerificationProperties properties;
 
@@ -68,7 +79,7 @@ public class VerificationConfigFactory {
             case "SLEEP" -> sleep = new SleepConfig(
                     timeParamOrNull(params, "bedtime_before"),
                     decimalParamOrNull(params, "sleep_hours"),
-                    Polarity.ACHIEVEMENT, 12);
+                    Polarity.ACHIEVEMENT, 12, DEFAULT_TRUSTED_SLEEP_ORIGINS);
             default -> { /* SELF_CHECK: 수동 — 자동 신호 설정 없음 */ }
         }
 

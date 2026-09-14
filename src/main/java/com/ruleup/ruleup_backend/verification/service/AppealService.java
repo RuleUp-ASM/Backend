@@ -73,14 +73,17 @@ public class AppealService {
 
     @Transactional
     public AppealResponse submit(UUID userId, UUID verificationId, AppealSubmitRequest request) {
-        // 인정률의 <b>분모</b>다. 형식 요건에서 걸린 건까지 세야 「인정률 급변」을 물을 수 있다.
-        metrics.appealSubmitted();
         String reason = (request != null) ? request.reason() : null;
 
         // 남의 인증은 존재 자체를 알리지 않는다 — 본인 것이 아니면 없는 것과 같이 다룬다.
         VerificationDaily daily = dailyRepo.findById(verificationId)
                 .filter(d -> d.getUserId().equals(userId))
                 .orElseThrow(() -> new BusinessException(ErrorCode.VERIFICATION_NOT_FOUND));
+
+        // 인정률의 <b>분모</b>다. 형식 요건에서 걸린 건까지 세야 「인정률 급변」을 물을 수 있다.
+        // 다만 <b>소유권 확인 뒤에</b> 센다 — 남의 판정이나 없는 판정을 찍어 보는 요청까지
+        // 분모에 들어가면, 밖에서 분모를 부풀려 인정률을 낮춰 보이게 만들 수 있다.
+        metrics.appealSubmitted();
 
         // 형식 요건 — 사유부터 본다. 미달이면 접수하지 않으므로 이력도 남지 않는다.
         if (!Appeal.isValidReason(reason)) throw new BusinessException(ErrorCode.INVALID_REASON);
@@ -97,6 +100,7 @@ public class AppealService {
 
         // 인용 — 정상 성공과 동일하게 정정한다.
         daily.correctByAppeal(now);
+        metrics.appealAccepted();   // 인정률의 분자
         ChallengeMember member = challengeQuery.findMember(daily.getChallengeMemberId()).orElse(null);
         refreshProgress(member, daily);
         eventPublisher.publishEvent(
@@ -155,6 +159,9 @@ public class AppealService {
                     daily.getId(), daily.getChallengeId(), daily.getChallengeMemberId(),
                     userId, daily.getTargetDate(), reason, imageUrl, now));
         } catch (DataIntegrityViolationException e) {
+            // 같은 판정에 두 번째 이의. 유일 제약이 막았다 — 중복 정정·중복 지급의 방어선이
+            // 실제로 일하고 있는지는 이 값으로만 알 수 있다.
+            metrics.appealDuplicateBlocked();
             throw new BusinessException(ErrorCode.NOT_FAILED);
         }
     }

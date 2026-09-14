@@ -108,9 +108,15 @@ public class OutboxMessage {
     /**
      * 포기한 메시지를 다시 줄에 세운다. 같은 사건이 다시 적재될 때와 운영이 직접 되살릴 때
      * 모두 이 경로를 쓴다 — {@code dedupKey} 가 남아 있어 새 행을 만들 수 없기 때문이다.
+     *
+     * <p>{@code processedAt} 도 함께 비운다. 포기를 {@code processed_at} 으로 닫던 시절의 행은
+     * 두 시각이 <b>모두</b> 차 있는데, 포기 표식만 지우면 {@link #isPending()} 이 여전히 false 라
+     * 스윕이 집지 않는다 — 죽은 목록에서는 사라지고 발행은 되지 않는, 되살릴 수조차 없는
+     * 상태가 된다. 되살린다는 것은 <b>아직 발행되지 않았다</b>고 선언하는 일이다.
      */
     public void redrive(Instant at) {
         this.deadLetteredAt = null;
+        this.processedAt = null;
         this.attempts = 0;
         this.availableAt = at;
     }

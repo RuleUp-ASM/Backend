@@ -31,6 +31,14 @@ class OutboxDeadLetterIT {
 
     @Autowired OutboxRepository repository;
     @Autowired OutboxService outboxService;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
+
+    private static byte[] uuidBytes(UUID id) {
+        java.nio.ByteBuffer bb = java.nio.ByteBuffer.allocate(16);
+        bb.putLong(id.getMostSignificantBits());
+        bb.putLong(id.getLeastSignificantBits());
+        return bb.array();
+    }
 
     private OutboxMessage exhaust(String dedupKey) {
         OutboxMessage m = repository.save(
@@ -58,6 +66,34 @@ class OutboxDeadLetterIT {
                 .doesNotContain(dead.getId());
         assertThat(repository.findDeadLettered(Limit.of(100)))
                 .as("운영이 찾을 수 있어야 되살릴 수 있다")
+                .extracting(OutboxMessage::getId)
+                .contains(dead.getId());
+    }
+
+    @Test
+    @DisplayName("[P1] 예전 방식으로 닫힌 메시지도 되살리면 다시 처리 대상이 된다")
+    void aLegacyClosedMessageBecomesPendingAgainWhenRedriven() {
+        OutboxMessage dead = exhaust("legacy:" + UUID.randomUUID());
+        // 포기를 processed_at 으로 닫던 시절의 모양. V49 는 dead_lettered_at 을 새로 새겼지만
+        // processed_at 은 그대로 뒀으므로, 운영에는 두 시각이 <b>모두</b> 찬 행이 남아 있다.
+        repository.save(dead);
+        repository.flush();
+        jdbc.update("UPDATE outbox_messages SET processed_at = dead_lettered_at WHERE id = ?",
+                uuidBytes(dead.getId()));
+
+        OutboxMessage legacy = repository.findById(dead.getId()).orElseThrow();
+        legacy.redrive(Instant.now());
+        repository.saveAndFlush(legacy);
+
+        OutboxMessage revived = repository.findById(dead.getId()).orElseThrow();
+        assertThat(revived.isPending())
+                .as("포기 표식만 지우면 죽은 목록에서는 사라지고 스윕은 집지 않는다 — "
+                        + "되살릴 수조차 없는 상태가 된다")
+                .isTrue();
+        assertThat(revived.getProcessedAt())
+                .as("되살린다는 것은 「아직 발행되지 않았다」고 선언하는 일이다")
+                .isNull();
+        assertThat(repository.findDue(Instant.now().plusSeconds(60), Limit.of(500)))
                 .extracting(OutboxMessage::getId)
                 .contains(dead.getId());
     }
