@@ -381,7 +381,10 @@ class ChallengeLifecycleBatchIT extends ChallengeApiSupport {
         void autoDeleteReleasesSlotOnce() throws Exception {
             Member user = member(uniq("slot-del"));
             var rooms = occupySlots(user.id(), 1);
-            jdbcTemplate.update("UPDATE challenges SET status = 'COMPLETED' WHERE id = ?",
+            // 끝난 방은 기간도 과거다 — 자동 삭제는 마지막 활동일의 인증 창(endDate+2)이 닫힌 뒤에만 집는다.
+            jdbcTemplate.update("UPDATE challenges SET status = 'COMPLETED', " +
+                            " end_date = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 3 DAY) " +
+                            "WHERE id = ?",
                     (Object) bytes(rooms.get(0)));
 
             autoDeleteService.runOnce();

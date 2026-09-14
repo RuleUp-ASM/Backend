@@ -48,11 +48,21 @@ public class ChallengeAutoDeleteService {
         runOnce();
     }
 
-    /** 만료(COMPLETED)·유령방(ACTIVE 멤버 0명)을 이력 스냅샷 적재 후 하드 삭제한다. */
+    /**
+     * 만료(COMPLETED)·유령방(ACTIVE 멤버 0명)을 이력 스냅샷 적재 후 하드 삭제한다.
+     *
+     * <p><b>마지막 활동일의 인증 창이 닫힌 뒤에 지운다.</b> 종료 배치는 endDate 다음 날 방을
+     * COMPLETED 로 바꾸는데, 그날 04:10 에 바로 지워 버리면 endDate 귀속 판정이 유예 구간
+     * (D+1\~D+2)을 통째로 잃는다 — 늦게 도착한 신호를 반영할 챌린지 설정이 사라지고, D+2 00:00
+     * 확정기는 실제 판정 대신 「챌린지 없음」으로 떨어진다. 그래서 {@code endDate + 2일}이
+     * 지난 방만 집는다(= 확정이 끝난 다음 날). 하루치 여유는 확정 배치가 밀렸을 때의 완충이다.
+     *
+     * <p>유령방은 이 유예를 받지 않는다 — ACTIVE 멤버가 0명이라 확정할 판정 자체가 없다.
+     */
     public void runOnce() {
         List<byte[]> targets = jdbc.query(
                 "SELECT c.id FROM challenges c " +
-                        "WHERE c.status = 'COMPLETED' " +
+                        "WHERE (c.status = 'COMPLETED' AND c.end_date < DATE_SUB(CURDATE(), INTERVAL 2 DAY)) " +
                         "   OR NOT EXISTS (SELECT 1 FROM challenge_members m " +
                         "                  WHERE m.challenge_id = c.id AND m.status = 'ACTIVE')",
                 (rs, i) -> rs.getBytes(1));
