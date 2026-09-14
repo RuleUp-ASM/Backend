@@ -23,10 +23,18 @@ public interface OutboxRepository extends JpaRepository<OutboxMessage, UUID> {
     @Query("""
             SELECT m FROM OutboxMessage m
              WHERE m.processedAt IS NULL
+               AND m.deadLetteredAt IS NULL
                AND m.availableAt <= :now
              ORDER BY m.availableAt ASC, m.createdAt ASC
             """)
     List<OutboxMessage> findDue(@Param("now") Instant now, Limit limit);
+
+    /**
+     * 끝내 발행되지 못한 메시지. 정상 경로에서는 <b>비어 있어야 한다</b> —
+     * 한 건이라도 있으면 그만큼의 통지·집행이 나가지 않았다는 뜻이다.
+     */
+    @Query("SELECT m FROM OutboxMessage m WHERE m.deadLetteredAt IS NOT NULL ORDER BY m.deadLetteredAt ASC")
+    List<OutboxMessage> findDeadLettered(Limit limit);
 
     Optional<OutboxMessage> findByDedupKey(String dedupKey);
 

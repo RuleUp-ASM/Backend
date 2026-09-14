@@ -15,22 +15,38 @@ import java.util.Optional;
 public enum SignalDomain {
 
     /** GPS · 지오펜스. 위치정보라 파기 정책이 가장 이르다. */
-    LOCATION("verification_location_signals"),
+    LOCATION("verification_location_signals", "anomaly_location_events"),
 
     /** 앱 사용 시간 · 화면 켜짐/잠금해제. <b>전송량의 대부분</b>이 여기로 온다. */
-    DEVICE_USAGE("verification_device_usage_signals"),
+    DEVICE_USAGE("verification_device_usage_signals", "anomaly_device_usage_events"),
 
     /** Health Connect 걸음 · 거리 · 수면. */
-    HEALTH_CONNECT("verification_health_connect_signals");
+    HEALTH_CONNECT("verification_health_connect_signals", "anomaly_health_connect_events");
 
     private final String table;
+    private final String anomalyTable;
 
-    SignalDomain(String table) {
+    SignalDomain(String table, String anomalyTable) {
         this.table = table;
+        this.anomalyTable = anomalyTable;
     }
 
+    /** 판정 원본 테이블. 현재 귀속일과 직전 유예 귀속일만 필요한 hot storage 다. */
     public String table() {
         return table;
+    }
+
+    /**
+     * 이상탐지 입력 테이블. 원본과 <b>같은 셋</b>으로 유지해 변환 경로를 단순하게 둔다 —
+     * 성공 판정에서 뽑은 feature 와 신호 위생 이상 근거만 들어가고 원본 전체는 들어가지 않는다.
+     */
+    public String anomalyTable() {
+        return anomalyTable;
+    }
+
+    /** 판정 방식이 쓰는 신호 타입 이름 → 저장 도메인. 배제·feature 기록이 갈 곳을 정한다. */
+    public static SignalDomain ofSignalTypeOrDefault(String signalType, SignalDomain fallback) {
+        return of(signalType).orElse(fallback);
     }
 
     /**

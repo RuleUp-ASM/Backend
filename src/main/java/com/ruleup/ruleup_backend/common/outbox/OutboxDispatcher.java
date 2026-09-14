@@ -46,6 +46,11 @@ public class OutboxDispatcher {
 
     private final OutboxRepository repository;
     /**
+     * 포기 카운터. 정정 전파 실패를 포함해 <b>끝내 나가지 못한 발행</b>이 여기 모인다 —
+     * 스펙이 0건을 요구하는 값이라 알람을 걸 수 있는 형태로 내보낸다.
+     */
+    private final io.micrometer.core.instrument.Counter deadLettered;
+    /**
      * 핸들러는 <b>지연 해석</b>한다. 생성자에서 {@code List<OutboxHandler>} 를 받으면
      * 발행자 → 디스패처 → 핸들러 → 발행자 순환이 생겨 컨텍스트가 뜨지 않는다 — 아웃박스는
      * 원래 발행하는 쪽이 부르는 물건이라 이 순환은 구조상 피할 수 없다.
@@ -57,10 +62,14 @@ public class OutboxDispatcher {
     private volatile Map<String, OutboxHandler> handlers;
 
     public OutboxDispatcher(OutboxRepository repository, ObjectProvider<OutboxHandler> handlerProvider,
+                            io.micrometer.core.instrument.MeterRegistry registry,
                             @org.springframework.context.annotation.Lazy OutboxDispatcher self) {
         this.repository = repository;
         this.handlerProvider = handlerProvider;
         this.self = self;
+        this.deadLettered = io.micrometer.core.instrument.Counter.builder("outbox.dead_lettered")
+                .description("재시도 상한을 넘겨 포기한 발행 — 수신측에 도달하지 않은 사건")
+                .register(registry);
     }
 
     private Map<String, OutboxHandler> handlers() {
@@ -146,11 +155,35 @@ public class OutboxDispatcher {
             message.markProcessed(now);
             return true;
         } catch (Exception e) {
-            log.warn("아웃박스 처리 실패 type={} id={} attempts={}: {}",
-                    message.getType(), id, message.getAttempts() + 1, e.toString());
             message.markFailed(now, e.toString());
+            if (message.isDeadLettered()) {
+                deadLettered.increment();
+                // 여기서 멈춘 건 곧 <b>나가지 않은 통지·집행</b>이다. 경고로 묻으면 아무도 모른다.
+                log.error("아웃박스 발행 포기 — 이 사건은 수신측에 도달하지 않았다. type={} id={} err={}",
+                        message.getType(), id, e.toString(), e);
+            } else {
+                log.warn("아웃박스 처리 실패 type={} id={} attempts={}: {}",
+                        message.getType(), id, message.getAttempts(), e.toString());
+            }
             return false;
         }
+    }
+
+    /**
+     * 발행에 실패한 채 닫힌 메시지를 다시 줄에 세운다 — 운영 복구 경로.
+     *
+     * <p>원인(수신측 장애·배포 롤백 등)이 해소된 뒤 부르면 그때부터 정상 재시도가 돈다.
+     * 핸들러가 멱등하므로 이미 일부 처리된 건이 섞여 있어도 안전하다.
+     *
+     * @return 다시 줄에 세운 건수
+     */
+    @Transactional
+    public int redriveDeadLettered(int limit) {
+        List<OutboxMessage> dead = repository.findDeadLettered(Limit.of(limit));
+        Instant now = Instant.now();
+        dead.forEach(m -> m.redrive(now));
+        if (!dead.isEmpty()) log.warn("아웃박스 포기분 재적재 {}건", dead.size());
+        return dead.size();
     }
 
     /** 보관 기간 경과분 정리. 점검 창(02:00~03:00)과 아침 요약(08:00)을 피한다. */

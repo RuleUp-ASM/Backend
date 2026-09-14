@@ -62,8 +62,12 @@ public class SignalPartitionMaintainer {
     public void maintain() {
         LocalDate today = LocalDate.now(KST);
         for (SignalDomain domain : SignalDomain.values()) {
-            addFuturePartitions(domain, today);
-            dropExpiredPartitions(domain, today);
+            // 판정 원본 — 현재 귀속일과 직전 유예 귀속일만 필요한 hot storage.
+            addFuturePartitions(domain.table(), today);
+            dropExpiredPartitions(domain, today, properties.signalRetentionDays());
+            // 이상탐지 입력 — 스펙이 못 박은 최대 30일. 같은 파티션 전략으로 걷는다.
+            addFuturePartitions(domain.anomalyTable(), today);
+            dropAnomalyPartitions(domain.anomalyTable(), today, properties.anomalyRetentionDays());
         }
     }
 
@@ -84,8 +88,8 @@ public class SignalPartitionMaintainer {
      * <p>MySQL 은 MAXVALUE 파티션 뒤에 새 파티션을 붙일 수 없어 <b>REORGANIZE</b> 로 잘라낸다.
      * {@code pFuture} 가 비어 있는 한(= 앞서 파티션을 확보해 둔 한) 이 작업은 데이터 복사가 없다.
      */
-    private void addFuturePartitions(SignalDomain domain, LocalDate today) {
-        Set<String> existing = existingPartitions(domain);
+    private void addFuturePartitions(String table, LocalDate today) {
+        Set<String> existing = existingPartitions(table);
         List<LocalDate> missing = new ArrayList<>();
         for (int i = 0; i <= properties.signalPartitionLookaheadDays(); i++) {
             LocalDate date = today.plusDays(i);
@@ -93,7 +97,7 @@ public class SignalPartitionMaintainer {
         }
         if (missing.isEmpty()) return;
 
-        StringBuilder sql = new StringBuilder("ALTER TABLE ").append(domain.table())
+        StringBuilder sql = new StringBuilder("ALTER TABLE ").append(table)
                 .append(" REORGANIZE PARTITION ").append(FUTURE_PARTITION).append(" INTO (");
         for (LocalDate date : missing) {
             sql.append("PARTITION ").append(partitionName(date))
@@ -103,9 +107,9 @@ public class SignalPartitionMaintainer {
 
         try {
             jdbc.execute(sql.toString());
-            log.info("신호 파티션 확보 table={} added={}", domain.table(), missing.size());
+            log.info("신호 파티션 확보 table={} added={}", table, missing.size());
         } catch (RuntimeException e) {
-            log.warn("신호 파티션 확보 실패 table={} err={}", domain.table(), e.toString());
+            log.warn("신호 파티션 확보 실패 table={} err={}", table, e.toString());
         }
     }
 
@@ -116,27 +120,97 @@ public class SignalPartitionMaintainer {
      * 오늘·D-1·D-2 를 남기는 3일이다 — 확정이 방금 끝난 날짜까지 하루 더 붙잡고 있는 셈이라
      * 배치가 밀려도 원본이 먼저 사라지지 않는다.
      */
-    private void dropExpiredPartitions(SignalDomain domain, LocalDate today) {
-        LocalDate oldestKept = today.minusDays(properties.signalRetentionDays());
-        for (String name : existingPartitions(domain)) {
+    private void dropExpiredPartitions(SignalDomain domain, LocalDate today, int retentionDays) {
+        LocalDate oldestKept = oldestKept(today, retentionDays);
+        for (String name : existingPartitions(domain.table())) {
             LocalDate date = dateOf(name);
             if (date == null || !date.isBefore(oldestKept)) continue;
-            try {
-                jdbc.execute("ALTER TABLE " + domain.table() + " DROP PARTITION " + name);
-                log.info("신호 파티션 파기 table={} partition={}", domain.table(), name);
-            } catch (RuntimeException e) {
-                log.warn("신호 파티션 파기 실패 table={} partition={} err={}",
-                        domain.table(), name, e.toString());
-            }
+            if (domain == SignalDomain.LOCATION && holdForUnconfirmed(date, today, retentionDays)) continue;
+            dropPartition(domain.table(), name);
         }
     }
 
-    private Set<String> existingPartitions(SignalDomain domain) {
+    private void dropAnomalyPartitions(String table, LocalDate today, int retentionDays) {
+        LocalDate oldestKept = oldestKept(today, retentionDays);
+        for (String name : existingPartitions(table)) {
+            LocalDate date = dateOf(name);
+            if (date == null || !date.isBefore(oldestKept)) continue;
+            dropPartition(table, name);
+        }
+    }
+
+    /**
+     * 남길 가장 오래된 날짜.
+     *
+     * <p>{@code retentionDays} 는 <b>보관할 날짜 수</b>다 — 3이면 오늘·어제·그제 셋이다.
+     * {@code today.minusDays(3)} 을 경계로 쓰면 네 날짜가 남아 스펙의 「최대 30일」이 31일이 된다.
+     */
+    public static LocalDate oldestKept(LocalDate today, int retentionDays) {
+        return today.minusDays(Math.max(retentionDays - 1, 0));
+    }
+
+    /**
+     * 아직 확정되지 않은 좌표가 남은 위치 파티션은 잠시 붙잡는다.
+     *
+     * <p>파기 타이머({@code purgeAfter})는 <b>확정 시각</b>에 걸린다. 그래서 확정 배치가 밀린 날의
+     * 파티션을 시각만 보고 떨어뜨리면, 판정도 못 한 좌표를 <b>파기 기록조차 없이</b> 잃는다.
+     * 스펙이 "고정 일괄 시각이 아니므로 확정 전 건이 지워지지 않는다"고 적은 지점이다.
+     *
+     * <p>다만 <b>무한정 붙잡지 않는다.</b> 인증에 한 번도 쓰이지 않은 좌표(위치 챌린지가 없는
+     * 사용자의 신호)는 영영 확정되지 않아 파티션이 끝없이 쌓인다. 보관 기간의 두 배까지만
+     * 기다리고, 그 뒤에는 몇 건을 확정 없이 지웠는지 남기고 떨어뜨린다.
+     *
+     * @return 이번에는 떨어뜨리지 않고 넘길지
+     */
+    private boolean holdForUnconfirmed(LocalDate partitionDate, LocalDate today, int retentionDays) {
+        Integer unconfirmed = countUnconfirmed(partitionDate);
+        if (unconfirmed == null || unconfirmed == 0) return false;
+
+        boolean withinHold = !partitionDate.isBefore(today.minusDays(2L * retentionDays));
+        if (withinHold) {
+            log.warn("확정되지 않은 좌표가 남아 위치 파티션 파기를 미룬다 date={} rows={}",
+                    partitionDate, unconfirmed);
+            return true;
+        }
+        log.warn("확정 없이 위치 파티션을 파기한다 — 인증에 쓰이지 않은 좌표다. date={} rows={}",
+                partitionDate, unconfirmed);
+        return false;
+    }
+
+    /**
+     * 그 귀속일의 위치 원본 중 <b>아직 확정되지 않은</b>(파기 타이머가 걸리지 않은) 행 수.
+     * 파티션을 붙잡을지 정하는 유일한 입력이라 밖에서 확인할 수 있게 열어 둔다.
+     */
+    public Integer countUnconfirmed(LocalDate partitionDate) {
+        try {
+            // 파기 시각이 아직 오지 않았거나(확정 전) 파기되지 않은 채 남은 좌표.
+            return jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM " + SignalDomain.LOCATION.table()
+                            + " WHERE observedDate = ? AND purgedAt IS NULL"
+                            + "   AND (purgeAfter IS NULL OR purgeAfter > NOW(6))",
+                    Integer.class, java.sql.Date.valueOf(partitionDate));
+        } catch (RuntimeException e) {
+            // 세지 못하면 붙잡는 쪽으로 기운다 — 판정 근거를 잃는 것보다 하루 더 두는 편이 낫다.
+            log.warn("미확정 좌표 집계 실패 date={} err={}", partitionDate, e.toString());
+            return Integer.MAX_VALUE;
+        }
+    }
+
+    private void dropPartition(String table, String name) {
+        try {
+            jdbc.execute("ALTER TABLE " + table + " DROP PARTITION " + name);
+            log.info("신호 파티션 파기 table={} partition={}", table, name);
+        } catch (RuntimeException e) {
+            log.warn("신호 파티션 파기 실패 table={} partition={} err={}", table, name, e.toString());
+        }
+    }
+
+    private Set<String> existingPartitions(String table) {
         List<String> names = jdbc.queryForList(
                 "SELECT PARTITION_NAME FROM information_schema.PARTITIONS"
                         + " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?"
                         + " AND PARTITION_NAME IS NOT NULL",
-                String.class, domain.table());
+                String.class, table);
         return new LinkedHashSet<>(names);
     }
 

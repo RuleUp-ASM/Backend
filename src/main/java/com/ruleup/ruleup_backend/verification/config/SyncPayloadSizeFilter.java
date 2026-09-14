@@ -47,6 +47,7 @@ public class SyncPayloadSizeFilter extends OncePerRequestFilter {
     private static final String SYNC_PATH = "/api/v1/verifications/sync";
 
     private final VerificationProperties properties;
+    private final com.ruleup.ruleup_backend.verification.service.VerificationMetrics metrics;
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
@@ -73,6 +74,8 @@ public class SyncPayloadSizeFilter extends OncePerRequestFilter {
     }
 
     private void writeTooLarge(HttpServletResponse response) throws IOException {
+        // 초과율(스펙 목표 1% 이하)의 분자. 분모는 verification.sync 타이머의 count 다.
+        metrics.payloadRejected();
         ErrorCode code = ErrorCode.SYNC_PAYLOAD_TOO_LARGE;
         response.setStatus(code.getStatus().value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);

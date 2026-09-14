@@ -15,7 +15,9 @@ import com.ruleup.ruleup_backend.common.verification.GeoAnchor;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationFailureDetailRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationMethodResultRepository;
-import com.ruleup.ruleup_backend.common.event.RoutineFailureConfirmed;
+import com.ruleup.ruleup_backend.common.outbox.OutboxDispatcher;
+import com.ruleup.ruleup_backend.common.outbox.OutboxService;
+import com.ruleup.ruleup_backend.watcher.service.WatcherFailureOutboxHandler;
 import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.NotificationPublisher;
 import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
@@ -58,9 +60,28 @@ public class VerificationFinalizeService {
     private static final Logger log = LoggerFactory.getLogger(VerificationFinalizeService.class);
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
-    private static final int CLAIM_LIMIT = 200;
+    /**
+     * 한 트랜잭션에 담는 대상 수. 크게 잡을수록 커밋 횟수가 줄지만 그만큼 행 잠금을 오래 쥐고,
+     * 한 건이 실패했을 때 되돌아가는 범위도 커진다.
+     */
+    private static final int CLAIM_LIMIT = 500;
+
+    /**
+     * 한 번 깨워 비우는 데 쓸 시간 예산. tick 주기(60초)보다 짧게 둬서 다음 폴링과 겹치지 않게 한다 —
+     * 넘기면 남은 대상은 다음 tick 이 이어 집는다(FOR UPDATE SKIP LOCKED 라 중복 처리도 없다).
+     */
+    private static final java.time.Duration DRAIN_BUDGET = java.time.Duration.ofSeconds(45);
+
+    /**
+     * 확정에 실패한 한 건을 다시 보기까지의 간격. 짧으면 같은 행이 계속 앞을 막고, 길면 일시적
+     * 장애로 실패한 건의 확정이 그만큼 늦어진다. 확정 시각 자체가 자정 경계라 10분은 무해하다.
+     */
+    private static final java.time.Duration RETRY_BACKOFF = java.time.Duration.ofMinutes(10);
     /** 한 번에 채울 무신호 대상 상한. 유저 2만 × 동시 3개 기준 일 6만 건이라 여유를 둔다. */
     private static final int MATERIALIZE_LIMIT = 100_000;
+
+    /** 한 트랜잭션에 담을 채우기 대상 수. 청크가 터져도 되돌아가는 범위를 이만큼으로 묶는다. */
+    private static final int MATERIALIZE_CHUNK = 500;
 
     private final VerificationDailyRepository dailyRepo;
     private final VerificationMethodResultRepository methodResultRepo;
@@ -68,11 +89,18 @@ public class VerificationFinalizeService {
     private final SignalExclusionRecorder exclusionRecorder;
     private final ChallengeQueryService challengeQuery;
     private final VerificationConfigFactory configFactory;
+    private final com.ruleup.ruleup_backend.verification.config.VerificationProperties properties;
     private final VerificationProgressService progressService;
     private final NotificationPublisher notificationPublisher;
     private final ApplicationEventPublisher eventPublisher;
     private final VerificationSignalReader signalReader;
     private final MemberSettingsResolver settingsResolver;
+    private final AnomalyEventRecorder anomalyRecorder;
+    private final LocationPurgeService locationPurge;
+    private final OutboxService outbox;
+    private final OutboxDispatcher outboxDispatcher;
+    private final VerificationMetrics metrics;
+    private final org.springframework.transaction.support.TransactionTemplate transactionTemplate;
     private final Map<VerificationMethod, MethodEvaluator> evaluators;
 
     public VerificationFinalizeService(VerificationDailyRepository dailyRepo,
@@ -81,11 +109,18 @@ public class VerificationFinalizeService {
                                        SignalExclusionRecorder exclusionRecorder,
                                        ChallengeQueryService challengeQuery,
                                        VerificationConfigFactory configFactory,
+                                       com.ruleup.ruleup_backend.verification.config.VerificationProperties properties,
                                        VerificationProgressService progressService,
                                        NotificationPublisher notificationPublisher,
                                        ApplicationEventPublisher eventPublisher,
                                        VerificationSignalReader signalReader,
                                        MemberSettingsResolver settingsResolver,
+                                       AnomalyEventRecorder anomalyRecorder,
+                                       LocationPurgeService locationPurge,
+                                       OutboxService outbox,
+                                       OutboxDispatcher outboxDispatcher,
+                                       VerificationMetrics metrics,
+                                       org.springframework.transaction.support.TransactionTemplate transactionTemplate,
                                        List<MethodEvaluator> evaluatorList) {
         this.dailyRepo = dailyRepo;
         this.methodResultRepo = methodResultRepo;
@@ -93,64 +128,235 @@ public class VerificationFinalizeService {
         this.exclusionRecorder = exclusionRecorder;
         this.challengeQuery = challengeQuery;
         this.configFactory = configFactory;
+        this.properties = properties;
         this.progressService = progressService;
         this.notificationPublisher = notificationPublisher;
         this.eventPublisher = eventPublisher;
         this.signalReader = signalReader;
         this.settingsResolver = settingsResolver;
+        this.anomalyRecorder = anomalyRecorder;
+        this.locationPurge = locationPurge;
+        this.outbox = outbox;
+        this.outboxDispatcher = outboxDispatcher;
+        this.metrics = metrics;
+        this.transactionTemplate = transactionTemplate;
         this.evaluators = evaluatorList.stream().collect(
                 java.util.stream.Collectors.toMap(MethodEvaluator::method, e -> e, (a, b) -> a));
     }
 
     /**
-     * 매일 00:00:30 KST: 확정 시각이 막 지난 귀속일(D-2)에 대해 <b>행이 없는 대상</b>을 채운다.
+     * 매일 00:00:30 KST: 확정 시각이 지난 귀속일에 대해 <b>행이 없는 대상</b>을 채운다.
      *
      * <p>판정 행은 sync 가 만든다. 그래서 그날 앱을 한 번도 켜지 않은 사용자는 행이 아예 없고,
      * 확정 배치가 "PENDING 행"만 훑으면 그 날짜는 실패로도 확정되지 않아 통계에서 통째로 사라진다.
      * 여기서 빈 자리를 채워 두면 아래 {@link #finalizeDue()} 가 NO_SIGNAL_RECEIVED 로 확정한다.
      *
+     * <h4>하루만 보지 않는다</h4>
+     * D-2 만 채우면 <b>배포·장애로 이 배치가 걸러진 날짜는 영영 채워지지 않는다.</b> 다음 날은
+     * 다른 날짜를 보기 때문이다. 확정 폴러가 「확정 시각이 지난 미확정 건」 조건으로 스스로
+     * 따라잡는 것과 달리, 여기는 <b>행 자체가 없어</b> 폴러의 시야 밖이다. 그래서 최근
+     * {@code materializeCatchupDays} 일을 함께 훑는다. 늦게 채워도 판정은 달라지지 않는다 —
+     * 행이 없다는 것은 그날 그 멤버로 신호가 온 적이 없다는 뜻이라 결론이 무신호로 같다.
+     *
+     * <h4>한 멤버가 전체를 되돌리지 않는다</h4>
+     * 예전에는 최대 10만 건을 <b>단일 트랜잭션</b>으로 돌았다. 챌린지 설정 하나가 깨지면 그날
+     * 채우기가 통째로 롤백되고, 다음 날에는 다른 날짜를 보므로 그 날짜는 영구히 비어 있게 된다.
+     * 청크 트랜잭션으로 나누고, 청크가 터지면 멤버별로 다시 돌려 문제 멤버만 남긴다.
+     *
      * <p>대상 아닌 날(요일 밖·기간 밖·빈도 몫 충족)은 열지 않는다 — 확정되지 않을 행을 만들 이유가 없다.
-     * 재실행해도 이미 있는 행은 건너뛰므로 안전하다.
      */
     @Scheduled(cron = "30 0 0 * * *", zone = "Asia/Seoul")
-    @Transactional
     public void materializeDueTargets() {
-        LocalDate targetDate = LocalDate.now(KST).minusDays(2);   // 확정 시각이 방금 지난 귀속일
+        LocalDate today = LocalDate.now(KST);
+        // D-2 가 확정 시각이 막 지난 귀속일이고, 그보다 오래된 날짜는 이전 실행이 놓친 몫이다.
+        for (int back = 0; back < properties.materializeCatchupDays(); back++) {
+            materializeForDate(today.minusDays(2L + back));
+        }
+    }
+
+    private void materializeForDate(LocalDate targetDate) {
         List<ChallengeMember> members = challengeQuery.findActiveOnDate(targetDate, MATERIALIZE_LIMIT);
         int opened = 0;
-        for (ChallengeMember member : members) {
-            if (dailyRepo.findByChallengeMemberIdAndTargetDate(member.getId(), targetDate).isPresent()) continue;
-            Challenge challenge = challengeQuery.findChallenge(member.getChallengeId()).orElse(null);
-            if (challenge == null) continue;
-            VerificationConfig config = configFactory.build(challenge);
-            if (config.isManual()) continue;   // 수동 인증은 미체크가 곧 미수행 — 자동 확정 대상이 아니다
-            if (VerificationTargetDays.of(config, challenge, member, targetDate)
-                    != VerificationTargetDays.Disposition.EVALUATE) {
-                continue;
-            }
-            VerificationDaily daily = dailyRepo.save(VerificationDaily.open(
-                    member.getId(), challenge.getId(), member.getUserId(), targetDate));
-            daily.applyWindow(null);
-            opened++;
+        for (int from = 0; from < members.size(); from += MATERIALIZE_CHUNK) {
+            List<ChallengeMember> chunk =
+                    members.subList(from, Math.min(from + MATERIALIZE_CHUNK, members.size()));
+            opened += openChunkSafely(chunk, targetDate);
         }
         if (opened > 0) log.info("무신호 귀속일 채우기: {} 대상 {}건 개시", targetDate, opened);
     }
 
-    /** 1분마다 폴링하되, 실제 확정은 귀속일 이틀 뒤 00:00 KST 가 지난 건에서만 일어난다. */
+    /** 청크 하나. 통째로 터지면 멤버별로 다시 돌려 나머지를 살린다. */
+    private int openChunkSafely(List<ChallengeMember> chunk, LocalDate targetDate) {
+        try {
+            Integer opened = transactionTemplate.execute(tx -> {
+                int n = 0;
+                for (ChallengeMember member : chunk) n += openIfMissing(member, targetDate) ? 1 : 0;
+                return n;
+            });
+            return (opened != null) ? opened : 0;
+        } catch (RuntimeException e) {
+            log.warn("무신호 채우기 청크 실패 — 멤버별 격리로 전환한다. date={} err={}",
+                    targetDate, e.toString());
+            return openEachIndividually(chunk, targetDate);
+        }
+    }
+
+    private int openEachIndividually(List<ChallengeMember> chunk, LocalDate targetDate) {
+        int opened = 0;
+        for (ChallengeMember member : chunk) {
+            try {
+                Boolean done = transactionTemplate.execute(tx -> openIfMissing(member, targetDate));
+                if (Boolean.TRUE.equals(done)) opened++;
+            } catch (RuntimeException e) {
+                metrics.materializeFailed();
+                log.error("무신호 채우기 실패 — 이 멤버만 건너뛴다. memberId={} date={} err={}",
+                        member.getId(), targetDate, e.toString(), e);
+            }
+        }
+        return opened;
+    }
+
+    /** 그 멤버·날짜의 판정 행이 없으면 연다. 이미 있으면 아무것도 하지 않는다(재실행 안전). */
+    private boolean openIfMissing(ChallengeMember member, LocalDate targetDate) {
+        if (dailyRepo.findByChallengeMemberIdAndTargetDate(member.getId(), targetDate).isPresent()) return false;
+        Challenge challenge = challengeQuery.findChallenge(member.getChallengeId()).orElse(null);
+        if (challenge == null) return false;
+        VerificationConfig config = configFactory.build(challenge);
+        if (config.isManual()) return false;   // 수동 인증은 미체크가 곧 미수행 — 자동 확정 대상이 아니다
+        if (VerificationTargetDays.of(config, challenge, member, targetDate)
+                != VerificationTargetDays.Disposition.EVALUATE) {
+            return false;
+        }
+        VerificationDaily daily = dailyRepo.save(VerificationDaily.open(
+                member.getId(), challenge.getId(), member.getUserId(), targetDate));
+        daily.applyWindow(null);
+        return true;
+    }
+
+    /**
+     * 1분마다 폴링하되, 실제 확정은 귀속일 이틀 뒤 00:00 KST 가 지난 건에서만 일어난다.
+     *
+     * <h4>한 번 깨울 때 <b>끝까지</b> 비운다</h4>
+     * 예전에는 한 tick 에 청크 하나(200건)만 집었다. 일 6만 건 기준으로 이론상 다섯 시간이 걸려
+     * 03:30 탐색 reconciliation 전에 끝나지 못한다 — 그 배치가 확정 결과를 입력으로 쓰므로
+     * 완주율·유지율이 하루씩 밀린 값으로 계산된다. 그래서 대상이 남아 있는 동안 청크를 이어
+     * 돌리고, 시간 예산을 넘기면 다음 tick 에 넘긴다(폴러라 catch-up 은 그대로 유지된다).
+     *
+     * <h4>한 건이 전체를 되돌리지 않는다</h4>
+     * 트랜잭션은 <b>청크 단위</b>다. 청크가 통째로 실패하면 같은 예산만큼을 <b>건별</b> 트랜잭션으로
+     * 다시 돌린다. 실패한 행은 폴링 커서를 잠깐 뒤로 미뤄 격리하므로, 문제 있는 한 건만 남고
+     * 나머지는 그대로 확정된다 — 스펙의 「한 건의 판정 실패 때문에 전체 일 배치가 롤백되지
+     * 않도록」이 이 모양이다.
+     */
     @Scheduled(fixedDelay = 60_000)
-    @Transactional
     public void finalizeDue() {
-        Instant now = Instant.now();
-        List<VerificationDaily> due = dailyRepo.findDuePendingForUpdate(now, CLAIM_LIMIT);
-        Set<UUID> changedChallenges = new HashSet<>();
-        for (VerificationDaily daily : due) {
-            if (finalizeOne(daily, now)) changedChallenges.add(daily.getChallengeId());
+        long startedAt = System.nanoTime();
+        Instant deadline = Instant.now().plus(DRAIN_BUDGET);
+        int total = 0;
+        while (Instant.now().isBefore(deadline)) {
+            int done = drainOnce();
+            if (done == 0) break;   // 대상이 바닥났다
+            total += done;
         }
-        changedChallenges.forEach(challengeId -> eventPublisher.publishEvent(
-                ChallengeStatsRefreshRequested.of(challengeId, "VERIFICATION_FINALIZED")));
-        if (!due.isEmpty()) {
-            log.info("인증 확정 배치: 귀속일이 끝난 미확정 {}건 확정 처리", due.size());
+        if (total > 0) {
+            // 적재한 감시자 통지를 곧바로 흘린다. 실패해도 스윕이 다시 집는다.
+            outboxDispatcher.requestFlush();
+            metrics.finalizeBatch(total, System.nanoTime() - startedAt);
+            log.info("인증 확정 배치: 귀속일이 끝난 미확정 {}건 확정 처리", total);
         }
+    }
+
+    /**
+     * 한 번 비우기. 청크가 통째로 실패하면 <b>같은 예산만큼</b> 건별로 다시 돌려 나머지를 살린다.
+     *
+     * <p>예전에는 실패 시 한 건만 다시 처리했는데, 그러면 (1) 반환값이 예산보다 작아 바깥 루프가
+     * 곧바로 멈추고 (2) 하필 그 한 건이 문제 행이면 예외가 그대로 밖으로 튀어 <b>그 행이 이후의
+     * 모든 확정을 막았다.</b> 격리의 요점은 「하나를 더 해보기」가 아니라 「문제 행을 비켜 가기」다.
+     */
+    private int drainOnce() {
+        try {
+            return finalizeChunk(CLAIM_LIMIT);
+        } catch (RuntimeException e) {
+            log.warn("확정 청크 실패 — 건별 격리로 전환한다. err={}", e.toString());
+            return finalizeIndividually(CLAIM_LIMIT);
+        }
+    }
+
+    /**
+     * 건별 격리 처리. 한 건이 터져도 그 트랜잭션만 롤백되고, 터진 행은 폴링 커서를 뒤로 밀어
+     * 다음 대상이 굶지 않게 한다.
+     *
+     * @return 이번에 집은 대상 수(성공·실패 합). 0 이면 더 볼 것이 없다
+     */
+    private int finalizeIndividually(int budget) {
+        int handled = 0;
+        for (int i = 0; i < budget; i++) {
+            UUID id = claimOne();
+            if (id == null) break;               // 대상 소진
+            handled++;
+            if (!finalizeIsolated(id)) defer(id);
+        }
+        return handled;
+    }
+
+    /**
+     * 대상 하나의 id 만 집는다. 락은 이 짧은 트랜잭션 안에서만 유지되므로, 뒤이은 확정 사이에
+     * 다른 인스턴스가 같은 건을 가져갈 수 있다 — {@link #finalizeOne} 이 {@code isTerminal()} 로
+     * 되돌아가므로 중복 확정은 생기지 않는다. 격리 경로에서만 쓰는 느린 길이다.
+     */
+    private UUID claimOne() {
+        return transactionTemplate.execute(tx ->
+                dailyRepo.findDuePendingForUpdate(Instant.now(), 1).stream()
+                        .findFirst().map(VerificationDaily::getId).orElse(null));
+    }
+
+    /** 한 건 확정. 성공하면 true, 그 건 때문에 터지면 false(호출부가 격리한다). */
+    private boolean finalizeIsolated(UUID id) {
+        try {
+            Boolean changed = transactionTemplate.execute(tx -> {
+                VerificationDaily daily = dailyRepo.findById(id).orElse(null);
+                if (daily == null) return false;
+                boolean result = finalizeOne(daily, Instant.now());
+                if (result) {
+                    eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(
+                            daily.getChallengeId(), "VERIFICATION_FINALIZED"));
+                }
+                return result;
+            });
+            return changed != null;
+        } catch (RuntimeException e) {
+            log.error("인증 확정 실패 — 이 건만 미룬다. verificationId={} err={}", id, e.toString(), e);
+            return false;
+        }
+    }
+
+    /** 실패한 행을 뒤로 민다. 이 UPDATE 마저 실패하면 다음 tick 이 같은 자리에서 다시 시도한다. */
+    private void defer(UUID id) {
+        metrics.finalizeFailed();
+        try {
+            transactionTemplate.execute(tx -> dailyRepo.deferFinalize(id, Instant.now().plus(RETRY_BACKOFF)));
+        } catch (RuntimeException e) {
+            log.error("확정 실패 건 미루기 실패 — 다음 tick 이 다시 시도한다. verificationId={}", id, e);
+        }
+    }
+
+    /**
+     * @param limit 한 트랜잭션에 담을 대상 수. 1 이면 건별 격리 모드다
+     * @return 이번에 집은 대상 수(확정 성공 여부와 무관 — 0 이면 더 볼 것이 없다)
+     */
+    private int finalizeChunk(int limit) {
+        Integer claimed = transactionTemplate.execute(tx -> {
+            Instant now = Instant.now();
+            List<VerificationDaily> due = dailyRepo.findDuePendingForUpdate(now, limit);
+            Set<UUID> changedChallenges = new HashSet<>();
+            for (VerificationDaily daily : due) {
+                if (finalizeOne(daily, now)) changedChallenges.add(daily.getChallengeId());
+            }
+            changedChallenges.forEach(challengeId -> eventPublisher.publishEvent(
+                    ChallengeStatsRefreshRequested.of(challengeId, "VERIFICATION_FINALIZED")));
+            return due.size();
+        });
+        return (claimed != null) ? claimed : 0;
     }
 
     /**
@@ -203,14 +409,25 @@ public class VerificationFinalizeService {
         // 확정 시점에 판정에서 뺀 신호를 배제 로그로 옮긴다 — 성공·실패를 가리지 않는다.
         // 신호 위생 이상은 인증 결과와 무관하게 탐지 입력으로 남겨야 한다(공통 3절 ①).
         exclusionRecorder.recordEvaluationHygiene(daily.getUserId(), daily.getId(), method, evidence, now);
+        if (!confirmedFail) {
+            // 성공 인증만 탐지 feature 로 승격한다 — 실패 인증은 anomaly 데이터셋을 만들지 않는다.
+            anomalyRecorder.recordSuccessFeature(daily.getUserId(), daily.getId(), method,
+                    daily.getTargetDate(), evidence, now);
+        }
+        // 성공이든 실패든 확정은 확정이다. 좌표 파기 타이머는 여기서 시작된다(공통 5-6).
+        locationPurge.scheduleFor(daily.getUserId(), daily.getTargetDate(), daily.getId(), now);
 
         refreshProgress(member, daily);
 
         // 확정된 실패만 감시자 통지 적재. 실패 예정 단계에서는 통지하지 않는다(확정이 아니므로).
+        // 아웃박스라 확정과 같은 커밋에 들어가고, 통지가 한 번 실패해도 스윕이 다시 집는다 —
+        // 인메모리 이벤트로 내면 그 실패는 감시자에게 영원히 가지 않는다.
         if (confirmedFail && member != null) {
-            eventPublisher.publishEvent(new RoutineFailureConfirmed(
-                    daily.getChallengeId(), member.getUserId(), daily.getId(),
-                    daily.getTargetDate(), now));
+            outbox.enqueue(WatcherFailureOutboxHandler.OUTBOX_TYPE,
+                    new WatcherFailureOutboxHandler.Payload(
+                            daily.getChallengeId().toString(), member.getUserId().toString(),
+                            daily.getId().toString(), daily.getTargetDate().toString(), now.toString()),
+                    WatcherFailureOutboxHandler.OUTBOX_TYPE + ":" + daily.getId());
         }
 
         // 판정 결과 고지 — 성공·실패 둘 다. 확정 시각이 귀속일 이틀 뒤 00:00 이라 그때 유저는

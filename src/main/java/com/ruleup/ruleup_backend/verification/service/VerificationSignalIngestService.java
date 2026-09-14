@@ -65,6 +65,9 @@ public class VerificationSignalIngestService {
     private static final int INSERT_BATCH = 500;
 
     private final JdbcTemplate jdbc;
+    private final com.ruleup.ruleup_backend.verification.config.VerificationProperties properties;
+    private final VerificationMetrics metrics;
+    private final LocationPurgeService locationPurge;
 
     /**
      * 수신 결과.
@@ -76,10 +79,18 @@ public class VerificationSignalIngestService {
 
     /** 적재 대상 한 건 — 도메인·귀속일이 정해진 뒤의 모습. */
     private record Candidate(SignalDomain domain, LocalDate observedDate, String dedupKey,
-                             SyncSignal signal, Instant occurredAt, SignalExclusionReason excludeReason) {}
+                             SyncSignal signal, Instant occurredAt, SignalExclusionReason excludeReason,
+                             boolean explicitRecordId) {}
 
-    /** 게이트가 신호 타입별로 내리는 배제 결정. 아무것도 배제하지 않는 기본값. */
-    public static final java.util.function.Function<String, SignalExclusionReason> ACCEPT_ALL = type -> null;
+    /**
+     * 신호의 출처와 게이트 결정.
+     *
+     * @param deviceId 보낸 기기(없으면 null). 행에 적어 두어야 나중에 「어느 기기가 올린 신호인가」를 안다
+     * @param gate     신호 타입 → 판정 배제 사유(없으면 null)
+     */
+    public record Source(String deviceId, java.util.function.Function<String, SignalExclusionReason> gate) {
+        public static Source trusted() { return new Source(null, type -> null); }
+    }
 
     /**
      * 신호를 원본 그대로 저장하고, 처음 받은 것만 골라 돌려준다.
@@ -89,16 +100,15 @@ public class VerificationSignalIngestService {
      */
     @Transactional
     public Ingested ingest(UUID userId, List<SyncSignal> signals, Instant receivedAt) {
-        return ingest(userId, signals, receivedAt, ACCEPT_ALL);
+        return ingest(userId, signals, receivedAt, Source.trusted());
     }
 
     /**
-     * @param gate 신호 타입 → 판정 배제 사유(없으면 null). 봉투 수준 게이트(VPN·무결성 실패)의 결정을
-     *             <b>행에 새긴다</b> — 요청 메모리에서만 빼면 다음 sync 의 전량 재평가가 되살린다
+     * @param source 보낸 기기와 게이트 결정. 봉투 수준 게이트(VPN·무결성 실패·비활성 기기)의 결정을
+     *               <b>행에 새긴다</b> — 요청 메모리에서만 빼면 다음 sync 의 전량 재평가가 되살린다
      */
     @Transactional
-    public Ingested ingest(UUID userId, List<SyncSignal> signals, Instant receivedAt,
-                           java.util.function.Function<String, SignalExclusionReason> gate) {
+    public Ingested ingest(UUID userId, List<SyncSignal> signals, Instant receivedAt, Source source) {
         if (signals == null || signals.isEmpty()) return new Ingested(List.of(), 0);
 
         // 한 요청 안의 중복부터 접는다 — 같은 배치에 같은 신호가 두 번 실려 오는 일이 흔하다.
@@ -124,7 +134,8 @@ public class VerificationSignalIngestService {
             grouped.computeIfAbsent(domain.get(), d -> new LinkedHashMap<>())
                     .computeIfAbsent(observedDate, d -> new ArrayList<>())
                     .add(new Candidate(domain.get(), observedDate, e.getKey(), signal, occurredAt,
-                            gate.apply(signal.type())));
+                            source.gate().apply(signal.type()),
+                            signal.recordId() != null && !signal.recordId().isBlank()));
         }
         if (!unsupported.isEmpty()) {
             // 평가기가 무시하는 타입이다. 계약에 없는 payload 를 쌓지 않는다(수집 최소화).
@@ -136,7 +147,7 @@ public class VerificationSignalIngestService {
         for (Map.Entry<SignalDomain, Map<LocalDate, List<Candidate>>> byDomain : grouped.entrySet()) {
             for (Map.Entry<LocalDate, List<Candidate>> byDate : byDomain.getValue().entrySet()) {
                 dropped += store(userId, byDomain.getKey(), byDate.getKey(), byDate.getValue(),
-                        receivedAt, accepted);
+                        receivedAt, source.deviceId(), accepted);
             }
         }
         return new Ingested(accepted, dropped);
@@ -144,19 +155,66 @@ public class VerificationSignalIngestService {
 
     /** 한 도메인·한 귀속일 묶음을 적재하고, 중복으로 걸러낸 수를 돌려준다. */
     private int store(UUID userId, SignalDomain domain, LocalDate observedDate,
-                      List<Candidate> candidates, Instant receivedAt, List<SyncSignal> accepted) {
-        Set<String> known = alreadyStored(userId, domain, observedDate,
-                candidates.stream().map(Candidate::dedupKey).collect(java.util.stream.Collectors.toSet()));
+                      List<Candidate> candidates, Instant receivedAt, String deviceId,
+                      List<SyncSignal> accepted) {
+        Set<String> keys = candidates.stream().map(Candidate::dedupKey)
+                .collect(java.util.stream.Collectors.toSet());
+        Set<String> known = alreadyStored(userId, domain, observedDate, keys);
+        Set<String> otherDate = storedOnOtherDate(userId, domain, observedDate,
+                candidates.stream().filter(Candidate::explicitRecordId).map(Candidate::dedupKey)
+                        .collect(java.util.stream.Collectors.toSet()));
 
         List<Object[]> rows = new ArrayList<>(candidates.size());
         int dropped = 0;
         for (Candidate c : candidates) {
             if (known.contains(c.dedupKey())) { dropped++; continue; }
+            if (otherDate.contains(c.dedupKey())) {
+                // 같은 recordId 가 <b>다른 발생일</b>로 다시 왔다. 정상 재전송이 아니라 귀속일을 바꿔
+                // 판정을 다시 받으려는 요청이거나 클라 버그다 — 파티션 유일 키가 (발생일, 유저,
+                // dedupKey) 라 DB 는 이걸 막지 못하므로 여기서 거른다(백엔드 4-1-1).
+                log.warn("signal_date_conflict userId={} domain={} observedDate={} dedupKey={}",
+                        userId, domain, observedDate, c.dedupKey());
+                dropped++;
+                continue;
+            }
             accepted.add(c.signal());
-            rows.add(row(userId, c, receivedAt));
+            rows.add(row(userId, c, receivedAt, deviceId, domain, observedDate));
         }
         insertAll(domain, rows);
+        metrics.signalsStored(rows.size());
         return dropped;
+    }
+
+    /**
+     * 같은 dedupKey 가 <b>다른 귀속일</b>로 이미 저장돼 있는지. 클라가 recordId 를 명시한 신호만 본다 —
+     * 내용 해시로 만든 키는 날짜가 내용에 들어 있어 애초에 충돌하지 않는다.
+     *
+     * <p>검사 창은 <b>원본 보관 기간</b>이다. 앞뒤 하루만 보면 그 밖의 날짜에 같은 레코드가
+     * 남아 있어도 통과하는데, 보관 중인 원본은 전부 판정 재평가의 입력이라 「닿지 못한다」고
+     * 말할 수 없다. 어차피 파티션 프루닝이 걸리는 조회라 창을 넓혀도 비용은 거의 같다.
+     */
+    private Set<String> storedOnOtherDate(UUID userId, SignalDomain domain, LocalDate observedDate,
+                                          Set<String> keys) {
+        if (keys.isEmpty()) return Set.of();
+        Set<String> found = new HashSet<>();
+        List<String> all = new ArrayList<>(keys);
+        for (int from = 0; from < all.size(); from += INSERT_BATCH) {
+            List<String> chunk = all.subList(from, Math.min(from + INSERT_BATCH, all.size()));
+            String placeholders = String.join(",", Collections.nCopies(chunk.size(), "?"));
+            int window = properties.signalRetentionDays();
+            List<Object> args = new ArrayList<>();
+            args.add(Date.valueOf(observedDate.minusDays(window)));
+            args.add(Date.valueOf(observedDate.plusDays(window)));
+            args.add(Date.valueOf(observedDate));
+            args.add(bytes(userId));
+            args.addAll(chunk);
+            found.addAll(jdbc.queryForList(
+                    "SELECT dedupKey FROM " + domain.table()
+                            + " WHERE observedDate BETWEEN ? AND ? AND observedDate <> ? AND userId = ?"
+                            + " AND dedupKey IN (" + placeholders + ")",
+                    String.class, args.toArray()));
+        }
+        return found;
     }
 
     /**
@@ -186,27 +244,44 @@ public class VerificationSignalIngestService {
      * INSERT IGNORE 로 적재한다 — 동시 요청이 같은 키를 넣어도 예외 없이 한 건만 남는다.
      * 예외로 처리하면 트랜잭션이 롤백 표시돼 나머지 신호까지 잃는다.
      */
+    /**
+     * 적재. 위치 도메인만 컬럼이 하나 더 붙는다 — <b>파기 예정 시각</b>이다.
+     *
+     * <p>확정 때 거는 대신 여기서 미리 박는 이유는 두 가지다. 첫째, 시각이 <b>귀속일만으로</b>
+     * 정해져 미리 알 수 있다. 둘째, 인증에 한 번도 쓰이지 않은 좌표(위치 챌린지가 없는 사용자의
+     * 신호)도 파기 대상이 된다 — 확정 때만 걸면 그런 행은 타이머 없이 남아 파티션이 걷어갈 때까지
+     * 파기 기록조차 생기지 않는다.
+     */
     private void insertAll(SignalDomain domain, List<Object[]> rows) {
+        boolean location = (domain == SignalDomain.LOCATION);
+        String sql = "INSERT IGNORE INTO " + domain.table()
+                + " (id, observedDate, userId, deviceId, signalType, excludeReason, occurredAt,"
+                + "  receivedAt, payload, dedupKey" + (location ? ", purgeAfter)" : ")")
+                + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?" + (location ? ", ?)" : ")");
         for (int from = 0; from < rows.size(); from += INSERT_BATCH) {
             List<Object[]> chunk = rows.subList(from, Math.min(from + INSERT_BATCH, rows.size()));
-            jdbc.batchUpdate("INSERT IGNORE INTO " + domain.table()
-                    + " (id, observedDate, userId, signalType, excludeReason, occurredAt, receivedAt,"
-                    + "  payload, dedupKey)"
-                    + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", chunk);
+            jdbc.batchUpdate(sql, chunk);
         }
     }
 
-    private Object[] row(UUID userId, Candidate c, Instant receivedAt) {
-        return new Object[]{
+    private Object[] row(UUID userId, Candidate c, Instant receivedAt, String deviceId,
+                         SignalDomain domain, LocalDate observedDate) {
+        Object[] base = {
                 bytes(UuidGenerator.generate()),
                 Date.valueOf(c.observedDate()),
                 bytes(userId),
+                deviceId,
                 (c.signal().type() != null) ? c.signal().type() : "UNKNOWN",
                 (c.excludeReason() != null) ? c.excludeReason().name() : null,
                 (c.occurredAt() != null) ? Timestamp.from(c.occurredAt()) : null,
                 Timestamp.from(receivedAt),
                 JSON.writeValueAsString(c.signal()),
                 c.dedupKey()};
+        if (domain != SignalDomain.LOCATION) return base;
+
+        Object[] withPurge = java.util.Arrays.copyOf(base, base.length + 1);
+        withPurge[base.length] = Timestamp.from(locationPurge.purgeAfterFor(observedDate));
+        return withPurge;
     }
 
     /** recordId 가 있으면 그것으로, 없으면 신호 내용 전체로 만든 해시. */

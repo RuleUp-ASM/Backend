@@ -61,6 +61,8 @@ public class VerificationSyncService {
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     /** 누적 일괄 상한: 신호 배열 총 개수(초과 시 413 SYNC_PAYLOAD_TOO_LARGE, 클라는 분할 재전송). */
     private static final int MAX_SIGNALS_PER_SYNC = 5000;
+    /** 신호 하나의 대략적인 직렬화 크기. 본문 크기 <b>분포</b>를 보기 위한 환산 계수다. */
+    private static final int APPROX_BYTES_PER_SIGNAL = 256;
     private static final Set<String> KNOWN_SIGNAL_TYPES = Stream.concat(
             Arrays.stream(SignalType.values()).map(Enum::name),
             Stream.of("GEOFENCE_TRANSITION")   // Android 와이어 별칭
@@ -83,6 +85,11 @@ public class VerificationSyncService {
     private final com.ruleup.ruleup_backend.common.web.CountryResolver countryResolver;
     private final VerificationProperties properties;
     private final SignalExclusionRecorder exclusionRecorder;
+    private final AnomalyEventRecorder anomalyRecorder;
+    private final LocationPurgeService locationPurge;
+    private final VerificationSyncSessionStore sessionStore;
+    private final SignalConsentGate consentGate;
+    private final VerificationMetrics metrics;
     private final Map<VerificationMethod, MethodEvaluator> evaluators;
 
     public VerificationSyncService(ChallengeQueryService challengeQuery,
@@ -102,6 +109,11 @@ public class VerificationSyncService {
                                    com.ruleup.ruleup_backend.common.web.CountryResolver countryResolver,
                                    VerificationProperties properties,
                                    SignalExclusionRecorder exclusionRecorder,
+                                   AnomalyEventRecorder anomalyRecorder,
+                                   LocationPurgeService locationPurge,
+                                   VerificationSyncSessionStore sessionStore,
+                                   SignalConsentGate consentGate,
+                                   VerificationMetrics metrics,
                                    List<MethodEvaluator> evaluatorList) {
         this.challengeQuery = challengeQuery;
         this.dailyRepo = dailyRepo;
@@ -120,12 +132,18 @@ public class VerificationSyncService {
         this.countryResolver = countryResolver;
         this.properties = properties;
         this.exclusionRecorder = exclusionRecorder;
+        this.anomalyRecorder = anomalyRecorder;
+        this.locationPurge = locationPurge;
+        this.sessionStore = sessionStore;
+        this.consentGate = consentGate;
+        this.metrics = metrics;
         this.evaluators = evaluatorList.stream()
                 .collect(Collectors.toMap(MethodEvaluator::method, e -> e, (a, b) -> a));
     }
 
     @Transactional
     public SyncResponse sync(UUID userId, SyncRequest req) {
+        long startedAt = System.nanoTime();
         if (req == null) throw new BusinessException(ErrorCode.INVALID_SIGNAL_PAYLOAD);
         // 복구 전송(backlog)은 별도 허용치 — 평상시 간격을 그대로 적용하면 밀린 구간을 올릴 수가 없다.
         rateLimiter.check(userId.toString(), Boolean.TRUE.equals(req.backlog()));
@@ -143,16 +161,24 @@ public class VerificationSyncService {
         LocalDate today = LocalDate.now(KST);
         Instant now = Instant.now();
 
-        // 원본 저장 + 영속 멱등. 못 믿을 봉투(VPN·무결성 실패)의 위치 신호는 저장하되
+        com.ruleup.ruleup_backend.user.domain.User user = userRepository.findById(userId).orElse(null);
+        sessionStore.touch(userId, req.sessionId(), now);
+
+        // 개별 동의가 없는 위치·건강 신호는 적재 이전에 떨어뜨린다. 신호 위생과 달리 이건
+        // 「받아서 안 쓴다」가 아니라 「받으면 안 된다」다(공통 5-6).
+        SignalConsentGate.Decision consent = consentGate.apply(userId, signals);
+        List<SyncSignal> collectible = consent.accepted();
+
+        // 원본 저장 + 영속 멱등. 못 믿을 봉투(VPN·무결성 실패·비활성 기기)의 신호는 저장하되
         // 배제 사유를 행에 새긴다 — 제외와 제재는 분리하고, 원본은 이상탐지 자료로 남긴다.
-        VerificationSignalIngestService.Ingested ingested =
-                signalIngest.ingest(userId, signals, now, trustGate.decide(req));
-        trustGate.record(userId, req, signals);
+        VerificationSignalIngestService.Ingested ingested = signalIngest.ingest(userId, collectible, now,
+                new VerificationSignalIngestService.Source(req.deviceId(), gateFor(user, req)));
+        int gateDropped = trustGate.record(userId, req, collectible);
 
         // 판정 입력은 저장된 원본이다. 오늘과 유예 중인 어제를 한 번씩만 읽어 멤버들이 나눠 쓴다 —
         // 같은 사용자 신호를 챌린지별로 복제해 읽지 않는다(백엔드 4-1-1 「사용자 신호 1회 저장」).
         LocalDate yesterday = today.minusDays(1);
-        Map<LocalDate, List<SyncSignal>> daySignals =
+        Map<LocalDate, VerificationSignalReader.DaySignalSet> daySignals =
                 signalReader.forDays(userId, List.of(yesterday, today));
 
         List<ChallengeMember> members = challengeQuery.findActiveMemberships(userId);
@@ -191,7 +217,7 @@ public class VerificationSyncService {
             VerificationDaily daily = loadOrCreateDaily(member, challenge, today);
             VerificationStatus before = daily.getStatus();
             VerificationStatus todayStatus = processMember(member, challenge, config, daily,
-                    daySignals.getOrDefault(today, List.of()), gaps, today, now);
+                    daySignals.get(today), gaps, today, now);
 
             progressService.updateAfterSync(member, todayStatus, now);
             if (becameFinal(before, todayStatus) || graceChanged) {
@@ -205,19 +231,55 @@ public class VerificationSyncService {
                     member.getProgressRate()));
         }
         // sync_result — 자동 판정 커버리지·중복 비율·압축 도입 판단의 1차 근거(로깅 스펙 §9).
-        log.info("sync_result userId={} signalCount={} dedupDropped={} ignoredTypes={} gapReasons={} " +
-                        "activeMembers={} updated={} backlog={}",
-                userId, signals.size(), ingested.droppedCount(), ignored,
+        log.info("sync_result userId={} signalCount={} dedupDropped={} ignoredTypes={} consentRejected={} " +
+                        "gapReasons={} activeMembers={} updated={} backlog={}",
+                userId, signals.size(), ingested.droppedCount(), ignored, consent.rejectedTypes(),
                 gaps.stream().map(SyncRequest.Gap::reason).filter(java.util.Objects::nonNull).distinct().toList(),
                 members.size(), updated.size(), Boolean.TRUE.equals(req.backlog()));
         // flushIntervalSec: 기기 스펙 기반 산정값을 매 ACK마다 전체값으로 회신(§6 제어 모델).
         // maxPayloadBytes: 클라가 이 값을 보고 전송 구간을 쪼갠다(설정값, 실측 후 조정).
-        com.ruleup.ruleup_backend.user.domain.User user = userRepository.findById(userId).orElse(null);
         backfillCountry(user, req.timeZone());
         int flushIntervalSec = FlushIntervalPolicy.forUser(user);
+        metrics.sync(System.nanoTime() - startedAt, signals.size(), ingested.droppedCount(),
+                gateDropped, consent.rejectedTypes().size());
+        // 봉투의 모양 — 압축·요약 전송 도입 판단의 근거다(백엔드 7절).
+        metrics.envelope(payloadBytesOf(req), (req.coveredUntil() - req.coveredFrom()) / 1000);
         return new SyncResponse(
                 ZonedDateTime.ofInstant(now, KST).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
-                flushIntervalSec, updated, ignored, properties.maxPayloadBytes(), ingested.droppedCount());
+                flushIntervalSec, updated, ignored, properties.maxPayloadBytes(), ingested.droppedCount(),
+                consent.consentRequired());
+    }
+
+    /**
+     * 이 요청의 신호에 새길 배제 사유.
+     *
+     * <p>비활성 기기가 먼저다 — 기기 전체를 못 믿는 경우라 신호 종류를 가리지 않는다. 예전 기기에
+     * 남아 있던 백로그가 새 기기의 인증을 통과시키면 안 되기 때문이다(스펙: 「비활성 기기 신호는
+     * 수신해도 판정에 쓰지 않음」). 기기를 밝히지 않은 요청은 <b>거르지 않는다</b> — 계약에 기기가
+     * 없던 시절의 앱이 전부 인증 불가가 된다.
+     */
+    private java.util.function.Function<String, SignalExclusionReason> gateFor(
+            com.ruleup.ruleup_backend.user.domain.User user, SyncRequest req) {
+        var trust = trustGate.decide(req);
+        if (!inactiveDevice(user, req.deviceId())) return trust;
+        return type -> SignalExclusionReason.UNTRUSTED_SOURCE;
+    }
+
+    /**
+     * 활성 기기가 아닌지.
+     *
+     * <p>기기를 밝히지 않은 요청은 <b>엄격 모드가 아니면 통과</b>시킨다(엄격 모드에서는 봉투 검증이
+     * 이미 거절했다). 다만 그냥 넘기지 않고 센다 — 이 카운터가 0 으로 떨어져야 엄격 모드를 켤 수
+     * 있고, 그 전에는 「검증하고 있다」고 말할 수 없다.
+     */
+    private boolean inactiveDevice(com.ruleup.ruleup_backend.user.domain.User user, String deviceId) {
+        if (blank(deviceId)) {
+            metrics.deviceIdMissing();
+            return false;
+        }
+        if (user == null) return false;
+        String active = user.getDeviceId();
+        return active != null && !active.isBlank() && !active.equals(deviceId.trim());
     }
 
     /**
@@ -241,6 +303,26 @@ public class VerificationSyncService {
                 || req.coveredUntil() < req.coveredFrom()) {
             throw new BusinessException(ErrorCode.INVALID_SIGNAL_PAYLOAD);
         }
+        // 「AT + 활성 기기 검증」을 엄격히 적용하는 모드. 기기를 밝히지 않으면 <b>어느 기기 신호인지
+        // 알 수 없어</b> 활성 여부를 물을 수조차 없으므로 받지 않는다. 기본값은 꺼짐 —
+        // 계약에 기기가 없던 시절의 앱을 한 번에 인증 불가로 만들지 않기 위해서다.
+        if (properties.requireActiveDevice() && blank(req.deviceId())) {
+            throw new BusinessException(ErrorCode.INVALID_SIGNAL_PAYLOAD);
+        }
+    }
+
+    private static boolean blank(String value) {
+        return value == null || value.isBlank();
+    }
+
+    /**
+     * 이 요청의 대략적인 본문 크기. 실제 바이트는 필터가 스트림에서 세지만 그 값을 여기까지
+     * 들고 오려면 요청 속성을 엮어야 하고, 지표의 쓰임(분포를 보고 상한을 조정)에는 신호 수로
+     * 환산한 근사면 충분하다. <b>정확한 반려 판단은 여전히 필터가 한다.</b>
+     */
+    private static long payloadBytesOf(SyncRequest req) {
+        List<SyncSignal> signals = req.signals();
+        return (signals != null) ? (long) signals.size() * APPROX_BYTES_PER_SIGNAL : 0L;
     }
 
     private boolean becameFinal(VerificationStatus before, VerificationStatus after) {
@@ -272,8 +354,8 @@ public class VerificationSyncService {
      * @return 이 재평가로 어제 건이 확정됐으면 true
      */
     private boolean evaluateGraceDay(ChallengeMember member, Challenge challenge, VerificationConfig config,
-                                     Map<LocalDate, List<SyncSignal>> daySignals, List<SyncRequest.Gap> gaps,
-                                     LocalDate today, Instant now) {
+                                     Map<LocalDate, VerificationSignalReader.DaySignalSet> daySignals,
+                                     List<SyncRequest.Gap> gaps, LocalDate today, Instant now) {
         LocalDate yesterday = today.minusDays(1);
         if (VerificationDeadlines.finalizeDue(yesterday, now)) return false;   // 확정 배치 몫
         if (VerificationTargetDays.of(config, challenge, member, yesterday)
@@ -286,7 +368,7 @@ public class VerificationSyncService {
 
         VerificationStatus before = daily.getStatus();
         VerificationStatus after = processMember(member, challenge, config, daily,
-                daySignals.getOrDefault(yesterday, List.of()), gaps, yesterday, now);
+                daySignals.get(yesterday), gaps, yesterday, now);
         if (!becameFinal(before, after)) return false;
         progressService.recount(member);
         return true;
@@ -305,10 +387,19 @@ public class VerificationSyncService {
     }
 
     private VerificationStatus processMember(ChallengeMember member, Challenge challenge, VerificationConfig config,
-                                             VerificationDaily daily, List<SyncSignal> signals,
+                                             VerificationDaily daily,
+                                             VerificationSignalReader.DaySignalSet daySignals,
                                              List<SyncRequest.Gap> gaps, LocalDate today, Instant now) {
         // 확정 이후 도착분은 저장만 하고 판정에 쓰지 않는다(인증 정책 §2 지연 데이터). 구제는 이의제기로만.
         if (daily.isTerminal()) return daily.getStatus();
+        // 원본을 전부 읽지 못한 날은 평가하지 않는다. 잘린 값으로 「실패 예정」이나 성공을 찍으면
+        // 사용자에게 잘못된 결과가 그대로 보인다 — 판정을 미루는 편이 낫다.
+        if (daySignals == null || !daySignals.complete()) {
+            log.warn("원본을 전부 읽지 못해 이 날 평가를 건너뛴다 userId={} targetDate={}",
+                    member.getUserId(), today);
+            return daily.getStatus();
+        }
+        List<SyncSignal> signals = daySignals.signals();
         VerificationTargetDays.Disposition disp =
                 VerificationTargetDays.of(config, challenge, member, today);
         if (disp == VerificationTargetDays.Disposition.NOT_TARGET) {
@@ -385,6 +476,11 @@ public class VerificationSyncService {
                 // sync 마다 누적되므로 매번 옮기면 같은 배제가 여러 행이 된다(공통 5-3).
                 exclusionRecorder.recordEvaluationHygiene(
                         member.getUserId(), daily.getId(), method, evidence, now);
+                // 성공 인증만 탐지 feature 로 승격한다(스펙: 실패 인증은 anomaly 데이터셋을 만들지 않음).
+                anomalyRecorder.recordSuccessFeature(
+                        member.getUserId(), daily.getId(), method, today, evidence, now);
+                // 확정됐으니 그날 좌표의 파기 타이머가 시작된다 — 고정 일괄 시각이 아니라 건별이다.
+                locationPurge.scheduleFor(member.getUserId(), today, daily.getId(), now);
                 // 즉시 확정된 성공은 확정 배치를 거치지 않는다 — finalizeDue 는 미확정 건만 집어가고
                 // finalizeOne 은 초입에서 isTerminal() 로 되돌아간다. 그래서 성공 고지를 여기서
                 // 하지 않으면 「성공한 날」만 알림이 없는 비대칭이 생긴다(실패는 확정 배치가 고지한다).

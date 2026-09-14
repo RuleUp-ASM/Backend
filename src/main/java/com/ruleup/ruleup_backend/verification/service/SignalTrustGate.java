@@ -57,15 +57,19 @@ public class SignalTrustGate {
         return type -> (type != null && LOCATION_TYPES.contains(type)) ? excluded : null;
     }
 
-    /** 게이트로 빠진 신호를 배제 로그·관측 지표에 남긴다. 판정에는 영향이 없다. */
-    public void record(UUID userId, SyncRequest req, List<SyncSignal> signals) {
+    /**
+     * 게이트로 빠진 신호를 배제 로그·관측 지표에 남긴다. 판정에는 영향이 없다.
+     *
+     * @return 게이트로 판정에서 뺀 신호 수(지표의 분자)
+     */
+    public int record(UUID userId, SyncRequest req, List<SyncSignal> signals) {
         String reason = untrustedReason(req);
-        if (reason == null || signals == null || signals.isEmpty()) return;
+        if (reason == null || signals == null || signals.isEmpty()) return 0;
 
         List<SyncSignal> dropped = signals.stream()
                 .filter(s -> s != null && s.type() != null && LOCATION_TYPES.contains(s.type()))
                 .toList();
-        if (dropped.isEmpty()) return;
+        if (dropped.isEmpty()) return 0;
 
         // 로깅 스펙 §9 #7 — reason 은 MOCK·VPN·UNTRUSTED 중 하나다.
         log.info("gate_dropped userId={} reason={} dropped={} total={}",
@@ -73,6 +77,7 @@ public class SignalTrustGate {
         // 배제 로그는 이상패턴 탐지의 입력이다(공통 5-3). 여기 기록은 **판정 이전**이라
         // 귀속할 판정이 없다 — 기기 단위 사건이라 유저에만 달아 둔다.
         exclusionRecorder.recordGateDrop(userId, exclusionReason(reason), dropped, Instant.now());
+        return dropped.size();
     }
 
     /** 게이트 사유 → 배제 로그의 사유. VPN 과 무결성 실패는 층이 다르다. */

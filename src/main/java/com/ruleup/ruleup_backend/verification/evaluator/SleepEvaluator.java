@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.verification.evaluator;
 
+import com.ruleup.ruleup_backend.verification.config.VerificationProperties;
 import com.ruleup.ruleup_backend.verification.domain.SleepConfig;
 import com.ruleup.ruleup_backend.verification.domain.VerificationMethod;
 import com.ruleup.ruleup_backend.verification.signal.SignalType;
@@ -19,6 +20,12 @@ import java.util.*;
  */
 @Component
 public class SleepEvaluator implements MethodEvaluator {
+
+    private final VerificationProperties properties;
+
+    public SleepEvaluator(VerificationProperties properties) {
+        this.properties = properties;
+    }
 
     @Override
     public VerificationMethod method() { return VerificationMethod.SLEEP; }
@@ -40,12 +47,14 @@ public class SleepEvaluator implements MethodEvaluator {
         long sleepSec = 0;
         Instant bedtime = null;
         boolean anyUntrusted = false;
+        int originMissing = 0;
 
         for (SleepSegment s : segs) {
             Instant st = TimeWindows.parseInstant(s.startAt());
             Instant en = TimeWindows.parseInstant(s.endAt());
             if (st == null || en == null || !en.isAfter(st)) continue;
             if (!seen.add(st.toString() + "|" + en.toString())) continue;   // 재전송 — 이미 반영했다
+            if (s.origin() == null) originMissing++;
             if (!trusted(s)) { anyUntrusted = true; continue; }             // 손입력·비신뢰 출처는 제외
             sleepSec += en.getEpochSecond() - st.getEpochSecond();
             if (bedtime == null || st.isBefore(bedtime)) bedtime = st;
@@ -56,6 +65,7 @@ public class SleepEvaluator implements MethodEvaluator {
             empty.put("note", anyUntrusted ? "untrusted_sleep_only" : "no_sleep_segments");
             if (!seen.isEmpty()) empty.put("seenSegments", new ArrayList<>(seen));
             if (anyUntrusted) empty.put("untrustedExcluded", true);
+            if (originMissing > 0) empty.put("originMissing", originMissing);
             return EvaluationOutcome.pending(empty, windowClose);
         }
 
@@ -67,6 +77,8 @@ public class SleepEvaluator implements MethodEvaluator {
         ev.put("sleepSeconds", sleepSec);
         if (!seen.isEmpty()) ev.put("seenSegments", new ArrayList<>(seen));
         if (anyUntrusted) ev.put("untrustedExcluded", true);
+        // 출처 없이 들어온 수면 기록 수. 엄격 모드를 켤 수 있는 시점을 이 값이 알려 준다.
+        if (originMissing > 0) ev.put("originMissing", originMissing);
 
         // bedtimeBefore 판정(우선) → SLEPT_LATE
         if (cfg.bedtimeBefore() != null && bedtime != null) {
@@ -110,13 +122,17 @@ public class SleepEvaluator implements MethodEvaluator {
     /**
      * 판정에 쓸 수 있는 수면 기록인지 (테크 스펙 §5-1 "신뢰 가능한 Health Connect 수면 기록만 사용").
      *
-     * <p>손으로 입력한(MANUAL) 기록은 제외한다 — 자고 나서 적어 넣으면 인증이 통과되면 자동 인증이 아니다.
-     * {@code origin} 을 아직 보내지 않는 클라가 있어 <b>없으면 통과</b>시키되 evidence 에 남긴다.
-     * 실제 전송률을 관측한 뒤 "없으면 제외"로 조인다.
+     * <p>손으로 입력한(MANUAL) 기록은 제외한다 — 자고 나서 적어 넣은 기록으로 인증이 통과되면
+     * 자동 인증이 아니다.
+     *
+     * <p>{@code origin} 누락 처리는 <b>설정으로 가른다</b>. 걸음·거리(HEALTH)는 이미 출처가 없으면
+     * 거부하는데 수면만 통과시키는 것은 일관되지 않다. 다만 지금 바로 조이면 출처를 보내지 않는
+     * 클라의 수면 인증이 전부 막히므로, evidence 의 {@code originMissing} 이 0 으로 떨어진 것을
+     * 보고 {@code app.verification.require-signal-origin} 을 켠다.
      */
     private boolean trusted(SleepSegment s) {
         HealthOrigin origin = s.origin();
-        if (origin == null) return true;                                        // 미전송 — 관측 후 조인다
+        if (origin == null) return !properties.requireSignalOrigin();
         return !"MANUAL".equalsIgnoreCase(origin.recordingMethod());
     }
 

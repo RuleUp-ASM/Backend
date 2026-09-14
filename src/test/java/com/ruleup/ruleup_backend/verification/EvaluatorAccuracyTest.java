@@ -31,6 +31,18 @@ class EvaluatorAccuracyTest {
     private static final LocalDate TARGET = LocalDate.of(2026, 8, 25);
     private static final String MEMBER = "11111111-2222-3333-4444-555555555555";
 
+    /** 게이트 강화를 끈 기본 설정. 나머지 값은 record 가 기본값으로 채운다. */
+    private static com.ruleup.ruleup_backend.verification.config.VerificationProperties lenientProperties() {
+        return new com.ruleup.ruleup_backend.verification.config.VerificationProperties(
+                null, null, null, null, null, null, null, null, null, null, false, false);
+    }
+
+    /** 출처 없는 기록을 거부하는 설정. */
+    private static com.ruleup.ruleup_backend.verification.config.VerificationProperties strictOriginProperties() {
+        return new com.ruleup.ruleup_backend.verification.config.VerificationProperties(
+                null, null, null, null, null, null, null, null, null, null, false, true);
+    }
+
     private static Instant at(int hour, int minute) {
         return TARGET.atTime(hour, minute).atZone(KST).toInstant();
     }
@@ -241,7 +253,8 @@ class EvaluatorAccuracyTest {
     @DisplayName("수면 — 신뢰 출처와 세그먼트 누적")
     class SleepTrustAndAccumulation {
 
-        private final SleepEvaluator evaluator = new SleepEvaluator();
+        /** 기본값(관대 모드) — 출처 누락은 통과. 엄격 모드는 아래에서 따로 확인한다. */
+        private final SleepEvaluator evaluator = new SleepEvaluator(lenientProperties());
         private static final HealthOrigin TRUSTED =
                 new HealthOrigin("com.sec.android.app.shealth", "AUTO", "WATCH");
         private static final HealthOrigin HAND_WRITTEN =
@@ -274,6 +287,25 @@ class EvaluatorAccuracyTest {
             assertThat(evaluator.evaluate(ctx(
                     sleepConfig(new BigDecimal("7")), List.of(early, late), List.of(), now)).status())
                     .isEqualTo(VerificationStatus.SUCCESS);
+        }
+
+        @Test
+        @DisplayName("출처를 밝히지 않은 수면 기록은 엄격 모드에서 판정에서 빠진다")
+        void segmentsWithoutOriginAreExcludedInStrictMode() {
+            SleepEvaluator strict = new SleepEvaluator(strictOriginProperties());
+            Instant now = at(23, 0).plusSeconds(10 * 3600);
+            // 출처가 없는 8시간 수면 — 관대 모드면 통과, 엄격 모드면 근거로 쓸 수 없다.
+            SyncSignal noOrigin = sleep(at(23, 0), at(23, 0).plusSeconds(8 * 3600), null);
+
+            assertThat(evaluator.evaluate(ctx(
+                    sleepConfig(new BigDecimal("7")), List.of(noOrigin), List.of(), now)).status())
+                    .as("지금 바로 조이면 출처를 안 보내는 클라의 수면 인증이 전부 막힌다")
+                    .isEqualTo(VerificationStatus.SUCCESS);
+
+            assertThat(strict.evaluate(ctx(
+                    sleepConfig(new BigDecimal("7")), List.of(noOrigin), List.of(), now)).status())
+                    .as("걸음·거리는 출처가 없으면 거부하는데 수면만 통과시키면 일관되지 않다")
+                    .isNotEqualTo(VerificationStatus.SUCCESS);
         }
 
         @Test

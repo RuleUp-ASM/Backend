@@ -5,7 +5,10 @@ import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
 import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
+import com.ruleup.ruleup_backend.common.outbox.OutboxDispatcher;
+import com.ruleup.ruleup_backend.common.outbox.OutboxService;
 import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
+import com.ruleup.ruleup_backend.score.AppealCorrectionOutboxHandler;
 import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.NotificationPublisher;
 import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
@@ -58,6 +61,8 @@ public class AppealService {
 
     private final VerificationDailyRepository dailyRepo;
     private final AppealRepository appealRepo;
+    private final OutboxService outbox;
+    private final OutboxDispatcher outboxDispatcher;
     private final ChallengeQueryService challengeQuery;
     private final VerificationConfigFactory configFactory;
     private final VerificationProgressService progressService;
@@ -94,9 +99,18 @@ public class AppealService {
         eventPublisher.publishEvent(
                 ChallengeStatsRefreshRequested.of(daily.getChallengeId(), "APPEAL_ACCEPTED"));
         // 이상탐지는 인용 이후 비동기로 돈다 — 개별 인용을 지연하거나 뒤집지 않는다.
+        // (인메모리 이벤트를 그대로 둔다. 탐지 입력 적재는 실패해도 사용자에게 돌려줄 것이 없다.)
         eventPublisher.publishEvent(new AppealAccepted(
                 appeal.getId(), userId, daily.getChallengeId(), daily.getId(),
                 daily.getTargetDate(), now));
+        // 점수 정정은 다르다. 사용자에게 "인용됐다"고 응답해 놓고 점수가 끝내 안 돌아오면
+        // 되돌릴 방법이 없다 — 인용과 같은 커밋에 적어 두어야 재처리가 가능하다(공통 5-7).
+        outbox.enqueue(AppealCorrectionOutboxHandler.OUTBOX_TYPE,
+                new AppealCorrectionOutboxHandler.Payload(
+                        userId.toString(), daily.getChallengeId().toString(),
+                        daily.getId().toString(), daily.getTargetDate().toString()),
+                AppealCorrectionOutboxHandler.OUTBOX_TYPE + ":" + daily.getId());
+        outboxDispatcher.requestFlush();
 
         // 결과 고지. 응답으로도 알려 주지만 그것만으로는 부족하다 — 신청 화면을 떠난 뒤에
         // 정정 사실을 확인할 자리가 알림함뿐이다. 이의 하나에 결과는 하나라 appeal_id 가 곧 멱등 키다.
