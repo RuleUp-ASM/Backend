@@ -72,9 +72,13 @@ class EvaluatorAccuracyTest {
     }
 
     private VerificationConfig sleepConfig(BigDecimal minHours) {
+        return sleepConfig(minHours, List.of());
+    }
+
+    private VerificationConfig sleepConfig(BigDecimal minHours, List<String> trustedOrigins) {
         return new VerificationConfig(ScheduleType.FIXED_DAYS, null, MethodCombine.AND,
                 List.of(VerificationMethod.SLEEP), null, null, null, null,
-                new SleepConfig(null, minHours, Polarity.ACHIEVEMENT, 12), List.of());
+                new SleepConfig(null, minHours, Polarity.ACHIEVEMENT, 12, trustedOrigins), List.of());
     }
 
     private static SyncSignal geofence(String transition, Instant when, Boolean isMock) {
@@ -269,6 +273,29 @@ class EvaluatorAccuracyTest {
                     List.of(), at(23, 30).plusSeconds(9 * 3600)));
 
             assertThat(outcome.status()).isNotEqualTo(VerificationStatus.SUCCESS);
+        }
+
+        @Test
+        @DisplayName("[P1] 화이트리스트 밖 출처는 자동 기록이어도 판정에 쓰지 않는다")
+        void untrustedOriginIsExcludedEvenWhenAutomaticallyRecorded() {
+            Instant now = at(23, 0).plusSeconds(10 * 3600);
+            // 「AUTO」만 붙이면 아무 앱이나 수면을 써 넣을 수 있다. MANUAL 만 걸러서는
+            // 스펙의 「신뢰 가능한 Health Connect 수면 기록만 사용」이 지켜지지 않는다.
+            HealthOrigin fake = new HealthOrigin("com.example.fake", "AUTO", "PHONE");
+            SyncSignal eightHours = sleep(at(23, 0), at(23, 0).plusSeconds(8 * 3600), fake);
+            List<String> allow = List.of("com.sec.android.app.shealth");
+
+            assertThat(evaluator.evaluate(ctx(
+                    sleepConfig(new BigDecimal("7"), allow), List.of(eightHours), List.of(), now)).status())
+                    .as("목록 밖 출처가 통과하면 수면 인증은 사실상 자기 신고가 된다")
+                    .isNotEqualTo(VerificationStatus.SUCCESS);
+
+            // 같은 기록이라도 신뢰 출처면 그대로 인정된다 — 게이트가 과하게 닫히지 않는지도 본다.
+            assertThat(evaluator.evaluate(ctx(
+                    sleepConfig(new BigDecimal("7"), allow),
+                    List.of(sleep(at(23, 0), at(23, 0).plusSeconds(8 * 3600), TRUSTED)),
+                    List.of(), now)).status())
+                    .isEqualTo(VerificationStatus.SUCCESS);
         }
 
         @Test

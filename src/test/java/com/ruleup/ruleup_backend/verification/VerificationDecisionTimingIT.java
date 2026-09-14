@@ -1,7 +1,9 @@
 package com.ruleup.ruleup_backend.verification;
 
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
+import com.ruleup.ruleup_backend.TestcontainersConfiguration.MutableClock;
 import com.ruleup.ruleup_backend.verification.service.VerificationFinalizeService;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -15,6 +17,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -43,12 +46,18 @@ class VerificationDecisionTimingIT extends VerificationApiSupport {
     @Autowired WebApplicationContext wac;
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired VerificationFinalizeService finalizeService;
+    @Autowired MutableClock clock;
 
     private MockMvc mvc;
 
     @BeforeEach
     void setUp() {
         mvc = MockMvcBuilders.webAppContextSetup(wac).apply(springSecurity()).build();
+    }
+
+    @AfterEach
+    void restoreClock() {
+        clock.reset();
     }
 
     @Override protected MockMvc mvc() { return mvc; }
@@ -67,13 +76,18 @@ class VerificationDecisionTimingIT extends VerificationApiSupport {
     }
 
     /**
-     * 확정 배치를 지금 돌려도 잡히도록 finalizeAfter 를 과거로 당긴다(시간 여행 대용).
-     * 시각 컬럼은 UTC 로 저장되므로 UTC_TIMESTAMP 로 쓴다 — JVM 기본 시간대(KST)로 쓰면 9시간 미래가 된다.
+     * 확정 시각까지 <b>시계를 앞으로 돌린다</b>.
+     *
+     * <p>예전에는 행의 {@code finalizeAfter} 를 과거로 당겼는데, 그 우회는 정작 막아야 할
+     * 것을 시험하지 못한다 — 확정 배치가 귀속일에서 <b>다시 파생</b>한 시각으로도 거르기
+     * 때문에, 저장된 값만 흔드는 테스트는 「오늘 행을 오늘 확정해도 되는가」를 영영 묻지 않는다.
+     * 시계를 옮기면 오늘 만든 판정이 진짜로 D+2 를 지난 상태가 된다.
+     *
+     * <p>인자는 남겨 둔다 — 호출부가 「이 멤버의 판정을 확정 시점으로 보낸다」고 읽히는 편이
+     * 시계를 직접 만지는 것보다 의도가 분명하다.
      */
     private void makeDue(UUID challengeMemberId) {
-        jdbc().update("UPDATE VerificationDaily SET finalizeAfter = UTC_TIMESTAMP(6) - INTERVAL 1 MINUTE " +
-                        "WHERE challengeMemberId = ? AND targetDate = ?",
-                bytes(challengeMemberId), java.sql.Date.valueOf(LocalDate.now(KST)));
+        clock.advance(Duration.ofDays(2).plusMinutes(1));
     }
 
     /** 저장된 시각 컬럼을 UTC 기준 Instant 로 읽는다. */
@@ -259,6 +273,29 @@ class VerificationDecisionTimingIT extends VerificationApiSupport {
             assertThat(shareableAtOf(memberId))
                     .as("이의는 확정 전에 이미 마감됐다 — 확정된 실패는 바로 공유된다")
                     .isNotNull();
+        }
+
+        @Test
+        @DisplayName("[P1] 저장된 확정 시각이 앞당겨져 있어도 귀속일 기준 D+2 전이면 확정하지 않는다")
+        void anEarlyStoredDeadlineDoesNotConfirmBeforeTheDerivedOne() throws Exception {
+            Member me = member(uniq("final-too-early"));
+            UUID challenge = insertAutoChallenge(me.id(), "SCREEN_TIME_MAX", "USAGE", "{\"duration_min\":10}");
+            UUID memberId = insertReadyMember(challenge, me.id(), null, screenApps("com.instagram.android"));
+
+            sync(me.token(), List.of(usageSignal("com.instagram.android", todayAt(20, 0), todayAt(20, 40))));
+
+            // 행에 적힌 확정 시각만 과거로 당긴다. 시계는 그대로라 <b>오늘</b>이고, 오늘 귀속
+            // 판정의 확정 경계는 아직 이틀 뒤다. 저장값만 믿으면 여기서 실패로 굳어 버린다.
+            jdbc().update("UPDATE VerificationDaily SET finalizeAfter = UTC_TIMESTAMP(6) - INTERVAL 1 MINUTE "
+                            + "WHERE challengeMemberId = ? AND targetDate = ?",
+                    bytes(memberId), java.sql.Date.valueOf(LocalDate.now(KST)));
+
+            finalizeService.finalizeDue();
+
+            assertThat(todayStatusOf(memberId))
+                    .as("이른 확정은 이의 창이 열린 건을 실패로 굳히는 일이라 되돌릴 수 없다 — "
+                            + "세는 것만으로는 「D+2 이전 확정 0건」을 지킬 수 없다")
+                    .isNotEqualTo("FAILED");
         }
 
         @Test

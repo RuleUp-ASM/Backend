@@ -100,6 +100,8 @@ public class VerificationFinalizeService {
     private final OutboxService outbox;
     private final OutboxDispatcher outboxDispatcher;
     private final VerificationMetrics metrics;
+    /** 확정 시각 판단의 유일한 출처. 주입 가능해야 「이틀 뒤」를 시험할 수 있다. */
+    private final java.time.Clock clock;
     private final org.springframework.transaction.support.TransactionTemplate transactionTemplate;
     private final Map<VerificationMethod, MethodEvaluator> evaluators;
 
@@ -121,6 +123,7 @@ public class VerificationFinalizeService {
                                        OutboxDispatcher outboxDispatcher,
                                        VerificationMetrics metrics,
                                        org.springframework.transaction.support.TransactionTemplate transactionTemplate,
+                                       java.time.Clock clock,
                                        List<MethodEvaluator> evaluatorList) {
         this.dailyRepo = dailyRepo;
         this.methodResultRepo = methodResultRepo;
@@ -140,6 +143,7 @@ public class VerificationFinalizeService {
         this.outboxDispatcher = outboxDispatcher;
         this.metrics = metrics;
         this.transactionTemplate = transactionTemplate;
+        this.clock = clock;
         this.evaluators = evaluatorList.stream().collect(
                 java.util.stream.Collectors.toMap(MethodEvaluator::method, e -> e, (a, b) -> a));
     }
@@ -167,7 +171,7 @@ public class VerificationFinalizeService {
      */
     @Scheduled(cron = "30 0 0 * * *", zone = "Asia/Seoul")
     public void materializeDueTargets() {
-        LocalDate today = LocalDate.now(KST);
+        LocalDate today = LocalDate.now(clock.withZone(KST));
         // D-2 가 확정 시각이 막 지난 귀속일이고, 그보다 오래된 날짜는 이전 실행이 놓친 몫이다.
         for (int back = 0; back < properties.materializeCatchupDays(); back++) {
             materializeForDate(today.minusDays(2L + back));
@@ -251,9 +255,9 @@ public class VerificationFinalizeService {
     @Scheduled(fixedDelay = 60_000)
     public void finalizeDue() {
         long startedAt = System.nanoTime();
-        Instant deadline = Instant.now().plus(DRAIN_BUDGET);
+        Instant deadline = clock.instant().plus(DRAIN_BUDGET);
         int total = 0;
-        while (Instant.now().isBefore(deadline)) {
+        while (clock.instant().isBefore(deadline)) {
             int done = drainOnce();
             if (done == 0) break;   // 대상이 바닥났다
             total += done;
@@ -306,7 +310,7 @@ public class VerificationFinalizeService {
      */
     private UUID claimOne() {
         return transactionTemplate.execute(tx ->
-                dailyRepo.findDuePendingForUpdate(Instant.now(), 1).stream()
+                dailyRepo.findDuePendingForUpdate(clock.instant(), 1).stream()
                         .findFirst().map(VerificationDaily::getId).orElse(null));
     }
 
@@ -316,7 +320,7 @@ public class VerificationFinalizeService {
             Boolean changed = transactionTemplate.execute(tx -> {
                 VerificationDaily daily = dailyRepo.findById(id).orElse(null);
                 if (daily == null) return false;
-                boolean result = finalizeOne(daily, Instant.now());
+                boolean result = finalizeOne(daily, clock.instant());
                 if (result) {
                     eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(
                             daily.getChallengeId(), "VERIFICATION_FINALIZED"));
@@ -334,7 +338,7 @@ public class VerificationFinalizeService {
     private void defer(UUID id) {
         metrics.finalizeFailed();
         try {
-            transactionTemplate.execute(tx -> dailyRepo.deferFinalize(id, Instant.now().plus(RETRY_BACKOFF)));
+            transactionTemplate.execute(tx -> dailyRepo.deferFinalize(id, clock.instant().plus(RETRY_BACKOFF)));
         } catch (RuntimeException e) {
             log.error("확정 실패 건 미루기 실패 — 다음 tick 이 다시 시도한다. verificationId={}", id, e);
         }
@@ -346,7 +350,7 @@ public class VerificationFinalizeService {
      */
     private int finalizeChunk(int limit) {
         Integer claimed = transactionTemplate.execute(tx -> {
-            Instant now = Instant.now();
+            Instant now = clock.instant();
             List<VerificationDaily> due = dailyRepo.findDuePendingForUpdate(now, limit);
             Set<UUID> changedChallenges = new HashSet<>();
             for (VerificationDaily daily : due) {
@@ -380,15 +384,15 @@ public class VerificationFinalizeService {
                     daily.getId(), daily.getFinalizeAfter());
             return false;
         }
-        // ② 행에 적힌 시각이 귀속일에서 파생한 값과 어긋나는지 <b>센다</b>(막지는 않는다).
-        //    `applyWindow` 는 늘 귀속일에서 파생시키므로 정상적으로는 같고, 실패 격리 백오프는
-        //    뒤로만 민다. 여기가 0 이 아니면 그 파생 경로가 어긋났다는 뜻이다(스펙 7절 0건 항목).
-        //    막지 않는 이유는 <b>운영에서 유일하게 정당한 예외가 시간 이동</b>이기 때문이다 —
-        //    주입 가능한 Clock 이 없어 통합 테스트가 이 값을 당겨 「하루 뒤」를 흉내 낸다.
+        // ② <b>귀속일에서 파생한</b> 확정 시각도 지났어야 한다. ①은 행에 적힌 값을 믿는데,
+        //    그 값이 어떤 경로로든 앞당겨져 저장됐다면 ①만으로는 막히지 않는다. 스펙이 「D+2
+        //    이전 확정 0건」을 절대 조건으로 둔 이상, 세어 두는 것으로는 조건을 만족하지 못한다 —
+        //    이른 확정은 <b>이의 창이 열린 건을 실패로 굳히는</b> 일이라 되돌릴 수 없다.
         if (!VerificationDeadlines.finalizeDue(daily.getTargetDate(), now)) {
             metrics.confirmedTooEarly();
-            log.warn("귀속일에서 파생한 확정 시각과 어긋난 채 확정된다 verificationId={} targetDate={}",
-                    daily.getId(), daily.getTargetDate());
+            log.error("귀속일 기준 확정 시각 전이다 — 확정하지 않는다. verificationId={} targetDate={} now={}",
+                    daily.getId(), daily.getTargetDate(), now);
+            return false;
         }
 
         Challenge challenge = challengeQuery.findChallenge(daily.getChallengeId()).orElse(null);
@@ -565,7 +569,7 @@ public class VerificationFinalizeService {
     /** 진행률 재계산 + (그날이 오늘이면) todayStatus 뱃지 캐시 갱신. */
     private void refreshProgress(ChallengeMember member, VerificationDaily daily) {
         if (member == null) return;
-        if (daily.getTargetDate().equals(LocalDate.now(KST))) {
+        if (daily.getTargetDate().equals(LocalDate.now(clock.withZone(KST)))) {
             progressService.recountAndSetToday(member, daily.getStatus());
         } else {
             progressService.recount(member);
@@ -576,7 +580,7 @@ public class VerificationFinalizeService {
     @Scheduled(cron = "0 5 0 * * *", zone = "Asia/Seoul")
     @Transactional
     public void rolloverFrequencyPeriods() {
-        LocalDate today = LocalDate.now(KST);
+        LocalDate today = LocalDate.now(clock.withZone(KST));
         List<ChallengeMember> members = challengeQuery.findFrequencyRolloverTargets(today);
         Set<UUID> changedChallenges = new HashSet<>();
         for (ChallengeMember m : members) {

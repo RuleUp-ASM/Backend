@@ -129,6 +129,9 @@ public class LocationPurgeService {
      * 판정 행이 하나라도 있는가」로 물으면 안 된다 — 일반 챌린지 행은 열렸는데 정작 이 좌표를
      * 쓸 장소 챌린지 행만 안 열린 경우가 「끝났다」로 읽혀, 복구해 봐야 판정 원본이 없다.
      *
+     * <p>확인은 <b>두 갈래</b>다. 활성 멤버십별 누락 검사와, 멤버십을 거치지 않는 미확정 판정
+     * 검사를 함께 건다 — 탈퇴한 멤버의 PENDING 행은 앞의 질문에서 아예 빠지기 때문이다.
+     *
      * <p>장소를 쓰는 챌린지만 골라내지 않고 <b>모든 활성 멤버십</b>을 본다. 어떤 판정 방식이
      * 위치를 쓰는지는 루틴 템플릿까지 따라가야 알 수 있어 SQL 로 좁히기 어렵고, 넓게 보는 쪽은
      * 파기를 <b>늦출 뿐</b> 일찍 지우지 않는다 — 틀리는 방향이 안전한 쪽이다. 그래도 무한정
@@ -144,9 +147,10 @@ public class LocationPurgeService {
                             + " SET s.payload = ?, s.purgedAt = ?"
                             + " WHERE s.purgedAt IS NULL AND s.purgeAfter IS NOT NULL AND s.purgeAfter <= ?"
                             + "   AND ("
-                            // 그 날짜에 인증 대상이던 <b>멤버십 하나하나</b>가 결론을 받았는지 본다.
-                            // 「판정 행이 하나라도 있는가」로 물으면, 다른 챌린지 행만 있고 정작
-                            // 이 좌표를 쓸 챌린지 행이 안 열린 경우가 「끝났다」로 읽힌다.
+                            + "     ("
+                            // ① 그 날짜에 인증 대상이던 <b>멤버십 하나하나</b>가 결론을 받았는지 본다.
+                            //    「판정 행이 하나라도 있는가」로 물으면, 다른 챌린지 행만 있고 정작
+                            //    이 좌표를 쓸 챌린지 행이 안 열린 경우가 「끝났다」로 읽힌다.
                             + "        NOT EXISTS ("
                             + "            SELECT 1 FROM challenge_members m"
                             + "              JOIN challenges c ON c.id = m.challenge_id"
@@ -160,6 +164,17 @@ public class LocationPurgeService {
                             + "                    WHERE d.challengeMemberId = m.id"
                             + "                      AND d.targetDate = s.observedDate"
                             + "                      AND d.status <> 'PENDING'))"
+                            // ② 멤버십을 안 거치고 <b>남아 있는 미확정 판정</b>도 본다. ①은 지금
+                            //    ACTIVE 인 멤버십만 훑으므로, 탈퇴·강퇴한 멤버의 PENDING 행은
+                            //    질문 자체에서 빠진다 — 확정 배치가 밀린 사이에 탈퇴하면 그 사람의
+                            //    판정 근거만 골라 지우는 꼴이 된다. 판정 행은 남아 있으므로
+                            //    (멤버십과 달리 지워지지 않는다) 여기서 직접 묻는다.
+                            + "        AND NOT EXISTS ("
+                            + "            SELECT 1 FROM VerificationDaily d2"
+                            + "             WHERE d2.userId = s.userId"
+                            + "               AND d2.targetDate = s.observedDate"
+                            + "               AND d2.status = 'PENDING')"
+                            + "     )"
                             // 파티션이 떨어질 날짜가 되면 더 기다릴 수 없다. 그때는 파기해 기록을 남긴다.
                             + "        OR s.observedDate < ?"
                             + "   )"

@@ -172,6 +172,30 @@ class VerificationPrivacyRetentionIT extends VerificationApiSupport {
         }
 
         @Test
+        @DisplayName("[P1] 탈퇴한 뒤에도 남아 있는 미확정 판정이 좌표를 붙잡는다")
+        void aPendingVerdictOfAWithdrawnMemberStillHoldsTheCoordinates() throws Exception {
+            Member me = member(uniq("privacy-left"));
+            UUID challenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
+            UUID memberId = insertReadyMember(challenge, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+
+            // 진입만 있어 판정은 PENDING 으로 남는다.
+            sync(me.token(), List.of(geofenceSignal(memberId, "ENTER", todayAt(9, 0))));
+            assertThat(todayStatusOf(memberId)).isIn(null, "PENDING");
+
+            // 확정 배치가 밀린 사이에 방을 나간다. 멤버십은 더 이상 ACTIVE 가 아니지만
+            // 판정 행은 그대로 남아 있고, 그 판정에는 여전히 이 좌표가 필요하다.
+            jdbc().update("UPDATE challenge_members SET status = 'LEFT' WHERE id = ?", bytes(memberId));
+            makeDue(me.id());
+
+            locationPurge.purgeDue();
+
+            assertThat(purgedRows(me.id()))
+                    .as("활성 멤버십만 훑으면 탈퇴한 사람의 미확정 판정은 질문에서 빠져, "
+                            + "그 사람 좌표만 골라 먼저 지우게 된다")
+                    .isZero();
+        }
+
+        @Test
         @DisplayName("[P1] 한 챌린지가 먼저 성공해도 다른 챌린지의 좌표를 지우지 않는다")
         void anEarlySuccessDoesNotPurgeCoordinatesSharedWithAnotherChallenge() throws Exception {
             Member me = member(uniq("privacy-shared"));
@@ -240,6 +264,25 @@ class VerificationPrivacyRetentionIT extends VerificationApiSupport {
             assertThat(partitionMaintainer.countUnconfirmed(today))
                     .as("파기 시각(D+2 경계)이 오기 전에 파티션을 떨어뜨리면 "
                             + "좌표를 파기 기록 없이 잃는다")
+                    .isGreaterThanOrEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("[P1] 기한이 지났는데 아직 안 지운 좌표도 「남아 있다」로 세어진다")
+        void overdueButUnpurgedCoordinatesAreStillCounted() throws Exception {
+            Member me = member(uniq("privacy-overdue"));
+            UUID challenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
+            UUID memberId = insertReadyMember(challenge, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+
+            sync(me.token(), List.of(geofenceSignal(memberId, "ENTER", todayAt(9, 0))));
+            // 파기 배치가 「미확정 판정이 남았다」며 건너뛴 좌표가 놓이는 자리다 —
+            // 기한은 지났고 purgedAt 은 비어 있다.
+            jdbc().update("UPDATE verification_location_signals "
+                    + "SET purgeAfter = DATE_SUB(NOW(6), INTERVAL 1 DAY) WHERE userId = ?", bytes(me.id()));
+
+            assertThat(partitionMaintainer.countUnconfirmed(java.time.LocalDate.now(KST)))
+                    .as("기한이 지났는지를 조건에 넣으면 정작 위험한 행이 0 건으로 보이고 "
+                            + "파티션째 사라진다 — 파기 기록 없이 잃는 바로 그 경우다")
                     .isGreaterThanOrEqualTo(1);
         }
     }

@@ -55,7 +55,7 @@ public class SleepEvaluator implements MethodEvaluator {
             if (st == null || en == null || !en.isAfter(st)) continue;
             if (!seen.add(st.toString() + "|" + en.toString())) continue;   // 재전송 — 이미 반영했다
             if (s.origin() == null) originMissing++;
-            if (!trusted(s)) { anyUntrusted = true; continue; }             // 손입력·비신뢰 출처는 제외
+            if (!trusted(s, cfg)) { anyUntrusted = true; continue; }             // 손입력·비신뢰 출처는 제외
             sleepSec += en.getEpochSecond() - st.getEpochSecond();
             if (bedtime == null || st.isBefore(bedtime)) bedtime = st;
         }
@@ -127,13 +127,20 @@ public class SleepEvaluator implements MethodEvaluator {
      *
      * <p>{@code origin} 누락 처리는 <b>설정으로 가른다</b>. 걸음·거리(HEALTH)는 이미 출처가 없으면
      * 거부하는데 수면만 통과시키는 것은 일관되지 않다. 다만 지금 바로 조이면 출처를 보내지 않는
-     * 클라의 수면 인증이 전부 막히므로, evidence 의 {@code originMissing} 이 0 으로 떨어진 것을
-     * 보고 {@code app.verification.require-signal-origin} 을 켠다.
+     * 클라의 수면 인증이 전부 막히므로, {@code app.verification.require-signal-origin} 으로 가른다.
+     *
+     * <p>출처가 <b>있어도</b> 화이트리스트를 본다. MANUAL 만 걸러서는 임의 앱이 AUTO 로 써 넣은
+     * 기록이 그대로 통과해 「신뢰 가능한 Health Connect 수면 기록만 사용」이 지켜지지 않는다.
+     * 걸음·거리가 이미 같은 게이트를 쓰고 있어, 수면만 열어 두는 것은 일관되지도 않다.
+     * 목록이 비어 있으면 게이트를 적용하지 않는다 — 설정 미비가 곧 전면 차단이 되면 안 된다.
      */
-    private boolean trusted(SleepSegment s) {
+    private boolean trusted(SleepSegment s, SleepConfig cfg) {
         HealthOrigin origin = s.origin();
         if (origin == null) return !properties.requireSignalOrigin();
-        return !"MANUAL".equalsIgnoreCase(origin.recordingMethod());
+        if ("MANUAL".equalsIgnoreCase(origin.recordingMethod())) return false;
+        List<String> allow = (cfg != null) ? cfg.trustedOrigins() : null;
+        if (allow == null || allow.isEmpty()) return true;
+        return origin.dataOrigin() != null && allow.contains(origin.dataOrigin());
     }
 
     private Instant bedtimeThreshold(String hhmm, LocalDate targetDate, ZoneId zone) {

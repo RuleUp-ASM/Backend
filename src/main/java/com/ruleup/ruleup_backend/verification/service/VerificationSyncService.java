@@ -14,6 +14,9 @@ import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.verification.domain.*;
 import com.ruleup.ruleup_backend.verification.config.VerificationProperties;
+import com.ruleup.ruleup_backend.verification.config.SyncPayloadSizeFilter;
+import org.springframework.web.context.request.RequestAttributes;
+import org.springframework.web.context.request.RequestContextHolder;
 import com.ruleup.ruleup_backend.verification.dto.SyncRequest;
 import com.ruleup.ruleup_backend.verification.dto.SyncResponse;
 import com.ruleup.ruleup_backend.verification.evaluator.DayContext;
@@ -36,6 +39,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.concurrent.atomic.AtomicLong;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -146,7 +150,11 @@ public class VerificationSyncService {
         long startedAt = System.nanoTime();
         if (req == null) throw new BusinessException(ErrorCode.INVALID_SIGNAL_PAYLOAD);
         // 복구 전송(backlog)은 별도 허용치 — 평상시 간격을 그대로 적용하면 밀린 구간을 올릴 수가 없다.
-        rateLimiter.check(userId.toString(), Boolean.TRUE.equals(req.backlog()));
+        boolean backlog = Boolean.TRUE.equals(req.backlog());
+        // 복구 전송은 레이트리밋 허용치가 다르다. 「구간당 요청 수」를 볼 때 이 값이 분자다 —
+        // 세지 않으면 복구가 정상 주기 전송을 밀어내고 있는지 밖에서 알 수 없다.
+        if (backlog) metrics.backlogRequest();
+        rateLimiter.check(userId.toString(), backlog);
         validateEnvelope(req);
         List<SyncSignal> signals = (req.signals() != null) ? req.signals() : List.of();
         if (signals.size() > MAX_SIGNALS_PER_SYNC) {
@@ -271,15 +279,23 @@ public class VerificationSyncService {
      * <p>기기를 밝히지 않은 요청은 <b>엄격 모드가 아니면 통과</b>시킨다(엄격 모드에서는 봉투 검증이
      * 이미 거절했다). 다만 그냥 넘기지 않고 센다 — 이 카운터가 0 으로 떨어져야 엄격 모드를 켤 수
      * 있고, 그 전에는 「검증하고 있다」고 말할 수 없다.
+     *
+     * <p><b>계정 쪽에 활성 기기가 없을 때</b>도 같은 문제다. 대조할 대상이 없으니 요청이 들고 온
+     * 값을 그대로 믿는 셈인데, 그러면 엄격 모드를 켜도 <b>기기를 한 번도 등록하지 않은 계정은
+     * 아무 값이나 적어 통과</b>한다 — 스위치만 올려서는 「AT + 활성 기기 검증」이 되지 않는다.
+     * 그래서 엄격 모드에서는 <b>모르면 쓰지 않는다</b>. 관대 모드에서는 통과시키되 센다.
      */
     private boolean inactiveDevice(com.ruleup.ruleup_backend.user.domain.User user, String deviceId) {
         if (blank(deviceId)) {
             metrics.deviceIdMissing();
             return false;
         }
-        if (user == null) return false;
-        String active = user.getDeviceId();
-        return active != null && !active.isBlank() && !active.equals(deviceId.trim());
+        String active = (user != null) ? user.getDeviceId() : null;
+        if (active == null || active.isBlank()) {
+            metrics.activeDeviceUnknown();
+            return properties.requireActiveDevice();
+        }
+        return !active.equals(deviceId.trim());
     }
 
     /**
@@ -316,11 +332,21 @@ public class VerificationSyncService {
     }
 
     /**
-     * 이 요청의 대략적인 본문 크기. 실제 바이트는 필터가 스트림에서 세지만 그 값을 여기까지
-     * 들고 오려면 요청 속성을 엮어야 하고, 지표의 쓰임(분포를 보고 상한을 조정)에는 신호 수로
-     * 환산한 근사면 충분하다. <b>정확한 반려 판단은 여전히 필터가 한다.</b>
+     * 이 요청의 본문 크기 — 크기 상한 필터가 스트림에서 <b>실제로 센 바이트</b>다.
+     *
+     * <p>신호 수에 고정 배수를 곱하는 근사를 쓰면 분포가 흐려진다. 측위 포인트가 잔뜩 실린
+     * 신호 하나와 빈 신호 하나가 같은 크기로 잡혀, 정작 상한에 부딪히는 요청이 분포에서
+     * 사라지기 때문이다 — 상한을 조정하려고 보는 값인데 조정 근거가 지워진다.
+     *
+     * <p>요청 문맥 밖(테스트·배치 재처리)에서는 셀 값이 없으므로 예전 근사로 물러난다.
      */
     private static long payloadBytesOf(SyncRequest req) {
+        RequestAttributes attrs = RequestContextHolder.getRequestAttributes();
+        if (attrs != null) {
+            Object counted = attrs.getAttribute(
+                    SyncPayloadSizeFilter.BODY_BYTES_ATTR, RequestAttributes.SCOPE_REQUEST);
+            if (counted instanceof AtomicLong bytes && bytes.get() > 0) return bytes.get();
+        }
         List<SyncSignal> signals = req.signals();
         return (signals != null) ? (long) signals.size() * APPROX_BYTES_PER_SIGNAL : 0L;
     }

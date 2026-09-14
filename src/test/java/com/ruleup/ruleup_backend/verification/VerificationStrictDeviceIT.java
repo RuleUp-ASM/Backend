@@ -75,4 +75,27 @@ class VerificationStrictDeviceIT extends VerificationApiSupport {
                 .getResponse().getStatus()).isEqualTo(200);
         assertThat(todayStatusOf(memberId)).isEqualTo("SUCCESS");
     }
+
+    @Test
+    @DisplayName("[P1] 계정에 활성 기기가 없으면 엄격 모드에서 신호를 판정에 쓰지 않는다")
+    void signalsAreNotUsedWhenTheAccountHasNoActiveDevice() throws Exception {
+        Member me = member(uniq("strict-device-unknown"));
+        UUID challenge = insertAutoChallenge(me.id(), "SCREEN_TIME_MIN", "USAGE", "{\"duration_min\":30}");
+        UUID memberId = insertReadyMember(challenge, me.id(), null, screenApps("com.ridi.books"));
+        // 기기를 한 번도 등록하지 않은 계정. 대조할 대상이 없다.
+        jdbc().update("UPDATE users SET device_id = NULL WHERE id = ?", bytes(me.id()));
+
+        Map<String, Object> body = syncBody(List.of(
+                usageSignal("com.ridi.books", todayAt(9, 0), todayAt(10, 0))));
+        body.put("deviceId", "아무거나-적어도-통과하면-안-된다");
+
+        // 요청 자체는 받는다 — 봉투가 기기를 밝혔으므로 형식은 갖췄다.
+        assertThat(postJsonAuth("/api/v1/verifications/sync", me.token(), body)
+                .getResponse().getStatus()).isEqualTo(200);
+
+        assertThat(todayStatusOf(memberId))
+                .as("모르면 통과시키는 구멍이 남아 있으면, 스위치를 켜도 기기를 등록한 적 없는 "
+                        + "계정은 아무 값이나 적어 그대로 인증된다 — 켠 의미가 없다")
+                .isNotEqualTo("SUCCESS");
+    }
 }

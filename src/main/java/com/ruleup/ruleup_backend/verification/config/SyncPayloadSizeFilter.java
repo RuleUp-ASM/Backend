@@ -20,6 +20,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * sync 요청 본문 크기 상한 (백엔드 테크스펙 §5 "요청 크기 상한").
@@ -46,6 +47,15 @@ public class SyncPayloadSizeFilter extends OncePerRequestFilter {
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final String SYNC_PATH = "/api/v1/verifications/sync";
 
+    /**
+     * 이 요청 본문의 <b>실제</b> 바이트 수가 담기는 요청 속성.
+     *
+     * <p>크기 분포 지표는 상한을 조정하려고 보는 값이라 근사로는 쓸모가 적다 — 신호 수에
+     * 고정 배수를 곱하면 신호 하나가 큰 요청(측위 포인트가 많은 건)이 작게 보여, 정작 상한에
+     * 부딪히는 요청이 분포에서 사라진다. 여기서는 어차피 세고 있으니 그 값을 넘긴다.
+     */
+    public static final String BODY_BYTES_ATTR = SyncPayloadSizeFilter.class.getName() + ".bodyBytes";
+
     private final VerificationProperties properties;
     private final com.ruleup.ruleup_backend.verification.service.VerificationMetrics metrics;
 
@@ -62,8 +72,10 @@ public class SyncPayloadSizeFilter extends OncePerRequestFilter {
             writeTooLarge(response);
             return;
         }
+        AtomicLong counted = new AtomicLong();
+        request.setAttribute(BODY_BYTES_ATTR, counted);
         try {
-            chain.doFilter(new LimitedBodyRequest(request, limit), response);
+            chain.doFilter(new LimitedBodyRequest(request, limit, counted), response);
         } catch (RuntimeException | ServletException | IOException e) {
             // 스트림에서 던진 신호는 파서(Jackson·메시지 컨버터)가 자기 예외로 감싸 올려보낸다.
             // 원인 사슬을 따라가 우리가 끊은 것인지 확인하고, 아니면 그대로 올린다.
@@ -93,10 +105,12 @@ public class SyncPayloadSizeFilter extends OncePerRequestFilter {
     /** 본문을 읽어 나가며 누적 바이트를 세는 래퍼. 상한을 넘으면 즉시 끊는다. */
     private static class LimitedBodyRequest extends HttpServletRequestWrapper {
         private final long limit;
+        private final AtomicLong counted;
 
-        LimitedBodyRequest(HttpServletRequest request, long limit) {
+        LimitedBodyRequest(HttpServletRequest request, long limit, AtomicLong counted) {
             super(request);
             this.limit = limit;
+            this.counted = counted;
         }
 
         @Override
@@ -106,7 +120,10 @@ public class SyncPayloadSizeFilter extends OncePerRequestFilter {
                 private long read;
 
                 private int count(int n) {
-                    if (n > 0 && (read += n) > limit) throw new SyncPayloadTooLargeException();
+                    if (n > 0) {
+                        counted.addAndGet(n);
+                        if ((read += n) > limit) throw new SyncPayloadTooLargeException();
+                    }
                     return n;
                 }
 

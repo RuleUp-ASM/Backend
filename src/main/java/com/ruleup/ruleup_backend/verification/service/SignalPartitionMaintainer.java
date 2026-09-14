@@ -178,16 +178,23 @@ public class SignalPartitionMaintainer {
     }
 
     /**
-     * 그 귀속일의 위치 원본 중 <b>아직 확정되지 않은</b>(파기 타이머가 걸리지 않은) 행 수.
+     * 그 귀속일의 위치 원본 중 <b>아직 파기되지 않은</b> 행 수.
      * 파티션을 붙잡을지 정하는 유일한 입력이라 밖에서 확인할 수 있게 열어 둔다.
+     *
+     * <p>기준은 {@code purgedAt} <b>하나뿐</b>이다. 파기 예정 시각이 남았는지는 묻지 않는다 —
+     * 물으면 정작 위험한 행이 빠진다. 파기 배치가 「아직 미확정 판정이 있다」며 건너뛴 좌표는
+     * {@code purgeAfter} 가 <b>이미 지나 있으므로</b>, 시각을 조건에 넣는 순간 0 건으로 보이고
+     * 파티션째 사라진다. 지켜야 할 불변식은 「파기 기록 없이 사라지지 않는다」이고, 그 기록이
+     * 바로 {@code purgedAt} 이다.
+     *
+     * <p>영원히 붙잡히지는 않는다 — 호출부가 보관 기간의 두 배에서 손을 놓고, 파기 배치도
+     * 파티션 경계에 닿으면 기록을 남기고 지운다.
      */
     public Integer countUnconfirmed(LocalDate partitionDate) {
         try {
-            // 파기 시각이 아직 오지 않았거나(확정 전) 파기되지 않은 채 남은 좌표.
             return jdbc.queryForObject(
                     "SELECT COUNT(*) FROM " + SignalDomain.LOCATION.table()
-                            + " WHERE observedDate = ? AND purgedAt IS NULL"
-                            + "   AND (purgeAfter IS NULL OR purgeAfter > NOW(6))",
+                            + " WHERE observedDate = ? AND purgedAt IS NULL",
                     Integer.class, java.sql.Date.valueOf(partitionDate));
         } catch (RuntimeException e) {
             // 세지 못하면 붙잡는 쪽으로 기운다 — 판정 근거를 잃는 것보다 하루 더 두는 편이 낫다.
