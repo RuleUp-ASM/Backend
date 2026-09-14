@@ -125,21 +125,38 @@ public class LocationPurgeService {
     /**
      * 한 묶음 파기.
      *
-     * <p><b>미확정 판정이 남은 유저·날짜는 건너뛴다.</b> 확정 배치가 밀려 경계가 지났는데도
-     * 판정이 안 끝난 경우가 있고, 그때 좌표를 지우면 판정할 근거가 사라진다.
+     * <p>두 가지를 건너뛴다.
+     * <ul>
+     *   <li><b>미확정 판정이 남은 유저·날짜</b> — 확정 배치가 밀려 경계가 지났는데도 판정이
+     *       안 끝난 경우가 있고, 그때 좌표를 지우면 판정할 근거가 사라진다.</li>
+     *   <li><b>판정 행이 아직 열리지도 않은 유저·날짜</b> — 채우기 배치가 늦으면 「PENDING 이
+     *       없다」가 「확정됐다」로 잘못 읽힌다. 다만 파티션이 떨어질 날짜가 되면 더 기다릴 수
+     *       없으므로, 그때는 파기해 <b>기록을 남기고</b> 보낸다.</li>
+     * </ul>
      */
     private int purgeChunk() {
         Instant now = Instant.now();
+        // 파티션이 곧 떨어질 날짜. 그 전에 파기해 두지 않으면 좌표가 <b>파기 기록 없이</b> 사라진다.
+        LocalDate dropBoundary = SignalPartitionMaintainer.oldestKept(
+                LocalDate.now(VerificationDeadlines.KST), properties.signalRetentionDays());
         try {
             return jdbc.update("UPDATE " + SignalDomain.LOCATION.table() + " s"
                             + " SET s.payload = ?, s.purgedAt = ?"
                             + " WHERE s.purgedAt IS NULL AND s.purgeAfter IS NOT NULL AND s.purgeAfter <= ?"
+                            // ① 확정 전에는 지우지 않는다.
                             + "   AND NOT EXISTS ("
                             + "       SELECT 1 FROM VerificationDaily d"
                             + "        WHERE d.userId = s.userId AND d.targetDate = s.observedDate"
                             + "          AND d.status = 'PENDING')"
+                            // ② 판정 행이 아직 열리지도 않았으면 기다린다 — 채우기 배치가 늦으면
+                            //    「PENDING 이 없다」가 「확정됐다」로 잘못 읽힌다. 다만 파티션이
+                            //    떨어질 날짜가 되면 더 기다릴 수 없으므로 그때는 파기해 기록을 남긴다.
+                            + "   AND (EXISTS ("
+                            + "          SELECT 1 FROM VerificationDaily d2"
+                            + "           WHERE d2.userId = s.userId AND d2.targetDate = s.observedDate)"
+                            + "        OR s.observedDate < ?)"
                             + " LIMIT " + PURGE_BATCH,
-                    PURGED_PAYLOAD, Timestamp.from(now), Timestamp.from(now));
+                    PURGED_PAYLOAD, Timestamp.from(now), Timestamp.from(now), Date.valueOf(dropBoundary));
         } catch (RuntimeException e) {
             // 이 배치가 밀리면 위치정보법 위반이다 — 조용히 넘기지 않고 에러로 남긴다.
             log.error("GPS 원본 좌표 파기 실패 — 지연이 쌓이면 안 된다. err={}", e.toString(), e);

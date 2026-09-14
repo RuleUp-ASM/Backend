@@ -31,6 +31,8 @@ class OutboxDeadLetterIT {
 
     @Autowired OutboxRepository repository;
     @Autowired OutboxService outboxService;
+    @Autowired OutboxDispatcher dispatcher;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
     private OutboxMessage exhaust(String dedupKey) {
         OutboxMessage m = repository.save(
@@ -60,6 +62,34 @@ class OutboxDeadLetterIT {
                 .as("운영이 찾을 수 있어야 되살릴 수 있다")
                 .extracting(OutboxMessage::getId)
                 .contains(dead.getId());
+    }
+
+    @Test
+    @DisplayName("[P1] 처리 완료 표시가 남아 있던 과거 메시지도 되살리면 다시 집힌다")
+    void aMigratedMessageBecomesPendingAgainAfterRedrive() {
+        // V49 이전 구조를 재현한다 — 포기한 건에 processedAt 이 찍혀 있던 상태.
+        OutboxMessage dead = exhaust("migrated:" + UUID.randomUUID());
+        jdbcTemplate.update("UPDATE outbox_messages SET processed_at = dead_lettered_at WHERE id = ?",
+                (Object) uuidBytes(dead.getId()));
+
+        int redriven = dispatcher.redriveDeadLettered(100);
+        assertThat(redriven).isGreaterThanOrEqualTo(1);
+
+        OutboxMessage revived = repository.findById(dead.getId()).orElseThrow();
+        assertThat(revived.isPending())
+                .as("processedAt 을 함께 비우지 않으면 되살렸다고 해 놓고 폴러가 집지 않는다 — "
+                        + "하필 그 행들이 실제로 나가지 못한 통지·집행이다")
+                .isTrue();
+        assertThat(repository.findDue(Instant.now().plusSeconds(60), Limit.of(500)))
+                .extracting(OutboxMessage::getId)
+                .contains(dead.getId());
+    }
+
+    private static byte[] uuidBytes(UUID id) {
+        java.nio.ByteBuffer bb = java.nio.ByteBuffer.allocate(16);
+        bb.putLong(id.getMostSignificantBits());
+        bb.putLong(id.getLeastSignificantBits());
+        return bb.array();
     }
 
     @Test

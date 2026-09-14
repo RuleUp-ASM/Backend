@@ -5,6 +5,7 @@ import com.ruleup.ruleup_backend.verification.repository.AppealRepository;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,6 +24,11 @@ import java.util.Objects;
  *
  * <p>남기는 값: 최근 30일 이의 건수, 짧은 기간(24시간) 반복 건수, 동일 사유 반복 건수, 동일 이미지 반복 건수.
  * 임계값 판정과 운영자 알림은 실데이터 관측 후 확정할 후속 작업이라 지금은 로그로만 적재한다.
+ *
+ * <p><b>정말 비동기로 돈다.</b> 예전에는 {@code @TransactionalEventListener} 만 달아 커밋 직후
+ * <b>같은 스레드</b>에서 실행했다. 그러면 30일치 이의를 훑는 조회가 이의 신청 응답을 붙잡는다 —
+ * 스펙이 "이상탐지 결과는 개별 인용을 지연하지 않는다"고 적은 것과 정반대다. 실패해도 삼킨다.
+ * 관측 자료이지 인용의 일부가 아니다.
  */
 @Component
 @RequiredArgsConstructor
@@ -34,10 +40,22 @@ public class AppealAbuseMonitor {
     private static final Duration BURST = Duration.ofHours(24);
 
     private final AppealRepository appealRepo;
+    private final VerificationMetrics metrics;
 
+    @Async
     @TransactionalEventListener
     @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
     public void onAppealAccepted(AppealService.AppealAccepted event) {
+        try {
+            record(event);
+        } catch (RuntimeException e) {
+            // 관측 자료다. 이미 사용자에게 인용됐다고 응답했고, 그것을 되돌릴 일이 아니다.
+            log.warn("이의 이상탐지 집계 실패 userId={} appealId={}: {}",
+                    event.userId(), event.appealId(), e.toString());
+        }
+    }
+
+    private void record(AppealService.AppealAccepted event) {
         List<Appeal> recent = appealRepo.findByUserIdAndAcceptedAtGreaterThanEqualOrderByAcceptedAtDesc(
                 event.userId(), event.acceptedAt().minus(LOOKBACK));
         Appeal current = recent.stream()
@@ -55,5 +73,6 @@ public class AppealAbuseMonitor {
                         "recent30d={} within24h={} sameReason={} sameImage={}",
                 event.userId(), event.challengeId(), event.targetDate(),
                 recent.size(), inBurst, sameReason, sameImage);
+        metrics.appealAbuseSampled();
     }
 }

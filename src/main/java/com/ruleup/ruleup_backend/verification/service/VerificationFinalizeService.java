@@ -367,7 +367,19 @@ public class VerificationFinalizeService {
      * 않은 경우), 그러면 확정 시각의 진실은 저장된 요약이 아니라 원본에 있다.
      */
     private boolean finalizeOne(VerificationDaily daily, Instant now) {
-        if (daily.isTerminal()) return false;   // 다른 인스턴스가 먼저 확정 — 중복 확정 금지
+        if (daily.isTerminal()) {
+            metrics.duplicateConfirm();   // 다른 인스턴스가 먼저 확정 — 중복 확정 금지
+            return false;
+        }
+        if (!VerificationDeadlines.finalizeDue(daily.getTargetDate(), now)) {
+            // 스펙 7절의 「확정 시각보다 이른 실패 확정 0건」 — <b>세기만 하고 막지는 않는다.</b>
+            // 확정 대상 여부는 행의 finalizeAfter(폴링 커서)가 정한다. 그 값은 실패 격리
+            // 백오프로 뒤로 밀리기도 하므로, 귀속일에서 다시 계산한 시각으로 막으면 정당한
+            // 확정까지 되돌린다. 여기서는 어긋난 사실만 남겨 알람이 잡을 수 있게 한다.
+            metrics.confirmedTooEarly();
+            log.warn("귀속일 기준 확정 시각보다 이르게 확정된다 verificationId={} targetDate={}",
+                    daily.getId(), daily.getTargetDate());
+        }
 
         Challenge challenge = challengeQuery.findChallenge(daily.getChallengeId()).orElse(null);
         if (challenge == null) {

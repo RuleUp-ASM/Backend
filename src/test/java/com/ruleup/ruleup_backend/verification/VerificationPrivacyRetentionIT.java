@@ -200,6 +200,29 @@ class VerificationPrivacyRetentionIT extends VerificationApiSupport {
         }
 
         @Test
+        @DisplayName("[P1] 판정 행이 아직 열리지 않았으면 「확정됐다」로 읽지 않는다")
+        void coordinatesWaitWhileTheVerdictRowHasNotBeenOpenedYet() throws Exception {
+            Member me = member(uniq("privacy-lazy"));
+            UUID challenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
+            UUID memberId = insertReadyMember(challenge, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+
+            sync(me.token(), List.of(
+                    geofenceSignal(memberId, "ENTER", todayAt(9, 0)),
+                    geofenceSignal(memberId, "EXIT", todayAt(10, 0))));
+            // 채우기 배치가 늦어 판정 행이 아직 없는 상태를 만든다.
+            jdbc().update("DELETE FROM VerificationMethodResult WHERE verificationDailyId IN "
+                    + "(SELECT id FROM VerificationDaily WHERE challengeMemberId = ?)", bytes(memberId));
+            jdbc().update("DELETE FROM VerificationDaily WHERE challengeMemberId = ?", bytes(memberId));
+            makeDue(me.id());
+
+            locationPurge.purgeDue();
+
+            assertThat(purgedRows(me.id()))
+                    .as("행이 없으면 「PENDING 이 없다」가 「확정됐다」로 잘못 읽힌다")
+                    .isZero();
+        }
+
+        @Test
         @DisplayName("[P1] 모두 확정된 뒤에는 좌표가 지워지고, 판정 기록은 남는다")
         void coordinatesArePurgedOnceEveryVerdictIsSettled() throws Exception {
             Member me = member(uniq("privacy-purged"));
@@ -228,18 +251,22 @@ class VerificationPrivacyRetentionIT extends VerificationApiSupport {
     class PartitionHold {
 
         @Test
-        @DisplayName("[P1] 파기 시각이 아직 안 온 좌표는 파티션 파기 판단에서 「남아 있다」로 세어진다")
-        void coordinatesNotYetDueAreCountedBeforeDroppingThePartition() throws Exception {
+        @DisplayName("[P1] 파기 시각이 지났어도 미확정이면 파티션 파기 판단이 붙잡는다")
+        void aPendingVerdictStillHoldsThePartitionAfterTheTimerPasses() throws Exception {
             Member me = member(uniq("privacy-hold"));
             UUID challenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
             UUID memberId = insertReadyMember(challenge, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
 
+            // 진입만 있어 판정은 PENDING 으로 남고, 파기 시각은 이미 지난 상태로 만든다.
             sync(me.token(), List.of(geofenceSignal(memberId, "ENTER", todayAt(9, 0))));
+            assertThat(todayStatusOf(memberId)).isIn(null, "PENDING");
+            jdbc().update("UPDATE verification_location_signals "
+                    + "SET purgeAfter = DATE_SUB(NOW(6), INTERVAL 1 DAY) WHERE userId = ?", bytes(me.id()));
 
             java.time.LocalDate today = java.time.LocalDate.now(KST);
             assertThat(partitionMaintainer.countUnconfirmed(today))
-                    .as("파기 시각(D+2 경계)이 오기 전에 파티션을 떨어뜨리면 "
-                            + "좌표를 파기 기록 없이 잃는다")
+                    .as("「파기 시각이 아직 안 왔는가」로 물으면 경계가 지난 뒤에는 늘 0 이라, "
+                            + "확정 전 좌표가 파티션째 사라진다")
                     .isGreaterThanOrEqualTo(1);
         }
     }

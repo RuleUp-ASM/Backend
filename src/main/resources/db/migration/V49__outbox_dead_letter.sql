@@ -23,10 +23,15 @@ ALTER TABLE `outbox_messages`
 -- 죽은 메시지 조회 전용. 정상 경로에서는 비어 있어야 하는 인덱스라 비용이 거의 없다.
 CREATE INDEX `ix_outbox_dead_lettered` ON `outbox_messages` (`dead_lettered_at`);
 
--- 과거에 「포기」로 닫힌 행은 되살릴 근거가 없다. attempts 가 상한에 닿았고 오류가 남아 있는
--- 행만 포기로 다시 표시한다 — 정상 발행분은 attempts 가 상한 미만이거나 last_error 가 비어 있다.
+-- 과거에 「포기」로 닫힌 행을 옮긴다. attempts 가 상한에 닿았고 오류가 남아 있는 행만 대상이다 --
+-- 정상 발행분은 attempts 가 상한 미만이거나 last_error 가 비어 있다.
+--
+-- (!) `processed_at` 을 반드시 함께 비운다. 그대로 두면 dead_lettered_at 만 채워진 채
+-- 「처리 완료」로도 남아, 되살려도 폴러가 집지 않는다. 과거 메시지만 영원히 복구 불가가 되는데
+-- 하필 그 행들이 실제로 나가지 못한 통지·집행이다.
 UPDATE `outbox_messages`
-   SET `dead_lettered_at` = `processed_at`
+   SET `dead_lettered_at` = `processed_at`,
+       `processed_at`     = NULL
  WHERE `processed_at` IS NOT NULL
    AND `attempts` >= 5
    AND `last_error` IS NOT NULL;

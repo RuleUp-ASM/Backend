@@ -163,17 +163,19 @@ public class SignalPartitionMaintainer {
      * @return 이번에는 떨어뜨리지 않고 넘길지
      */
     private boolean holdForUnconfirmed(LocalDate partitionDate, LocalDate today, int retentionDays) {
-        Integer unconfirmed = countUnconfirmed(partitionDate);
-        if (unconfirmed == null || unconfirmed == 0) return false;
+        Integer unpurged = countUnconfirmed(partitionDate);
+        if (unpurged == null || unpurged == 0) return false;
 
         boolean withinHold = !partitionDate.isBefore(today.minusDays(2L * retentionDays));
         if (withinHold) {
-            log.warn("확정되지 않은 좌표가 남아 위치 파티션 파기를 미룬다 date={} rows={}",
-                    partitionDate, unconfirmed);
+            log.warn("파기되지 않은 좌표가 남아 위치 파티션 파기를 미룬다 date={} rows={}",
+                    partitionDate, unpurged);
             return true;
         }
-        log.warn("확정 없이 위치 파티션을 파기한다 — 인증에 쓰이지 않은 좌표다. date={} rows={}",
-                partitionDate, unconfirmed);
+        // 최대 보류 기간을 넘겼다. 대개 판정이 끝내 확정되지 않은 건인데, 무한정 붙잡으면
+        // 파티션이 끝없이 쌓인다. 몇 건을 파기 기록 없이 지웠는지 남기고 떨어뜨린다.
+        log.error("[PRIVACY] 파기 기록 없이 위치 파티션을 떨어뜨린다 — 확정이 끝내 되지 않은 건이다. "
+                + "date={} rows={}", partitionDate, unpurged);
         return false;
     }
 
@@ -183,15 +185,17 @@ public class SignalPartitionMaintainer {
      */
     public Integer countUnconfirmed(LocalDate partitionDate) {
         try {
-            // 파기 시각이 아직 오지 않았거나(확정 전) 파기되지 않은 채 남은 좌표.
+            // <b>파기되지 않은 채 남은 좌표</b>가 있으면 붙잡는다. 「파기 시각이 아직 안 왔는가」로
+            // 물으면 안 된다 — 파기 시각은 적재 때 D+2 로 미리 박히므로, 파티션을 떨어뜨릴 때쯤이면
+            // 판정이 아직 PENDING 이어도 그 조건은 이미 거짓이다. 그러면 확정 전 좌표가
+            // 파티션째 사라진다. 파기 배치가 미확정 건을 건너뛰어 남겨 둔 행이 곧 그 신호다.
             return jdbc.queryForObject(
                     "SELECT COUNT(*) FROM " + SignalDomain.LOCATION.table()
-                            + " WHERE observedDate = ? AND purgedAt IS NULL"
-                            + "   AND (purgeAfter IS NULL OR purgeAfter > NOW(6))",
+                            + " WHERE observedDate = ? AND purgedAt IS NULL",
                     Integer.class, java.sql.Date.valueOf(partitionDate));
         } catch (RuntimeException e) {
             // 세지 못하면 붙잡는 쪽으로 기운다 — 판정 근거를 잃는 것보다 하루 더 두는 편이 낫다.
-            log.warn("미확정 좌표 집계 실패 date={} err={}", partitionDate, e.toString());
+            log.warn("미파기 좌표 집계 실패 date={} err={}", partitionDate, e.toString());
             return Integer.MAX_VALUE;
         }
     }

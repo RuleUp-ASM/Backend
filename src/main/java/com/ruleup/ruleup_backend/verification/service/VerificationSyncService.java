@@ -61,8 +61,6 @@ public class VerificationSyncService {
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     /** 누적 일괄 상한: 신호 배열 총 개수(초과 시 413 SYNC_PAYLOAD_TOO_LARGE, 클라는 분할 재전송). */
     private static final int MAX_SIGNALS_PER_SYNC = 5000;
-    /** 신호 하나의 대략적인 직렬화 크기. 본문 크기 <b>분포</b>를 보기 위한 환산 계수다. */
-    private static final int APPROX_BYTES_PER_SIGNAL = 256;
     private static final Set<String> KNOWN_SIGNAL_TYPES = Stream.concat(
             Arrays.stream(SignalType.values()).map(Enum::name),
             Stream.of("GEOFENCE_TRANSITION")   // Android 와이어 별칭
@@ -243,7 +241,8 @@ public class VerificationSyncService {
         metrics.sync(System.nanoTime() - startedAt, signals.size(), ingested.droppedCount(),
                 gateDropped, consent.rejectedTypes().size());
         // 봉투의 모양 — 압축·요약 전송 도입 판단의 근거다(백엔드 7절).
-        metrics.envelope(payloadBytesOf(req), (req.coveredUntil() - req.coveredFrom()) / 1000);
+        metrics.envelope(payloadBytesOf(), (req.coveredUntil() - req.coveredFrom()) / 1000,
+                Boolean.TRUE.equals(req.backlog()));
         return new SyncResponse(
                 ZonedDateTime.ofInstant(now, KST).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
                 flushIntervalSec, updated, ignored, properties.maxPayloadBytes(), ingested.droppedCount(),
@@ -275,11 +274,17 @@ public class VerificationSyncService {
     private boolean inactiveDevice(com.ruleup.ruleup_backend.user.domain.User user, String deviceId) {
         if (blank(deviceId)) {
             metrics.deviceIdMissing();
-            return false;
+            return false;   // 엄격 모드에서는 봉투 검증이 이미 거절했다
         }
-        if (user == null) return false;
-        String active = user.getDeviceId();
-        return active != null && !active.isBlank() && !active.equals(deviceId.trim());
+        String active = (user != null) ? user.getDeviceId() : null;
+        if (active == null || active.isBlank()) {
+            // 대조할 활성 기기가 없다. 관대 모드에서는 통과시키되, 엄격 모드에서는 <b>막는다</b> —
+            // 그러지 않으면 활성 기기가 없는 계정에 아무 deviceId 나 실어 보내는 것으로
+            // 검증 전체를 우회할 수 있다. 로그인하면 기기가 붙으므로 정상 계정은 여기 오지 않는다.
+            metrics.activeDeviceUnknown();
+            return properties.requireActiveDevice();
+        }
+        return !active.equals(deviceId.trim());
     }
 
     /**
@@ -316,13 +321,19 @@ public class VerificationSyncService {
     }
 
     /**
-     * 이 요청의 대략적인 본문 크기. 실제 바이트는 필터가 스트림에서 세지만 그 값을 여기까지
-     * 들고 오려면 요청 속성을 엮어야 하고, 지표의 쓰임(분포를 보고 상한을 조정)에는 신호 수로
-     * 환산한 근사면 충분하다. <b>정확한 반려 판단은 여전히 필터가 한다.</b>
+     * 이 요청의 <b>실제</b> 본문 바이트. 크기 상한 필터가 스트림에서 세어 요청 속성에 남긴 값이다.
+     *
+     * <p>신호 개수로 환산하면 큰 수면 세션이나 Health 레코드 하나가 상한에 붙어도 지표에 잡히지
+     * 않는다 — 정작 압축·요약 전송을 검토해야 할 신호를 놓친다. 속성이 없으면(필터를 타지 않는
+     * 테스트 경로 등) 0 을 돌려 분포를 오염시키지 않는다.
      */
-    private static long payloadBytesOf(SyncRequest req) {
-        List<SyncSignal> signals = req.signals();
-        return (signals != null) ? (long) signals.size() * APPROX_BYTES_PER_SIGNAL : 0L;
+    private static long payloadBytesOf() {
+        var attrs = org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+        if (attrs == null) return 0L;
+        Object bytes = attrs.getAttribute(
+                com.ruleup.ruleup_backend.verification.config.SyncPayloadSizeFilter.PAYLOAD_BYTES_ATTRIBUTE,
+                org.springframework.web.context.request.RequestAttributes.SCOPE_REQUEST);
+        return (bytes instanceof Number n) ? n.longValue() : 0L;
     }
 
     private boolean becameFinal(VerificationStatus before, VerificationStatus after) {
@@ -391,7 +402,12 @@ public class VerificationSyncService {
                                              VerificationSignalReader.DaySignalSet daySignals,
                                              List<SyncRequest.Gap> gaps, LocalDate today, Instant now) {
         // 확정 이후 도착분은 저장만 하고 판정에 쓰지 않는다(인증 정책 §2 지연 데이터). 구제는 이의제기로만.
-        if (daily.isTerminal()) return daily.getStatus();
+        // 스펙 7절이 「확정 이후 일반 sync 자동 정정 0건」을 요구하므로, 여기 닿은 횟수를 센다 —
+        // 결과가 바뀐 것이 아니라 <b>바뀔 뻔한 시도</b>의 수다.
+        if (daily.isTerminal()) {
+            metrics.lateSignalIgnored();
+            return daily.getStatus();
+        }
         // 원본을 전부 읽지 못한 날은 평가하지 않는다. 잘린 값으로 「실패 예정」이나 성공을 찍으면
         // 사용자에게 잘못된 결과가 그대로 보인다 — 판정을 미루는 편이 낫다.
         if (daySignals == null || !daySignals.complete()) {

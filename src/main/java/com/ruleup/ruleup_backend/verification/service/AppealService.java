@@ -63,6 +63,7 @@ public class AppealService {
     private final AppealRepository appealRepo;
     private final OutboxService outbox;
     private final OutboxDispatcher outboxDispatcher;
+    private final VerificationMetrics metrics;
     private final ChallengeQueryService challengeQuery;
     private final VerificationConfigFactory configFactory;
     private final VerificationProgressService progressService;
@@ -111,6 +112,7 @@ public class AppealService {
                         daily.getId().toString(), daily.getTargetDate().toString()),
                 AppealCorrectionOutboxHandler.OUTBOX_TYPE + ":" + daily.getId());
         outboxDispatcher.requestFlush();
+        metrics.appealAccepted();
 
         // 결과 고지. 응답으로도 알려 주지만 그것만으로는 부족하다 — 신청 화면을 떠난 뒤에
         // 정정 사실을 확인할 자리가 알림함뿐이다. 이의 하나에 결과는 하나라 appeal_id 가 곧 멱등 키다.
@@ -150,6 +152,9 @@ public class AppealService {
                     daily.getId(), daily.getChallengeId(), daily.getChallengeMemberId(),
                     userId, daily.getTargetDate(), reason, imageUrl, now));
         } catch (DataIntegrityViolationException e) {
+            // uq(verificationDailyId) 가 막았다 — 같은 판정이 두 번 뒤집히면 점수도 두 번 지급된다.
+            // 스펙 7절이 0건을 요구하는 값이라 막힌 횟수를 센다.
+            metrics.appealDuplicateBlocked();
             throw new BusinessException(ErrorCode.NOT_FAILED);
         }
     }

@@ -111,6 +111,9 @@ public class OutboxMessage {
      */
     public void redrive(Instant at) {
         this.deadLetteredAt = null;
+        // 처리 완료 표시도 함께 지운다. 하나라도 남아 있으면 isPending() 이 false 라
+        // 되살렸다고 해 놓고 폴러가 집지 않는다 — 마이그레이션으로 옮겨 온 과거 행이 그 경우다.
+        this.processedAt = null;
         this.attempts = 0;
         this.availableAt = at;
     }

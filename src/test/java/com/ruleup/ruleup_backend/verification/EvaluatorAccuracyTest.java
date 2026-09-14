@@ -72,9 +72,14 @@ class EvaluatorAccuracyTest {
     }
 
     private VerificationConfig sleepConfig(BigDecimal minHours) {
+        return sleepConfig(minHours, List.of());   // 신뢰 목록 미적용(기존 케이스 유지)
+    }
+
+    /** 신뢰 목록을 건 수면 설정 — 걸음·거리와 같은 규칙이 수면에도 걸리는지 보는 데 쓴다. */
+    private VerificationConfig sleepConfig(BigDecimal minHours, List<String> trustedOrigins) {
         return new VerificationConfig(ScheduleType.FIXED_DAYS, null, MethodCombine.AND,
                 List.of(VerificationMethod.SLEEP), null, null, null, null,
-                new SleepConfig(null, minHours, Polarity.ACHIEVEMENT, 12), List.of());
+                new SleepConfig(null, minHours, Polarity.ACHIEVEMENT, 12, trustedOrigins), List.of());
     }
 
     private static SyncSignal geofence(String transition, Instant when, Boolean isMock) {
@@ -286,6 +291,27 @@ class EvaluatorAccuracyTest {
             // 나머지 4시간이 뒤늦게 도착해 원본에 쌓이면 합산된다 — 앞 구간을 잊으면 영영 못 채운다.
             assertThat(evaluator.evaluate(ctx(
                     sleepConfig(new BigDecimal("7")), List.of(early, late), List.of(), now)).status())
+                    .isEqualTo(VerificationStatus.SUCCESS);
+        }
+
+        @Test
+        @DisplayName("신뢰 목록 밖 출처의 수면 기록은 자동 기록이라도 판정에서 빠진다")
+        void sleepFromAnUntrustedOriginIsExcludedEvenWhenAutomatic() {
+            Instant now = at(23, 0).plusSeconds(10 * 3600);
+            // 손입력이 아니라 「자동」이지만 출처가 신뢰 목록 밖이다.
+            HealthOrigin spoofed = new HealthOrigin("com.example.fake", "AUTO", "PHONE");
+            SyncSignal segment = sleep(at(23, 0), at(23, 0).plusSeconds(8 * 3600), spoofed);
+            List<String> allowlist = List.of("com.sec.android.app.shealth");
+
+            assertThat(evaluator.evaluate(ctx(
+                    sleepConfig(new BigDecimal("7"), allowlist), List.of(segment), List.of(), now)).status())
+                    .as("손입력만 거르면 임의의 dataOrigin 을 단 자동 기록이 그대로 통과한다")
+                    .isNotEqualTo(VerificationStatus.SUCCESS);
+
+            // 목록 안의 출처는 그대로 인정된다.
+            SyncSignal trustedSegment = sleep(at(23, 0), at(23, 0).plusSeconds(8 * 3600), TRUSTED);
+            assertThat(evaluator.evaluate(ctx(
+                    sleepConfig(new BigDecimal("7"), allowlist), List.of(trustedSegment), List.of(), now)).status())
                     .isEqualTo(VerificationStatus.SUCCESS);
         }
 
