@@ -86,8 +86,11 @@ public class ChallengeDetailQueryService {
                 c.getStatus().name(),
                 owner(c),
                 c.getOwnerType().name(),
-                c.getParticipantCount(),
+                // isFull 을 실시간 COUNT 로 재면서 참여자 수만 비동기 표시값을 내리면
+                // 「0명인데 마감」 같은 카드가 나온다. 한 요청 안에서는 같은 원천을 본다.
+                (int) activeCount,
                 c.getMaxParticipants(),
+                c.getWeeklyCount(),
                 full,
                 new ChallengeDetailResponse.Period(
                         c.getStartDate().toString(), c.getEndDate().toString(),

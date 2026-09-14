@@ -44,6 +44,21 @@ public class ExploreRedisStore {
         return Boolean.TRUE.equals(redis.hasKey(ExploreKeys.WARMED));
     }
 
+    /**
+     * 파생 인덱스를 계산한 시각을 새긴다.
+     *
+     * <p>인기 응답의 {@code calculatedAt} 이 이 값이다. 응답을 만들 때 「지금」을 찍으면 클라가
+     * 언제나 「0초 전 기준」을 보게 되어, 지연을 표시하라고 그 필드를 둔 이유가 사라진다.
+     */
+    public void markCalculatedAt(java.time.Instant at) {
+        redis.opsForValue().set(ExploreKeys.CALCULATED_AT, at.toString());
+    }
+
+    /** 마지막 계산 시각. 아직 없으면 비어 있다. */
+    public java.util.Optional<String> calculatedAt() {
+        return java.util.Optional.ofNullable(redis.opsForValue().get(ExploreKeys.CALCULATED_AT));
+    }
+
     public void markWarmed() {
         redis.opsForValue().set(ExploreKeys.WARMED, "1");
     }

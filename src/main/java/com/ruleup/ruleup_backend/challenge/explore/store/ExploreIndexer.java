@@ -82,6 +82,26 @@ public class ExploreIndexer {
     }
 
     /**
+     * 지금 값과 다른 카테고리·인증 방식 집합에서 그 방을 뺀다.
+     *
+     * <p>이전 값을 따로 기억하지 않는다 — 기억하면 그 기록이 또 하나의 파생값이 되어 같은 문제를
+     * 되풀이한다. 집합 수가 카테고리 12종과 인증 방식 몇 개로 <b>작고 고정</b>이라, 전부 훑어
+     * 지우는 편이 값을 하나 더 들고 있는 것보다 단순하고 틀릴 여지가 없다.
+     */
+    private void removeFromOtherSets(Row row) {
+        for (com.ruleup.ruleup_backend.user.domain.InterestCategory c
+                : com.ruleup.ruleup_backend.user.domain.InterestCategory.values()) {
+            if (!c.name().equals(row.category())) store.removeFromSet(ExploreKeys.category(c.name()), row.id());
+        }
+        for (String type : VERIFY_TYPES) {
+            if (!type.equals(row.verificationType())) store.removeFromSet(ExploreKeys.verifyType(type), row.id());
+        }
+    }
+
+    /** 인증 방식 필터의 전체 값. 집합에서 빼려면 어떤 이름들이 있는지 알아야 한다. */
+    private static final java.util.List<String> VERIFY_TYPES = java.util.List.of("AUTO", "MANUAL");
+
+    /**
      * 전체 재구성 — 워밍업과 03:30 대조 배치가 쓴다.
      *
      * <p>기존 키를 <b>먼저 비운다.</b> 원천에서 사라진 방이 파생에 남아 있으면 목록에 유령이 뜨는데,
@@ -91,6 +111,7 @@ public class ExploreIndexer {
         List<Row> rows = jdbc.query(SELECT_ROW + "WHERE " + VISIBLE_CONDITION, (rs, i) -> mapRow(rs));
         store.flushDerived();
         for (Row row : rows) apply(row);
+        store.markCalculatedAt(java.time.Instant.now());
         store.markWarmed();
         log.info("explore_reindex rows={}", rows.size());
         return rows.size();
@@ -131,6 +152,10 @@ public class ExploreIndexer {
         store.putStats(row.id(), next);
 
         store.addToSet(ExploreKeys.VISIBLE, row.id());
+        // 카테고리·인증 방식은 <b>바뀔 수 있다.</b> 새 집합에 넣기만 하고 옛 집합에서 빼지 않으면,
+        // 다음 전체 재구성까지 그 방이 옛 필터 결과에 계속 뜬다 — AUTO 로 걸러 놓고 MANUAL 방을
+        // 보게 되는 식이다. 파생값이 원천보다 오래 살아남는 자리라 반드시 지워야 한다.
+        removeFromOtherSets(row);
         if (row.category() != null) store.addToSet(ExploreKeys.category(row.category()), row.id());
         // 인증 방식이 비어 있는 방은 해당 필터의 후보가 아니다 — "null" 이라는 이름의 집합을 만들지 않는다.
         if (row.verificationType() != null) {

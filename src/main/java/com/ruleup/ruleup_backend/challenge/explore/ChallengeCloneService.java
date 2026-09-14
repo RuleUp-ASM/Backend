@@ -59,11 +59,11 @@ public class ChallengeCloneService {
         boolean group = origin.getParticipationType() == ParticipationType.GROUP;
         boolean isPublic = "PUBLIC".equals(origin.getVisibility());
         if (!group || !isPublic) {
-            // 볼 수 없는 사람에게는 존재 자체를 숨기고, 볼 수 있는 사람에게만 "복제 불가"라고 답한다.
-            boolean canSee = origin.isOwner(userId)
-                    || memberRepository.findByChallengeIdAndUserId(challengeId, userId)
-                    .filter(m -> m.isActive()).isPresent();
-            throw new BusinessException(canSee ? ErrorCode.NOT_CLONEABLE : ErrorCode.CHALLENGE_NOT_FOUND);
+            // 복제 API 명세는 비공개·솔로를 403 NOT_CLONEABLE 로 규정한다. 존재 은닉은 <b>상세
+            // 조회</b>의 규칙이고, 복제는 id 를 이미 아는 사람만 부를 수 있는 경로다 — 여기서
+            // 404 를 섞으면 클라가 「없는 방」과 「복제만 안 되는 방」을 구분하지 못해,
+            // 사전 비활성 + 토스트라는 명세의 처리 방식을 그릴 수 없다.
+            throw new BusinessException(ErrorCode.NOT_CLONEABLE);
         }
 
         LocalDate start = LocalDate.now(KST).plusDays(START_OFFSET_DAYS);

@@ -30,6 +30,8 @@ public record ChallengeDetailResponse(
         String ownerType,
         int participantCount,
         Integer capacity,
+        /** 주 몇 회 목표인지. 명세의 필수 필드다 — 없으면 카드가 목표를 설명하지 못한다. */
+        Integer weeklyCount,
         boolean isFull,
         Period period,
         Verification verification,

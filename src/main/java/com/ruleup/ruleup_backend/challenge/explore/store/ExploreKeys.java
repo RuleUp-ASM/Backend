@@ -47,6 +47,9 @@ public final class ExploreKeys {
     }
 
     /** 인증 방식 필터 집합(AUTO / MANUAL). */
+    /** 파생 인덱스를 마지막으로 계산한 시각. 인기 응답의 calculatedAt 이 이 값이다. */
+    public static final String CALCULATED_AT = PREFIX + "calculated_at";
+
     public static String verifyType(String verifyType) {
         return PREFIX + "s:verify:" + verifyType;
     }

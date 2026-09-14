@@ -65,11 +65,9 @@ public class TrendingRankingSource {
             throw new BusinessException(ErrorCode.EXPLORE_TEMPORARILY_UNAVAILABLE);
         }
 
-        // 비어 있음을 정상으로 취급하지 않는다. 다만 이건 <b>장애가 아니라 인덱스가 덜 찬 상태</b>라
-        // 회로에 실패로 세지 않는다 — 방이 정말 하나도 없는 서비스 초기에 회로가 계속 열려 버린다.
-        if (top.isEmpty()) return fromSql(category);
-
-        return new Ranking(Instant.now().toString(),
+        // 워밍업이 끝난 뒤의 빈 후보는 <b>정말 방이 없다</b>는 뜻이다. 다른 저장소로 대신
+        // 채우면 「인기 섹션을 숨긴다」는 클라 분기가 영영 돌지 않는다(공통 5-5-1).
+        return new Ranking(store.calculatedAt().orElseGet(() -> Instant.now().toString()),
                 top.stream().map(t -> new Entry(t.challengeId(), t.recentJoins24h())).toList(),
                 ExploreDataSource.REDIS);
     }

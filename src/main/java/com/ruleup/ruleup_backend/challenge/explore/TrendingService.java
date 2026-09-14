@@ -43,6 +43,7 @@ public class TrendingService {
     private final UserScoreSummaryRepository scoreSummaryRepository;
     private final MyMembershipReader myMembershipReader;
     private final MeterRegistry meterRegistry;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
     private final AtomicLong redisServed = new AtomicLong();
     private final AtomicLong sqlServed = new AtomicLong();
 
@@ -63,7 +64,14 @@ public class TrendingService {
             return new TrendingResponse(ranking.calculatedAt(), List.of());
         }
 
-        List<UUID> ids = ranking.entries().stream().map(TrendingRankingSource.Entry::challengeId).toList();
+        // 내가 신고해 차단한 방은 인기에서도 뺀다(공통 5-3). 목록에서만 빼고 인기에 남기면
+        // 신고한 그 방을 홈 첫 화면에서 다시 만난다 — 신고의 결과가 뒤집히는 셈이다.
+        Set<UUID> blocked = blockedChallengeIds(userId);
+        List<UUID> ids = ranking.entries().stream()
+                .map(TrendingRankingSource.Entry::challengeId)
+                .filter(id -> !blocked.contains(id))
+                .toList();
+        if (ids.isEmpty()) return new TrendingResponse(ranking.calculatedAt(), List.of());
         Map<UUID, Challenge> byId = challengeRepository.findAllById(ids).stream()
                 .collect(Collectors.toMap(Challenge::getId, Function.identity()));
         Tier myTier = displayTier(userId);
@@ -73,6 +81,7 @@ public class TrendingService {
         List<TrendingResponse.Item> items = new ArrayList<>();
         int rank = 1;
         for (TrendingRankingSource.Entry entry : ranking.entries()) {
+            if (blocked.contains(entry.challengeId())) continue;
             Challenge c = byId.get(entry.challengeId());
             if (!isCurrentlyVisible(c, normalized)) continue;
             items.add(new TrendingResponse.Item(
@@ -134,6 +143,24 @@ public class TrendingService {
         if (!InterestCategory.allValid(List.of(code)))
             throw new BusinessException(ErrorCode.INVALID_FILTER_VALUE);
         return code;
+    }
+
+    /** 내가 차단한 챌린지 id. 신고하면 자동 등재되며, 본인이 풀 때까지 내 화면에서 빠진다. */
+    private Set<UUID> blockedChallengeIds(UUID userId) {
+        return new java.util.HashSet<>(jdbc.query(
+                "SELECT target_id FROM user_blocks WHERE blocker_id = ? AND target_type = 'CHALLENGE'",
+                (rs, i) -> {
+                    byte[] raw = rs.getBytes(1);
+                    java.nio.ByteBuffer bb = java.nio.ByteBuffer.wrap(raw);
+                    return new UUID(bb.getLong(), bb.getLong());
+                }, uuidBytes(userId)));
+    }
+
+    private static byte[] uuidBytes(UUID id) {
+        java.nio.ByteBuffer bb = java.nio.ByteBuffer.allocate(16);
+        bb.putLong(id.getMostSignificantBits());
+        bb.putLong(id.getLeastSignificantBits());
+        return bb.array();
     }
 
     private Tier displayTier(UUID userId) {
