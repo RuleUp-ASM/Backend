@@ -46,6 +46,15 @@ public class SyncPayloadSizeFilter extends OncePerRequestFilter {
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final String SYNC_PATH = "/api/v1/verifications/sync";
 
+    /**
+     * 실제로 읽어 들인 본문 바이트를 담아 두는 요청 속성.
+     *
+     * <p>크기 분포 지표는 <b>여기서 센 값</b>이라야 의미가 있다. 신호 개수로 환산하면 큰 수면
+     * 세션이나 Health 레코드 하나가 상한에 붙어도 지표에 잡히지 않는다 — 정작 압축·요약 전송을
+     * 검토해야 할 신호를 놓친다.
+     */
+    public static final String PAYLOAD_BYTES_ATTRIBUTE = "verification.sync.payloadBytes";
+
     private final VerificationProperties properties;
     private final com.ruleup.ruleup_backend.verification.service.VerificationMetrics metrics;
 
@@ -90,7 +99,10 @@ public class SyncPayloadSizeFilter extends OncePerRequestFilter {
         return false;
     }
 
-    /** 본문을 읽어 나가며 누적 바이트를 세는 래퍼. 상한을 넘으면 즉시 끊는다. */
+    /**
+     * 본문을 읽어 나가며 누적 바이트를 세는 래퍼. 상한을 넘으면 즉시 끊고,
+     * 정상 통과분은 <b>읽은 만큼</b>을 요청 속성에 남겨 지표가 실제 크기를 볼 수 있게 한다.
+     */
     private static class LimitedBodyRequest extends HttpServletRequestWrapper {
         private final long limit;
 
@@ -106,7 +118,11 @@ public class SyncPayloadSizeFilter extends OncePerRequestFilter {
                 private long read;
 
                 private int count(int n) {
-                    if (n > 0 && (read += n) > limit) throw new SyncPayloadTooLargeException();
+                    if (n > 0) {
+                        read += n;
+                        if (read > limit) throw new SyncPayloadTooLargeException();
+                        setAttribute(PAYLOAD_BYTES_ATTRIBUTE, read);
+                    }
                     return n;
                 }
 

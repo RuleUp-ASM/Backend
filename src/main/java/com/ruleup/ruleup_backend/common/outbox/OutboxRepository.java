@@ -36,6 +36,11 @@ public interface OutboxRepository extends JpaRepository<OutboxMessage, UUID> {
     @Query("SELECT m FROM OutboxMessage m WHERE m.deadLetteredAt IS NOT NULL ORDER BY m.deadLetteredAt ASC")
     List<OutboxMessage> findDeadLettered(Limit limit);
 
+    /** 최근에 포기한 건만 — 자동 재적재가 영구 불능 메시지를 매일 다시 태우지 않게 한다. */
+    @Query("SELECT m FROM OutboxMessage m WHERE m.deadLetteredAt IS NOT NULL "
+            + "AND m.deadLetteredAt >= :since ORDER BY m.deadLetteredAt ASC")
+    List<OutboxMessage> findDeadLetteredSince(@Param("since") Instant since, Limit limit);
+
     Optional<OutboxMessage> findByDedupKey(String dedupKey);
 
     /**

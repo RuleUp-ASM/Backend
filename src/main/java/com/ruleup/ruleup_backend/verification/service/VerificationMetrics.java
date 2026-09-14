@@ -48,6 +48,7 @@ public class VerificationMetrics {
     private final Counter finalizeFailed;
     private final Counter materializeFailed;
     private final Counter deviceIdMissing;
+    private final Counter activeDeviceUnknown;
     private final Counter signalsStored;
     private final Counter coordinatesPurged;
     private final Counter signalsReadTruncated;
@@ -92,6 +93,9 @@ public class VerificationMetrics {
         // 기기를 안 보내는 구버전 앱이 전부 인증 불가가 된다.
         this.deviceIdMissing = Counter.builder("verification.sync.device_id_missing")
                 .description("기기 식별자 없이 들어온 sync 요청 수").register(registry);
+        // 대조할 활성 기기가 없는 계정. 정상 계정은 로그인 때 기기가 붙으므로 0 이어야 한다.
+        this.activeDeviceUnknown = Counter.builder("verification.sync.active_device_unknown")
+                .description("활성 기기가 등록되지 않은 계정의 sync 요청 수").register(registry);
         this.signalsStored = Counter.builder("verification.signals.stored")
                 .description("실제로 적재된 원본 신호 수 — 저장량 증가율의 원천").register(registry);
         // 파기가 실제로 돌고 있는지의 유일한 수치. 0 이 이어지면 배치가 죽은 것이다.
@@ -156,6 +160,11 @@ public class VerificationMetrics {
     /** 기기 식별자 없이 sync 가 들어왔다(관대 모드에서만 도달한다). */
     public void deviceIdMissing() {
         deviceIdMissing.increment();
+    }
+
+    /** 대조할 활성 기기가 없는 계정이 sync 했다. */
+    public void activeDeviceUnknown() {
+        activeDeviceUnknown.increment();
     }
 
     /** 한 멤버의 무신호 채우기가 실패해 그 날짜 판정 행이 열리지 않았다. */

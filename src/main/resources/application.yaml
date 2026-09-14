@@ -84,6 +84,19 @@ app:
     geofence-radius-m: ${VERIFICATION_GEOFENCE_RADIUS_M:500}     # 잠정 500m — 성능 테스트 후 조정
     max-payload-bytes: ${VERIFICATION_MAX_PAYLOAD_BYTES:1048576} # sync 1회 상한(클라가 이 값으로 구간을 쪼갠다)
 
+    # 게이트 강화 스위치 — <b>둘 다 지금은 꺼져 있다.</b> 기본값에 묻어 두지 않고 여기 적어 두는
+    # 이유는, 「언젠가 켠다」가 아니라 <b>켤 조건이 정해진 미완 항목</b>이기 때문이다.
+    #
+    #  · require-active-device : 스펙의 「AT + 활성 기기 검증」. 켜면 기기를 밝히지 않은 sync 를
+    #    거절한다. 안드로이드가 deviceId 를 싣기 시작하고 `verification.sync.device_id_missing`
+    #    과 `verification.sync.active_device_unknown` 이 0 으로 떨어진 뒤에 켠다.
+    #  · require-signal-origin : 출처 없는 수면 기록을 판정에서 뺀다(걸음·거리는 이미 뺀다).
+    #    evidence 의 originMissing 이 0 으로 떨어진 뒤에 켠다.
+    #
+    # 먼저 켜면 구버전 앱 사용자가 전부 인증 불가가 된다 — 조건 없이 켜지 말 것.
+    require-active-device: ${VERIFICATION_REQUIRE_ACTIVE_DEVICE:false}
+    require-signal-origin: ${VERIFICATION_REQUIRE_SIGNAL_ORIGIN:false}
+
   # 추천 세그먼트 점수 윈도우 배치 튜닝(SegmentScoreService, 매일 04:00 KST).
   recommendation:
     segment-window-days: ${RECO_SEGMENT_WINDOW_DAYS:30}        # 최근 N일 생성 챌린지만 인기도 집계
