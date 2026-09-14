@@ -46,6 +46,8 @@ public class VerificationMetrics {
     private final Counter finalized;
     private final Counter finalizeLate;
     private final Counter finalizeFailed;
+    private final Counter duplicateConfirm;
+    private final Counter confirmedTooEarly;
     private final Counter materializeFailed;
     private final Counter deviceIdMissing;
     private final Counter signalsStored;
@@ -82,6 +84,12 @@ public class VerificationMetrics {
                 .register(registry);
         // 스펙상 0 이어야 하는 값이라 1건이라도 세어져야 한다. 격리된 건은 조용히 미뤄지므로
         // 이 카운터가 없으면 「확정되지 않은 채 계속 밀리는 판정」을 아무도 모른다.
+        // 스펙 7절이 <b>0건</b>을 요구하는 두 값. 0 을 확인하려면 세는 자리가 있어야 한다.
+        this.duplicateConfirm = Counter.builder("verification.confirm.duplicate")
+                .description("같은 멤버·날짜에 확정이 두 번 시도된 횟수 — 유일 제약이 막은 수")
+                .register(registry);
+        this.confirmedTooEarly = Counter.builder("verification.confirm.too_early")
+                .description("확정 시각 전에 실패를 확정하려 한 횟수").register(registry);
         this.finalizeFailed = Counter.builder("verification.finalize.failed")
                 .description("대상 단위 확정 실패 — 격리 후 뒤로 미뤄진 판정 수").register(registry);
         // 채우기에 실패한 멤버는 그 날짜가 통계에서 비어 버린다. 확정 실패와 원인이 달라 따로 센다.
@@ -162,6 +170,12 @@ public class VerificationMetrics {
     public void materializeFailed() {
         materializeFailed.increment();
     }
+
+    /** 같은 멤버·날짜에 확정이 두 번 시도됐다(유일 제약이 막았다). */
+    public void duplicateConfirm() { duplicateConfirm.increment(); }
+
+    /** 확정 시각 전에 실패를 확정하려 했다. 스펙상 0 이어야 한다. */
+    public void confirmedTooEarly() { confirmedTooEarly.increment(); }
 
     /** 한 건의 확정이 실패해 격리·연기됐다. */
     public void finalizeFailed() {

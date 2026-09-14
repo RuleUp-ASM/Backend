@@ -125,21 +125,46 @@ public class LocationPurgeService {
     /**
      * 한 묶음 파기.
      *
-     * <p><b>미확정 판정이 남은 유저·날짜는 건너뛴다.</b> 확정 배치가 밀려 경계가 지났는데도
-     * 판정이 안 끝난 경우가 있고, 그때 좌표를 지우면 판정할 근거가 사라진다.
+     * <p><b>그 날짜에 인증 대상이던 멤버십 하나하나</b>가 결론을 받았는지 본다. 「그 유저·날짜에
+     * 판정 행이 하나라도 있는가」로 물으면 안 된다 — 일반 챌린지 행은 열렸는데 정작 이 좌표를
+     * 쓸 장소 챌린지 행만 안 열린 경우가 「끝났다」로 읽혀, 복구해 봐야 판정 원본이 없다.
+     *
+     * <p>장소를 쓰는 챌린지만 골라내지 않고 <b>모든 활성 멤버십</b>을 본다. 어떤 판정 방식이
+     * 위치를 쓰는지는 루틴 템플릿까지 따라가야 알 수 있어 SQL 로 좁히기 어렵고, 넓게 보는 쪽은
+     * 파기를 <b>늦출 뿐</b> 일찍 지우지 않는다 — 틀리는 방향이 안전한 쪽이다. 그래도 무한정
+     * 기다리지는 않는다. 파티션이 떨어질 날짜가 되면 파기해 <b>기록을 남기고</b> 보낸다.
      */
     private int purgeChunk() {
         Instant now = Instant.now();
+        // 파티션이 곧 떨어질 날짜. 그 전에 파기해 두지 않으면 좌표가 <b>파기 기록 없이</b> 사라진다.
+        LocalDate dropBoundary = SignalPartitionMaintainer.oldestKept(
+                LocalDate.now(VerificationDeadlines.KST), properties.signalRetentionDays());
         try {
             return jdbc.update("UPDATE " + SignalDomain.LOCATION.table() + " s"
                             + " SET s.payload = ?, s.purgedAt = ?"
                             + " WHERE s.purgedAt IS NULL AND s.purgeAfter IS NOT NULL AND s.purgeAfter <= ?"
-                            + "   AND NOT EXISTS ("
-                            + "       SELECT 1 FROM VerificationDaily d"
-                            + "        WHERE d.userId = s.userId AND d.targetDate = s.observedDate"
-                            + "          AND d.status = 'PENDING')"
+                            + "   AND ("
+                            // 그 날짜에 인증 대상이던 <b>멤버십 하나하나</b>가 결론을 받았는지 본다.
+                            // 「판정 행이 하나라도 있는가」로 물으면, 다른 챌린지 행만 있고 정작
+                            // 이 좌표를 쓸 챌린지 행이 안 열린 경우가 「끝났다」로 읽힌다.
+                            + "        NOT EXISTS ("
+                            + "            SELECT 1 FROM challenge_members m"
+                            + "              JOIN challenges c ON c.id = m.challenge_id"
+                            + "             WHERE m.user_id = s.userId"
+                            + "               AND m.status = 'ACTIVE' AND m.setup_status = 'READY'"
+                            + "               AND c.deleted_at IS NULL"
+                            + "               AND c.start_date <= s.observedDate"
+                            + "               AND c.end_date >= s.observedDate"
+                            + "               AND NOT EXISTS ("
+                            + "                   SELECT 1 FROM VerificationDaily d"
+                            + "                    WHERE d.challengeMemberId = m.id"
+                            + "                      AND d.targetDate = s.observedDate"
+                            + "                      AND d.status <> 'PENDING'))"
+                            // 파티션이 떨어질 날짜가 되면 더 기다릴 수 없다. 그때는 파기해 기록을 남긴다.
+                            + "        OR s.observedDate < ?"
+                            + "   )"
                             + " LIMIT " + PURGE_BATCH,
-                    PURGED_PAYLOAD, Timestamp.from(now), Timestamp.from(now));
+                    PURGED_PAYLOAD, Timestamp.from(now), Timestamp.from(now), Date.valueOf(dropBoundary));
         } catch (RuntimeException e) {
             // 이 배치가 밀리면 위치정보법 위반이다 — 조용히 넘기지 않고 에러로 남긴다.
             log.error("GPS 원본 좌표 파기 실패 — 지연이 쌓이면 안 된다. err={}", e.toString(), e);

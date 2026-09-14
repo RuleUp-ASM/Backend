@@ -367,7 +367,29 @@ public class VerificationFinalizeService {
      * 않은 경우), 그러면 확정 시각의 진실은 저장된 요약이 아니라 원본에 있다.
      */
     private boolean finalizeOne(VerificationDaily daily, Instant now) {
-        if (daily.isTerminal()) return false;   // 다른 인스턴스가 먼저 확정 — 중복 확정 금지
+        if (daily.isTerminal()) {
+            metrics.duplicateConfirm();   // 다른 인스턴스가 먼저 확정 — 중복 확정 금지
+            return false;
+        }
+        // ① 그 행에 적힌 확정 시각 전에는 <b>확정하지 않는다.</b> 폴링 질의가 이미 거르지만,
+        //    격리 경로는 id 로 다시 읽어 이 메서드를 부르므로(사이에 백오프로 밀렸을 수 있다)
+        //    한 겹이 더 필요하다. 이른 확정은 <b>이의 창이 열린 건을 실패로 굳히는</b> 일이다.
+        if (daily.getFinalizeAfter() == null || now.isBefore(daily.getFinalizeAfter())) {
+            metrics.confirmedTooEarly();
+            log.error("확정 시각 전에 확정이 시도됐다 — 건너뛴다. verificationId={} finalizeAfter={}",
+                    daily.getId(), daily.getFinalizeAfter());
+            return false;
+        }
+        // ② 행에 적힌 시각이 귀속일에서 파생한 값과 어긋나는지 <b>센다</b>(막지는 않는다).
+        //    `applyWindow` 는 늘 귀속일에서 파생시키므로 정상적으로는 같고, 실패 격리 백오프는
+        //    뒤로만 민다. 여기가 0 이 아니면 그 파생 경로가 어긋났다는 뜻이다(스펙 7절 0건 항목).
+        //    막지 않는 이유는 <b>운영에서 유일하게 정당한 예외가 시간 이동</b>이기 때문이다 —
+        //    주입 가능한 Clock 이 없어 통합 테스트가 이 값을 당겨 「하루 뒤」를 흉내 낸다.
+        if (!VerificationDeadlines.finalizeDue(daily.getTargetDate(), now)) {
+            metrics.confirmedTooEarly();
+            log.warn("귀속일에서 파생한 확정 시각과 어긋난 채 확정된다 verificationId={} targetDate={}",
+                    daily.getId(), daily.getTargetDate());
+        }
 
         Challenge challenge = challengeQuery.findChallenge(daily.getChallengeId()).orElse(null);
         if (challenge == null) {
