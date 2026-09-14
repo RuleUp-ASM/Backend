@@ -1,6 +1,7 @@
 package com.ruleup.ruleup_backend.verification;
 
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
+import com.ruleup.ruleup_backend.common.outbox.OutboxDispatcher;
 import com.ruleup.ruleup_backend.score.UserScoreSummaryRepository;
 import com.ruleup.ruleup_backend.verification.domain.VerificationDaily;
 import com.ruleup.ruleup_backend.verification.repository.CheatDetectionRepository;
@@ -49,12 +50,25 @@ class CheatDetectionIT extends VerificationApiSupport {
     @Autowired CheatDetectionRepository detectionRepository;
     @Autowired VerificationDailyRepository dailyRepository;
     @Autowired UserScoreSummaryRepository scoreRepository;
+    @Autowired OutboxDispatcher outboxDispatcher;
 
     private MockMvc mvc;
 
     @BeforeEach
     void setUp() {
         mvc = MockMvcBuilders.webAppContextSetup(wac).apply(springSecurity()).build();
+    }
+
+    /**
+     * 집행은 아웃박스를 거친다 — 확정 커밋과 <b>같은 스레드에서 끝나지 않는다.</b>
+     *
+     * <p>커밋 직후 즉시 경로는 전용 스레드에 신호만 보내고 돌아오므로(요청 스레드를 붙잡지
+     * 않으려는 설계다), 여기서 흘리지 않고 바로 단언하면 아직 안 나간 상태를 보게 된다.
+     * 예전에 통과하던 것은 그 경로가 마침 같은 스레드였기 때문이지 보장이 아니었다.
+     * 유실을 막는 것은 어차피 스윕이고, 테스트는 그 스윕을 <b>지금</b> 한 번 돌린다.
+     */
+    private void drainOutbox() {
+        outboxDispatcher.flush();
     }
 
     @Override protected MockMvc mvc() { return mvc; }
@@ -115,6 +129,7 @@ class CheatDetectionIT extends VerificationApiSupport {
 
         cheatDetectionService.confirm(me.id(), challenge, verificationId,
                 Map.of("rule", "IMPOSSIBLE_TRAVEL", "observed", "120km/h"), Instant.now());
+        drainOutbox();
 
         assertThat(detectionRepository.findByVerificationDailyId(verificationId))
                 .as("무엇을 근거로 확정했는지 남는다").isPresent();
@@ -141,6 +156,7 @@ class CheatDetectionIT extends VerificationApiSupport {
                 Map.of("rule", "REPEATED_MOCK"), Instant.now());
         cheatDetectionService.confirm(me.id(), challenge, verificationId,
                 Map.of("rule", "REPEATED_MOCK"), Instant.now());
+        drainOutbox();
 
         assertThat(detectionRepository.findByUserIdOrderByDetectedAtDesc(me.id()))
                 .as("검출 기록도 하나뿐이다").hasSize(1);
