@@ -36,8 +36,8 @@ class EvaluatorAccuracyTest {
     }
 
     private DayContext ctx(VerificationConfig config, List<SyncSignal> signals,
-                           Map<String, Object> prior, List<GeoAnchor> anchors, Instant now) {
-        return new DayContext(TARGET, KST, now, config, signals, prior, anchors, List.of(), MEMBER);
+                           List<GeoAnchor> anchors, Instant now) {
+        return new DayContext(TARGET, KST, now, config, signals, anchors, List.of(), MEMBER);
     }
 
     // ===== 설정 조립 =====
@@ -104,7 +104,7 @@ class EvaluatorAccuracyTest {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
                     gpsConfig(GpsPresence.AVOID, 0, 5, 100),
                     List.of(geofence("ENTER", at(19, 0), false), geofence("EXIT", at(19, 2), false)),
-                    null, List.of(), at(20, 0)));
+                    List.of(), at(20, 0)));
 
             assertThat(outcome.failureReason()).as("스침은 위반이 아니다").isNull();
             assertThat(outcome.status()).isEqualTo(VerificationStatus.PENDING);
@@ -116,7 +116,7 @@ class EvaluatorAccuracyTest {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
                     gpsConfig(GpsPresence.AVOID, 0, 5, 100),
                     List.of(geofence("ENTER", at(19, 0), false), geofence("EXIT", at(19, 30), false)),
-                    null, List.of(), at(20, 0)));
+                    List.of(), at(20, 0)));
 
             assertThat(outcome.failureReason()).isEqualTo("ENTERED_AVOID_ZONE");
         }
@@ -127,7 +127,7 @@ class EvaluatorAccuracyTest {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
                     gpsConfig(GpsPresence.AVOID, 0, 5, 100),
                     List.of(geofence("ENTER", at(19, 0), false)),
-                    null, List.of(), at(19, 3)));
+                    List.of(), at(19, 3)));
 
             assertThat(outcome.failureReason()).isNull();
         }
@@ -138,7 +138,7 @@ class EvaluatorAccuracyTest {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
                     gpsConfig(GpsPresence.AVOID, 0, 5, 100),
                     List.of(geofence("ENTER", at(19, 0), false)),
-                    null, List.of(), at(19, 30)));
+                    List.of(), at(19, 30)));
 
             assertThat(outcome.failureReason()).isEqualTo("ENTERED_AVOID_ZONE");
         }
@@ -149,7 +149,7 @@ class EvaluatorAccuracyTest {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
                     gpsConfig(GpsPresence.AVOID, 0, 5, 100),
                     List.of(geofence("DWELL", at(19, 0), false)),
-                    null, List.of(), at(19, 1)));
+                    List.of(), at(19, 1)));
 
             assertThat(outcome.failureReason()).isEqualTo("ENTERED_AVOID_ZONE");
         }
@@ -160,7 +160,7 @@ class EvaluatorAccuracyTest {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
                     gpsConfig(GpsPresence.AVOID, 0, 5, 100),
                     List.of(geofence("DWELL", at(19, 0), true)),
-                    null, List.of(), at(20, 0)));
+                    List.of(), at(20, 0)));
 
             assertThat(outcome.failureReason()).isNull();
         }
@@ -183,7 +183,7 @@ class EvaluatorAccuracyTest {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
                     gpsConfig(GpsPresence.VISIT, 30, 30, 100),
                     List.of(location(37.4979, 127.0276, 10.0, false, fortyMinutes())),
-                    null, anchors, at(10, 0)));
+                    anchors, at(10, 0)));
 
             assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
         }
@@ -195,7 +195,7 @@ class EvaluatorAccuracyTest {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
                     gpsConfig(GpsPresence.VISIT, 30, 30, 100),
                     List.of(location(37.4979, 127.0276, 500.0, false, fortyMinutes())),
-                    null, anchors, at(10, 0)));
+                    anchors, at(10, 0)));
 
             assertThat(outcome.status()).isEqualTo(VerificationStatus.PENDING);
         }
@@ -206,7 +206,7 @@ class EvaluatorAccuracyTest {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
                     gpsConfig(GpsPresence.VISIT, 30, 30, 100),
                     List.of(location(37.4979, 127.0276, 10.0, true, fortyMinutes())),
-                    null, anchors, at(10, 0)));
+                    anchors, at(10, 0)));
 
             assertThat(outcome.status()).isEqualTo(VerificationStatus.PENDING);
         }
@@ -222,7 +222,7 @@ class EvaluatorAccuracyTest {
         @DisplayName("잠금 해제는 기상으로 인정된다")
         void unlockCounts() {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    wakeConfig("07:00"), List.of(screen("UNLOCK", at(6, 30))), null, List.of(), at(8, 0)));
+                    wakeConfig("07:00"), List.of(screen("UNLOCK", at(6, 30))), List.of(), at(8, 0)));
 
             assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
         }
@@ -231,7 +231,7 @@ class EvaluatorAccuracyTest {
         @DisplayName("화면만 켜진 것은 기상이 아니다 — 알림 확인으로도 켜진다")
         void screenOnAloneIsNotWakingUp() {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    wakeConfig("07:00"), List.of(screen("SCREEN_ON", at(6, 30))), null, List.of(), at(8, 0)));
+                    wakeConfig("07:00"), List.of(screen("SCREEN_ON", at(6, 30))), List.of(), at(8, 0)));
 
             assertThat(outcome.status()).isNotEqualTo(VerificationStatus.SUCCESS);
         }
@@ -253,7 +253,7 @@ class EvaluatorAccuracyTest {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
                     sleepConfig(new BigDecimal("7")),
                     List.of(sleep(at(23, 0), at(23, 0).plusSeconds(8 * 3600), HAND_WRITTEN)),
-                    null, List.of(), at(23, 30).plusSeconds(9 * 3600)));
+                    List.of(), at(23, 30).plusSeconds(9 * 3600)));
 
             assertThat(outcome.status()).isNotEqualTo(VerificationStatus.SUCCESS);
         }
@@ -262,35 +262,30 @@ class EvaluatorAccuracyTest {
         @DisplayName("여러 sync 에 나뉘어 온 수면 구간이 합산된다")
         void segmentsAcrossSyncsAccumulate() {
             Instant now = at(23, 0).plusSeconds(10 * 3600);
+            SyncSignal early = sleep(at(23, 0), at(23, 0).plusSeconds(4 * 3600), TRUSTED);
+            SyncSignal late = sleep(at(23, 0).plusSeconds(4 * 3600), at(23, 0).plusSeconds(8 * 3600), TRUSTED);
 
-            // 1차: 4시간만 도착 — 목표 7시간에 못 미친다.
-            EvaluationOutcome first = evaluator.evaluate(ctx(
-                    sleepConfig(new BigDecimal("7")),
-                    List.of(sleep(at(23, 0), at(23, 0).plusSeconds(4 * 3600), TRUSTED)),
-                    null, List.of(), now));
-            assertThat(first.status()).isNotEqualTo(VerificationStatus.SUCCESS);
+            // 4시간만 있을 때는 목표 7시간에 못 미친다.
+            assertThat(evaluator.evaluate(ctx(
+                    sleepConfig(new BigDecimal("7")), List.of(early), List.of(), now)).status())
+                    .isNotEqualTo(VerificationStatus.SUCCESS);
 
-            // 2차: 나머지 4시간이 뒤늦게 도착. 앞 구간을 잊으면 영영 7시간을 못 채운다.
-            EvaluationOutcome second = evaluator.evaluate(ctx(
-                    sleepConfig(new BigDecimal("7")),
-                    List.of(sleep(at(23, 0).plusSeconds(4 * 3600), at(23, 0).plusSeconds(8 * 3600), TRUSTED)),
-                    first.evidence(), List.of(), now));
-
-            assertThat(second.status()).isEqualTo(VerificationStatus.SUCCESS);
+            // 나머지 4시간이 뒤늦게 도착해 원본에 쌓이면 합산된다 — 앞 구간을 잊으면 영영 못 채운다.
+            assertThat(evaluator.evaluate(ctx(
+                    sleepConfig(new BigDecimal("7")), List.of(early, late), List.of(), now)).status())
+                    .isEqualTo(VerificationStatus.SUCCESS);
         }
 
         @Test
-        @DisplayName("같은 구간이 재전송돼도 두 번 세지 않는다")
+        @DisplayName("같은 구간이 두 번 남아 있어도 두 번 세지 않는다")
         void resentSegmentIsNotDoubleCounted() {
             Instant now = at(23, 0).plusSeconds(10 * 3600);
             SyncSignal segment = sleep(at(23, 0), at(23, 0).plusSeconds(4 * 3600), TRUSTED);
 
-            EvaluationOutcome first = evaluator.evaluate(ctx(
-                    sleepConfig(new BigDecimal("7")), List.of(segment), null, List.of(), now));
-            EvaluationOutcome second = evaluator.evaluate(ctx(
-                    sleepConfig(new BigDecimal("7")), List.of(segment), first.evidence(), List.of(), now));
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(
+                    sleepConfig(new BigDecimal("7")), List.of(segment, segment), List.of(), now));
 
-            assertThat(second.status())
+            assertThat(outcome.status())
                     .as("4시간을 두 번 세면 8시간이 되어 목표를 넘겨버린다")
                     .isNotEqualTo(VerificationStatus.SUCCESS);
         }

@@ -23,7 +23,7 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
 
     /** LOCATION fallback 연속 체류 판정: 반경 내 연속 두 포인트 간 이 값 이하 간격이면 체류로 이어붙인다(초). */
     private static final long LOCATION_CONTINUITY_GAP_SECONDS = 600;
-    /** 신호 단위 멱등: evidence에 이월하는 처리 완료 트랜지션 키 상한(방어적 캡). */
+    /** evidence 에 남길 처리 트랜지션 키 상한(설명용, 방어적 캡). */
     private static final int SEEN_TRANSITIONS_CAP = 500;
 
     @Override
@@ -43,14 +43,14 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
 
         // ===== VISIT(도달형): dwell 누적 =====
         int goalMin = (cfg.dwellMinutes() != null) ? cfg.dwellMinutes() : 0;
-        long dwellSec = priorSeconds(ctx.priorEvidence());
-        Instant openEnter = priorEnter(ctx.priorEvidence());
+        long dwellSec = 0;
+        Instant openEnter = null;
         boolean dwellConfirmed = false;
         String source = "TRANSITION";
 
-        // ② 신호 단위 멱등: (geofenceId|transition|at) 키로 이미 처리한 트랜지션은 재누적하지 않는다.
-        //    prior에 이월된 키 + 이번 배치 키를 합쳐 재전송/중복 배치의 ENTER·EXIT 이중 계산을 차단(§0.1 재전송 안전).
-        LinkedHashSet<String> seen = new LinkedHashSet<>(priorSeen(ctx.priorEvidence()));
+        // ② 같은 전환이 두 행으로 남아 있어도(geofenceId|transition|at) 한 번만 센다.
+        //    그날 원본을 전량 재평가하므로 이월이 아니라 이 평가 안에서의 중복 제거다.
+        LinkedHashSet<String> seen = new LinkedHashSet<>();
 
         for (GeofenceTransition t : trans) {
             Instant at = safe(t.at());
@@ -66,9 +66,9 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
             }
         }
 
-        // ① fallback: 트랜지션 전무 → 멤버 앵커(OR) 반경 내 LOCATION 포인트를 sync 간 연속으로 누적.
-        //    배치당 1포인트여도 lastInsideAt(직전 반경 내 관측 시각)을 evidence로 이월해 연속 체류를 이어붙인다.
-        Instant lastInside = priorLastInside(ctx.priorEvidence());
+        // ① fallback: 트랜지션 전무 → 멤버 앵커(OR) 반경 내 LOCATION 포인트로 연속 체류를 누적.
+        //    그날 포인트를 전부 들고 있으므로 이월 워터마크 없이 한 번에 이어붙인다.
+        Instant lastInside = null;
         if (trans.isEmpty()) {
             LocationDwell ld = locationDwell(ctx.signals(), ctx.memberAnchors(), cfg, dwellSec, lastInside);
             if (ld.added() > 0) source = "POINTS";
@@ -89,8 +89,8 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
         ev.put("source", source);
         ev.put("dwellSeconds", dwellSec);
         if (openEnter != null) ev.put("enterAt", openEnter.toString());
-        if (lastInside != null) ev.put("lastInsideAt", lastInside.toString());   // ① 연속성 이월
-        if (!seen.isEmpty()) ev.put("seenTransitions", capSeen(seen));            // ② 멱등 키 이월
+        if (lastInside != null) ev.put("lastInsideAt", lastInside.toString());
+        if (!seen.isEmpty()) ev.put("seenTransitions", capSeen(seen));
         putHygiene(ev, ctx, cfg);
 
         return success
@@ -116,8 +116,8 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
                                             List<GeofenceTransition> trans, Instant windowClose) {
         long graceSec = 60L * ((cfg.loiteringDelayMin() != null) ? cfg.loiteringDelayMin() : 0);
         boolean violated = false;
-        Instant openEnter = priorEnter(ctx.priorEvidence());
-        long longestStaySec = priorSeconds(ctx.priorEvidence());
+        Instant openEnter = null;
+        long longestStaySec = 0;
 
         for (GeofenceTransition t : trans) {
             Instant at = safe(t.at());
@@ -147,7 +147,7 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
         ev.put("avoid", true);
         ev.put("entered", violated);
         ev.put("graceMinutes", graceSec / 60);
-        ev.put("dwellSeconds", longestStaySec);          // 가장 오래 머문 시간(이월)
+        ev.put("dwellSeconds", longestStaySec);          // 가장 오래 머문 시간
         if (openEnter != null) ev.put("enterAt", openEnter.toString());
         putHygiene(ev, ctx, cfg);
         return violated
@@ -183,12 +183,12 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
      * 여기서는 <b>몇 개가 빠졌는지만</b> 센다. 그 수가 여러 판정에 걸쳐 반복될 때 이상패턴
      * 탐지가 부정행위를 확정한다 — 단건으로는 확정하지 않는다.
      *
-     * <p>sync 마다 이번 배치분을 이전 값에 더한다. 배제 로그는 <b>확정 시 한 번</b> 이 값을
-     * 옮기므로, 누적해 두지 않으면 중간 sync 에서 빠진 신호가 기록에서 사라진다.
+     * <p>그날 원본을 전량 재평가하므로 매번 처음부터 센다 — 이월이 없어 같은 신호가 두 번
+     * 세어지지 않는다. 배제 로그는 <b>확정 시 한 번</b> 이 값을 옮긴다.
      */
     private void putHygiene(Map<String, Object> ev, DayContext ctx, GpsConfig cfg) {
-        int mock = priorInt(ctx.priorEvidence(), "excludedMock");
-        int lowAccuracy = priorInt(ctx.priorEvidence(), "excludedAccuracy");
+        int mock = 0;
+        int lowAccuracy = 0;
         Integer maxAccuracy = cfg.accuracyMaxM();
 
         if (ctx.signals() != null) {
@@ -211,19 +211,14 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
         if (lowAccuracy > 0) ev.put("excludedAccuracy", lowAccuracy);
     }
 
-    private int priorInt(Map<String, Object> prior, String key) {
-        Object value = (prior != null) ? prior.get(key) : null;
-        return (value instanceof Number n) ? n.intValue() : 0;
-    }
-
     /** LOCATION fallback 누적 결과: 갱신된 총 체류초·이번 배치가 더한 초·이월할 lastInsideAt. */
     private record LocationDwell(long dwellSec, long added, Instant lastInside) {}
 
     /**
      * 멤버 앵커(OR) 반경 내 LOCATION 포인트로 체류시간을 sync 간 연속 누적한다(테크스펙 v2 §7.2 fallback).
-     *  - lastInsideAt(직전 반경 내 관측 시각)을 prior로 받아, 반경 내 연속 포인트 간 간격이
-     *    LOCATION_CONTINUITY_GAP_SECONDS 이하일 때만 그 간격을 체류로 이어붙인다(공백·이탈은 미가산).
-     *  - lastInsideAt 이하 시각의 포인트는 무시 → 재전송·중복 포인트 이중 누적 방지(멱등).
+     *  - 반경 내 연속 포인트 간 간격이 LOCATION_CONTINUITY_GAP_SECONDS 이하일 때만 그 간격을
+     *    체류로 이어붙인다(공백·이탈은 미가산).
+     *  - 직전 반영 시각 이하의 포인트는 무시 → 같은 좌표가 두 행으로 남아 있어도 이중 누적하지 않는다.
      * 앵커가 없으면 config 레거시 단일앵커(lat/lng/radiusM)로 폴백.
      */
     private LocationDwell locationDwell(List<SyncSignal> signals, List<GeoAnchor> anchors, GpsConfig cfg,
@@ -283,23 +278,6 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
         return false;
     }
 
-    private long priorSeconds(Map<String, Object> prior) {
-        Object v = (prior != null) ? prior.get("dwellSeconds") : null;
-        return (v instanceof Number n) ? n.longValue() : 0;
-    }
-    private Instant priorEnter(Map<String, Object> prior) {
-        Object v = (prior != null) ? prior.get("enterAt") : null;
-        return (v != null) ? safe(v.toString()) : null;
-    }
-    @SuppressWarnings("unchecked")
-    private List<String> priorSeen(Map<String, Object> prior) {
-        Object v = (prior != null) ? prior.get("seenTransitions") : null;
-        return (v instanceof List<?> l) ? (List<String>) (List<?>) l : List.of();
-    }
-    private Instant priorLastInside(Map<String, Object> prior) {
-        Object v = (prior != null) ? prior.get("lastInsideAt") : null;
-        return (v != null) ? safe(v.toString()) : null;
-    }
     private String transitionKey(GeofenceTransition t) {
         return nzStr(t.geofenceId()) + "|" + nzStr(t.transition()) + "|" + nzStr(t.at());
     }

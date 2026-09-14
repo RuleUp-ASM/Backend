@@ -45,9 +45,11 @@ import java.util.stream.Stream;
 
 /**
  * 인증 sync 처리(§3.1) — 인증 엔진의 심장.
- *  흐름: 레이트리밋 → 페이로드 검증 → ignoredSignalTypes → 내 ACTIVE 멤버별로
- *        대상일 판정 → 평가기 라우팅 → verification_daily/method_result upsert(증분·멱등)
+ *  흐름: 레이트리밋 → 페이로드 검증 → 원본 적재 → <b>그 귀속일 원본 전량 재조회</b> →
+ *        내 ACTIVE 멤버별로 대상일 판정 → 평가기 라우팅 → verification_daily/method_result upsert
  *        → 진행률 비정규화 갱신 → updatedChallenges 회신.
+ *  - 판정 입력은 <b>이번 요청의 신호가 아니라 저장된 원본</b>이다. 요청분만 보면 분할 전송 순서가
+ *    바뀔 때 짝을 못 찾은 이벤트가 버려진다(백엔드 4-3 「나누어 보낸 요청은 순서가 바뀌어도 되도록」).
  *  - 별도 크론 없음: 이 sync 요청 자체가 평가 트리거(§2.2). 확정(잠금)만 배치가 별도(§2.14).
  *  - 단일 method MVP: daily 상태 = primary method 상태(결합기는 다중 method 도입 시).
  */
@@ -69,6 +71,7 @@ public class VerificationSyncService {
     private final VerificationMethodResultRepository methodResultRepo;
     private final SyncRateLimiter rateLimiter;
     private final VerificationSignalIngestService signalIngest;
+    private final VerificationSignalReader signalReader;
     private final MemberSettingsResolver settingsResolver;
     private final SignalTrustGate trustGate;
     private final VerificationMemberSetup memberSetup;
@@ -87,6 +90,7 @@ public class VerificationSyncService {
                                    VerificationMethodResultRepository methodResultRepo,
                                    SyncRateLimiter rateLimiter,
                                    VerificationSignalIngestService signalIngest,
+                                   VerificationSignalReader signalReader,
                                    MemberSettingsResolver settingsResolver,
                                    SignalTrustGate trustGate,
                                    VerificationMemberSetup memberSetup,
@@ -104,6 +108,7 @@ public class VerificationSyncService {
         this.methodResultRepo = methodResultRepo;
         this.rateLimiter = rateLimiter;
         this.signalIngest = signalIngest;
+        this.signalReader = signalReader;
         this.settingsResolver = settingsResolver;
         this.trustGate = trustGate;
         this.memberSetup = memberSetup;
@@ -138,11 +143,17 @@ public class VerificationSyncService {
         LocalDate today = LocalDate.now(KST);
         Instant now = Instant.now();
 
-        // 원본 저장 + 영속 멱등. 평가에는 이번에 처음 받은 신호만 넘긴다 —
-        // 재전송된 구간이 체류·사용 시간에 다시 더해지지 않게 하는 경계다.
-        VerificationSignalIngestService.Ingested ingested = signalIngest.ingest(userId, signals, now);
-        // 원본은 위에서 이미 저장했다. 판정 입력에서만 못 믿을 신호를 뺀다 — 제외와 제재는 분리한다.
-        List<SyncSignal> fresh = trustGate.apply(userId, req, ingested.accepted());
+        // 원본 저장 + 영속 멱등. 못 믿을 봉투(VPN·무결성 실패)의 위치 신호는 저장하되
+        // 배제 사유를 행에 새긴다 — 제외와 제재는 분리하고, 원본은 이상탐지 자료로 남긴다.
+        VerificationSignalIngestService.Ingested ingested =
+                signalIngest.ingest(userId, signals, now, trustGate.decide(req));
+        trustGate.record(userId, req, signals);
+
+        // 판정 입력은 저장된 원본이다. 오늘과 유예 중인 어제를 한 번씩만 읽어 멤버들이 나눠 쓴다 —
+        // 같은 사용자 신호를 챌린지별로 복제해 읽지 않는다(백엔드 4-1-1 「사용자 신호 1회 저장」).
+        LocalDate yesterday = today.minusDays(1);
+        Map<LocalDate, List<SyncSignal>> daySignals =
+                signalReader.forDays(userId, List.of(yesterday, today));
 
         List<ChallengeMember> members = challengeQuery.findActiveMemberships(userId);
         List<SyncResponse.UpdatedChallenge> updated = new ArrayList<>();
@@ -165,7 +176,7 @@ public class VerificationSyncService {
 
             // 유예 구간(어제 귀속·미확정)에 늦게 도착한 신호를 먼저 반영한다.
             // 귀속일이 끝났어도 확정 전이면 발생 시각이 맞는 신호는 그대로 인정한다(인증 정책 §2 지연 데이터).
-            boolean graceChanged = evaluateGraceDay(member, challenge, config, fresh, gaps, today, now);
+            boolean graceChanged = evaluateGraceDay(member, challenge, config, daySignals, gaps, today, now);
 
             if (graceOnly) {
                 // 방이 끝났으니 오늘은 인증 대상일이 아니다. 열지도 않은 오늘 행을 NOT_TARGET 으로
@@ -179,7 +190,8 @@ public class VerificationSyncService {
 
             VerificationDaily daily = loadOrCreateDaily(member, challenge, today);
             VerificationStatus before = daily.getStatus();
-            VerificationStatus todayStatus = processMember(member, challenge, config, daily, fresh, gaps, today, now);
+            VerificationStatus todayStatus = processMember(member, challenge, config, daily,
+                    daySignals.getOrDefault(today, List.of()), gaps, today, now);
 
             progressService.updateAfterSync(member, todayStatus, now);
             if (becameFinal(before, todayStatus) || graceChanged) {
@@ -260,7 +272,7 @@ public class VerificationSyncService {
      * @return 이 재평가로 어제 건이 확정됐으면 true
      */
     private boolean evaluateGraceDay(ChallengeMember member, Challenge challenge, VerificationConfig config,
-                                     List<SyncSignal> fresh, List<SyncRequest.Gap> gaps,
+                                     Map<LocalDate, List<SyncSignal>> daySignals, List<SyncRequest.Gap> gaps,
                                      LocalDate today, Instant now) {
         LocalDate yesterday = today.minusDays(1);
         if (VerificationDeadlines.finalizeDue(yesterday, now)) return false;   // 확정 배치 몫
@@ -273,7 +285,8 @@ public class VerificationSyncService {
         if (daily.isTerminal()) return false;
 
         VerificationStatus before = daily.getStatus();
-        VerificationStatus after = processMember(member, challenge, config, daily, fresh, gaps, yesterday, now);
+        VerificationStatus after = processMember(member, challenge, config, daily,
+                daySignals.getOrDefault(yesterday, List.of()), gaps, yesterday, now);
         if (!becameFinal(before, after)) return false;
         progressService.recount(member);
         return true;
@@ -323,14 +336,13 @@ public class VerificationSyncService {
 
         VerificationMethodResult mr = methodResultRepo
                 .findByVerificationDailyIdAndMethod(daily.getId(), method.name()).orElse(null);
-        Map<String, Object> prior = (mr != null) ? mr.getEvidence() : null;
 
         // 과거 날짜는 그 날 적용되던 설정으로 평가한다 — 유예 구간에 장소를 바꿔도 어제 판정이 흔들리지 않게.
         List<String> memberScreenApps = settingsResolver.screenAppPackagesOn(member, today);
         List<GeoAnchor> memberAnchors = settingsResolver.anchorsOn(member, today);
         // 신호는 도착 시각이 아니라 발생 시각으로 귀속한다 — 한 배치에 어제치와 오늘치가 섞여 온다.
         List<SyncSignal> ofDay = DaySignals.forDate(signals, today, KST);
-        DayContext ctx = new DayContext(today, KST, now, config, ofDay, prior,
+        DayContext ctx = new DayContext(today, KST, now, config, ofDay,
                 memberAnchors, memberScreenApps, member.getId().toString());
         EvaluationOutcome outcome = evaluator.evaluate(ctx);
 
@@ -392,7 +404,7 @@ public class VerificationSyncService {
     /** 해당 method의 신호타입에 대해, 당일과 겹치는 비회복(recoverable=false) 권한 공백이 있는지(§8.5). */
     private boolean permissionGap(List<SyncRequest.Gap> gaps, VerificationMethod method, LocalDate day) {
         if (gaps == null || gaps.isEmpty()) return false;
-        Set<String> types = signalTypesFor(method);
+        Set<String> types = MethodSignalTypes.of(method);
         if (types.isEmpty()) return false;
         long dayStart = day.atStartOfDay(KST).toInstant().toEpochMilli();
         long dayEnd = day.plusDays(1).atStartOfDay(KST).toInstant().toEpochMilli();
@@ -405,17 +417,6 @@ public class VerificationSyncService {
             return true;
         }
         return false;
-    }
-
-    /** method → 그 판정에 쓰이는 신호타입(대문자). gap.signalType 매칭용. */
-    private static Set<String> signalTypesFor(VerificationMethod method) {
-        return switch (method) {
-            case GPS_PRESENCE, GPS_DISTANCE -> Set.of("GEOFENCE", "GEOFENCE_TRANSITION", "LOCATION");
-            case HEALTH -> Set.of("HEALTH");
-            case SCREEN_TIME, WAKE -> Set.of("SCREEN_TIME", "USAGE");
-            case SLEEP -> Set.of("SLEEP");
-            default -> Set.of();
-        };
     }
 
 }

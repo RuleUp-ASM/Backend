@@ -14,7 +14,7 @@ import java.util.*;
 /**
  * GPS DISTANCE 평가기 (§2.16, 부록 4.3) — 도달형. RUNNING_SESSION 경로 누적거리 ≥ goalKm.
  *  - 세션별 points를 정제(정확도 컷·점프 컷) → haversine 누적.
- *  - 하루 여러 세션 합산. sessionStart 멱등(중복 전송 무시). 상태는 evidence에 누적.
+ *  - 하루 여러 세션 합산. 그날 원본을 전량 재평가하며 sessionStart 로 같은 세션을 한 번만 센다.
  */
 @Component
 public class GpsDistanceEvaluator implements MethodEvaluator {
@@ -31,14 +31,14 @@ public class GpsDistanceEvaluator implements MethodEvaluator {
         int accuracyMax = (cfg.accuracyMaxM() != null) ? cfg.accuracyMaxM() : 50;
         Instant windowClose = TimeWindows.startOfDay(ctx.targetDate().plusDays(1), ctx.zone());
 
-        double accM = priorMeters(ctx.priorEvidence());
-        Set<String> seen = priorSessions(ctx.priorEvidence());
+        double accM = 0;
+        Set<String> seen = new HashSet<>();
 
         if (ctx.signals() != null) {
             for (SyncSignal s : ctx.signals()) {
                 if (!SignalType.RUNNING_SESSION.name().equals(s.type()) || s.points() == null) continue;
                 String key = (s.sessionStart() != null) ? s.sessionStart() : String.valueOf(s.points().hashCode());
-                if (seen.contains(key)) continue;           // 멱등: 처리한 세션 스킵
+                if (seen.contains(key)) continue;           // 같은 세션이 두 행으로 남아 있어도 한 번만
                 seen.add(key);
                 accM += sessionDistance(s.points(), accuracyMax);
             }
@@ -74,17 +74,6 @@ public class GpsDistanceEvaluator implements MethodEvaluator {
         return sum;
     }
 
-    private double priorMeters(Map<String, Object> prior) {
-        Object v = (prior != null) ? prior.get("distanceMeters") : null;
-        return (v instanceof Number n) ? n.doubleValue() : 0;
-    }
-    @SuppressWarnings("unchecked")
-    private Set<String> priorSessions(Map<String, Object> prior) {
-        Set<String> set = new HashSet<>();
-        if (prior != null && prior.get("sessions") instanceof List<?> l)
-            for (Object o : l) set.add(String.valueOf(o));
-        return set;
-    }
     private double round2(double v) { return Math.round(v * 100.0) / 100.0; }
     private Instant nz(Instant i) { return (i != null) ? i : Instant.EPOCH; }
 }

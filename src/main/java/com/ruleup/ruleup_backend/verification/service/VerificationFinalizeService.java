@@ -6,6 +6,12 @@ import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
 import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.verification.domain.*;
+import com.ruleup.ruleup_backend.verification.evaluator.DayContext;
+import com.ruleup.ruleup_backend.verification.evaluator.EvaluationOutcome;
+import com.ruleup.ruleup_backend.verification.evaluator.MethodEvaluator;
+import com.ruleup.ruleup_backend.verification.signal.DaySignals;
+import com.ruleup.ruleup_backend.verification.signal.SyncSignal;
+import com.ruleup.ruleup_backend.common.verification.GeoAnchor;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationFailureDetailRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationMethodResultRepository;
@@ -14,7 +20,6 @@ import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.NotificationPublisher;
 import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
-import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -34,6 +39,8 @@ import java.util.UUID;
 /**
  * 인증 확정 배치 (인증 정책 §2 · 테크스펙 §4-3 "일일 확정 배치"). 두 작업:
  *  1) finalizeDue : <b>귀속일 이틀 뒤 00:00 KST</b>가 지난 미확정 행을 최종 재평가해 완료·실패로 확정한다.
+ *     재평가 입력은 그 귀속일의 <b>원본 신호 전량</b>이다 — 저장된 실패 사유를 그대로 믿으면
+ *     유예 하루 동안 늦게 도착한 신호가 반영되지 않는다(백엔드 4-3 「대상 건의 최신 유효 신호를 다시 조회함」).
  *     - 목표 달성형: 성공은 이미 즉시 확정됐으므로 여기 남은 건 미달 → 실패.
  *     - 규칙 지키기형: 위반이 남아 있으면 실패, 없으면 완료.
  *     이 시각 전에는 어떤 실패도 확정되지 않는다 — 늦게 도착하는 신호로 뒤집힐 수 있기 때문이다.
@@ -46,7 +53,6 @@ import java.util.UUID;
  * FOR UPDATE SKIP LOCKED 선점이라 다중 인스턴스에서도 같은 대상을 중복 처리하지 않는다.
  */
 @Service
-@RequiredArgsConstructor
 public class VerificationFinalizeService {
 
     private static final Logger log = LoggerFactory.getLogger(VerificationFinalizeService.class);
@@ -65,6 +71,36 @@ public class VerificationFinalizeService {
     private final VerificationProgressService progressService;
     private final NotificationPublisher notificationPublisher;
     private final ApplicationEventPublisher eventPublisher;
+    private final VerificationSignalReader signalReader;
+    private final MemberSettingsResolver settingsResolver;
+    private final Map<VerificationMethod, MethodEvaluator> evaluators;
+
+    public VerificationFinalizeService(VerificationDailyRepository dailyRepo,
+                                       VerificationMethodResultRepository methodResultRepo,
+                                       VerificationFailureDetailRepository failureDetailRepo,
+                                       SignalExclusionRecorder exclusionRecorder,
+                                       ChallengeQueryService challengeQuery,
+                                       VerificationConfigFactory configFactory,
+                                       VerificationProgressService progressService,
+                                       NotificationPublisher notificationPublisher,
+                                       ApplicationEventPublisher eventPublisher,
+                                       VerificationSignalReader signalReader,
+                                       MemberSettingsResolver settingsResolver,
+                                       List<MethodEvaluator> evaluatorList) {
+        this.dailyRepo = dailyRepo;
+        this.methodResultRepo = methodResultRepo;
+        this.failureDetailRepo = failureDetailRepo;
+        this.exclusionRecorder = exclusionRecorder;
+        this.challengeQuery = challengeQuery;
+        this.configFactory = configFactory;
+        this.progressService = progressService;
+        this.notificationPublisher = notificationPublisher;
+        this.eventPublisher = eventPublisher;
+        this.signalReader = signalReader;
+        this.settingsResolver = settingsResolver;
+        this.evaluators = evaluatorList.stream().collect(
+                java.util.stream.Collectors.toMap(MethodEvaluator::method, e -> e, (a, b) -> a));
+    }
 
     /**
      * 매일 00:00:30 KST: 확정 시각이 막 지난 귀속일(D-2)에 대해 <b>행이 없는 대상</b>을 채운다.
@@ -120,9 +156,9 @@ public class VerificationFinalizeService {
     /**
      * 한 건 최종 재평가·확정. 확정 결과가 이미 있으면 건너뛴다(재실행 멱등).
      *
-     * <p>재평가 입력은 그 날 누적된 방식 평가 결과다. 규칙 지키기형(장소 피하기·앱 최대 사용)의 위반과
-     * 목표 달성형의 미달 사유는 sync 가 "실패 예정"으로 {@code failureReason} 에 눌러 담아 두므로,
-     * 여기서는 그 사유가 확정 시각까지 살아남았는지만 보면 된다 — 성공은 이미 즉시 확정돼 여기 오지 않는다.
+     * <p><b>저장된 실패 사유를 그대로 믿지 않고 원본으로 다시 판정한다.</b> 유예 하루 동안 늦게
+     * 도착한 신호가 sync 를 거치지 않고 쌓여 있을 수 있고(그 멤버가 그 사이 한 번도 평가되지
+     * 않은 경우), 그러면 확정 시각의 진실은 저장된 요약이 아니라 원본에 있다.
      */
     private boolean finalizeOne(VerificationDaily daily, Instant now) {
         if (daily.isTerminal()) return false;   // 다른 인스턴스가 먼저 확정 — 중복 확정 금지
@@ -142,27 +178,32 @@ public class VerificationFinalizeService {
         VerificationConfig config = configFactory.build(challenge);
         VerificationMethod method = config.primaryMethod();
         Polarity polarity = VerificationPolarity.of(config);
+        ChallengeMember member = challengeQuery.findMember(daily.getChallengeMemberId()).orElse(null);
+
+        // 원본으로 최종 재평가. 평가기가 없거나 멤버가 사라졌으면 저장된 요약으로 물러선다.
+        EvaluationOutcome outcome = reevaluate(daily, config, method, member, now);
+        Map<String, Object> evidence = (outcome != null) ? outcome.evidence() : evidenceOf(daily, method);
+        String failureReason = (outcome != null) ? outcome.failureReason() : daily.getFailureReason();
+        boolean succeeded = (outcome != null) && outcome.status() == VerificationStatus.SUCCESS;
 
         boolean confirmedFail;
-        if (polarity == Polarity.CONSTRAINT && daily.getFailureReason() == null) {
-            // 정해진 기간 동안 유효한 위반이 없었다 → 완료 확정.
+        if (succeeded || (polarity == Polarity.CONSTRAINT && failureReason == null)) {
+            // 성공 조건을 채웠거나, 정해진 기간 동안 유효한 위반이 없었다 → 완료 확정.
             daily.recordResult(VerificationStatus.SUCCESS, method.name(), null, now);
             confirmedFail = false;
         } else {
-            String reasonCode = finalFailureReason(daily, method, config);
+            String reasonCode = finalFailureReason(failureReason, evidence, method, config);
             daily.confirmFailure(now, method.name(), reasonCode);
             // 실패 상세는 **확정된 실패에만** 남긴다. 실패 예정은 뒤집힐 수 있는 계산 상태라
             // 행을 만들면 이의로 완료가 된 뒤에도 「실패했다는 기록」이 남는다.
-            recordFailureDetail(daily, method, reasonCode, now);
+            recordFailureDetail(daily, reasonCode, evidence, now);
             confirmedFail = true;
         }
 
         // 확정 시점에 판정에서 뺀 신호를 배제 로그로 옮긴다 — 성공·실패를 가리지 않는다.
         // 신호 위생 이상은 인증 결과와 무관하게 탐지 입력으로 남겨야 한다(공통 3절 ①).
-        exclusionRecorder.recordEvaluationHygiene(daily.getUserId(), daily.getId(), method,
-                evidenceOf(daily, method), now);
+        exclusionRecorder.recordEvaluationHygiene(daily.getUserId(), daily.getId(), method, evidence, now);
 
-        ChallengeMember member = challengeQuery.findMember(daily.getChallengeMemberId()).orElse(null);
         refreshProgress(member, daily);
 
         // 확정된 실패만 감시자 통지 적재. 실패 예정 단계에서는 통지하지 않는다(확정이 아니므로).
@@ -189,15 +230,71 @@ public class VerificationFinalizeService {
     }
 
     /**
-     * 최종 실패 사유. sync 가 남긴 "실패 예정" 사유가 있으면 그대로 쓰고,
+     * 그 귀속일의 원본으로 최종 재평가한다. 평가기가 없거나(새 방식을 enum 에만 추가한 경우)
+     * 멤버가 사라졌으면 null 을 돌려 저장된 요약으로 물러선다.
+     *
+     * <p>설정은 <b>그 날 적용되던 값</b>을 쓴다 — 유예 구간에 장소·대상 앱을 바꿔도 지난 판정이
+     * 흔들리면 안 된다.
+     */
+    private EvaluationOutcome reevaluate(VerificationDaily daily, VerificationConfig config,
+                                         VerificationMethod method, ChallengeMember member, Instant now) {
+        MethodEvaluator evaluator = evaluators.get(method);
+        if (evaluator == null || member == null) return null;
+
+        LocalDate targetDate = daily.getTargetDate();
+        List<SyncSignal> ofDay = DaySignals.forDate(
+                signalReader.forDay(daily.getUserId(), targetDate), targetDate, KST);
+
+        VerificationMethodResult mr = methodResultRepo
+                .findByVerificationDailyIdAndMethod(daily.getId(), method.name())
+                .orElseGet(() -> VerificationMethodResult.create(
+                        daily.getId(), method.name(), VerificationPolarity.of(config), true));
+        Map<String, Object> stored = mr.getEvidence();
+
+        if (!MethodSignalTypes.anyFor(method, ofDay)) {
+            // 그 방식이 읽을 신호가 하나도 없다. 평가기를 돌리면 「진행도 0」 근거가 만들어지고
+            // 확정 사유가 무신호 대신 목표 미달로 바뀐다 — 유저에게 할 안내가 달라진다.
+            // 다만 원본 보관 기간이 지나 비어 보이는 경우가 있어, 저장된 근거가 있으면 그쪽을 믿는다.
+            if (stored != null && !stored.isEmpty()) return null;
+            return new EvaluationOutcome(VerificationStatus.PENDING, null,
+                    carryPendingReason(null, stored), null);
+        }
+
+        List<String> screenApps = settingsResolver.screenAppPackagesOn(member, targetDate);
+        List<GeoAnchor> anchors = settingsResolver.anchorsOn(member, targetDate);
+        EvaluationOutcome outcome = evaluator.evaluate(new DayContext(
+                targetDate, KST, now, config, ofDay, anchors, screenApps, member.getId().toString()));
+
+        // 재평가 결과를 방식 행에 남긴다 — 실패 상세와 배제 로그가 이 근거를 읽는다.
+        Map<String, Object> evidence = carryPendingReason(outcome.evidence(), stored);
+        mr.evaluate(outcome.status(), evidence, now);
+        methodResultRepo.save(mr);
+        return new EvaluationOutcome(outcome.status(), outcome.failureReason(), evidence,
+                outcome.windowClosesAt());
+    }
+
+    /**
+     * 권한 공백 힌트는 신호가 아니라 <b>봉투</b>에서 온다(gaps). 원본 재평가는 그것을 알 수 없으므로
+     * sync 가 남겨 둔 값을 이어 붙인다 — 놓치면 「권한 없음」이 「신호 없음」으로 뭉개진다.
+     */
+    private Map<String, Object> carryPendingReason(Map<String, Object> fresh, Map<String, Object> stored) {
+        String carried = FailureReasons.pendingReasonOf(stored);
+        if (carried == null) return fresh;
+        Map<String, Object> merged = (fresh != null) ? new java.util.HashMap<>(fresh) : new java.util.HashMap<>();
+        merged.putIfAbsent("pendingReason", carried);
+        return merged;
+    }
+
+    /**
+     * 최종 실패 사유. 재평가가 낸 "실패 예정" 사유가 있으면 그대로 쓰고,
      * 없으면 신호 자체가 없었던 경우(권한 공백 / 신뢰 게이트 탈락 / 무신호)를 구분해 붙인다.
      */
-    private String finalFailureReason(VerificationDaily daily, VerificationMethod method, VerificationConfig config) {
-        if (daily.getFailureReason() != null) return daily.getFailureReason();
+    private String finalFailureReason(String failureReason, Map<String, Object> evidence,
+                                      VerificationMethod method, VerificationConfig config) {
+        if (failureReason != null) return failureReason;
+        if (evidence == null || evidence.isEmpty()) return "NO_SIGNAL_RECEIVED";
 
-        var mr = methodResultRepo.findByVerificationDailyIdAndMethod(daily.getId(), method.name()).orElse(null);
-        if (mr == null) return "NO_SIGNAL_RECEIVED";
-        String pendingReason = FailureReasons.pendingReasonOf(mr.getEvidence());
+        String pendingReason = FailureReasons.pendingReasonOf(evidence);
         if ("UNTRUSTED_HEALTH_SOURCE".equals(pendingReason)) return "UNTRUSTED_HEALTH_SOURCE";
         if ("PERMISSION_MISSING".equals(pendingReason)) return "PERMISSION_MISSING";   // 무신호와 구분
         return FailureReasons.of(method, config);
@@ -213,11 +310,10 @@ public class VerificationFinalizeService {
      * <p>PK 가 판정 id 라 배치가 재실행돼도 같은 행을 덮어쓴다. 실패가 이의로 뒤집히는 경로는
      * 없다 — 이의 기한이 확정 시각과 같아서, 확정된 실패는 이미 신청 창이 닫혀 있다.
      */
-    private void recordFailureDetail(VerificationDaily daily, VerificationMethod method,
-                                     String reasonCode, Instant now) {
+    private void recordFailureDetail(VerificationDaily daily, String reasonCode,
+                                     Map<String, Object> evidence, Instant now) {
         failureDetailRepo.save(VerificationFailureDetail.of(
-                daily.getId(), reasonCode,
-                FailureEvidence.of(reasonCode, evidenceOf(daily, method)), now));
+                daily.getId(), reasonCode, FailureEvidence.of(reasonCode, evidence), now));
     }
 
     /** 그 판정에 쌓인 평가 근거. 방식이 없으면(챌린지가 사라진 경우) 읽을 것도 없다. */

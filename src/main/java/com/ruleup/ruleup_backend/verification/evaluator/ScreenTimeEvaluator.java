@@ -19,7 +19,8 @@ import java.util.*;
  * SCREEN_TIME 평가기 (§2.13). usageEvents(RESUMED/PAUSED) 페어링 → 시간창 교집합 합산.
  *  - MIN(도달형): 창 내 사용 ≥ goalMinutes → SUCCESS. 미달이면 PENDING(창 닫힘 시 배치가 FAILED·INSUFFICIENT_USAGE).
  *  - MAX(제약형): 창 내 사용 > goalMinutes → 즉시 FAILED·USAGE_EXCEEDED. 무위반이면 PENDING(배치가 SUCCESS).
- *  - 증분/멱등: 신호는 델타. 상태(누적초 + 미완 RESUMED)를 evidence에 누적 → 재배포에도 페어링 유지.
+ *  - 전량 재평가: 그날 원본을 통째로 받아 매번 처음부터 페어링한다. 요약을 이월하지 않으므로
+ *    분할 전송이 뒤바뀌어 PAUSED 가 먼저 도착해도 앞 이벤트가 버려지지 않는다(백엔드 4-3).
  *  - targetPackages 비면 전체 앱 사용으로 간주(폰 금지창 등).
  */
 @Component
@@ -40,12 +41,9 @@ public class ScreenTimeEvaluator implements MethodEvaluator {
                 ? new HashSet<>(memberApps)
                 : (cfg.targetPackages() != null ? new HashSet<>(cfg.targetPackages()) : Set.of());
 
-        // 직전 상태 복원
-        long accSec = priorSeconds(ctx.priorEvidence());
-        Map<String, Instant> open = priorOpen(ctx.priorEvidence());
-
-        // 이번 sync 이벤트 처리(패키지별 시간순 페어링)
-        accSec += processEvents(ctx.signals(), targets, window, open);
+        // 그날 원본 전부를 패키지별 시간순으로 페어링한다(이월 상태 없음).
+        Map<String, Instant> open = new HashMap<>();
+        long accSec = processEvents(ctx.signals(), targets, window, open);
 
         // 창 닫힘 이후면 남은 open 세션을 창 끝에서 종료(꼬리 시간 반영)
         if (!ctx.now().isBefore(window.end())) {
@@ -60,8 +58,8 @@ public class ScreenTimeEvaluator implements MethodEvaluator {
         evidence.put("usageMinutes", usageMin);
         evidence.put("goalMinutes", goal);
         evidence.put("mode", cfg.mode().name());
-        evidence.put("usageSeconds", accSec);          // 누적 상태(증분용)
-        if (!open.isEmpty()) evidence.put("open", serializeOpen(open));   // 미완 RESUMED 상태
+        evidence.put("usageSeconds", accSec);
+        if (!open.isEmpty()) evidence.put("open", serializeOpen(open));   // 아직 안 닫힌 세션(설명용)
 
         if (cfg.mode() == ScreenTimeMode.MIN) {
             return (usageMin >= goal)
@@ -74,7 +72,7 @@ public class ScreenTimeEvaluator implements MethodEvaluator {
         }
     }
 
-    /** 이번 sync 이벤트를 패키지별로 페어링해 새로 닫힌 구간의 창 내 초를 반환. open 맵은 갱신. */
+    /** 그날 이벤트를 패키지별로 페어링해 닫힌 구간의 창 내 초를 반환. open 맵에는 미완 세션이 남는다. */
     private long processEvents(List<SyncSignal> signals, Set<String> targets, Window window, Map<String, Instant> open) {
         // 패키지별 (type, at) 수집
         Map<String, List<UsageEvent>> byPkg = new HashMap<>();
@@ -122,25 +120,7 @@ public class ScreenTimeEvaluator implements MethodEvaluator {
         return Math.max(sec, 0);
     }
 
-    // ===== evidence 상태 직렬화/복원 =====
-    private long priorSeconds(Map<String, Object> prior) {
-        if (prior == null) return 0;
-        Object v = prior.get("usageSeconds");
-        return (v instanceof Number n) ? n.longValue() : 0;
-    }
-    @SuppressWarnings("unchecked")
-    private Map<String, Instant> priorOpen(Map<String, Object> prior) {
-        Map<String, Instant> open = new HashMap<>();
-        if (prior == null) return open;
-        Object o = prior.get("open");
-        if (o instanceof Map<?, ?> m) {
-            for (var e : ((Map<String, Object>) m).entrySet()) {
-                Instant at = safeInstant(String.valueOf(e.getValue()));
-                if (at != null) open.put(e.getKey(), at);
-            }
-        }
-        return open;
-    }
+    // ===== evidence 직렬화 =====
     private Map<String, String> serializeOpen(Map<String, Instant> open) {
         Map<String, String> out = new HashMap<>();
         for (var e : open.entrySet()) out.put(e.getKey(), e.getValue().toString());

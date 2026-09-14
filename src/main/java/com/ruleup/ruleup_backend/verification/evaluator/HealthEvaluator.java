@@ -40,9 +40,8 @@ public class HealthEvaluator implements MethodEvaluator {
 
         double goal = (cfg.goal() != null) ? cfg.goal().doubleValue() : 0;
         HealthMetric target = (cfg.metric() != null) ? cfg.metric() : HealthMetric.DISTANCE;
-        // HEALTH는 그날 누적 결과값을 통째로 다시 보내므로(델타 아님) prior 합산 대신 max로 갱신.
-        double priorBest = priorValue(ctx.priorEvidence());
-        Set<String> rejected = new LinkedHashSet<>(priorRejected(ctx.priorEvidence()));
+        // 그날 원본 전부를 매번 다시 읽는다 — 이월 없이 처음부터 집계한다.
+        Set<String> rejected = new LinkedHashSet<>();
 
         double passedSum = 0;
         boolean anyReading = false;
@@ -70,7 +69,7 @@ public class HealthEvaluator implements MethodEvaluator {
             }
         }
 
-        double best = Math.max(priorBest, passedSum);
+        double best = passedSum;
 
         Map<String, Object> ev = new HashMap<>();
         ev.put("metric", target.name());
@@ -105,14 +104,5 @@ public class HealthEvaluator implements MethodEvaluator {
         return TimeWindows.startOfDay(ctx.targetDate().plusDays(1), ctx.zone());
     }
 
-    private double priorValue(Map<String, Object> prior) {
-        Object v = (prior != null) ? prior.get("value") : null;
-        return (v instanceof Number n) ? n.doubleValue() : 0;
-    }
-    @SuppressWarnings("unchecked")
-    private List<String> priorRejected(Map<String, Object> prior) {
-        Object v = (prior != null) ? prior.get("rejectedOrigins") : null;
-        return (v instanceof List<?> l) ? (List<String>) l : List.of();
-    }
     private double round2(double v) { return Math.round(v * 100.0) / 100.0; }
 }
