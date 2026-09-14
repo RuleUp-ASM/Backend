@@ -30,7 +30,7 @@ class GpsRetentionCoherenceTest {
     /** 지정하지 않은 값은 record 가 기본값으로 채운다. */
     private VerificationProperties properties(Integer gpsRetentionDays, Integer signalRetentionDays) {
         return new VerificationProperties(null, null, null, null, null,
-                signalRetentionDays, null, gpsRetentionDays, null, false, false);
+                signalRetentionDays, null, gpsRetentionDays, null, null, false, false);
     }
 
     @Test

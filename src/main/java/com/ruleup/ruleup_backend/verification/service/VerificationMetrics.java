@@ -46,6 +46,7 @@ public class VerificationMetrics {
     private final Counter finalized;
     private final Counter finalizeLate;
     private final Counter finalizeFailed;
+    private final Counter materializeFailed;
     private final Counter deviceIdMissing;
     private final Counter signalsStored;
     private final Counter coordinatesPurged;
@@ -83,6 +84,10 @@ public class VerificationMetrics {
         // 이 카운터가 없으면 「확정되지 않은 채 계속 밀리는 판정」을 아무도 모른다.
         this.finalizeFailed = Counter.builder("verification.finalize.failed")
                 .description("대상 단위 확정 실패 — 격리 후 뒤로 미뤄진 판정 수").register(registry);
+        // 채우기에 실패한 멤버는 그 날짜가 통계에서 비어 버린다. 확정 실패와 원인이 달라 따로 센다.
+        this.materializeFailed = Counter.builder("verification.materialize.failed")
+                .description("무신호 귀속일 채우기 실패 — 그 멤버·날짜는 판정 행이 열리지 않았다")
+                .register(registry);
         // 활성 기기 검증을 엄격 모드로 켤 수 있는 시점을 이 값이 알려 준다. 0 이 되기 전에 켜면
         // 기기를 안 보내는 구버전 앱이 전부 인증 불가가 된다.
         this.deviceIdMissing = Counter.builder("verification.sync.device_id_missing")
@@ -151,6 +156,11 @@ public class VerificationMetrics {
     /** 기기 식별자 없이 sync 가 들어왔다(관대 모드에서만 도달한다). */
     public void deviceIdMissing() {
         deviceIdMissing.increment();
+    }
+
+    /** 한 멤버의 무신호 채우기가 실패해 그 날짜 판정 행이 열리지 않았다. */
+    public void materializeFailed() {
+        materializeFailed.increment();
     }
 
     /** 한 건의 확정이 실패해 격리·연기됐다. */

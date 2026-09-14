@@ -34,13 +34,13 @@ class EvaluatorAccuracyTest {
     /** 게이트 강화를 끈 기본 설정. 나머지 값은 record 가 기본값으로 채운다. */
     private static com.ruleup.ruleup_backend.verification.config.VerificationProperties lenientProperties() {
         return new com.ruleup.ruleup_backend.verification.config.VerificationProperties(
-                null, null, null, null, null, null, null, null, null, false, false);
+                null, null, null, null, null, null, null, null, null, null, false, false);
     }
 
     /** 출처 없는 기록을 거부하는 설정. */
     private static com.ruleup.ruleup_backend.verification.config.VerificationProperties strictOriginProperties() {
         return new com.ruleup.ruleup_backend.verification.config.VerificationProperties(
-                null, null, null, null, null, null, null, null, null, false, true);
+                null, null, null, null, null, null, null, null, null, null, false, true);
     }
 
     private static Instant at(int hour, int minute) {

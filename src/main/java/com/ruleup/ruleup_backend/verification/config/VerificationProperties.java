@@ -39,6 +39,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *                          이상탐지가 볼 수 있는 <b>상한</b>이지 목표가 아니다
  * @param anomalyRetentionDays 이상탐지 입력(유형별 anomaly 도메인)의 보관 일수. 스펙이 <b>최대 30일</b>
  *                          이라고 못 박았고, 만료분은 행 삭제가 아니라 일자 파티션 DROP 으로 걷는다
+ * @param materializeCatchupDays 무신호 귀속일 채우기가 거슬러 올라가 훑을 날짜 수(D-2 부터).
+ *                          1이면 D-2 하루만 보는데, 그러면 배포·장애로 이 배치가 걸러진 날짜는
+ *                          <b>영영 채워지지 않는다</b> — 다음 날은 다른 날짜를 보기 때문이다.
+ *                          확정 폴러와 달리 여기는 행 자체가 없어 폴러의 시야 밖이라 스스로
+ *                          따라잡지 못한다. 기본 7일
  * @param requireActiveDevice sync 요청에 기기 식별자를 <b>강제</b>할지. 스펙의 「AT + 활성 기기 검증」을
  *                          엄격히 적용하면 기기를 밝히지 않은 요청은 거부해야 한다. 다만 계약에 기기가
  *                          없던 시절의 앱이 아직 있어 <b>기본값은 false</b> 다 — 켜는 순간 그 앱들은
@@ -55,6 +60,7 @@ public record VerificationProperties(Integer geofenceRadiusM, Integer maxPayload
                                      Integer avoidGraceMinutes, Integer signalRetentionDays,
                                      Integer signalPartitionLookaheadDays,
                                      Integer gpsRetentionDays, Integer anomalyRetentionDays,
+                                     Integer materializeCatchupDays,
                                      Boolean requireActiveDevice, Boolean requireSignalOrigin) {
 
     private static final int DEFAULT_GEOFENCE_RADIUS_M = 500;
@@ -66,6 +72,7 @@ public record VerificationProperties(Integer geofenceRadiusM, Integer maxPayload
     private static final int DEFAULT_SIGNAL_PARTITION_LOOKAHEAD_DAYS = 10;
     private static final int DEFAULT_GPS_RETENTION_DAYS = 0;
     private static final int DEFAULT_ANOMALY_RETENTION_DAYS = 30;
+    private static final int DEFAULT_MATERIALIZE_CATCHUP_DAYS = 7;
 
     public VerificationProperties {
         geofenceRadiusM = positiveOrDefault(geofenceRadiusM, DEFAULT_GEOFENCE_RADIUS_M);
@@ -87,6 +94,8 @@ public record VerificationProperties(Integer geofenceRadiusM, Integer maxPayload
                             + "그렇지 않으면 좌표가 파기 타이머 도달 전에 파티션째 사라져 파기 기록이 남지 않는다");
         }
         anomalyRetentionDays = positiveOrDefault(anomalyRetentionDays, DEFAULT_ANOMALY_RETENTION_DAYS);
+        materializeCatchupDays = positiveOrDefault(
+                materializeCatchupDays, DEFAULT_MATERIALIZE_CATCHUP_DAYS);
         // 게이트 강화는 <b>끄는 쪽이 기본</b>이다. 구버전 앱을 한 번에 인증 불가로 만드는 변경은
         // 관측으로 안전을 확인한 뒤 켜야 한다.
         requireActiveDevice = requireActiveDevice != null && requireActiveDevice;

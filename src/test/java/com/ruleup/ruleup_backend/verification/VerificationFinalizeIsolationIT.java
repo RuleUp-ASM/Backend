@@ -162,6 +162,63 @@ class VerificationFinalizeIsolationIT extends VerificationApiSupport {
     }
 
     @Test
+    @DisplayName("[P1] 무신호 채우기도 깨진 멤버 하나에 통째로 롤백되지 않는다")
+    void materializeIsolatesABrokenMember() throws Exception {
+        Member me = member(uniq("materialize-isolate"));
+        LocalDate targetDate = LocalDate.now(KST).minusDays(2);
+
+        UUID brokenChallenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
+        UUID brokenMember = insertReadyMember(brokenChallenge, me.id(),
+                anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+        UUID healthyChallenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
+        UUID healthyMember = insertReadyMember(healthyChallenge, me.id(),
+                anchor(GYM_LAT, GYM_LNG, 100, "도서관"), null);
+        startedDaysAgo(brokenChallenge, 5);
+        startedDaysAgo(healthyChallenge, 5);
+        corrupt(brokenChallenge);
+
+        finalizeService.materializeDueTargets();
+
+        assertThat(rowExists(healthyMember, targetDate))
+                .as("단일 트랜잭션이면 깨진 멤버 하나가 그날 채우기를 통째로 되돌리고, "
+                        + "다음 날은 다른 날짜를 보므로 그 날짜는 영구히 비어 버린다")
+                .isTrue();
+        assertThat(rowExists(brokenMember, targetDate))
+                .as("설정을 읽을 수 없는 멤버는 열지 않는다")
+                .isFalse();
+    }
+
+    @Test
+    @DisplayName("[P1] 하루 걸러진 날짜도 다음 실행이 따라잡는다")
+    void materializeCatchesUpOnSkippedDates() throws Exception {
+        Member me = member(uniq("materialize-catchup"));
+        UUID challenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
+        UUID memberId = insertReadyMember(challenge, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+        startedDaysAgo(challenge, 10);
+
+        finalizeService.materializeDueTargets();
+
+        // D-2 만 보면 그보다 오래된 날짜는 영영 열리지 않는다.
+        assertThat(rowExists(memberId, LocalDate.now(KST).minusDays(4)))
+                .as("확정 폴러는 행이 있어야 집는다 — 행 자체가 없는 날짜는 스스로 따라잡지 못한다")
+                .isTrue();
+    }
+
+    /** 챌린지 시작일을 당겨 과거 날짜도 인증 대상이 되게 한다. */
+    private void startedDaysAgo(UUID challengeId, int days) {
+        jdbc().update("UPDATE challenges SET start_date = " +
+                        " DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL ? DAY) " +
+                        "WHERE id = ?", days, bytes(challengeId));
+    }
+
+    private boolean rowExists(UUID challengeMemberId, LocalDate date) {
+        Integer n = jdbc().queryForObject(
+                "SELECT COUNT(*) FROM VerificationDaily WHERE challengeMemberId = ? AND targetDate = ?",
+                Integer.class, bytes(challengeMemberId), java.sql.Date.valueOf(date));
+        return n != null && n > 0;
+    }
+
+    @Test
     @DisplayName("[P1] 격리된 건은 다음 차례가 와도 정상 건보다 앞서지 않는다")
     void deferredRowDoesNotJumpTheQueueAgain() throws Exception {
         Member me = member(uniq("finalize-defer"));

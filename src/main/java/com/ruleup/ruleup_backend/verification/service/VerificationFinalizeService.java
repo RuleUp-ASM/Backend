@@ -80,12 +80,16 @@ public class VerificationFinalizeService {
     /** 한 번에 채울 무신호 대상 상한. 유저 2만 × 동시 3개 기준 일 6만 건이라 여유를 둔다. */
     private static final int MATERIALIZE_LIMIT = 100_000;
 
+    /** 한 트랜잭션에 담을 채우기 대상 수. 청크가 터져도 되돌아가는 범위를 이만큼으로 묶는다. */
+    private static final int MATERIALIZE_CHUNK = 500;
+
     private final VerificationDailyRepository dailyRepo;
     private final VerificationMethodResultRepository methodResultRepo;
     private final VerificationFailureDetailRepository failureDetailRepo;
     private final SignalExclusionRecorder exclusionRecorder;
     private final ChallengeQueryService challengeQuery;
     private final VerificationConfigFactory configFactory;
+    private final com.ruleup.ruleup_backend.verification.config.VerificationProperties properties;
     private final VerificationProgressService progressService;
     private final NotificationPublisher notificationPublisher;
     private final ApplicationEventPublisher eventPublisher;
@@ -105,6 +109,7 @@ public class VerificationFinalizeService {
                                        SignalExclusionRecorder exclusionRecorder,
                                        ChallengeQueryService challengeQuery,
                                        VerificationConfigFactory configFactory,
+                                       com.ruleup.ruleup_backend.verification.config.VerificationProperties properties,
                                        VerificationProgressService progressService,
                                        NotificationPublisher notificationPublisher,
                                        ApplicationEventPublisher eventPublisher,
@@ -123,6 +128,7 @@ public class VerificationFinalizeService {
         this.exclusionRecorder = exclusionRecorder;
         this.challengeQuery = challengeQuery;
         this.configFactory = configFactory;
+        this.properties = properties;
         this.progressService = progressService;
         this.notificationPublisher = notificationPublisher;
         this.eventPublisher = eventPublisher;
@@ -139,37 +145,92 @@ public class VerificationFinalizeService {
     }
 
     /**
-     * 매일 00:00:30 KST: 확정 시각이 막 지난 귀속일(D-2)에 대해 <b>행이 없는 대상</b>을 채운다.
+     * 매일 00:00:30 KST: 확정 시각이 지난 귀속일에 대해 <b>행이 없는 대상</b>을 채운다.
      *
      * <p>판정 행은 sync 가 만든다. 그래서 그날 앱을 한 번도 켜지 않은 사용자는 행이 아예 없고,
      * 확정 배치가 "PENDING 행"만 훑으면 그 날짜는 실패로도 확정되지 않아 통계에서 통째로 사라진다.
      * 여기서 빈 자리를 채워 두면 아래 {@link #finalizeDue()} 가 NO_SIGNAL_RECEIVED 로 확정한다.
      *
+     * <h4>하루만 보지 않는다</h4>
+     * D-2 만 채우면 <b>배포·장애로 이 배치가 걸러진 날짜는 영영 채워지지 않는다.</b> 다음 날은
+     * 다른 날짜를 보기 때문이다. 확정 폴러가 「확정 시각이 지난 미확정 건」 조건으로 스스로
+     * 따라잡는 것과 달리, 여기는 <b>행 자체가 없어</b> 폴러의 시야 밖이다. 그래서 최근
+     * {@code materializeCatchupDays} 일을 함께 훑는다. 늦게 채워도 판정은 달라지지 않는다 —
+     * 행이 없다는 것은 그날 그 멤버로 신호가 온 적이 없다는 뜻이라 결론이 무신호로 같다.
+     *
+     * <h4>한 멤버가 전체를 되돌리지 않는다</h4>
+     * 예전에는 최대 10만 건을 <b>단일 트랜잭션</b>으로 돌았다. 챌린지 설정 하나가 깨지면 그날
+     * 채우기가 통째로 롤백되고, 다음 날에는 다른 날짜를 보므로 그 날짜는 영구히 비어 있게 된다.
+     * 청크 트랜잭션으로 나누고, 청크가 터지면 멤버별로 다시 돌려 문제 멤버만 남긴다.
+     *
      * <p>대상 아닌 날(요일 밖·기간 밖·빈도 몫 충족)은 열지 않는다 — 확정되지 않을 행을 만들 이유가 없다.
-     * 재실행해도 이미 있는 행은 건너뛰므로 안전하다.
      */
     @Scheduled(cron = "30 0 0 * * *", zone = "Asia/Seoul")
-    @Transactional
     public void materializeDueTargets() {
-        LocalDate targetDate = LocalDate.now(KST).minusDays(2);   // 확정 시각이 방금 지난 귀속일
+        LocalDate today = LocalDate.now(KST);
+        // D-2 가 확정 시각이 막 지난 귀속일이고, 그보다 오래된 날짜는 이전 실행이 놓친 몫이다.
+        for (int back = 0; back < properties.materializeCatchupDays(); back++) {
+            materializeForDate(today.minusDays(2L + back));
+        }
+    }
+
+    private void materializeForDate(LocalDate targetDate) {
         List<ChallengeMember> members = challengeQuery.findActiveOnDate(targetDate, MATERIALIZE_LIMIT);
         int opened = 0;
-        for (ChallengeMember member : members) {
-            if (dailyRepo.findByChallengeMemberIdAndTargetDate(member.getId(), targetDate).isPresent()) continue;
-            Challenge challenge = challengeQuery.findChallenge(member.getChallengeId()).orElse(null);
-            if (challenge == null) continue;
-            VerificationConfig config = configFactory.build(challenge);
-            if (config.isManual()) continue;   // 수동 인증은 미체크가 곧 미수행 — 자동 확정 대상이 아니다
-            if (VerificationTargetDays.of(config, challenge, member, targetDate)
-                    != VerificationTargetDays.Disposition.EVALUATE) {
-                continue;
-            }
-            VerificationDaily daily = dailyRepo.save(VerificationDaily.open(
-                    member.getId(), challenge.getId(), member.getUserId(), targetDate));
-            daily.applyWindow(null);
-            opened++;
+        for (int from = 0; from < members.size(); from += MATERIALIZE_CHUNK) {
+            List<ChallengeMember> chunk =
+                    members.subList(from, Math.min(from + MATERIALIZE_CHUNK, members.size()));
+            opened += openChunkSafely(chunk, targetDate);
         }
         if (opened > 0) log.info("무신호 귀속일 채우기: {} 대상 {}건 개시", targetDate, opened);
+    }
+
+    /** 청크 하나. 통째로 터지면 멤버별로 다시 돌려 나머지를 살린다. */
+    private int openChunkSafely(List<ChallengeMember> chunk, LocalDate targetDate) {
+        try {
+            Integer opened = transactionTemplate.execute(tx -> {
+                int n = 0;
+                for (ChallengeMember member : chunk) n += openIfMissing(member, targetDate) ? 1 : 0;
+                return n;
+            });
+            return (opened != null) ? opened : 0;
+        } catch (RuntimeException e) {
+            log.warn("무신호 채우기 청크 실패 — 멤버별 격리로 전환한다. date={} err={}",
+                    targetDate, e.toString());
+            return openEachIndividually(chunk, targetDate);
+        }
+    }
+
+    private int openEachIndividually(List<ChallengeMember> chunk, LocalDate targetDate) {
+        int opened = 0;
+        for (ChallengeMember member : chunk) {
+            try {
+                Boolean done = transactionTemplate.execute(tx -> openIfMissing(member, targetDate));
+                if (Boolean.TRUE.equals(done)) opened++;
+            } catch (RuntimeException e) {
+                metrics.materializeFailed();
+                log.error("무신호 채우기 실패 — 이 멤버만 건너뛴다. memberId={} date={} err={}",
+                        member.getId(), targetDate, e.toString(), e);
+            }
+        }
+        return opened;
+    }
+
+    /** 그 멤버·날짜의 판정 행이 없으면 연다. 이미 있으면 아무것도 하지 않는다(재실행 안전). */
+    private boolean openIfMissing(ChallengeMember member, LocalDate targetDate) {
+        if (dailyRepo.findByChallengeMemberIdAndTargetDate(member.getId(), targetDate).isPresent()) return false;
+        Challenge challenge = challengeQuery.findChallenge(member.getChallengeId()).orElse(null);
+        if (challenge == null) return false;
+        VerificationConfig config = configFactory.build(challenge);
+        if (config.isManual()) return false;   // 수동 인증은 미체크가 곧 미수행 — 자동 확정 대상이 아니다
+        if (VerificationTargetDays.of(config, challenge, member, targetDate)
+                != VerificationTargetDays.Disposition.EVALUATE) {
+            return false;
+        }
+        VerificationDaily daily = dailyRepo.save(VerificationDaily.open(
+                member.getId(), challenge.getId(), member.getUserId(), targetDate));
+        daily.applyWindow(null);
+        return true;
     }
 
     /**
