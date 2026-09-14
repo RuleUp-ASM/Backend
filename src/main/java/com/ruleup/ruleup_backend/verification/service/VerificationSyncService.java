@@ -61,6 +61,8 @@ public class VerificationSyncService {
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     /** 누적 일괄 상한: 신호 배열 총 개수(초과 시 413 SYNC_PAYLOAD_TOO_LARGE, 클라는 분할 재전송). */
     private static final int MAX_SIGNALS_PER_SYNC = 5000;
+    /** 신호 하나의 대략적인 직렬화 크기. 본문 크기 <b>분포</b>를 보기 위한 환산 계수다. */
+    private static final int APPROX_BYTES_PER_SIGNAL = 256;
     private static final Set<String> KNOWN_SIGNAL_TYPES = Stream.concat(
             Arrays.stream(SignalType.values()).map(Enum::name),
             Stream.of("GEOFENCE_TRANSITION")   // Android 와이어 별칭
@@ -240,6 +242,8 @@ public class VerificationSyncService {
         int flushIntervalSec = FlushIntervalPolicy.forUser(user);
         metrics.sync(System.nanoTime() - startedAt, signals.size(), ingested.droppedCount(),
                 gateDropped, consent.rejectedTypes().size());
+        // 봉투의 모양 — 압축·요약 전송 도입 판단의 근거다(백엔드 7절).
+        metrics.envelope(payloadBytesOf(req), (req.coveredUntil() - req.coveredFrom()) / 1000);
         return new SyncResponse(
                 ZonedDateTime.ofInstant(now, KST).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
                 flushIntervalSec, updated, ignored, properties.maxPayloadBytes(), ingested.droppedCount(),
@@ -309,6 +313,16 @@ public class VerificationSyncService {
 
     private static boolean blank(String value) {
         return value == null || value.isBlank();
+    }
+
+    /**
+     * 이 요청의 대략적인 본문 크기. 실제 바이트는 필터가 스트림에서 세지만 그 값을 여기까지
+     * 들고 오려면 요청 속성을 엮어야 하고, 지표의 쓰임(분포를 보고 상한을 조정)에는 신호 수로
+     * 환산한 근사면 충분하다. <b>정확한 반려 판단은 여전히 필터가 한다.</b>
+     */
+    private static long payloadBytesOf(SyncRequest req) {
+        List<SyncSignal> signals = req.signals();
+        return (signals != null) ? (long) signals.size() * APPROX_BYTES_PER_SIGNAL : 0L;
     }
 
     private boolean becameFinal(VerificationStatus before, VerificationStatus after) {

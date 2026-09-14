@@ -49,10 +49,17 @@ public class VerificationSignalReader {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
-    /** 한 귀속일 판정에 읽을 원본 상한. 넘으면 오래된 것부터 자른다(방어적). */
+    /**
+     * 한 귀속일·한 도메인에서 읽을 원본 상한(방어적).
+     *
+     * <p>여기 걸리면 <b>그 날 판정은 전량 재평가가 아니다</b> — 잘린 만큼이 근거에서 빠진다.
+     * 조용히 넘어가면 「원본이 곧 판정의 원본」이라는 전제가 소리 없이 깨지므로, 걸린 사실을
+     * 세고 남긴다. 정상 사용자는 근처에도 오지 않는 수치다(1분 sync 를 하루 종일 해도 1,440건).
+     */
     private static final int MAX_ROWS_PER_DAY = 20_000;
 
     private final JdbcTemplate jdbc;
+    private final VerificationMetrics metrics;
 
     /**
      * 그 귀속일 판정에 쓸 원본 신호 전부.
@@ -81,9 +88,18 @@ public class VerificationSignalReader {
         List<String> payloads = jdbc.queryForList(
                 "SELECT payload FROM " + domain.table()
                         + " WHERE observedDate BETWEEN ? AND ? AND userId = ? AND excludeReason IS NULL"
-                        + " ORDER BY occurredAt, id LIMIT " + MAX_ROWS_PER_DAY,
+                        + " ORDER BY occurredAt, id LIMIT " + (MAX_ROWS_PER_DAY + 1),
                 String.class,
                 Date.valueOf(targetDate.minusDays(1)), Date.valueOf(targetDate.plusDays(1)), bytes(userId));
+
+        if (payloads.size() > MAX_ROWS_PER_DAY) {
+            // 잘린 채로 판정하면 사용 시간·체류가 실제보다 작게 나온다. 유저에게 불리한 방향이라
+            // 더더욱 묻어 두면 안 된다.
+            metrics.signalsReadTruncated();
+            log.error("일별 원본 조회가 상한에 걸렸다 — 이 날 판정은 전량 재평가가 아니다. "
+                    + "table={} userId={} date={} limit={}", domain.table(), userId, targetDate, MAX_ROWS_PER_DAY);
+            payloads = payloads.subList(0, MAX_ROWS_PER_DAY);
+        }
 
         List<SyncSignal> signals = new ArrayList<>(payloads.size());
         for (String payload : payloads) {

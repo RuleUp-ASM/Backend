@@ -65,6 +65,8 @@ public class VerificationSignalIngestService {
     private static final int INSERT_BATCH = 500;
 
     private final JdbcTemplate jdbc;
+    private final com.ruleup.ruleup_backend.verification.config.VerificationProperties properties;
+    private final VerificationMetrics metrics;
 
     /**
      * 수신 결과.
@@ -178,6 +180,7 @@ public class VerificationSignalIngestService {
             rows.add(row(userId, c, receivedAt, deviceId));
         }
         insertAll(domain, rows);
+        metrics.signalsStored(rows.size());
         return dropped;
     }
 
@@ -185,8 +188,9 @@ public class VerificationSignalIngestService {
      * 같은 dedupKey 가 <b>다른 귀속일</b>로 이미 저장돼 있는지. 클라가 recordId 를 명시한 신호만 본다 —
      * 내용 해시로 만든 키는 날짜가 내용에 들어 있어 애초에 충돌하지 않는다.
      *
-     * <p>보관 중인 파티션 전부를 뒤지지 않고 앞뒤 하루만 본다. 판정을 바꿀 수 있는 구간이
-     * 현재 귀속일과 직전 유예 귀속일뿐이라, 그 밖의 날짜로 옮겨 봐야 판정에 닿지 못한다.
+     * <p>검사 창은 <b>원본 보관 기간</b>이다. 앞뒤 하루만 보면 그 밖의 날짜에 같은 레코드가
+     * 남아 있어도 통과하는데, 보관 중인 원본은 전부 판정 재평가의 입력이라 「닿지 못한다」고
+     * 말할 수 없다. 어차피 파티션 프루닝이 걸리는 조회라 창을 넓혀도 비용은 거의 같다.
      */
     private Set<String> storedOnOtherDate(UUID userId, SignalDomain domain, LocalDate observedDate,
                                           Set<String> keys) {
@@ -196,9 +200,10 @@ public class VerificationSignalIngestService {
         for (int from = 0; from < all.size(); from += INSERT_BATCH) {
             List<String> chunk = all.subList(from, Math.min(from + INSERT_BATCH, all.size()));
             String placeholders = String.join(",", Collections.nCopies(chunk.size(), "?"));
+            int window = properties.signalRetentionDays();
             List<Object> args = new ArrayList<>();
-            args.add(Date.valueOf(observedDate.minusDays(1)));
-            args.add(Date.valueOf(observedDate.plusDays(1)));
+            args.add(Date.valueOf(observedDate.minusDays(window)));
+            args.add(Date.valueOf(observedDate.plusDays(window)));
             args.add(Date.valueOf(observedDate));
             args.add(bytes(userId));
             args.addAll(chunk);

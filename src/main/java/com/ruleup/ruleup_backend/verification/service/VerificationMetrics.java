@@ -1,6 +1,7 @@
 package com.ruleup.ruleup_backend.verification.service;
 
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import org.springframework.stereotype.Component;
@@ -46,6 +47,11 @@ public class VerificationMetrics {
     private final Counter finalizeLate;
     private final Counter finalizeFailed;
     private final Counter deviceIdMissing;
+    private final Counter signalsStored;
+    private final Counter signalsReadTruncated;
+    private final Counter payloadRejected;
+    private final DistributionSummary payloadBytes;
+    private final DistributionSummary backlogSpanSeconds;
 
     /** 마지막으로 확정 배치가 대상을 비운 시각(epoch millis). 0 이면 아직 돈 적이 없다. */
     private final AtomicLong lastFinalizeCompletedAt = new AtomicLong();
@@ -80,6 +86,20 @@ public class VerificationMetrics {
         // 기기를 안 보내는 구버전 앱이 전부 인증 불가가 된다.
         this.deviceIdMissing = Counter.builder("verification.sync.device_id_missing")
                 .description("기기 식별자 없이 들어온 sync 요청 수").register(registry);
+        this.signalsStored = Counter.builder("verification.signals.stored")
+                .description("실제로 적재된 원본 신호 수 — 저장량 증가율의 원천").register(registry);
+        // 판정이 원본 전량을 다시 읽는 구조라, 상한에 걸려 잘린 날은 <b>그 날 판정이 틀렸다</b>는 뜻이다.
+        this.signalsReadTruncated = Counter.builder("verification.signals.read_truncated")
+                .description("일별 원본 조회가 상한에 걸려 잘린 횟수").register(registry);
+        this.payloadRejected = Counter.builder("verification.sync.payload_rejected")
+                .description("본문 크기 상한을 넘겨 413 으로 반려한 요청 수 — 초과율의 분자")
+                .register(registry);
+        this.payloadBytes = DistributionSummary.builder("verification.sync.payload_bytes")
+                .description("sync 본문 크기 — p99 가 상한에 근접하면 압축·요약 전송을 검토한다")
+                .baseUnit("bytes").publishPercentiles(0.5, 0.95, 0.99).register(registry);
+        this.backlogSpanSeconds = DistributionSummary.builder("verification.sync.backlog_span_seconds")
+                .description("한 요청이 선언한 커버리지 구간 길이 — 오프라인 복구 규모")
+                .baseUnit("seconds").publishPercentiles(0.5, 0.95, 0.99).register(registry);
         registry.gauge("verification.finalize.last_completed_epoch_ms", lastFinalizeCompletedAt,
                 AtomicLong::doubleValue);
     }
@@ -91,6 +111,32 @@ public class VerificationMetrics {
         if (deduped > 0) signalsDeduped.increment(deduped);
         if (gateDropped > 0) signalsGateDropped.increment(gateDropped);
         if (consentRejected > 0) signalsConsentRejected.increment(consentRejected);
+    }
+
+    /**
+     * 요청 봉투의 모양 — 크기와 커버리지 구간 길이.
+     *
+     * @param coveredSeconds 이 요청이 「빠짐없이 담았다」고 선언한 구간의 길이. 길수록 오프라인
+     *                       복구분이고, 이 값의 분포가 FCM 기동 효과를 판단하는 근거다
+     */
+    public void envelope(long payloadBytesValue, long coveredSeconds) {
+        if (payloadBytesValue > 0) payloadBytes.record(payloadBytesValue);
+        if (coveredSeconds > 0) backlogSpanSeconds.record(coveredSeconds);
+    }
+
+    /** 본문 크기 상한을 넘겨 반려했다(413). */
+    public void payloadRejected() {
+        payloadRejected.increment();
+    }
+
+    /** 원본을 실제로 적재했다. */
+    public void signalsStored(int count) {
+        if (count > 0) signalsStored.increment(count);
+    }
+
+    /** 일별 원본 조회가 상한에 걸려 잘렸다 — 그 날 판정은 전량 재평가가 아니다. */
+    public void signalsReadTruncated() {
+        signalsReadTruncated.increment();
     }
 
     /** 기기 식별자 없이 sync 가 들어왔다(관대 모드에서만 도달한다). */
