@@ -87,6 +87,7 @@ public class VerificationSyncService {
     private final LocationPurgeService locationPurge;
     private final VerificationSyncSessionStore sessionStore;
     private final SignalConsentGate consentGate;
+    private final VerificationMetrics metrics;
     private final Map<VerificationMethod, MethodEvaluator> evaluators;
 
     public VerificationSyncService(ChallengeQueryService challengeQuery,
@@ -110,6 +111,7 @@ public class VerificationSyncService {
                                    LocationPurgeService locationPurge,
                                    VerificationSyncSessionStore sessionStore,
                                    SignalConsentGate consentGate,
+                                   VerificationMetrics metrics,
                                    List<MethodEvaluator> evaluatorList) {
         this.challengeQuery = challengeQuery;
         this.dailyRepo = dailyRepo;
@@ -132,12 +134,14 @@ public class VerificationSyncService {
         this.locationPurge = locationPurge;
         this.sessionStore = sessionStore;
         this.consentGate = consentGate;
+        this.metrics = metrics;
         this.evaluators = evaluatorList.stream()
                 .collect(Collectors.toMap(MethodEvaluator::method, e -> e, (a, b) -> a));
     }
 
     @Transactional
     public SyncResponse sync(UUID userId, SyncRequest req) {
+        long startedAt = System.nanoTime();
         if (req == null) throw new BusinessException(ErrorCode.INVALID_SIGNAL_PAYLOAD);
         // 복구 전송(backlog)은 별도 허용치 — 평상시 간격을 그대로 적용하면 밀린 구간을 올릴 수가 없다.
         rateLimiter.check(userId.toString(), Boolean.TRUE.equals(req.backlog()));
@@ -167,7 +171,7 @@ public class VerificationSyncService {
         // 배제 사유를 행에 새긴다 — 제외와 제재는 분리하고, 원본은 이상탐지 자료로 남긴다.
         VerificationSignalIngestService.Ingested ingested = signalIngest.ingest(userId, collectible, now,
                 new VerificationSignalIngestService.Source(req.deviceId(), gateFor(user, req)));
-        trustGate.record(userId, req, collectible);
+        int gateDropped = trustGate.record(userId, req, collectible);
 
         // 판정 입력은 저장된 원본이다. 오늘과 유예 중인 어제를 한 번씩만 읽어 멤버들이 나눠 쓴다 —
         // 같은 사용자 신호를 챌린지별로 복제해 읽지 않는다(백엔드 4-1-1 「사용자 신호 1회 저장」).
@@ -234,6 +238,8 @@ public class VerificationSyncService {
         // maxPayloadBytes: 클라가 이 값을 보고 전송 구간을 쪼갠다(설정값, 실측 후 조정).
         backfillCountry(user, req.timeZone());
         int flushIntervalSec = FlushIntervalPolicy.forUser(user);
+        metrics.sync(System.nanoTime() - startedAt, signals.size(), ingested.droppedCount(),
+                gateDropped, consent.rejectedTypes().size());
         return new SyncResponse(
                 ZonedDateTime.ofInstant(now, KST).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
                 flushIntervalSec, updated, ignored, properties.maxPayloadBytes(), ingested.droppedCount(),
