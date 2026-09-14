@@ -241,7 +241,8 @@ public class VerificationSyncService {
         metrics.sync(System.nanoTime() - startedAt, signals.size(), ingested.droppedCount(),
                 gateDropped, consent.rejectedTypes().size());
         // 봉투의 모양 — 압축·요약 전송 도입 판단의 근거다(백엔드 7절).
-        metrics.envelope(payloadBytesOf(), (req.coveredUntil() - req.coveredFrom()) / 1000);
+        metrics.envelope(payloadBytesOf(), (req.coveredUntil() - req.coveredFrom()) / 1000,
+                Boolean.TRUE.equals(req.backlog()));
         return new SyncResponse(
                 ZonedDateTime.ofInstant(now, KST).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
                 flushIntervalSec, updated, ignored, properties.maxPayloadBytes(), ingested.droppedCount(),
@@ -401,7 +402,12 @@ public class VerificationSyncService {
                                              VerificationSignalReader.DaySignalSet daySignals,
                                              List<SyncRequest.Gap> gaps, LocalDate today, Instant now) {
         // 확정 이후 도착분은 저장만 하고 판정에 쓰지 않는다(인증 정책 §2 지연 데이터). 구제는 이의제기로만.
-        if (daily.isTerminal()) return daily.getStatus();
+        // 스펙 7절이 「확정 이후 일반 sync 자동 정정 0건」을 요구하므로, 여기 닿은 횟수를 센다 —
+        // 결과가 바뀐 것이 아니라 <b>바뀔 뻔한 시도</b>의 수다.
+        if (daily.isTerminal()) {
+            metrics.lateSignalIgnored();
+            return daily.getStatus();
+        }
         // 원본을 전부 읽지 못한 날은 평가하지 않는다. 잘린 값으로 「실패 예정」이나 성공을 찍으면
         // 사용자에게 잘못된 결과가 그대로 보인다 — 판정을 미루는 편이 낫다.
         if (daySignals == null || !daySignals.complete()) {

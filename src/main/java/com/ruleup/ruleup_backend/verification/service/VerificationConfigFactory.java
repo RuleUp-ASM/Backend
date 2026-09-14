@@ -68,7 +68,8 @@ public class VerificationConfigFactory {
             case "SLEEP" -> sleep = new SleepConfig(
                     timeParamOrNull(params, "bedtime_before"),
                     decimalParamOrNull(params, "sleep_hours"),
-                    Polarity.ACHIEVEMENT, 12);
+                    Polarity.ACHIEVEMENT, 12,
+                    DEFAULT_TRUSTED_ORIGINS);   // 걸음·거리와 같은 신뢰 목록
             default -> { /* SELF_CHECK: 수동 — 자동 신호 설정 없음 */ }
         }
 

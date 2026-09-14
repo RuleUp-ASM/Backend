@@ -55,7 +55,7 @@ public class SleepEvaluator implements MethodEvaluator {
             if (st == null || en == null || !en.isAfter(st)) continue;
             if (!seen.add(st.toString() + "|" + en.toString())) continue;   // 재전송 — 이미 반영했다
             if (s.origin() == null) originMissing++;
-            if (!trusted(s)) { anyUntrusted = true; continue; }             // 손입력·비신뢰 출처는 제외
+            if (!trusted(s, cfg)) { anyUntrusted = true; continue; }        // 손입력·비신뢰 출처는 제외
             sleepSec += en.getEpochSecond() - st.getEpochSecond();
             if (bedtime == null || st.isBefore(bedtime)) bedtime = st;
         }
@@ -125,15 +125,22 @@ public class SleepEvaluator implements MethodEvaluator {
      * <p>손으로 입력한(MANUAL) 기록은 제외한다 — 자고 나서 적어 넣은 기록으로 인증이 통과되면
      * 자동 인증이 아니다.
      *
-     * <p>{@code origin} 누락 처리는 <b>설정으로 가른다</b>. 걸음·거리(HEALTH)는 이미 출처가 없으면
-     * 거부하는데 수면만 통과시키는 것은 일관되지 않다. 다만 지금 바로 조이면 출처를 보내지 않는
+     * <p><b>신뢰 목록도 함께 본다.</b> 손입력만 거르면 임의의 {@code dataOrigin} 을 단 자동 기록이
+     * 그대로 통과한다 — 스펙의 "신뢰 가능한 Health Connect 출처만 사용함"을 만족하지 못한다.
+     * 목록은 걸음·거리와 같은 값이며, 비어 있으면(설정으로 껐으면) 검사하지 않는다.
+     *
+     * <p>{@code origin} 누락 처리는 <b>설정으로 가른다</b>. 지금 바로 조이면 출처를 보내지 않는
      * 클라의 수면 인증이 전부 막히므로, evidence 의 {@code originMissing} 이 0 으로 떨어진 것을
      * 보고 {@code app.verification.require-signal-origin} 을 켠다.
      */
-    private boolean trusted(SleepSegment s) {
+    private boolean trusted(SleepSegment s, SleepConfig cfg) {
         HealthOrigin origin = s.origin();
         if (origin == null) return !properties.requireSignalOrigin();
-        return !"MANUAL".equalsIgnoreCase(origin.recordingMethod());
+        if ("MANUAL".equalsIgnoreCase(origin.recordingMethod())) return false;
+
+        List<String> allowlist = cfg.trustedOrigins();
+        if (allowlist == null || allowlist.isEmpty()) return true;
+        return origin.dataOrigin() != null && allowlist.contains(origin.dataOrigin());
     }
 
     private Instant bedtimeThreshold(String hhmm, LocalDate targetDate, ZoneId zone) {

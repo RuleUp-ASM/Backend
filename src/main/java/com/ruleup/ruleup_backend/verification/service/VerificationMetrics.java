@@ -51,6 +51,13 @@ public class VerificationMetrics {
     private final Counter activeDeviceUnknown;
     private final Counter signalsStored;
     private final Counter coordinatesPurged;
+    private final Counter duplicateConfirm;
+    private final Counter mutatedAfterConfirm;
+    private final Counter confirmedTooEarly;
+    private final Counter appealAccepted;
+    private final Counter appealDuplicate;
+    private final Counter appealAbuseSampled;
+    private final Counter backlogRequests;
     private final Counter signalsReadTruncated;
     private final Counter payloadRejected;
     private final DistributionSummary payloadBytes;
@@ -113,6 +120,25 @@ public class VerificationMetrics {
         this.backlogSpanSeconds = DistributionSummary.builder("verification.sync.backlog_span_seconds")
                 .description("한 요청이 선언한 커버리지 구간 길이 — 오프라인 복구 규모")
                 .baseUnit("seconds").publishPercentiles(0.5, 0.95, 0.99).register(registry);
+        // 아래 넷은 스펙 7절이 <b>0건</b>을 요구하는 값이다. 0 을 확인하려면 세는 자리가 있어야 한다.
+        this.duplicateConfirm = Counter.builder("verification.confirm.duplicate")
+                .description("같은 멤버·날짜에 확정이 두 번 시도된 횟수 — 유일 제약이 막은 수")
+                .register(registry);
+        this.mutatedAfterConfirm = Counter.builder("verification.confirm.late_signal_ignored")
+                .description("확정 이후 도착한 신호로 평가가 시도된 횟수 — 결과는 바뀌지 않았다")
+                .register(registry);
+        this.confirmedTooEarly = Counter.builder("verification.confirm.too_early")
+                .description("확정 시각 전에 실패를 확정하려 한 횟수").register(registry);
+        this.appealAccepted = Counter.builder("verification.appeal.accepted")
+                .description("이의 인용 건수 — 인정률의 분자").register(registry);
+        this.appealDuplicate = Counter.builder("verification.appeal.duplicate_blocked")
+                .description("같은 판정에 두 번째 이의가 막힌 횟수 — 중복 정정·중복 지급의 방어선")
+                .register(registry);
+        this.appealAbuseSampled = Counter.builder("verification.appeal.abuse_sampled")
+                .description("이의 남용 이상탐지 집계가 실제로 돈 횟수").register(registry);
+        this.backlogRequests = Counter.builder("verification.sync.backlog_requests")
+                .description("복구 전송(backlog=true)으로 들어온 요청 수 — 구간당 요청 수의 분자")
+                .register(registry);
         registry.gauge("verification.finalize.last_completed_epoch_ms", lastFinalizeCompletedAt,
                 AtomicLong::doubleValue);
     }
@@ -132,15 +158,34 @@ public class VerificationMetrics {
      * @param coveredSeconds 이 요청이 「빠짐없이 담았다」고 선언한 구간의 길이. 길수록 오프라인
      *                       복구분이고, 이 값의 분포가 FCM 기동 효과를 판단하는 근거다
      */
-    public void envelope(long payloadBytesValue, long coveredSeconds) {
+    public void envelope(long payloadBytesValue, long coveredSeconds, boolean backlog) {
         if (payloadBytesValue > 0) payloadBytes.record(payloadBytesValue);
         if (coveredSeconds > 0) backlogSpanSeconds.record(coveredSeconds);
+        if (backlog) backlogRequests.increment();
     }
 
     /** 본문 크기 상한을 넘겨 반려했다(413). */
     public void payloadRejected() {
         payloadRejected.increment();
     }
+
+    /** 같은 멤버·날짜에 확정이 두 번 시도됐다(유일 제약이 막았다). */
+    public void duplicateConfirm() { duplicateConfirm.increment(); }
+
+    /** 확정 이후 도착한 신호로 평가가 시도됐다 — 결과는 바뀌지 않는다. */
+    public void lateSignalIgnored() { mutatedAfterConfirm.increment(); }
+
+    /** 확정 시각 전에 실패를 확정하려 했다. 스펙상 0 이어야 한다. */
+    public void confirmedTooEarly() { confirmedTooEarly.increment(); }
+
+    /** 이의가 인용됐다. */
+    public void appealAccepted() { appealAccepted.increment(); }
+
+    /** 같은 판정의 두 번째 이의가 막혔다. */
+    public void appealDuplicateBlocked() { appealDuplicate.increment(); }
+
+    /** 이의 남용 이상탐지 집계가 돌았다. */
+    public void appealAbuseSampled() { appealAbuseSampled.increment(); }
 
     /** GPS 좌표를 실제로 파기했다. */
     public void locationCoordinatesPurged(int count) {
