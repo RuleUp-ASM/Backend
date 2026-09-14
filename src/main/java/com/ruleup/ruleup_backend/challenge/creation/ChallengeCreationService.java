@@ -19,6 +19,7 @@ import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.challenge.repository.UserChallengeCounterRepository;
 import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsProjectionService;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
+import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.routine.domain.ParamSpec;
 import com.ruleup.ruleup_backend.routine.domain.RoutineTemplate;
@@ -69,7 +70,12 @@ public class ChallengeCreationService {
 
     private static final Logger log = LoggerFactory.getLogger(ChallengeCreationService.class);
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
-    private static final int CAPACITY_MAX = 10_000;
+    /**
+     * 고를 수 있는 정원 (탐색 공통 5-3). 자유 입력이 아니라 <b>고르는 값</b>이다 —
+     * 300 이 최대이고 그보다 크면 무제한(GROUP 에서는 정원 미지정)만 가능하다.
+     */
+    private static final java.util.Set<Integer> CAPACITY_CHOICES =
+            java.util.Set.of(5, 10, 20, 30, 50, 100, 200, 300);
     private static final int DEFAULT_WEEKLY_COUNT = 7;
     private static final int TITLE_MAX = 30;
     private static final int DESCRIPTION_MAX = 200;
@@ -82,9 +88,6 @@ public class ChallengeCreationService {
     private final ChallengeDraftRepository draftRepository;
     private final IdempotencyKeyRepository idempotencyKeyRepository;
     private final ChallengeImageUploadRepository imageUploadRepository;
-    private final UserChallengeCounterRepository counterRepository;
-    private final UserJoinCounterService joinCounterService;
-    private final ConcurrentChallengeLimitPolicy limitPolicy;
     private final ChallengeStatsProjectionService statsProjectionService;
     private final RoutineCatalog catalog;
     private final UserScoreSummaryRepository scoreSummaryRepository;
@@ -113,14 +116,8 @@ public class ChallengeCreationService {
             throw new BusinessException(ErrorCode.DRAFT_EXPIRED);
         DraftView original = draft.getPayload().draft();
 
-        // ②-1 동시 참여 한도 — 생성도 슬롯을 쓴다(생성자가 그 방의 ACTIVE 멤버가 된다).
-        // 가입에만 걸면 "방은 얼마든지 만들 수 있는데 남의 방에는 못 들어가는" 비대칭이 생긴다.
-        // 락 순서는 전 경로와 동일하게 사용자 행부터. 커밋까지 쥐고 있어 동시 생성도 직렬화된다.
-        // ⚠️ 테스트 기간에는 ConcurrentChallengeLimitPolicy 가 꺼져 있어 이 판정이 통과한다.
-        counterRepository.ensureRow(userId);
-        counterRepository.lockCount(userId);
-        if (limitPolicy.exceeded(joinCounterService.countActiveSlots(userId)))
-            throw new BusinessException(ErrorCode.CHALLENGE_LIMIT_EXCEEDED);
+        // 동시 참여 개수 상한은 탐색 스펙 개정으로 사라졌다(공통 5-1) — 생성도 가입도 세지 않는다.
+        // 그것을 직렬화하려고 잡던 사용자 행 락도 함께 걷었다.
 
         // ③ 값 검증
         String title = validateTitle(req.title());
@@ -166,15 +163,22 @@ public class ChallengeCreationService {
                 weeklyCount, draft.getTemplateId(),
                 verification, params.valueMap(), params.specs(), penalties,
                 moderationTitle, moderationDescription, moderationImage);
-        challengeRepository.save(challenge);
+        // saveAndFlush 여야 한다. 아래 createRow 는 raw JDBC 라 Hibernate 의 자동 flush 를 타지 않고,
+        // challenges 행이 아직 INSERT 되지 않은 채 challenge_stats 가 그 행을 참조해 FK 가 깨진다.
+        // 예전에는 뒤따르던 participant_count 증가가 우연히 flush 를 유발해 가려져 있던 함정이다.
+        challengeRepository.saveAndFlush(challenge);
 
         memberRepository.save(ChallengeMember.owner(challenge.getId(), userId));
+        // 방장은 만드는 순간 그 방의 ACTIVE 멤버다. 생성은 가입과 달리 경합할 상대가 없고
+        // (그 방의 첫 행이다) 표시값이 커밋 뒤 채워지길 기다리면 만든 직후 「참여자 0명」이 보인다.
+        // 가입 경로에서 이 갱신을 걷어낸 이유는 같은 방의 가입들이 그 한 행에서 줄 서기 때문이다.
         challenge.increaseParticipantCount();
-        // 생성자도 그 방의 ACTIVE 멤버 → 동시 참여 카운터에 포함시킨다(가입 게이트와 같은 대장을 쓴다).
-        // 행 보장·락은 ②-1 에서 이미 잡았다.
-        counterRepository.increment(userId);
         // 탐색 목록이 challenges JOIN challenge_stats 로 읽으므로 기본 행을 함께 만든다
         statsProjectionService.createRow(challenge.getId());
+        // 방장도 그 방의 ACTIVE 멤버다. 표시용 참여자 수는 커밋 뒤 원천에서 세어 채운다 —
+        // 만든 직후 「참여자 0명」으로 보이지 않게 여기서도 같은 재계산을 태운다.
+        eventPublisher.publishEvent(
+                ChallengeStatsRefreshRequested.of(challenge.getId(), "CREATE"));
 
         // 홈 카테고리 그리드는 시작 전(UPCOMING) 방까지 세므로 방을 만든 순간 수가 바뀐다 →
         // 캐시를 버려야 "만들었는데 카테고리 수가 그대로"가 안 생긴다. 집계 대상인 공개 그룹만.
@@ -247,10 +251,19 @@ public class ChallengeCreationService {
         }
     }
 
+    /**
+     * 정원 검증 — 9종 중 하나이거나 무제한이다(탐색 공통 5-3).
+     *
+     * <p>임의 값을 받으면 정원이 사실상 무한대의 선택지가 되어, 정원 있는 방에만 거는 락·COUNT 의
+     * 경계가 흐려진다. 무제한은 {@code null} 한 가지로만 표현한다 — 10,000 같은 큰 수로 "사실상
+     * 무제한"을 흉내 내면 그 방은 계속 락과 COUNT 를 지불한다.
+     */
     private Integer validateCapacity(ParticipationType mode, Integer capacity) {
         if (mode != ParticipationType.GROUP) return 1;
-        if (capacity == null) throw new BusinessException(ErrorCode.CAPACITY_REQUIRED);
-        if (capacity < 1 || capacity > CAPACITY_MAX)
+        // 비우면 무제한이다. 9종으로 좁히면서 이 길을 막으면 300 이 사실상 상한이 되고,
+        // 무제한을 흉내 내려는 방은 큰 수를 골라 계속 락과 COUNT 를 지불한다.
+        if (capacity == null) return null;
+        if (!CAPACITY_CHOICES.contains(capacity))
             throw new BusinessException(ErrorCode.CAPACITY_OUT_OF_RANGE);
         return capacity;
     }

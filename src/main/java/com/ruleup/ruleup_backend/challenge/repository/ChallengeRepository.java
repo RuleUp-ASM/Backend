@@ -66,6 +66,19 @@ public interface ChallengeRepository extends JpaRepository<Challenge, UUID> {
     List<Challenge> findActiveDueForCompletionForUpdate(@Param("today") LocalDate today, @Param("limit") int limit);
 
     /**
+     * 그 방의 정원만 읽는다 — 값이 없으면 무제한이다.
+     *
+     * <p>가입 경로가 <b>트랜잭션을 열기 전에</b> 부른다. 정원이 있는 방에서는 잠금 읽기가 트랜잭션의
+     * 첫 문장이어야 하는데(읽기 스냅샷이 먼저 고정되면 정원 COUNT 가 락 대기 중 커밋된 가입을
+     * 놓친다), 그러려면 잠글지 말지를 트랜잭션 밖에서 알아야 한다.
+     *
+     * @return 그 방이 없으면 빈 리스트. 있으면 한 줄이며, 그 값이 {@code null} 이면 무제한이다
+     *         (정원은 없을 수 있는 값이라 {@code Optional} 로는 「방이 없음」과 구분되지 않는다)
+     */
+    @Query("SELECT c.maxParticipants FROM Challenge c WHERE c.id = :id")
+    List<Integer> findCapacityById(@Param("id") UUID id);
+
+    /**
      * participant_count 원자적 +1 (동시 참여 시 read-modify-write 유실 방지).
      * 멤버 상태 전이가 실제로 일어났을 때만 호출한다.
      */

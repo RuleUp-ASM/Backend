@@ -475,8 +475,12 @@ public class Challenge extends AssignedIdEntity {
     public void changePenalty(PenaltyConfig v) { if (v != null) this.penalty = v; }
     public void changeReward(RewardConfig v)   { if (v != null) this.reward = v; }
     /** 최대 참여 인원 변경. SOLO(정원 1 고정)는 무시. GROUP만 반영(축소 하한 검증은 서비스에서). */
+    /**
+     * 정원 변경. {@code null} 은 「지정 안 함」이 아니라 <b>무제한</b>이라는 값이다 —
+     * 그래서 null 도 그대로 반영한다. 솔로는 정원 1 고정이라 대상이 아니다.
+     */
     public void changeMaxParticipants(Integer v) {
-        if (v != null && participationType == ParticipationType.GROUP) this.maxParticipants = v;
+        if (participationType == ParticipationType.GROUP) this.maxParticipants = v;
     }
 
     public void changeSchedule(Integer durationDays, LocalDate startDate) {

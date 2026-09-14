@@ -206,6 +206,42 @@ class ChallengeSettingsPatchIT extends ChallengeApiSupport {
         }
 
         @Test
+        @DisplayName("[P1] 정원 수정도 9종만 받는다 — 생성과 같은 규칙이어야 한다")
+        void capacityPatchAcceptsOnlyTheNineChoices() throws Exception {
+            Member owner = member(uniq("pat-cap-choice"));
+            String id = createGroupChallenge(owner.token());
+
+            for (int notAllowed : java.util.List.of(7, 25, 301, 1000)) {
+                int v = currentVersion(owner.token(), id);
+                MvcResult res = patchJsonAuth("/api/v1/challenges/" + id, owner.token(),
+                        Map.of("version", v, "capacity", notAllowed));
+                assertThat(res.getResponse().getStatus())
+                        .as("생성은 막고 수정은 열어 두면 수정으로 우회된다 — 정원 %d", notAllowed)
+                        .isEqualTo(400);
+                assertThat((String) read(res, "$.error.code")).isEqualTo("CAPACITY_OUT_OF_RANGE");
+            }
+        }
+
+        @Test
+        @DisplayName("[P1] 정원을 비우면 무제한으로 바뀐다 — 무제한은 되돌아갈 수 있는 선택지다")
+        void capacityCanBeClearedToUnlimited() throws Exception {
+            Member owner = member(uniq("pat-cap-null"));
+            String id = createGroupChallenge(owner.token());
+            int v = currentVersion(owner.token(), id);
+
+            Map<String, Object> body = new java.util.LinkedHashMap<>();
+            body.put("version", v);
+            body.put("capacity", null);
+            MvcResult res = patchJsonAuth("/api/v1/challenges/" + id, owner.token(), body);
+
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+            assertThat(jdbcTemplate.queryForMap(
+                    "SELECT capacity FROM challenges WHERE id = UNHEX(REPLACE(?, '-', ''))", id).get("capacity"))
+                    .as("무제한 전환을 막으면 한 번 정원을 정한 방은 영영 락과 COUNT 를 지불한다")
+                    .isNull();
+        }
+
+        @Test
         @DisplayName("제목 수정 → 재심사(IN_REVIEW) 응답 + 잠금 무관 필드라 시작 후에도 허용")
         void titlePatchTriggersReview() throws Exception {
             Member owner = member(uniq("pat-title"));
@@ -267,12 +303,12 @@ class ChallengeSettingsPatchIT extends ChallengeApiSupport {
         void capacityBelowCurrent() throws Exception {
             Member owner = member(uniq("pat-below"));
             String id = createGroupChallenge(owner.token());
-            Member other = member(uniq("pat-below2"));
-            addMember(id, other.id());   // 참여 2명
+            // 정원은 9종에서 고르므로, 「현재 인원보다 작은 선택지」를 만들려면 6명이 필요하다(5 < 6).
+            for (int i = 0; i < 5; i++) addMember(id, member(uniq("pat-below-m" + i)).id());
             int v = currentVersion(owner.token(), id);
 
             expectError(patchJsonAuth("/api/v1/challenges/" + id, owner.token(),
-                            Map.of("version", v, "capacity", 1)),
+                            Map.of("version", v, "capacity", 5)),
                     400, "CAPACITY_BELOW_CURRENT");
         }
 

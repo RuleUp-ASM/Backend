@@ -49,7 +49,9 @@ import java.util.UUID;
 public class ChallengeSettingsService {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
-    private static final int CAPACITY_MAX = 10_000;
+    /** 고를 수 있는 정원 (탐색 공통 5-3) — 생성과 같은 목록을 쓴다. 비우면 무제한. */
+    private static final java.util.Set<Integer> CAPACITY_CHOICES =
+            java.util.Set.of(5, 10, 20, 30, 50, 100, 200, 300);
 
     /** 시작 전 + 방장 혼자일 때 수정 가능한 전체 필드(카테고리 제외 — 어떤 상황에도 불변). */
     private static final List<String> FULL_EDITABLE = List.of(
@@ -61,6 +63,7 @@ public class ChallengeSettingsService {
             "title", "description", "capacity", "imageUrl");
 
     private final ChallengeRepository challengeRepository;
+    private final com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository memberRepository;
     private final ChallengeImageUploadRepository imageUploadRepository;
     private final RoutineCatalog catalog;
     private final UserScoreSummaryRepository scoreSummaryRepository;
@@ -209,14 +212,30 @@ public class ChallengeSettingsService {
         moderation.put("image", "IN_REVIEW");
     }
 
+    /**
+     * 정원 수정 — 생성과 <b>같은 규칙</b>이다(탐색 공통 5-3). 9종 중 하나이거나 비우면 무제한.
+     *
+     * <p>생성만 좁히고 수정을 열어 두면 수정으로 우회된다. 반대로 무제한 전환을 막으면 한 번
+     * 정원을 정한 방은 영영 가입마다 챌린지 행 락과 ACTIVE COUNT 를 지불한다.
+     */
     private void applyCapacity(Challenge c, JsonNode body, Map<String, Object> updated) {
         if (!body.has("capacity")) return;
         JsonNode node = body.get("capacity");
-        if (node.isNull() || !node.isNumber()) throw new BusinessException(ErrorCode.INVALID_FIELD_VALUE);
+        if (node.isNull()) {                       // 무제한으로 전환 — 줄이는 게 아니라 푸는 것이라 현재 인원과 무관
+            if (!c.isGroup()) return;              // 솔로는 정원 1 고정
+            c.changeMaxParticipants(null);
+            updated.put("capacity", null);
+            return;
+        }
+        if (!node.isNumber()) throw new BusinessException(ErrorCode.INVALID_FIELD_VALUE);
         int capacity = node.intValue();
-        if (capacity < 1 || capacity > CAPACITY_MAX)
+        if (!CAPACITY_CHOICES.contains(capacity))
             throw new BusinessException(ErrorCode.CAPACITY_OUT_OF_RANGE);
-        if (capacity < c.getParticipantCount())
+        // 비교 대상은 <b>원천</b>이다. 표시용 participant_count 는 커밋 뒤 비동기로 채워지므로
+        // 그 값으로 판정하면 「방금 들어온 인원 아래로 정원을 줄이는」 요청이 통과할 수 있다.
+        long active = memberRepository.countByChallengeIdAndStatus(
+                c.getId(), com.ruleup.ruleup_backend.challenge.domain.MemberStatus.ACTIVE);
+        if (capacity < active)
             throw new BusinessException(ErrorCode.CAPACITY_BELOW_CURRENT);
         if (!c.isGroup()) return;                 // 솔로는 정원 1 고정 — 적용 대상 아님
         c.changeMaxParticipants(capacity);

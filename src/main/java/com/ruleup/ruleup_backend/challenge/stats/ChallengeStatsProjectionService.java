@@ -65,8 +65,20 @@ public class ChallengeStatsProjectionService {
         jdbc.queryForList("SELECT challenge_id FROM challenge_stats WHERE challenge_id = ? FOR UPDATE", (Object) id);
 
         String status = jdbc.queryForObject("SELECT status FROM challenges WHERE id = ?", String.class, id);
-        int participantCount = jdbc.queryForObject(
-                "SELECT participant_count FROM challenges WHERE id = ?", Integer.class, id);
+
+        // 참여자 수는 <b>원천에서 다시 센다</b>. 가입·탈퇴 트랜잭션은 더 이상 표시값을 올리고
+        // 내리지 않는다(탐색 백엔드 5-2·12) — 같은 방의 모든 가입이 그 한 행에서 직렬화되기
+        // 때문이다. 세어 둔 값을 challenges 에 되써 주는 이유는 다른 모듈(자동 삭제·추천 집계·
+        // 카드 응답)이 그 열을 계속 읽기 때문이고, 그러니 여기가 그 열의 유일한 기록 지점이다.
+        Integer participantCount = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM challenge_members WHERE challenge_id = ? AND status = 'ACTIVE'",
+                Integer.class, id);
+        if (participantCount == null) participantCount = 0;
+        // updated_at 을 그대로 둔다. 이 열은 ON UPDATE CURRENT_TIMESTAMP 라 가만두면 파생값을
+        // 채울 때마다 「방금 수정된 방」이 되어, 수정 시각으로 지체를 판별하는 배치들(심사 재시도 등)이
+        // 영영 대상을 찾지 못한다. 참여자 수는 사용자가 방을 고친 것이 아니다.
+        jdbc.update("UPDATE challenges SET participant_count = ?, updated_at = updated_at WHERE id = ?",
+                participantCount, id);
 
         Counts c = countFromMembers(id);
         // 시작 전 방은 진행 지표 자체가 없다 — 표본이 충분해 보여도 값을 내지 않는다.

@@ -96,25 +96,12 @@ public abstract class ChallengeApiSupport extends AuthApiSupport {
                 bytes(UUID.randomUUID()), bytes(challengeId), bytes(userId), role);
     }
 
-    // ===== 동시 참여 슬롯(user_challenge_counters) =====
-
-    /** 저장 카운터를 직접 심는다. 원천(멤버십)과 어긋난 상태를 만들 때만 쓸 것 — 게이트는 원천을 본다. */
-    protected void setCounter(UUID userId, int count) {
-        jdbc().update("INSERT INTO user_challenge_counters (user_id, active_join_count) VALUES (?, ?) " +
-                "ON DUPLICATE KEY UPDATE active_join_count = VALUES(active_join_count)", bytes(userId), count);
-    }
-
-    protected int counterOf(UUID userId) {
-        Integer v = jdbc().queryForObject(
-                "SELECT active_join_count FROM user_challenge_counters WHERE user_id = ?",
-                Integer.class, bytes(userId));
-        return v != null ? v : 0;
-    }
-
     /**
-     * 슬롯 n개를 <b>실제로</b> 점유시킨다 — 진행 중인 방 n개 + ACTIVE 멤버십 + 카운터 동기화.
-     * 가입 게이트가 저장값이 아니라 원천을 세므로, 카운터만 심어서는 FREE_LIMIT 이 재현되지 않는다.
-     * 만든 방 id 들을 반환한다(종료·삭제시켜 슬롯 회수를 검증할 때 쓴다).
+     * 진행 중인 방 n개에 <b>실제로</b> 참여시킨다 — 방 n개 + ACTIVE 멤버십.
+     * 만든 방 id 들을 반환한다.
+     *
+     * <p>예전에는 동시 참여 카운터도 함께 맞췄다. 탐색 스펙 개정으로 동시 참여 개수 상한이
+     * 사라지면서 그 카운터는 아무도 읽지 않는다.
      */
     protected List<UUID> occupySlots(UUID userId, int slots) {
         List<UUID> ids = new ArrayList<>();
@@ -123,7 +110,6 @@ public abstract class ChallengeApiSupport extends AuthApiSupport {
             insertActiveMembership(id, userId, "OWNER");
             ids.add(id);
         }
-        setCounter(userId, slots);
         return ids;
     }
 

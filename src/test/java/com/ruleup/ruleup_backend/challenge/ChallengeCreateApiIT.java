@@ -342,7 +342,7 @@ class ChallengeCreateApiIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("GROUP 생성: visibility 기본 PUBLIC + groupShare=ON, capacity 미지정 400 / 범위 밖 400")
+        @DisplayName("GROUP 생성: visibility 기본 PUBLIC + groupShare=ON, capacity 미지정은 무제한 / 9종 밖 400")
         void groupRules() throws Exception {
             String token = memberToken(uniq("cr-grp"));
 
@@ -357,10 +357,12 @@ class ChallengeCreateApiIT extends ChallengeApiSupport {
                     String.class, (String) read(res, "$.data.challengeId"));
             assertThat(penalties.replace(" ", "")).contains("\"groupShare\":true");
 
+            // 비우면 무제한이다(탐색 공통 5-3). 300 초과를 표현할 길이 이것뿐이라 막으면 안 된다.
             Map<String, Object> noCapacity = createBodyFrom(templateDraft(token));
             noCapacity.put("mode", "GROUP");
             noCapacity.put("capacity", null);
-            expectError(create(token, UUID.randomUUID().toString(), noCapacity), 400, "CAPACITY_REQUIRED");
+            assertThat(create(token, UUID.randomUUID().toString(), noCapacity)
+                    .getResponse().getStatus()).isEqualTo(201);
 
             Map<String, Object> outOfRange = createBodyFrom(templateDraft(token));
             outOfRange.put("mode", "GROUP");
@@ -462,27 +464,6 @@ class ChallengeCreateApiIT extends ChallengeApiSupport {
     @DisplayName("동시 참여 한도 — 생성 경로")
     class ConcurrentLimit {
 
-        @Test
-        @DisplayName("한도를 채운 사용자는 방을 새로 만들 수 없다 — 생성만 열어두면 한도가 무의미해진다")
-        void creationIsGatedToo() throws Exception {
-            Member me = member(uniq("limit-create"));
-            occupySlots(me.id(), 3);
 
-            Map<String, Object> body = createBodyFrom(templateDraft(me.token()));
-            expectError(create(me.token(), UUID.randomUUID().toString(), body),
-                    409, "CHALLENGE_LIMIT_EXCEEDED");
-        }
-
-        @Test
-        @DisplayName("한도 미만이면 그대로 만들어지고 슬롯이 하나 늘어난다")
-        void underLimitStillCreates() throws Exception {
-            Member me = member(uniq("limit-create-ok"));
-            occupySlots(me.id(), 2);
-
-            Map<String, Object> body = createBodyFrom(templateDraft(me.token()));
-            MvcResult res = create(me.token(), UUID.randomUUID().toString(), body);
-            assertThat(res.getResponse().getStatus()).isIn(200, 201);
-            assertThat(counterOf(me.id())).isEqualTo(3);
-        }
     }
 }

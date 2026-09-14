@@ -50,11 +50,9 @@ public class ChallengeDetailQueryService {
 
     private final ChallengeRepository challengeRepository;
     private final ChallengeMemberRepository memberRepository;
-    private final UserChallengeCounterRepository counterRepository;
     private final UserRepository userRepository;
     private final UserScoreSummaryRepository scoreSummaryRepository;
     private final RoutineCatalog catalog;
-    private final ConcurrentChallengeLimitPolicy limitPolicy;
     private final JdbcTemplate jdbc;
 
     @Transactional(readOnly = true)
@@ -136,9 +134,7 @@ public class ChallengeDetailQueryService {
             if (availableAt != null && Instant.now().isBefore(availableAt))
                 return JoinBlockReason.REJOIN_COOLDOWN;
         }
-        int activeJoinCount = counterRepository.findById(viewerId)
-                .map(counter -> counter.getActiveJoinCount()).orElse(0);
-        if (limitPolicy.exceeded(activeJoinCount)) return JoinBlockReason.FREE_LIMIT;
+        // 동시 참여 개수 상한은 탐색 스펙 개정으로 사라졌다(공통 5-1) — 버튼을 미리 잠글 이유도 없다.
         if (c.getMaxParticipants() != null && activeCount >= c.getMaxParticipants()) return JoinBlockReason.FULL;
         if (!eligible) return JoinBlockReason.TIER_GATE;
         return null;

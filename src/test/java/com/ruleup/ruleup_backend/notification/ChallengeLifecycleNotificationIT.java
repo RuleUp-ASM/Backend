@@ -84,6 +84,7 @@ class ChallengeLifecycleNotificationIT {
                 " '+00:00', '+09:00')), INTERVAL 1 DAY) WHERE id = ?", bytes(challengeId));
     }
 
+    @SuppressWarnings("unused")   // 동시 참여 카운터는 개정으로 쓰이지 않는다 — 픽스처만 남긴다
     private void setCounter(UUID userId, int count) {
         jdbc.update("INSERT INTO user_challenge_counters (user_id, active_join_count) VALUES (?, ?) " +
                 "ON DUPLICATE KEY UPDATE active_join_count = VALUES(active_join_count)",

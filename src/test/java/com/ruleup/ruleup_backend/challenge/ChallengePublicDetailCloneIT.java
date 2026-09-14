@@ -135,19 +135,6 @@ class ChallengePublicDetailCloneIT extends ChallengeApiSupport {
             assertThat((String) read(res, "$.data.joinBlockReason")).isEqualTo("TIER_GATE");
         }
 
-        @Test
-        @DisplayName("동시 참여 무료 한도도 가입 API와 같은 FREE_LIMIT으로 미리 알려준다")
-        void previewsFreeLimit() throws Exception {
-            var owner = member(uniq("d-limit-owner"));
-            var viewer = member(uniq("d-limit-viewer"));
-            UUID id = room(owner.id(), "GROUP", "PUBLIC", "ACTIVE");
-            jdbcTemplate.update("INSERT INTO user_challenge_counters (user_id, active_join_count) VALUES (?, 3) " +
-                            "ON DUPLICATE KEY UPDATE active_join_count = 3",
-                    (Object) bytes(viewer.id()));
-
-            MvcResult res = detail(viewer.token(), id);
-            assertThat((String) read(res, "$.data.joinBlockReason")).isEqualTo("FREE_LIMIT");
-        }
 
         @Test
         @DisplayName("표본이 모자란 방은 완주율·유지율을 내려주지 않는다")
