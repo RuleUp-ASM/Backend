@@ -17,8 +17,7 @@ import java.util.Map;
  *  - 신호: SCREEN_TIME.screenEvents(UNLOCK/SCREEN_ON) 중 당일 첫 발생 = firstUnlockAt.
  *  - 창: [하루 시작, beforeTime]. beforeTime에 창이 닫힌다(자정 아님).
  *  - 판정: firstUnlockAt ≤ beforeTime → SUCCESS / 창 닫힘·미발생 → FAILED(WOKE_UP_LATE) / 그 외 → PENDING.
- *  - 신호가 델타라 priorEvidence.firstUnlockAt과 이번 신호의 최솟값을 누적(멱등·증분).
- *  - firstUnlockAt은 evidence에 담아 다음 sync의 prior로 재사용한다.
+ *  - 그날 원본 전부에서 가장 이른 잠금해제를 매번 다시 고른다 — 이월 상태가 없어 도착 순서와 무관하다.
  */
 @Component
 public class WakeEvaluator implements MethodEvaluator {
@@ -37,8 +36,8 @@ public class WakeEvaluator implements MethodEvaluator {
         Instant dayStart = TimeWindows.startOfDay(ctx.targetDate(), ctx.zone());
         Window window = new Window(dayStart, windowCloses);
 
-        // prior + 이번 신호 중 가장 이른 잠금해제(창 내)
-        Instant firstUnlock = min(priorFirstUnlock(ctx.priorEvidence()), earliestUnlockInWindow(ctx.signals(), window));
+        // 그날 원본 중 창 안에서 가장 이른 잠금해제
+        Instant firstUnlock = earliestUnlockInWindow(ctx.signals(), window);
 
         Map<String, Object> evidence = new HashMap<>();
         evidence.put("beforeTime", cfg.beforeTime());
@@ -52,13 +51,7 @@ public class WakeEvaluator implements MethodEvaluator {
         } else {
             outcome = EvaluationOutcome.pending(evidence, windowCloses);        // 아직 대기
         }
-        return outcome;   // firstUnlockAt은 evidence에 담겨 다음 sync prior로 재사용됨
-    }
-
-    private Instant priorFirstUnlock(Map<String, Object> prior) {
-        if (prior == null) return null;
-        Object v = prior.get("firstUnlockAt");
-        return (v != null) ? TimeWindows.parseInstant(v.toString()) : null;
+        return outcome;
     }
 
     private Instant earliestUnlockInWindow(List<SyncSignal> signals, Window window) {
@@ -76,11 +69,5 @@ public class WakeEvaluator implements MethodEvaluator {
             }
         }
         return earliest;
-    }
-
-    private Instant min(Instant a, Instant b) {
-        if (a == null) return b;
-        if (b == null) return a;
-        return a.isBefore(b) ? a : b;
     }
 }

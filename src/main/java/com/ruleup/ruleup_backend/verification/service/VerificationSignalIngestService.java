@@ -1,6 +1,7 @@
 package com.ruleup.ruleup_backend.verification.service;
 
 import com.ruleup.ruleup_backend.common.UuidGenerator;
+import com.ruleup.ruleup_backend.verification.domain.SignalExclusionReason;
 import com.ruleup.ruleup_backend.verification.evaluator.TimeWindows;
 import com.ruleup.ruleup_backend.verification.signal.SignalDomain;
 import com.ruleup.ruleup_backend.verification.signal.SyncSignal;
@@ -75,7 +76,10 @@ public class VerificationSignalIngestService {
 
     /** 적재 대상 한 건 — 도메인·귀속일이 정해진 뒤의 모습. */
     private record Candidate(SignalDomain domain, LocalDate observedDate, String dedupKey,
-                             SyncSignal signal, Instant occurredAt) {}
+                             SyncSignal signal, Instant occurredAt, SignalExclusionReason excludeReason) {}
+
+    /** 게이트가 신호 타입별로 내리는 배제 결정. 아무것도 배제하지 않는 기본값. */
+    public static final java.util.function.Function<String, SignalExclusionReason> ACCEPT_ALL = type -> null;
 
     /**
      * 신호를 원본 그대로 저장하고, 처음 받은 것만 골라 돌려준다.
@@ -85,6 +89,16 @@ public class VerificationSignalIngestService {
      */
     @Transactional
     public Ingested ingest(UUID userId, List<SyncSignal> signals, Instant receivedAt) {
+        return ingest(userId, signals, receivedAt, ACCEPT_ALL);
+    }
+
+    /**
+     * @param gate 신호 타입 → 판정 배제 사유(없으면 null). 봉투 수준 게이트(VPN·무결성 실패)의 결정을
+     *             <b>행에 새긴다</b> — 요청 메모리에서만 빼면 다음 sync 의 전량 재평가가 되살린다
+     */
+    @Transactional
+    public Ingested ingest(UUID userId, List<SyncSignal> signals, Instant receivedAt,
+                           java.util.function.Function<String, SignalExclusionReason> gate) {
         if (signals == null || signals.isEmpty()) return new Ingested(List.of(), 0);
 
         // 한 요청 안의 중복부터 접는다 — 같은 배치에 같은 신호가 두 번 실려 오는 일이 흔하다.
@@ -109,7 +123,8 @@ public class VerificationSignalIngestService {
                     (occurredAt != null) ? occurredAt : receivedAt, KST);
             grouped.computeIfAbsent(domain.get(), d -> new LinkedHashMap<>())
                     .computeIfAbsent(observedDate, d -> new ArrayList<>())
-                    .add(new Candidate(domain.get(), observedDate, e.getKey(), signal, occurredAt));
+                    .add(new Candidate(domain.get(), observedDate, e.getKey(), signal, occurredAt,
+                            gate.apply(signal.type())));
         }
         if (!unsupported.isEmpty()) {
             // 평가기가 무시하는 타입이다. 계약에 없는 payload 를 쌓지 않는다(수집 최소화).
@@ -175,8 +190,9 @@ public class VerificationSignalIngestService {
         for (int from = 0; from < rows.size(); from += INSERT_BATCH) {
             List<Object[]> chunk = rows.subList(from, Math.min(from + INSERT_BATCH, rows.size()));
             jdbc.batchUpdate("INSERT IGNORE INTO " + domain.table()
-                    + " (id, observedDate, userId, signalType, occurredAt, receivedAt, payload, dedupKey)"
-                    + " VALUES (?, ?, ?, ?, ?, ?, ?, ?)", chunk);
+                    + " (id, observedDate, userId, signalType, excludeReason, occurredAt, receivedAt,"
+                    + "  payload, dedupKey)"
+                    + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", chunk);
         }
     }
 
@@ -186,6 +202,7 @@ public class VerificationSignalIngestService {
                 Date.valueOf(c.observedDate()),
                 bytes(userId),
                 (c.signal().type() != null) ? c.signal().type() : "UNKNOWN",
+                (c.excludeReason() != null) ? c.excludeReason().name() : null,
                 (c.occurredAt() != null) ? Timestamp.from(c.occurredAt()) : null,
                 Timestamp.from(receivedAt),
                 JSON.writeValueAsString(c.signal()),

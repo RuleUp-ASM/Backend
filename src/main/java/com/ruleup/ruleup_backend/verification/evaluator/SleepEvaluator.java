@@ -34,12 +34,12 @@ public class SleepEvaluator implements MethodEvaluator {
                 .plus(Duration.ofHours(6));   // 익일 06:00경 도착 기대
 
         // 수면 세그먼트는 여러 sync 에 나뉘어 도착한다(기상 후 일괄 기록 → 절전으로 분할 전송).
-        // 앞서 받은 구간을 잊으면 목표 시간을 영영 못 채우므로 evidence 에 누적하고,
-        // 같은 구간이 재전송돼도 두 번 세지 않도록 (start|end) 키로 멱등 처리한다.
-        LinkedHashSet<String> seen = new LinkedHashSet<>(priorSeen(ctx.priorEvidence()));
-        long sleepSec = priorSeconds(ctx.priorEvidence());
-        Instant bedtime = priorBedtime(ctx.priorEvidence());
-        boolean anyUntrusted = priorUntrusted(ctx.priorEvidence());
+        // 그날 원본을 통째로 받아 매번 처음부터 합산하고, 같은 구간이 두 행으로 남아 있어도
+        // (start|end) 키로 한 번만 센다.
+        LinkedHashSet<String> seen = new LinkedHashSet<>();
+        long sleepSec = 0;
+        Instant bedtime = null;
+        boolean anyUntrusted = false;
 
         for (SleepSegment s : segs) {
             Instant st = TimeWindows.parseInstant(s.startAt());
@@ -118,27 +118,6 @@ public class SleepEvaluator implements MethodEvaluator {
         HealthOrigin origin = s.origin();
         if (origin == null) return true;                                        // 미전송 — 관측 후 조인다
         return !"MANUAL".equalsIgnoreCase(origin.recordingMethod());
-    }
-
-    private long priorSeconds(Map<String, Object> prior) {
-        Object v = (prior != null) ? prior.get("sleepSeconds") : null;
-        return (v instanceof Number n) ? n.longValue() : 0;
-    }
-
-    private Instant priorBedtime(Map<String, Object> prior) {
-        Object v = (prior != null) ? prior.get("bedtime") : null;
-        return (v != null) ? TimeWindows.parseInstant(v.toString()) : null;
-    }
-
-    @SuppressWarnings("unchecked")
-    private List<String> priorSeen(Map<String, Object> prior) {
-        Object v = (prior != null) ? prior.get("seenSegments") : null;
-        return (v instanceof List<?> l) ? (List<String>) (List<?>) l : List.of();
-    }
-
-    private boolean priorUntrusted(Map<String, Object> prior) {
-        Object v = (prior != null) ? prior.get("untrustedExcluded") : null;
-        return Boolean.TRUE.equals(v);
     }
 
     private Instant bedtimeThreshold(String hhmm, LocalDate targetDate, ZoneId zone) {
