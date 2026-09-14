@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.UUID;
 
 @Entity
+@org.hibernate.annotations.DynamicUpdate
 @Table(name = "challenges")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -89,14 +90,33 @@ public class Challenge extends AssignedIdEntity {
     @Column(name = "weekly_count", nullable = false)
     private Integer weeklyCount;
 
-    @Column(name = "duration_days", nullable = false)
+    @Column(name = "duration_days")
     private Integer durationDays;
 
     @Column(name = "start_date", nullable = false)
     private LocalDate startDate;
 
-    @Column(name = "end_date", nullable = false)
+    @Column(name = "end_date")
     private LocalDate endDate;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "origin")
+    private com.ruleup.ruleup_backend.challenge.draft.ChallengeDraft.Origin origin;
+
+    @JdbcTypeCode(SqlTypes.BINARY)
+    @Column(name = "source_challenge_id")
+    private UUID sourceChallengeId;
+
+    public void recordOrigin(com.ruleup.ruleup_backend.challenge.draft.ChallengeDraft draft) {
+        this.origin = draft.getOrigin();
+        this.sourceChallengeId = draft.getSourceChallengeId();
+    }
+
+    public ChallengePenalties getPenalties() {
+        return ChallengePenalties.enforced(verificationConfig != null
+                && verificationConfig.selectedMethod() == com.ruleup.ruleup_backend.routine.domain.SelectedMethod.AUTO,
+                isGroup(), penalties != null && penalties.watcher());
+    }
 
     // ===== 루틴(인증) =====
     @Column(name = "template_id")
@@ -155,7 +175,13 @@ public class Challenge extends AssignedIdEntity {
     @Column(name = "penalties")
     private ChallengePenalties penalties;
 
-    // ===== 항목별 심사 상태 + 반복 거부 잠금 =====
+    @Column(name = "moderation_pending_since")
+    private Instant moderationPendingSince;
+
+    @Column(name = "moderation_enqueued_at")
+    private Instant moderationEnqueuedAt;
+
+    // ===== 항목별 심사 상태 =====
     @Enumerated(EnumType.STRING)
     @Column(name = "moderation_title", nullable = false)
     private TargetModerationStatus moderationTitle = TargetModerationStatus.EXEMPT;
@@ -169,7 +195,7 @@ public class Challenge extends AssignedIdEntity {
     private TargetModerationStatus moderationImage = TargetModerationStatus.NONE;
 
     @Column(name = "moderation_locked_until")
-    private Instant moderationLockedUntil;          // 1시간 3회 거부 → 1시간 수정 잠금
+    private Instant moderationLockedUntil;          // 레거시 컬럼: 신규 심사는 잠금을 설정하지 않음
 
     @Column(name = "moderation_reject_count", nullable = false)
     private int moderationRejectCount;
@@ -250,7 +276,7 @@ public class Challenge extends AssignedIdEntity {
         c.minTier = minTier;
         c.startDate = startDate;
         c.endDate = endDate;
-        c.durationDays = (int) (endDate.toEpochDay() - startDate.toEpochDay()) + 1;
+        c.durationDays = endDate == null ? null : (int) (endDate.toEpochDay() - startDate.toEpochDay()) + 1;
         // FREQUENCY 일정은 특정 요일을 고르지 않는다. repeat_days는 구 판정 경로 호환을 위해 전체 요일로 둔다.
         c.repeatDays = new ArrayList<>(List.of("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"));
         c.weeklyCount = weeklyCount;
@@ -268,6 +294,7 @@ public class Challenge extends AssignedIdEntity {
         c.moderationTitle = moderationTitle;
         c.moderationDescription = moderationDescription;
         c.moderationImage = moderationImage;
+        c.refreshModerationPending(Instant.now());
         c.moderationStatus = ChallengeModerationStatus.NONE;   // 구 게이트 미사용
         c.aiAssisted = true;
         c.participantCount = 0;
@@ -301,12 +328,12 @@ public class Challenge extends AssignedIdEntity {
     /** 이미지 거부 = 이미지 삭제(타인 화면은 이미 기본 이미지) + REJECTED 기록. */
     public void rejectAndRemoveImage() {
         this.moderationImage = TargetModerationStatus.REJECTED;
-        this.imageUrl = null;
+        // 거부된 콘텐츠는 이의 제기의 원본으로 보관하고 publicImageUrl()에서 숨긴다.
     }
 
     /**
      * 심사 거부 1회 기록(제목+설명 세트 1회 심사 = 카운트 1회).
-     * 1시간 롤링 윈도우로 세고, 3회에 도달하면 1시간 수정 잠금을 건다(심사 우회 반복 차단).
+     * 관찰용 카운터만 갱신하며 수정 잠금을 걸지 않는다.
      */
     public void registerModerationRejection(Instant now) {
         if (moderationRejectWindowStart == null
@@ -316,15 +343,31 @@ public class Challenge extends AssignedIdEntity {
         } else {
             this.moderationRejectCount++;
         }
-        if (this.moderationRejectCount >= REJECT_LIMIT) {
-            this.moderationLockedUntil = now.plus(MODERATION_LOCK);
-        }
+        // 반복 제출은 관찰 지표일 뿐 수정 잠금의 근거가 아니다.
+        this.moderationLockedUntil = null;
     }
 
-    /** 반복 거부로 인한 수정 잠금 중인가(PATCH 429 MODERATION_LOCKED 판정). */
+    /** 레거시 호출 호환: 거부 횟수로 잠그지 않는다. */
     public boolean isModerationLocked(Instant now) {
-        return moderationLockedUntil != null && now.isBefore(moderationLockedUntil);
+        return false;
     }
+
+    public boolean hasPendingModeration() {
+        return moderationTitle == TargetModerationStatus.IN_REVIEW
+                || moderationDescription == TargetModerationStatus.IN_REVIEW
+                || moderationImage == TargetModerationStatus.IN_REVIEW;
+    }
+
+    public void refreshModerationPending(Instant now) {
+        if (hasPendingModeration()) {
+            if (moderationPendingSince == null) moderationPendingSince = now;
+        } else {
+            moderationPendingSince = null;
+        }
+        moderationEnqueuedAt = null;
+    }
+
+    public void clearDescriptionModeration() { moderationDescription = TargetModerationStatus.NONE; }
 
     // ===== 설정 수정(PATCH — merge patch, 파생 필드 정규화는 서버 책임) =====
 
@@ -335,7 +378,7 @@ public class Challenge extends AssignedIdEntity {
         if (newMode == ParticipationType.GROUP) {
             this.visibility = (requestedVisibility != null) ? requestedVisibility : "PUBLIC";
             this.rankingVisible = null;
-            if (this.maxParticipants == null || this.maxParticipants < 1) this.maxParticipants = 50;
+            if (this.maxParticipants != null && this.maxParticipants <= 1) this.maxParticipants = 50;
         } else {
             this.visibility = null;
             this.rankingVisible = (requestedRankingVisible != null) ? requestedRankingVisible : Boolean.TRUE;
@@ -351,7 +394,7 @@ public class Challenge extends AssignedIdEntity {
     public void changePeriod(LocalDate start, LocalDate end) {
         this.startDate = start;
         this.endDate = end;
-        this.durationDays = (int) (end.toEpochDay() - start.toEpochDay()) + 1;
+        this.durationDays = end == null ? null : (int) (end.toEpochDay() - start.toEpochDay()) + 1;
     }
 
     public void replaceParams(Map<String, Object> values,

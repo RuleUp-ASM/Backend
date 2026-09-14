@@ -61,8 +61,6 @@ public class RoomAdminService {
     @Transactional
     public RoomAdminDtos.KickResponse kick(UUID ownerId, UUID challengeId, UUID targetUserId, String reason) {
         // 락 순서는 전 경로에서 사용자 행 → 챌린지 행으로 고정한다(가입·탈퇴와 동일 — 데드락 방지).
-        counterRepository.ensureRow(targetUserId);
-        counterRepository.lockCount(targetUserId);
         Challenge challenge = locked(challengeId);
         requireOwner(challenge, ownerId);
         if (ownerId.equals(targetUserId)) throw new BusinessException(ErrorCode.CANNOT_KICK_SELF);
@@ -72,7 +70,7 @@ public class RoomAdminService {
         ChallengeMember target = memberRepository.findByChallengeIdAndUserId(challengeId, targetUserId)
                 .filter(ChallengeMember::isActive)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TARGET_NOT_MEMBER));
-        if (target.isOwner()) throw new BusinessException(ErrorCode.CANNOT_KICK_SELF);
+        if (challenge.isOwner(targetUserId)) throw new BusinessException(ErrorCode.CANNOT_KICK_SELF);
         Instant now = Instant.now();
         // 재입장 대기는 1주 → 2주 → 4주 매번 두 배(제재 정책 §4.3). kickCount는 이번 강퇴 반영 전 값.
         Instant rejoinAt = RejoinBackoff.availableAt(now, target.getKickCount());
@@ -81,7 +79,6 @@ public class RoomAdminService {
         // 그 뒤에서 부르면 challenge 가 준영속이 되어 증가가 조용히 사라진다(반드시 앞에서).
         challenge.bumpVersion();
         challengeRepository.decrementParticipantCount(challengeId);
-        counterRepository.decrement(targetUserId);   // 동시 참여 3개 카운터도 함께 정리
         // 나간 방의 음소거는 설정 목록에 남을 이유가 없고, 재입장 시 되살아나면 안 된다.
         muteCleaner.clearMute(targetUserId, challengeId);
         eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "KICK"));
@@ -108,8 +105,6 @@ public class RoomAdminService {
     @Transactional
     public void kickForCheat(UUID challengeId, UUID targetUserId) {
         // 락 순서는 전 경로에서 사용자 행 → 챌린지 행으로 고정한다(가입·탈퇴와 동일 — 데드락 방지).
-        counterRepository.ensureRow(targetUserId);
-        counterRepository.lockCount(targetUserId);
         Challenge challenge = locked(challengeId);
         ChallengeMember target = memberRepository.findByChallengeIdAndUserId(challengeId, targetUserId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TARGET_NOT_MEMBER));
@@ -120,12 +115,11 @@ public class RoomAdminService {
         }
         Instant now = Instant.now();
         // 방장이 쫓겨나면 탈퇴와 같이 봇방장 체제로 넘어간다 — 방장 없는 방이 되면 안 된다.
-        if (target.isOwner()) challenge.convertToBotOwner(now);
+        if (challenge.isOwner(targetUserId)) challenge.convertToBotOwner(now);
         target.kickPermanently(CHEAT_KICK_REASON, now);
         // decrementParticipantCount 는 clearAutomatically 라 bumpVersion 을 반드시 앞에서 부른다.
         challenge.bumpVersion();
         challengeRepository.decrementParticipantCount(challengeId);
-        counterRepository.decrement(targetUserId);
         muteCleaner.clearMute(targetUserId, challengeId);
         eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "KICK"));
         // 부정행위는 일반 강퇴와 다른 타입이다 — 진입점이 방이 아니라 제재 이력이고, 유저는

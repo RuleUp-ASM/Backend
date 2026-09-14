@@ -72,6 +72,13 @@ management:
 
 # 우리 앱 전용 설정 (외부에서 받는 값은 전부 .env에서 주입)
 app:
+  moderation:
+    local: ${MODERATION_LOCAL:false}
+    queue:
+      url: ${MODERATION_QUEUE_URL:}
+      region: ${AWS_REGION:ap-northeast-2}
+      endpoint: ${MODERATION_QUEUE_ENDPOINT:}
+
   auth:
     refresh-token-cleanup:
       # 일반 만료·폐기 RT는 운영·장애 확인용으로 30일, reuse_detected 보안 흔적은 180일 보관한다.

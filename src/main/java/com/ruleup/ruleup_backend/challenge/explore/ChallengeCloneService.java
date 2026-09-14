@@ -67,7 +67,7 @@ public class ChallengeCloneService {
         }
 
         LocalDate start = LocalDate.now(KST).plusDays(START_OFFSET_DAYS);
-        LocalDate end = start.plusDays(ChronoUnit.DAYS.between(origin.getStartDate(), origin.getEndDate()));
+        LocalDate end = origin.getEndDate() == null ? null : start.plusDays(ChronoUnit.DAYS.between(origin.getStartDate(), origin.getEndDate()));
 
         RoutineTemplate template = (origin.getTemplateId() != null)
                 ? catalog.findById(origin.getTemplateId()).orElse(null) : null;
@@ -87,7 +87,7 @@ public class ChallengeCloneService {
                 Boolean.TRUE,                                  // 솔로 랭킹 노출 기본 true
                 DEFAULT_CAPACITY,
                 displayTier(userId).name(),                    // 내 표시 티어로 리셋
-                new DraftView.Period(start.toString(), end.toString()),
+                new DraftView.Period(start.toString(), end == null ? null : end.toString()),
                 weeklyCount,
                 (origin.getParamSpecs() != null) ? origin.getParamSpecs() : List.of(),
                 new DraftView.Verification(

@@ -30,7 +30,7 @@ public class VerificationMemberSetup {
     private void applyFixedDays(ChallengeMember member, Challenge challenge) {
         List<String> repeat = challenge.getRepeatDays();
         int target = 0;
-        for (LocalDate d = challenge.getStartDate(); !d.isAfter(challenge.getEndDate()); d = d.plusDays(1)) {
+        for (LocalDate d = challenge.getStartDate(); !d.isAfter(challenge.getEndDate() == null ? challenge.getStartDate().plusDays(6) : challenge.getEndDate()); d = d.plusDays(1)) {
             if (repeat != null && repeat.contains(WeekdayCodes.code(d.getDayOfWeek()))) target++;
         }
         member.setupFixedDays(Math.max(target, 1));   // 최소 1 (재셋업 루프 방지)
@@ -40,7 +40,7 @@ public class VerificationMemberSetup {
         int n = f.count();
         int periodDays = (f.unit() == PeriodUnit.WEEK) ? 7 : 30;
         LocalDate start = challenge.getStartDate();
-        LocalDate end = challenge.getEndDate();
+        LocalDate end = challenge.getEndDate() == null ? start.plusDays(periodDays - 1L) : challenge.getEndDate();
         long totalDays = ChronoUnit.DAYS.between(start, end) + 1;
 
         int fullPeriods = (int) (totalDays / periodDays);

@@ -166,6 +166,9 @@ public class ChallengeMember extends AssignedIdEntity {
     @Column(name = "left_type", length = 10)
     private String leftType;
 
+    @Column(name = "leave_reason", length = 20)
+    private String leaveReason;
+
     @Column(name = "left_at")
     private Instant leftAt;
 
@@ -223,14 +226,21 @@ public class ChallengeMember extends AssignedIdEntity {
         this.status = MemberStatus.LEFT;
         this.role = MemberRole.MEMBER;      // 방장이 나가면 봇방장 전환 — 역할은 내려놓는다
         this.leftType = "LEAVE";
+        this.leaveReason = "VOLUNTARY";
         this.leftAt = at;
         this.rejoinAvailableAt = rejoinAt;
+    }
+
+    public void leaveExternally(Instant at, String reason) {
+        leave(at, null);
+        this.leaveReason = reason;
     }
 
     /** 강퇴 — 배수 백오프(연속 실패·권한 미허용·방장 재량, 정책 §10.2). 부정행위는 {@link #kickPermanently}. */
     public void kick(String reason, Instant at, Instant rejoinAt) {
         this.status = MemberStatus.REMOVED;
         this.leftType = "KICK";
+        this.leaveReason = "KICKED";
         this.leftAt = at;
         this.kickReason = reason;
         this.kickCount++;
@@ -260,12 +270,15 @@ public class ChallengeMember extends AssignedIdEntity {
         this.status = MemberStatus.ACTIVE;
         this.role = MemberRole.MEMBER;
         this.leftType = null;
+        this.leaveReason = null;
         this.leftAt = null;
         this.kickReason = null;
         this.rejoinAvailableAt = null;
     }
 
     // ===== 인증 진행률 비정규화 갱신 (sync·배치) =====
+    public void extendTargetDays(int additional) { this.targetDays += additional; }
+
     public void setupFixedDays(int targetDays) {
         this.scheduleType = ScheduleType.FIXED_DAYS;
         this.targetDays = targetDays;

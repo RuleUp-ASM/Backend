@@ -44,7 +44,7 @@ public class SanctionLeaveListener implements OutboxHandler {
     public void handle(String payload) {
         Payload event = OutboxService.parse(payload, Payload.class);
         // 탈퇴와 같은 경로를 쓴다 — 방 멤버십·랭킹·정원 카운터가 하나의 경로로 갱신되게 한다.
-        int left = challengeMemberService.leaveAllForWithdrawal(event.userId());
+        int left = challengeMemberService.leaveAllExternally(event.userId(), "SANCTION");
         log.info("제재에 따른 자동 탈퇴 userId={} rooms={}", event.userId(), left);
     }
 }

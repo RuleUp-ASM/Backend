@@ -158,7 +158,7 @@ public class LocationPurgeService {
                             + "               AND m.status = 'ACTIVE' AND m.setup_status = 'READY'"
                             + "               AND c.deleted_at IS NULL"
                             + "               AND c.start_date <= s.observedDate"
-                            + "               AND c.end_date >= s.observedDate"
+                            + "               AND (c.end_date IS NULL OR c.end_date >= s.observedDate)"
                             + "               AND NOT EXISTS ("
                             + "                   SELECT 1 FROM VerificationDaily d"
                             + "                    WHERE d.challengeMemberId = m.id"

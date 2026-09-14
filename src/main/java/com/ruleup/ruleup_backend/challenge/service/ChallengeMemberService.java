@@ -82,7 +82,8 @@ public class ChallengeMemberService {
     private final org.springframework.jdbc.core.JdbcTemplate jdbc;
     private final RoomAuthority roomAuthority;
     private final BlockService blockService;
-    private final com.ruleup.ruleup_backend.score.ScoreService scoreService;
+    private final com.ruleup.ruleup_backend.common.outbox.OutboxService outbox;
+    private final com.ruleup.ruleup_backend.common.outbox.OutboxDispatcher outboxDispatcher;
 
     // ===== 가입 =====
     /**
@@ -97,68 +98,19 @@ public class ChallengeMemberService {
         return join(userId, challengeId, false);
     }
 
-    /**
-     * 가입 본체. {@code invited=true} 면 ②(비공개 초대 전용)만 건너뛴다 —
-     * 초대장은 "이 방을 볼 자격"을 대신할 뿐, 재입장 대기·정원·티어까지 면제하지는 않는다.
-     * 그래서 초대 수락도 정원이 차 있으면 일반 가입과 똑같이 409 {@code JOIN_BLOCKED + FULL} 이다.
-     *
-     * <p>정원 유무만 <b>트랜잭션을 열기 전에</b> 읽는다. 안에서 일반 SELECT 로 읽으면 그 시점에
-     * 읽기 스냅샷이 고정돼, 뒤따르는 정원 COUNT 가 락을 기다리는 동안 커밋된 가입을 보지 못한다.
-     * 잠금 읽기는 스냅샷을 만들지 않으므로, 정원 있는 방에서는 그 잠금 읽기가 트랜잭션의 첫 문장이다.
-     */
+    /** Invitation bypasses only the private-room gate. Membership and settings changes share a room lock. */
     public JoinResponse join(UUID userId, UUID challengeId, boolean invited) {
-        List<Integer> capacityRow = challengeRepository.findCapacityById(challengeId);
-        if (capacityRow.isEmpty()) throw new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND);
-        Integer capacityKnown = capacityRow.get(0);   // null 이면 무제한
-        try {
-            return selfProvider.getObject().joinInTransaction(userId, challengeId, invited, capacityKnown);
-        } catch (CapacityAppearedException e) {
-            // 트랜잭션 밖에서 「무제한」으로 읽은 사이에 방장이 정원을 걸었다. 그 트랜잭션은
-            // 이미 일반 읽기로 스냅샷을 고정해 버려서 정원을 세도 믿을 수 없다 — 락을 첫 문장
-            // 으로 다시 열어야 한다. 정원이 생긴 것을 확인했으니 이번에는 잠그고 들어간다.
-            return selfProvider.getObject().joinInTransaction(userId, challengeId, invited, e.capacity());
-        }
-    }
-
-    /**
-     * 정원 유무를 읽은 뒤 가입 트랜잭션이 열리기 전에 방장이 정원을 건 경우.
-     *
-     * <p>그대로 진행하면 여러 가입 요청이 <b>챌린지 행 락 없이</b> 같은 인원수를 보고 모두
-     * 통과해 정원을 넘길 수 있다. 되돌리고 잠금 경로로 한 번 다시 간다.
-     */
-    private static class CapacityAppearedException extends RuntimeException {
-        private final Integer capacity;
-        CapacityAppearedException(Integer capacity) { super(null, null, false, false); this.capacity = capacity; }
-        Integer capacity() { return capacity; }
+        return selfProvider.getObject().joinInTransaction(userId, challengeId, invited);
     }
 
     @Transactional
-    public JoinResponse joinInTransaction(UUID userId, UUID challengeId, boolean invited, Integer capacityKnown) {
+    public JoinResponse joinInTransaction(UUID userId, UUID challengeId, boolean invited) {
         Instant now = Instant.now();
 
-        // 정원이 있는 방은 <b>쓰기 잠금</b>으로 마지막 한 자리를 직렬화한다(탐색 백엔드 5-1).
-        //
-        // ⚠️ 정원 유무는 트랜잭션 밖에서 미리 읽는다. REPEATABLE READ 에서 일반 SELECT 는 읽기
-        // 스냅샷을 그 시점에 고정하는데, 락을 기다리기 전에 스냅샷이 잡히면 뒤의 정원 COUNT 가
-        // 그 사이 커밋된 가입을 못 본다 → 마지막 한 자리에 여러 명이 들어간다. 잠금 읽기는
-        // 스냅샷을 만들지 않으므로, 정원 있는 방에서는 이 잠금 읽기가 트랜잭션의 첫 문장이다.
-        //
-        // 무제한 방은 <b>공유 잠금</b>이다. 스펙은 「락과 COUNT 를 모두 생략」이라고 적었지만,
-        // 정말 잠그지 않으면 정원을 거는 설정 변경과의 경합이 열린다 — 설정이 아직 커밋되기
-        // 전이라 가입은 여전히 「무제한」을 보고 정원 검사 없이 들어가고, 설정 쪽은 그 가입을
-        // 못 센 채 커밋해 정원을 넘긴다. 스펙이 생략하라는 이유는 <b>가입끼리의 경합</b>을
-        // 없애려는 것이고, 공유 잠금은 서로 막지 않으므로 그 목적은 그대로 지켜진다.
-        // COUNT 는 스펙대로 하지 않는다 — 셀 값이 없으므로 애초에 할 일이 없다.
-        Challenge c = (capacityKnown != null
-                ? challengeRepository.findByIdForUpdate(challengeId)
-                : challengeRepository.findByIdForShare(challengeId))
+        // Membership changes bump settings version even for unlimited rooms. Take the write lock
+        // up front to avoid upgrading concurrent shared locks; only finite rooms count capacity.
+        Challenge c = challengeRepository.findByIdForUpdate(challengeId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
-
-        // 무제한인 줄 알고 잠그지 않았는데 정원이 걸려 있다면, 이 트랜잭션의 스냅샷은 이미
-        // 고정돼 정원을 세도 믿을 수 없다. 되돌리고 잠금 경로로 다시 들어간다.
-        if (capacityKnown == null && c.getMaxParticipants() != null) {
-            throw new CapacityAppearedException(c.getMaxParticipants());
-        }
 
         // 솔로 방은 본인만 — 타인에겐 존재를 숨긴다(상세 조회 404 규칙과 동일).
         if (!c.isGroup() && !c.isOwner(userId))
@@ -178,7 +130,7 @@ public class ChallengeMemberService {
         //    백오프로 치환하면 치팅으로 쫓겨난 사용자가 1주 뒤 그대로 돌아온다.
         //    나머지(자진 탈퇴 1주 / 연속 실패·권한 미허용 강퇴 배수)는 대기 시각으로 판정한다.
         if (existing != null) {
-            if (existing.isRejoinBanned()) throw blocked(JoinBlockReason.BANNED);
+            if (existing.isRejoinBanned()) throw blocked(JoinBlockReason.PERMANENT_BAN);
             Instant availableAt = existing.getRejoinAvailableAt();
             if (availableAt != null && now.isBefore(availableAt))
                 throw new BusinessException(ErrorCode.JOIN_BLOCKED,
@@ -210,11 +162,7 @@ public class ChallengeMemberService {
                 throw blocked(JoinBlockReason.ALREADY_JOINED);
             }
         }
-        // 버전 증가는 <b>정원 있는 방만</b>. 참여 인원이 늘면 정원을 그 아래로 줄일 수 없게 되므로
-        // 설정 수정과의 충돌을 감지해야 하지만, 무제한 방에는 인원이 좁히는 값이 없다.
-        // 무제한 방에서 이걸 올리면 커밋 시 challenges 행에 쓰기 락이 잡혀, 잠금 읽기를
-        // 걷어낸 의미가 사라진다 — 락을 뒷문으로 다시 들이는 셈이다.
-        if (cap != null) c.bumpVersion();
+        c.bumpVersion();
         // 표시용 참여자 수는 여기서 올리지 않는다. 그 행을 가입 트랜잭션 안에서 쓰면 같은 방의
         // 모든 가입이 그 한 행에서 직렬화되고, 무제한 방에 락을 걷은 의미가 사라진다.
         // 정확해야 하는 값은 멤버십 행이고, 표시값은 커밋 뒤 원천에서 다시 센다(탐색 백엔드 5-2).
@@ -243,7 +191,7 @@ public class ChallengeMemberService {
         if (existing != null && existing.isActive()) return JoinBlockReason.ALREADY_JOINED;
         if (!invited && c.isGroup() && "PRIVATE".equals(c.getVisibility()))
             return JoinBlockReason.PRIVATE_INVITE_ONLY;
-        if (existing != null && existing.isRejoinBanned()) return JoinBlockReason.BANNED;
+        if (existing != null && existing.isRejoinBanned()) return JoinBlockReason.PERMANENT_BAN;
         if (existing != null && existing.getRejoinAvailableAt() != null
                 && Instant.now().isBefore(existing.getRejoinAvailableAt()))
             return JoinBlockReason.REJOIN_COOLDOWN;
@@ -267,9 +215,7 @@ public class ChallengeMemberService {
         Instant now = Instant.now();
 
         // 가입과 같은 규칙 — 정원 있는 방만 같은 챌린지 락으로 직렬화한다(탐색 백엔드 5-2).
-        Challenge c = challengeRepository.findById(challengeId)
-                .flatMap(found -> found.getMaxParticipants() != null
-                        ? challengeRepository.findByIdForUpdate(challengeId) : java.util.Optional.of(found))
+        Challenge c = challengeRepository.findByIdForUpdate(challengeId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
 
         if (c.getStatus() == ChallengeStatus.COMPLETED)
@@ -284,7 +230,7 @@ public class ChallengeMemberService {
 
         // 방장이 넘기지 않고 나감 → 즉시 봇방장 체제 + 잔류 멤버에게 승계 알림
         boolean botOwnerActivated = false;
-        if (me.isOwner()) {
+        if (c.isOwner(userId)) {
             c.convertToBotOwner(now);
             botOwnerActivated = true;
             notifyBotOwnerActivated(c, userId);
@@ -303,10 +249,13 @@ public class ChallengeMemberService {
         // 중도 탈퇴 감점은 정액이 아니라 진행 기간에 반비례한다 — −⌈15 × (1 − 진행주간/52)⌉.
         // 오래 해온 방일수록 가볍고, 1년을 채웠으면 면제다(점수 및 티어 정책 §4.8).
         int scoreDelta = 0;
-        if (exemptReason == null) {
+        if (exemptReason == null && c.getPenalties().score()) {
             scoreDelta = IncidentType.VOLUNTARY_LEAVE.deduction(progressWeeks(me));
-            scoreService.applyIncident(userId, challengeId, IncidentType.VOLUNTARY_LEAVE,
-                    "leave:" + me.getId(), progressWeeks(me));
+            String source = "leave:" + me.getId() + ":" + now;
+            outbox.enqueue(com.ruleup.ruleup_backend.score.LeaveScoreOutboxHandler.TYPE,
+                    new com.ruleup.ruleup_backend.score.LeaveScoreOutboxHandler.Payload(userId, challengeId,
+                            source, progressWeeks(me), "AUTO", scoreDelta, now), source);
+            outboxDispatcher.requestFlush();
         }
         log.info("challenge_leave challengeId={} userId={} penalty={} exempt={} botOwner={}",
                 challengeId, userId, scoreDelta, exemptReason, botOwnerActivated);
@@ -331,6 +280,11 @@ public class ChallengeMemberService {
      */
     @Transactional
     public int leaveAllForWithdrawal(UUID userId) {
+        return leaveAllExternally(userId, "VOLUNTARY");
+    }
+
+    @Transactional
+    public int leaveAllExternally(UUID userId, String reason) {
         Instant now = Instant.now();
 
         // 엔티티가 아니라 id 만 먼저 모은다 — 반복마다 새로 읽어 준영속 사고를 피한다.
@@ -339,17 +293,17 @@ public class ChallengeMemberService {
 
         int left = 0;
         for (UUID challengeId : challengeIds) {
+            Challenge c = challengeRepository.findByIdForUpdate(challengeId).orElse(null);
             ChallengeMember me = memberRepository.findByChallengeIdAndUserId(challengeId, userId)
                     .filter(ChallengeMember::isActive).orElse(null);
             if (me == null) continue;
-            Challenge c = challengeRepository.findById(challengeId).orElse(null);
             if (c == null) continue;   // 이미 삭제된 방 — 멤버 행도 곧 사라진다
 
-            if (me.isOwner()) {
+            if (c.isOwner(userId)) {
                 c.convertToBotOwner(now);
                 notifyBotOwnerActivated(c, userId);
             }
-            me.leave(now, null);       // rejoinAt=null — 재입장 대기 없음
+            me.leaveExternally(now, reason);       // rejoinAt=null — 재입장 대기 없음
             c.bumpVersion();
             eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "WITHDRAW"));
             left++;
@@ -386,7 +340,6 @@ public class ChallengeMemberService {
                 && !firstSuccess.isAfter(LocalDate.now(KST).minusDays(LONG_SUCCESS_THRESHOLD.toDays()))) {
             return LeaveResponse.EXEMPT_LONG_SUCCESS;
         }
-        if (c.isWithinSuccessionGrace(now)) return LeaveResponse.EXEMPT_SUCCESSION_GRACE;
         return null;
     }
 
@@ -429,7 +382,7 @@ public class ChallengeMemberService {
                     ? u.visibleProfileImageTo(viewerId) : null;
             return new MemberListResponse.Member(
                     m.getUserId().toString(), nickname, profile,
-                    m.isOwner() ? "OWNER" : "MEMBER",
+                    c.isOwner(m.getUserId()) ? "OWNER" : "MEMBER",
                     tierMap.getOrDefault(m.getUserId(), com.ruleup.ruleup_backend.score.domain.Tier.UNRANKED).name(),
                     m.getJoinedAt() != null ? m.getJoinedAt().toString() : null,
                     blocked);

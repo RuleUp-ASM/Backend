@@ -1,6 +1,7 @@
 package com.ruleup.ruleup_backend.score;
 
-import com.ruleup.ruleup_backend.challenge.domain.Challenge;
+import com.ruleup.ruleup_backend.challenge.lifecycle.ChallengeScoreSource;
+import com.ruleup.ruleup_backend.challenge.lifecycle.ChallengeScoreSource.Input;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeCycle;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
@@ -64,7 +65,7 @@ public class ScoreSyncService {
 
     private final VerificationDailyRepository dailyRepository;
     private final CycleScoreStateRepository cycleRepository;
-    private final ChallengeRepository challengeRepository;
+    private final ChallengeScoreSource challengeRepository;
     private final ScoreService scoreService;
 
     /**
@@ -135,7 +136,7 @@ public class ScoreSyncService {
      * 사이클은 테이블이 아니라 시작일로부터의 주 단위 계산이라 여기서 나눗셈으로 구한다.
      */
     private Optional<Integer> cycleNoOf(VerificationDaily daily) {
-        Challenge challenge = challengeRepository.findById(daily.getChallengeId()).orElse(null);
+        Input challenge = challengeRepository.findById(daily.getChallengeId()).orElse(null);
         if (challenge == null || challenge.getStartDate() == null) return Optional.empty();
         long elapsed = ChronoUnit.DAYS.between(challenge.getStartDate(), daily.getTargetDate());
         if (elapsed < 0) return Optional.empty();

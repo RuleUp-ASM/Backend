@@ -170,8 +170,8 @@ class ChallengeModerationFlowIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("1시간 내 3회 거부 → 1시간 수정 잠금(moderation_locked_until 설정)")
-        void threeRejectionsLock() throws Exception {
+        @DisplayName("반복 거부는 관찰하되 수정 잠금 없음")
+        void threeRejectionsDoNotLock() throws Exception {
             Member m = member(uniq("mod-lock"));
             String id = createWith(m.token(), "비속어 섞인 제목", null);
             awaitTitleDecided(id);   // 1회차 거부
@@ -185,7 +185,7 @@ class ChallengeModerationFlowIT extends ChallengeApiSupport {
 
             Map<String, Object> row = moderationRow(id);
             assertThat(((Number) row.get("moderation_reject_count")).intValue()).isEqualTo(3);
-            assertThat(row.get("moderation_locked_until")).isNotNull();
+            assertThat(row.get("moderation_locked_until")).isNull();
         }
     }
 
@@ -207,7 +207,7 @@ class ChallengeModerationFlowIT extends ChallengeApiSupport {
 
             Map<String, Object> row = moderationRow(id);
             assertThat(row.get("moderation_image")).isEqualTo("REJECTED");
-            assertThat(row.get("image_url")).isNull();
+            assertThat(row.get("image_url")).isEqualTo("/uploads/reject-cover.png");
             assertThat(notificationCount(m.id(), "CHALLENGE_IMAGE_REMOVED")).isGreaterThanOrEqualTo(1);
         }
 
@@ -239,7 +239,7 @@ class ChallengeModerationFlowIT extends ChallengeApiSupport {
             String id = createWith(token, null, null);
             // 심사 이벤트가 유실된 상황 재현: 수정분이 IN_REVIEW 인 채 오래 지체
             jdbcTemplate.update("UPDATE challenges SET moderation_title = 'IN_REVIEW', title = '고친 제목', " +
-                    "updated_at = DATE_SUB(NOW(), INTERVAL 1 DAY) WHERE id = UNHEX(REPLACE(?, '-', ''))", id);
+                    "moderation_pending_since = DATE_SUB(NOW(), INTERVAL 1 DAY), moderation_enqueued_at = NULL WHERE id = UNHEX(REPLACE(?, '-', ''))", id);
 
             assertThat(convergesToApproved(id))
                     .as("지체된 건은 배치가 돌면 재심사돼 수렴해야 한다")

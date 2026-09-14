@@ -27,7 +27,7 @@ public final class VerificationTargetDays {
     public static Disposition of(VerificationConfig config, Challenge challenge,
                                  ChallengeMember member, LocalDate date) {
         if (challenge == null) return Disposition.NOT_TARGET;
-        if (date.isBefore(challenge.getStartDate()) || date.isAfter(challenge.getEndDate())) {
+        if (date.isBefore(challenge.getStartDate()) || (challenge.getEndDate() != null && date.isAfter(challenge.getEndDate()))) {
             return Disposition.NOT_TARGET;   // 챌린지 기간 밖
         }
         if (config.isFrequency()) {

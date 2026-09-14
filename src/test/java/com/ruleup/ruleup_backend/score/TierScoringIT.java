@@ -46,6 +46,7 @@ class TierScoringIT extends ChallengeApiSupport {
     @Autowired WebApplicationContext wac;
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired ScoreService scoreService;
+    @Autowired com.ruleup.ruleup_backend.challenge.lifecycle.ChallengeArchiveService archive;
 
     private MockMvc mvc;
 
@@ -57,6 +58,37 @@ class TierScoringIT extends ChallengeApiSupport {
     @Override protected MockMvc mvc() { return mvc; }
     @Override protected JdbcTemplate jdbc() { return jdbcTemplate; }
 
+    @Test
+    void correctionsStillApplyAfterTheRoomIsArchived() throws Exception {
+        Member me = member(uniq("archived-score"));
+        UUID id = challengeWith(me.id(), 1, 21);
+        judgeAllFailed(id, me.id(), 1);
+        scoreService.reconcileCycle(me.id(), id, 1);
+        scoreService.closeCycle(me.id(), id, 1);
+        long before = scoreOf(me.id());
+        UUID original = jdbc().queryForObject("SELECT id FROM VerificationDaily WHERE challengeId=? ORDER BY targetDate LIMIT 1",
+                (rs, row) -> uuid(rs.getBytes(1)), bytes(id));
+        jdbc().update("UPDATE challenges SET status='COMPLETED',end_date=DATE_SUB(CURDATE(),INTERVAL 3 DAY) WHERE id=?", bytes(id));
+        assertThat(archive.deleteIfEligible(id)).isTrue();
+        jdbc().update("UPDATE VerificationDaily SET status='SUCCESS',verifiedVia='APPEAL' WHERE id=?", bytes(original));
+        scoreService.recompute(me.id(), id, 1, original);
+        assertThat(scoreOf(me.id())).isGreaterThan(before);
+        assertThat(jdbc().queryForObject("SELECT COUNT(*) FROM score_corrections WHERE challenge_id=?", Integer.class, bytes(id))).isEqualTo(1);
+    }
+
+    @Test
+    void manualRoomsDoNotScoreOnDailyOrIncidentPaths() throws Exception {
+        Member me = member(uniq("manual-score"));
+        UUID id = challengeWith(me.id(), 7, 0);
+        jdbc().update("UPDATE challenges SET verification_config=JSON_SET(verification_config,'$.selectedMethod','MANUAL') WHERE id=?", bytes(id));
+        judge(id, me.id(), 1, 0, "SUCCESS", "MANUAL");
+        scoreService.reconcileCycle(me.id(), id, 1);
+        scoreService.applyIncident(me.id(), id, IncidentType.CHEAT_DETECTED, "manual-incident", 0);
+        scoreService.closeCycle(me.id(), id, 1);
+        assertThat(scoreOf(me.id())).isEqualTo(10);
+        assertThat(ledger(me.id())).isEmpty();
+    }
+
     // ===== 픽스처 =====
 
     /**
@@ -66,7 +98,7 @@ class TierScoringIT extends ChallengeApiSupport {
     private UUID challengeWith(UUID ownerId, int weeklyCount, int startedDaysAgo) {
         UUID id = insertChallenge(ownerId, "EXERCISE", "ACTIVE", "GROUP");
         insertActiveMembership(id, ownerId, "OWNER");
-        jdbc().update("UPDATE challenges SET weekly_count = ?, " +
+        jdbc().update("UPDATE challenges SET verification_config=JSON_SET(verification_config,'$.selectedMethod','AUTO'),weekly_count = ?, " +
                         " start_date = DATE_SUB(start_date, INTERVAL ? DAY) WHERE id = ?",
                 weeklyCount, startedDaysAgo, bytes(id));
         return id;

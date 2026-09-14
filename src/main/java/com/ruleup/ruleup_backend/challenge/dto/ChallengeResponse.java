@@ -35,7 +35,7 @@ public record ChallengeResponse(
                 c.getImageUrl(), c.getCategory(), c.getParticipationType().name(),
                 c.getAnonymity().name(),
                 c.getWeeklyCount(), c.getDurationDays(),
-                c.getStartDate().toString(), c.getEndDate().toString(),
+                c.getStartDate().toString(), c.getEndDate() == null ? null : c.getEndDate().toString(),
                 c.getTemplateId(), c.getVerificationConfig(), c.getParams(),
                 c.getPenalty(), c.getReward());
     }

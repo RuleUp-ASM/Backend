@@ -19,7 +19,7 @@ public record CreateChallengeRequest(
         String mode,                  // SOLO / GROUP
         String visibility,            // 그룹: PUBLIC(기본)/PRIVATE — 솔로 null
         Boolean rankingVisible,       // 솔로: 기본 true — 그룹 null
-        Integer capacity,             // 그룹 전용 1~10,000
+        Integer capacity,             // 1~300 또는 무제한(null); SOLO는 1
         String minTier,               // ≤ 생성자 표시 티어
         Period period,
         Integer weeklyCount,          // 1~7, 미전송 시 draft 원본 유지

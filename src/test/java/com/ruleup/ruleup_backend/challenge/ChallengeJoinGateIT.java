@@ -275,6 +275,7 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
             Member owner = member(uniq("leave-owner"));
             Member joiner = member(uniq("leave-joiner"));
             UUID challengeId = openGroup(owner.id());
+            jdbcTemplate.update("UPDATE challenges SET verification_config=JSON_SET(verification_config,'$.selectedMethod','AUTO') WHERE id=?",bytes(challengeId));
             join(joiner.token(), challengeId);
 
             MvcResult res = leave(joiner.token(), challengeId);
@@ -309,26 +310,26 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
             roomAdmin.kickForCheat(challengeId, cheater.id());   // 같은 신호 재전송 — 멱등이어야 한다
 
             MvcResult blocked = join(cheater.token(), challengeId);
-            expectBlocked(blocked, "BANNED");
+            expectBlocked(blocked, "PERMANENT_BAN");
             // 사유는 설명하지 않는다 — 언제 풀리는지도 없다.
             assertThat(blocked.getResponse().getContentAsString()).doesNotContain("rejoinAvailableAt");
 
             // 백오프 강퇴라면 여기서 풀린다. 영구 차단은 대기 시각과 무관해야 한다.
             jdbcTemplate.update("UPDATE challenge_members SET rejoin_available_at = DATE_SUB(NOW(6), INTERVAL 1 HOUR) "
                     + "WHERE challenge_id = ? AND user_id = ?", bytes(challengeId), bytes(cheater.id()));
-            expectBlocked(join(cheater.token(), challengeId), "BANNED");
+            expectBlocked(join(cheater.token(), challengeId), "PERMANENT_BAN");
 
             // 초대 링크 미리보기도 같은 사유를 내린다 — 판정 순서가 어긋나면 클라 안내가 갈라진다.
             var challenge = wac.getBean(com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository.class)
                     .findById(challengeId).orElseThrow();
             assertThat(wac.getBean(com.ruleup.ruleup_backend.challenge.service.ChallengeMemberService.class)
                     .previewBlockReason(cheater.id(), challenge, true))
-                    .isEqualTo(com.ruleup.ruleup_backend.challenge.domain.JoinBlockReason.BANNED);
+                    .isEqualTo(com.ruleup.ruleup_backend.challenge.domain.JoinBlockReason.PERMANENT_BAN);
             // 상세 화면도 같은 사유 — 대기 시각은 비워 둔다.
             MvcResult detail = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
                     .get("/api/v1/challenges/" + challengeId).header("Authorization", "Bearer " + cheater.token()))
                     .andReturn();
-            assertThat((String) read(detail, "$.data.joinBlockReason")).isEqualTo("BANNED");
+            assertThat((String) read(detail, "$.data.joinBlockReason")).isEqualTo("PERMANENT_BAN");
             assertThat((Object) read(detail, "$.data.rejoinAvailableAt")).isNull();
 
             assertThat(jdbcTemplate.queryForObject(
@@ -358,7 +359,7 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
             jdbcTemplate.update("UPDATE challenge_members SET rejoin_available_at = DATE_SUB(NOW(6), INTERVAL 1 HOUR) "
                     + "WHERE challenge_id = ? AND user_id = ?", bytes(challengeId), bytes(cheater.id()));
 
-            expectBlocked(join(cheater.token(), challengeId), "BANNED");
+            expectBlocked(join(cheater.token(), challengeId), "PERMANENT_BAN");
         }
 
         @Test
@@ -403,12 +404,13 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("봇방장 체제가 된 방은 잔류 멤버 전원이 3일 면책 — 방장이 아니어도 감점 없음(정책 §11.3 모든 멤버 기준)")
+        @DisplayName("봇방장 전환은 남은 멤버에게 탈퇴 감점 면책을 만들지 않는다")
         void botOwnerGraceCoversEveryMember() throws Exception {
             Member owner = member(uniq("botgrace-owner"));
             Member joiner = member(uniq("botgrace-joiner"));
             Member bystander = member(uniq("botgrace-bystander"));
             UUID challengeId = openGroup(owner.id());
+            jdbcTemplate.update("UPDATE challenges SET verification_config=JSON_SET(verification_config,'$.selectedMethod','AUTO') WHERE id=?",bytes(challengeId));
             join(joiner.token(), challengeId);
             join(bystander.token(), challengeId);
 
@@ -416,8 +418,8 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
 
             MvcResult res = leave(bystander.token(), challengeId);
             assertThat(res.getResponse().getStatus()).isEqualTo(200);
-            assertThat((String) read(res, "$.data.exemptReason")).isEqualTo("SUCCESSION_GRACE");
-            assertThat((Integer) read(res, "$.data.scoreDelta")).isZero();
+            assertThat((String) read(res, "$.data.exemptReason")).isNull();
+            assertThat((Integer) read(res, "$.data.scoreDelta")).isNegative();
         }
 
         @Test
@@ -426,6 +428,7 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
             Member owner = member(uniq("expire-owner"));
             Member joiner = member(uniq("expire-joiner"));
             UUID challengeId = openGroup(owner.id());
+            jdbcTemplate.update("UPDATE challenges SET verification_config=JSON_SET(verification_config,'$.selectedMethod','AUTO') WHERE id=?",bytes(challengeId));
             join(joiner.token(), challengeId);
             leave(owner.token(), challengeId);
 
@@ -443,6 +446,7 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
             Member owner = member(uniq("selfexempt-owner"));
             Member joiner = member(uniq("selfexempt-joiner"));
             UUID challengeId = openGroup(owner.id());
+            jdbcTemplate.update("UPDATE challenges SET verification_config=JSON_SET(verification_config,'$.selectedMethod','AUTO') WHERE id=?",bytes(challengeId));
             join(joiner.token(), challengeId);
 
             MvcResult res = leave(owner.token(), challengeId);
@@ -452,19 +456,20 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("선착순으로 방장이 된 사람은 3일 안에 나가면 감점 없음(SUCCESSION_GRACE)")
+        @DisplayName("Phase 1에서는 클레임 시도로 탈퇴 감점 면책을 받을 수 없다")
         void claimGraceExemption() throws Exception {
             Member owner = member(uniq("grace-owner"));
             Member joiner = member(uniq("grace-joiner"));
             UUID challengeId = openGroup(owner.id());
+            jdbcTemplate.update("UPDATE challenges SET verification_config=JSON_SET(verification_config,'$.selectedMethod','AUTO') WHERE id=?",bytes(challengeId));
             join(joiner.token(), challengeId);
             leave(owner.token(), challengeId);
             postJsonAuth("/api/v1/challenges/" + challengeId + "/owner/claim", joiner.token(), Map.of());
 
             MvcResult res = leave(joiner.token(), challengeId);
             assertThat(res.getResponse().getStatus()).isEqualTo(200);
-            assertThat((String) read(res, "$.data.exemptReason")).isEqualTo("SUCCESSION_GRACE");
-            assertThat((Integer) read(res, "$.data.scoreDelta")).isZero();
+            assertThat((String) read(res, "$.data.exemptReason")).isNull();
+            assertThat((Integer) read(res, "$.data.scoreDelta")).isNegative();
         }
 
     }

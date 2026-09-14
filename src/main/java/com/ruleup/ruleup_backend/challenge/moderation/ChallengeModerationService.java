@@ -1,144 +1,94 @@
 package com.ruleup.ruleup_backend.challenge.moderation;
 
-import com.ruleup.ruleup_backend.challenge.domain.Challenge;
-import com.ruleup.ruleup_backend.challenge.domain.TargetModerationStatus;
-import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.moderation.ContentModerationClient;
 import com.ruleup.ruleup_backend.moderation.ModerationResult;
-import com.ruleup.ruleup_backend.notification.NotificationPublisher;
 import com.ruleup.ruleup_backend.notification.NotificationEvent;
+import com.ruleup.ruleup_backend.notification.NotificationPublisher;
 import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
-import java.time.Instant;
+import java.util.EnumMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/**
- * 챌린지 제목·설명·이미지 비동기 사후 심사 (기능 스펙 6-1 #4).
- *
- *  - 심사 대상은 항목별 상태가 IN_REVIEW 인 것만 — 사용자 직접 수정분(서버 draftId 대조 판정)과 이미지.
- *  - 제목+설명은 한 세트로 LLM 1회 호출, 결과는 항목별. 세트 심사 1회 = 반복 거부 카운트 1회.
- *  - 명백한 금칙어는 blocklist 로 LLM 호출 전에 즉시 거부(비용 절감·확실한 것만).
- *  - 거부: 대체 표시 유지(타인 = AI 임시 제목·빈 설명·기본 이미지) + 수정 요청 알림.
- *    이미지 거부는 이미지 삭제 + 방장 알림. 1시간 3회 거부 → 1시간 수정 잠금.
- *  - 검수 불가(UNAVAILABLE)는 IN_REVIEW 유지 — 재시도 배치가 수렴시킨다. 기능 제한은 어떤 상태에도 없다
- *    (구 "PENDING_REVIEW 비노출·가입 차단·1시간 미수정 하드 삭제" 플로우 폐기).
- */
+import static com.ruleup.ruleup_backend.challenge.moderation.ChallengeModerationSnapshot.Target;
+
+/** Read without a lock, call the provider outside a transaction, then conditionally apply each field. */
 @Service
 @RequiredArgsConstructor
 public class ChallengeModerationService {
-
     private static final Logger log = LoggerFactory.getLogger(ChallengeModerationService.class);
-
-    private final ChallengeRepository challengeRepository;
+    private final ChallengeModerationStore store;
     private final ContentModerationClient moderationClient;
     private final ChallengeNameBlocklist blocklist;
     private final NotificationPublisher notificationPublisher;
+    private final TransactionTemplate transactionTemplate;
 
-    @Transactional
-    public void moderate(UUID challengeId) {
-        Challenge c = challengeRepository.findById(challengeId).orElse(null);
-        if (c == null) return;
+    public void moderate(UUID id) { moderate(id, List.of(Target.values())); }
 
-        Instant now = Instant.now();
-        boolean rejected = false;
-        rejected |= moderateText(c);
-        rejected |= moderateImage(c);
-        if (rejected) {
-            c.registerModerationRejection(now);
+    public void moderate(UUID id, List<Target> requested) {
+        ChallengeModerationSnapshot snapshot = store.read(id);
+        if (snapshot == null) return;
+        List<Target> targets = snapshot.targets().stream().filter(requested::contains).toList();
+        if (targets.isEmpty()) return;
+        long started = System.nanoTime();
+        Map<Target, ModerationResult> verdicts = new EnumMap<>(Target.class);
+        for (Target target : targets) {
+            if (target != Target.IMAGE && blocklist.hits(snapshot.content(target)))
+                verdicts.put(target, ModerationResult.REJECTED);
         }
+        boolean titleNeeded = targets.contains(Target.TITLE) && !verdicts.containsKey(Target.TITLE);
+        boolean descriptionNeeded = targets.contains(Target.DESCRIPTION) && !verdicts.containsKey(Target.DESCRIPTION);
+        if (titleNeeded || descriptionNeeded) {
+            var result = moderationClient.moderateChallengeText(titleNeeded ? snapshot.title() : null,
+                    descriptionNeeded ? snapshot.description() : null);
+            if (titleNeeded) verdicts.put(Target.TITLE, result.title());
+            if (descriptionNeeded) verdicts.put(Target.DESCRIPTION, result.description());
+        }
+        if (targets.contains(Target.IMAGE)) {
+            verdicts.put(Target.IMAGE, snapshot.image() == null || snapshot.image().isBlank()
+                    ? ModerationResult.APPROVED : moderationClient.moderateImage(snapshot.image()));
+        }
+        // Provider errors remain pending. SQS retries only pending fields; committed decisions survive.
+        transactionTemplate.executeWithoutResult(tx -> {
+            boolean anyRejected = false;
+            for (var entry : verdicts.entrySet()) {
+                Target target = entry.getKey();
+                ModerationResult result = entry.getValue();
+                boolean applied = result != ModerationResult.UNAVAILABLE
+                        && store.apply(snapshot, target, result.name());
+                if (applied && result == ModerationResult.REJECTED) {
+                    anyRejected = true;
+                    rejectNotification(snapshot, target);
+                }
+                log.info("moderation_result challengeId={} target={} result={} applied={} latencyMs={}",
+                        id, target, result, applied, (System.nanoTime() - started) / 1_000_000);
+            }
+            if (anyRejected) store.recordRejection(id);
+            store.finish(id);
+        });
+        if (verdicts.containsValue(ModerationResult.UNAVAILABLE))
+            throw new IllegalStateException("Moderation provider unavailable");
     }
 
-    /** 제목+설명 세트 1회 심사. @return 거부가 하나라도 있었는가 */
-    private boolean moderateText(Challenge c) {
-        boolean titlePending = c.getModerationTitle() == TargetModerationStatus.IN_REVIEW;
-        boolean descriptionPending = c.getModerationDescription() == TargetModerationStatus.IN_REVIEW;
-        if (!titlePending && !descriptionPending) return false;
-
-        String title = titlePending ? c.getTitle() : null;
-        String description = descriptionPending ? c.getDescription() : null;
-
-        // 명백한 금칙어는 LLM 없이 즉시 거부(blocklist — 애매한 건 LLM 판단에 맡긴다)
-        ModerationResult titleVerdict = (title != null && blocklist.hits(title))
-                ? ModerationResult.REJECTED : null;
-        ModerationResult descriptionVerdict = (description != null && blocklist.hits(description))
-                ? ModerationResult.REJECTED : null;
-
-        if ((titlePending && titleVerdict == null) || (descriptionPending && descriptionVerdict == null)) {
-            ContentModerationClient.TextVerdicts verdicts = moderationClient.moderateChallengeText(
-                    (titlePending && titleVerdict == null) ? title : null,
-                    (descriptionPending && descriptionVerdict == null) ? description : null);
-            if (titleVerdict == null) titleVerdict = verdicts.title();
-            if (descriptionVerdict == null) descriptionVerdict = verdicts.description();
-        }
-
-        boolean anyRejected = false;
-        if (titlePending) {
-            switch (titleVerdict) {
-                case APPROVED -> c.approveTitle();
-                case REJECTED -> { c.rejectTitle(); anyRejected = true; }
-                case UNAVAILABLE -> log.info("챌린지 제목 심사 보류(IN_REVIEW 유지) challengeId={}", c.getId());
-            }
-        }
-        if (descriptionPending) {
-            switch (descriptionVerdict) {
-                case APPROVED -> c.approveDescription();
-                case REJECTED -> { c.rejectDescription(); anyRejected = true; }
-                case UNAVAILABLE -> log.info("챌린지 설명 심사 보류(IN_REVIEW 유지) challengeId={}", c.getId());
-            }
-        }
-        if (anyRejected) {
-            notificationPublisher.publish(NotificationEvent.forChallenge(c.getCreatorId(),
-                            NotificationType.MODERATION_REJECTED, c.getId(),
-                            // 수정 후 재심사에서 또 거부될 수 있어 심사 시각을 키에 넣는다.
-                            Map.of(NotificationParams.VARIANT, "CHALLENGE_TEXT",
-                                    NotificationParams.CHALLENGE_TITLE, c.publicTitle(),
-                                    NotificationParams.TARGET_KEY, "challenge_text",
-                                    NotificationParams.EVENT_KEY,
-                                    c.getId() + ":" + Instant.now().toEpochMilli()))
-                    // 프로필이 아니라 그 방 수정 화면으로 보내야 바로 고칠 수 있다.
-                    .withDeeplink("ruleup://challenges/" + c.getId() + "/edit"));
-            log.info("moderation_result target=TEXT approved=false challengeId={}", c.getId());
-        } else if (titlePending || descriptionPending) {
-            log.info("moderation_result target=TEXT approved=true challengeId={}", c.getId());
-        }
-        return anyRejected;
-    }
-
-    /** 이미지 심사. @return 거부였는가 */
-    private boolean moderateImage(Challenge c) {
-        if (c.getModerationImage() != TargetModerationStatus.IN_REVIEW) return false;
-        String imageUrl = c.getImageUrl();
-        if (imageUrl == null || imageUrl.isBlank()) {
-            c.approveImage();   // 방어: 심사 중 이미지가 사라졌으면 대상 없음
-            return false;
-        }
-        ModerationResult r = moderationClient.moderateImage(imageUrl);
-        switch (r) {
-            case APPROVED -> {
-                c.approveImage();
-                log.info("moderation_result target=IMAGE approved=true challengeId={}", c.getId());
-            }
-            case REJECTED -> {
-                c.rejectAndRemoveImage();
-                notificationPublisher.publish(NotificationEvent.forChallenge(c.getCreatorId(),
-                        NotificationType.CHALLENGE_IMAGE_REMOVED, c.getId(),
-                        // 같은 방에서 이미지를 다시 올렸다가 또 내려갈 수 있다.
-                        Map.of(NotificationParams.CHALLENGE_TITLE, c.publicTitle(),
-                                NotificationParams.CHALLENGE_ID, c.getId().toString(),
-                                NotificationParams.EVENT_KEY,
-                                c.getId() + ":" + Instant.now().toEpochMilli())));
-                log.info("moderation_result target=IMAGE approved=false challengeId={}", c.getId());
-                return true;
-            }
-            case UNAVAILABLE -> log.info("챌린지 이미지 심사 보류(IN_REVIEW 유지) challengeId={}", c.getId());
-        }
-        return false;
+    private void rejectNotification(ChallengeModerationSnapshot snapshot, Target target) {
+        // Owner may have left while the provider was running. Notify the current owner only.
+        ChallengeModerationSnapshot current = store.read(snapshot.id());
+        if (current == null || current.ownerId() == null) return;
+        NotificationType type = target == Target.IMAGE
+                ? NotificationType.CHALLENGE_IMAGE_REMOVED : NotificationType.MODERATION_REJECTED;
+        notificationPublisher.publish(NotificationEvent.forChallenge(current.ownerId(), type, snapshot.id(),
+                Map.of(NotificationParams.VARIANT, "CHALLENGE_TEXT",
+                        NotificationParams.CHALLENGE_TITLE, "챌린지",
+                        NotificationParams.CHALLENGE_ID, snapshot.id().toString(),
+                        NotificationParams.TARGET_KEY, "challenge_" + target.name().toLowerCase(java.util.Locale.ROOT),
+                        NotificationParams.EVENT_KEY, UUID.randomUUID().toString()))
+                .withDeeplink("ruleup://challenges/" + snapshot.id() + "/edit"));
     }
 }

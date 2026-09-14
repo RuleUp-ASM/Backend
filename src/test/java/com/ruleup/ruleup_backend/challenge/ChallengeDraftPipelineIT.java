@@ -155,7 +155,7 @@ class ChallengeDraftPipelineIT extends ChallengeApiSupport {
             assertThat((String) read(res, "$.data.draft.mode")).isEqualTo("SOLO");
             assertThat((Object) read(res, "$.data.draft.visibility")).isNull();
             assertThat((Boolean) read(res, "$.data.draft.rankingVisible")).isTrue();
-            assertThat((Integer) read(res, "$.data.draft.capacity")).isEqualTo(50);
+            assertThat((Integer) read(res, "$.data.draft.capacity")).isEqualTo(1);
 
             // minTier = 생성자 표시 티어(신규 가입자 BRONZE)
             assertThat((String) read(res, "$.data.draft.minTier")).isEqualTo("BRONZE");
@@ -315,7 +315,7 @@ class ChallengeDraftPipelineIT extends ChallengeApiSupport {
             assertThat((String) read(res, "$.data.draft.title")).isEqualTo("헬스장 가기");
             assertThat((String) read(res, "$.data.draft.category")).isEqualTo("EXERCISE");
             assertThat((String) read(res, "$.data.draft.mode")).isEqualTo("SOLO");
-            assertThat((Integer) read(res, "$.data.draft.capacity")).isEqualTo(50);
+            assertThat((Integer) read(res, "$.data.draft.capacity")).isEqualTo(1);
             assertThat((String) read(res, "$.data.draft.minTier")).isEqualTo("BRONZE");
             assertThat(res.getResponse().getContentAsString()).doesNotContain("\"repeatDays\"");
             assertThat((Integer) read(res, "$.data.draft.weeklyCount")).isEqualTo(7);

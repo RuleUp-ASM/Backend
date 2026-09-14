@@ -18,7 +18,7 @@ public enum JoinBlockReason {
      * 부정행위 검출로 강퇴돼 이 챌린지에 영구히 못 들어온다(방 내부 테크 스펙 5-6).
      * 대기 시각이 없고 사유는 설명하지 않는다 — {@code rejoinAvailableAt} 을 싣지 않는다.
      */
-    BANNED,
+    PERMANENT_BAN,
     /** 자진 탈퇴 1주 / 강퇴 1주→2주→4주 배수 대기 중(연속 실패·권한 미허용 강퇴 — 정책 §10.2). */
     REJOIN_COOLDOWN,
     /** 동시 참여 무료 3개 초과 (⚠️ BM 확정 대기). */

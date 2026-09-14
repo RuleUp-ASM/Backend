@@ -52,6 +52,7 @@ public class AdminOpsService {
     private final ConfirmationTokens confirmationTokens;
     private final AnnouncementRepository announcementRepository;
     private final JdbcTemplate jdbc;
+    private final com.ruleup.ruleup_backend.challenge.lifecycle.ChallengeArchiveService archiveService;
 
     // ===== 유저 통합 뷰 =====
 
@@ -293,15 +294,18 @@ public class AdminOpsService {
         auditService.allowed(operatorId, AdminAction.CHALLENGE_CLOSE,
                 AdminAuditLog.TargetType.CHALLENGE, challengeId, request.reasonText());
 
-        // 폐쇄된 방의 데이터 처리는 정책에 명시가 없다(공통 오픈 이슈 #4) — 조회만 막고 기록은 남긴다.
+        // 완료 응답을 먼저 구성하고, 이력을 보존한 뒤 운영 데이터를 삭제한다.
         challenge.complete();
+        challengeRepository.flush();
 
         // 근거 신고를 큐에 남겨 두지 않는다. 폐쇄해 놓고 신고가 미검토로 남으면 다음 운영자가
         // 같은 방을 다시 판단한다.
         reviewService.resolveAsSanctioned(operatorId, request.resolveReportIds(),
                 "챌린지 직권 폐쇄: " + request.reasonText());
 
-        return challengeDetail(challengeId);
+        AdminDtos.ChallengeDetail response = challengeDetail(challengeId);
+        archiveService.closeByAdmin(challengeId);
+        return response;
     }
 
     private AdminDtos.ChallengeDetail challengeDetail(UUID challengeId) {

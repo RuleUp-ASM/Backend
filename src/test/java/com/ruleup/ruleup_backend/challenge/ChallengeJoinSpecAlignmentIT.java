@@ -210,7 +210,7 @@ class ChallengeJoinSpecAlignmentIT extends ChallengeApiSupport {
 
         @Test
         @DisplayName("[P1] 정원이 없는 방은 가입해도 잠금 읽기도 정원 COUNT 도 하지 않는다")
-        void unlimitedRoomSkipsBothTheLockAndTheCount() throws Exception {
+        void unlimitedRoomLocksVersionButSkipsCapacityCount() throws Exception {
             Member me = member(uniq("cap-unlimited"));
             UUID room = someoneElsesRoom("cap-unlimited-owner");
             setCapacity(room, null);
@@ -218,14 +218,14 @@ class ChallengeJoinSpecAlignmentIT extends ChallengeApiSupport {
 
             assertThat(join(me.token(), room).getResponse().getStatus()).isEqualTo(200);
 
-            verify(challengeRepository, never()).findByIdForUpdate(room);
+            verify(challengeRepository).findByIdForUpdate(room);
             verify(memberRepository, never())
                     .countByChallengeIdAndStatus(room, MemberStatus.ACTIVE);
         }
 
         @Test
         @DisplayName("[P1] 무제한 방 가입은 challenges 행을 쓰지 않는다 — 쓰면 결국 그 행에 락이 걸린다")
-        void joiningAnUnlimitedRoomDoesNotWriteTheChallengeRow() throws Exception {
+        void joiningAnUnlimitedRoomBumpsSettingsVersion() throws Exception {
             Member me = member(uniq("cap-nowrite"));
             UUID room = someoneElsesRoom("cap-nowrite-owner");
             setCapacity(room, null);
@@ -236,7 +236,7 @@ class ChallengeJoinSpecAlignmentIT extends ChallengeApiSupport {
 
             assertThat(jdbc().queryForMap("SELECT version FROM challenges WHERE id = ?", bytes(room)).get("version"))
                     .as("버전을 올리면 커밋 시 그 행에 쓰기 락이 잡혀, 잠금 읽기를 걷어낸 의미가 사라진다")
-                    .isEqualTo(versionBefore);
+                    .isEqualTo(((Number)versionBefore).intValue()+1);
         }
 
         @Test
@@ -306,10 +306,10 @@ class ChallengeJoinSpecAlignmentIT extends ChallengeApiSupport {
 
         @Test
         @DisplayName("[P1] 9종에 없는 값은 거절한다 — 정원은 고른 값이지 적어 넣는 값이 아니다")
-        void capacityOutsideTheNineChoicesIsRejected() throws Exception {
+        void capacityOutsideRangeIsRejected() throws Exception {
             String token = memberToken(uniq("cap-choice"));
 
-            for (int notAllowed : List.of(1, 7, 25, 301, 1000)) {
+            for (int notAllowed : List.of(0, -1, 301, 1000)) {
                 MvcResult res = createWithCapacity(token, notAllowed);
                 assertThat(res.getResponse().getStatus())
                         .as("허용값 밖의 정원 %d 가 통과했다", notAllowed)

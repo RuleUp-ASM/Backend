@@ -430,7 +430,7 @@ public class ExploreQueryService {
             case COMPLETION_RATE -> String.valueOf(r.completionRate);
             case SUCCESS_FAIL_RATIO -> String.valueOf(r.retentionRate);
             case RECENT -> r.createdAt;
-            case DEADLINE -> r.endDate;
+            case DEADLINE -> r.endDate == null ? "9999-12-31" : r.endDate;
         };
         String secondary = (sort == ExploreSort.POPULAR)
                 ? (r.lastJoinedAt24h != null ? r.lastJoinedAt24h : EPOCH_LITERAL) : null;
@@ -458,7 +458,7 @@ public class ExploreQueryService {
                 // 시작 전 방은 진행 지표 자체가 없다
                 upcoming ? null : r.completionRate,
                 upcoming ? null : r.retentionRate,
-                (int) ChronoUnit.DAYS.between(today, LocalDate.parse(r.endDate)),
+                r.endDate == null ? null : (int) ChronoUnit.DAYS.between(today, LocalDate.parse(r.endDate)),
                 r.startDate, r.endDate, r.createdAt);
     }
 
@@ -516,7 +516,7 @@ public class ExploreQueryService {
                 rs.getString("image_url"), rs.getString("moderation_image"),
                 rs.getString("category"), rs.getString("verification_type"), rs.getString("status"),
                 0, (Integer) rs.getObject("capacity"), rs.getString("min_tier"),
-                String.valueOf(rs.getDate("start_date")), String.valueOf(rs.getDate("end_date")),
+                String.valueOf(rs.getDate("start_date")), rs.getDate("end_date") == null ? null : rs.getDate("end_date").toString(),
                 String.valueOf(rs.getTimestamp("created_at")),
                 null, null, 0, null);
     }

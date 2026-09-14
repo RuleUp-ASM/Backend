@@ -47,7 +47,7 @@ public record ChallengeDetailResponse(
 ) {
     public record Owner(String userId, String nickname) {}
 
-    public record Period(String start, String end, int remainingDays) {}
+    public record Period(String start, String end, Integer remainingDays) {}
 
     /** @param detail 표시 문구(예: "기상 06:00 ±10분") */
     public record Verification(String type, String method, String detail,

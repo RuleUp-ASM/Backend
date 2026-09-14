@@ -1,6 +1,7 @@
 package com.ruleup.ruleup_backend.score;
 
-import com.ruleup.ruleup_backend.challenge.domain.Challenge;
+import com.ruleup.ruleup_backend.challenge.lifecycle.ChallengeScoreSource;
+import com.ruleup.ruleup_backend.challenge.lifecycle.ChallengeScoreSource.Input;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeCycle;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
@@ -78,7 +79,7 @@ public class ScoreService {
     private final ChallengeStreakRepository streakRepository;
     private final ScoreTransactionRepository ledgerRepository;
     private final ScoreCorrectionRepository correctionRepository;
-    private final ChallengeRepository challengeRepository;
+    private final ChallengeScoreSource challengeRepository;
     private final VerificationDailyRepository dailyRepository;
 
     // ===== 날짜별 판정 반영 =====
@@ -92,8 +93,8 @@ public class ScoreService {
      */
     @Transactional
     public void reconcileCycle(UUID userId, UUID challengeId, int cycleNo) {
-        Challenge challenge = challengeRepository.findById(challengeId).orElse(null);
-        if (challenge == null) return;
+        Input challenge = challengeRepository.findById(challengeId).orElse(null);
+        if (challenge == null || !challenge.automatic()) return;
 
         UserScoreSummary summary = lockSummary(userId);
         CycleScoreState cycle = openCycle(summary, challenge, cycleNo);
@@ -122,6 +123,7 @@ public class ScoreService {
      */
     @Transactional
     public void closeCycle(UUID userId, UUID challengeId, int cycleNo) {
+        if (challengeRepository.findById(challengeId).filter(c -> c.automatic()).isEmpty()) return;
         UserScoreSummary summary = lockSummary(userId);
         CycleScoreState cycle = cycleRepository.findForUpdate(userId, challengeId, cycleNo).orElse(null);
         if (cycle == null || cycle.isClosed()) return;   // 마감 멱등
@@ -159,7 +161,7 @@ public class ScoreService {
      */
     private void notifyConsecutiveFailure(UUID userId, UUID challengeId, int cycleNo) {
         Long templateId = challengeRepository.findById(challengeId)
-                .map(Challenge::getTemplateId).orElse(null);
+                .map(Input::getTemplateId).orElse(null);
         String routineId = (templateId != null) ? templateId.toString() : challengeId.toString();
 
         notificationPublisher.publish(NotificationEvent.forChallenge(userId,
@@ -193,6 +195,7 @@ public class ScoreService {
     @Transactional
     public void applyIncident(UUID userId, UUID challengeId, IncidentType type,
                               String sourceId, int progressWeeks) {
+        if (challengeRepository.findById(challengeId).filter(c -> c.automatic()).isEmpty()) return;
         String key = "incident:%s:%s".formatted(type, sourceId);
         if (ledgerRepository.existsByIdempotencyKey(key)) return;
 
@@ -239,8 +242,8 @@ public class ScoreService {
     public void recompute(UUID userId, UUID challengeId, int cycleNo, UUID originalEventId) {
         if (correctionRepository.existsByOriginalEventIdAndCorrectionVersion(originalEventId, 1)) return;
 
-        Challenge challenge = challengeRepository.findById(challengeId).orElse(null);
-        if (challenge == null) return;
+        Input challenge = challengeRepository.findById(challengeId).orElse(null);
+        if (challenge == null || !challenge.automatic()) return;
 
         UserScoreSummary summary = lockSummary(userId);
         CycleScoreState cycle = cycleRepository.findForUpdate(userId, challengeId, cycleNo).orElse(null);
@@ -318,19 +321,19 @@ public class ScoreService {
      * 사이클 상태를 열거나 가져온다. 배점 티어는 <b>여는 시점의 실제 티어</b>로 고정되고 이후 바뀌지 않는다 —
      * 주중 승급·강등이 그 사이클의 배점·판정·보너스를 흔들면 한 주의 총 배점을 설명할 수 없게 된다.
      */
-    private CycleScoreState openCycle(UserScoreSummary summary, Challenge challenge, int cycleNo) {
+    private CycleScoreState openCycle(UserScoreSummary summary, Input challenge, int cycleNo) {
         return cycleRepository.findForUpdate(summary.getUserId(), challenge.getId(), cycleNo)
                 .orElseGet(() -> cycleRepository.save(CycleScoreState.open(
                         summary.getUserId(), challenge.getId(), cycleNo,
                         summary.getActualTier(), targetCount(challenge), cycleStart(challenge, cycleNo))));
     }
 
-    private int targetCount(Challenge challenge) {
+    private int targetCount(Input challenge) {
         Integer weekly = challenge.getWeeklyCount();
         return (weekly == null || weekly < 1) ? 7 : Math.min(7, weekly);
     }
 
-    private LocalDate cycleStart(Challenge challenge, int cycleNo) {
+    private LocalDate cycleStart(Input challenge, int cycleNo) {
         return challenge.getStartDate().plusDays((long) (cycleNo - 1) * ChallengeCycle.CYCLE_DAYS);
     }
 
@@ -341,7 +344,7 @@ public class ScoreService {
      * 주 5회 루틴에서 이틀 실패해도 남은 5일로 만회할 수 있으면 0이다. 남은 인증 가능일은
      * 사이클 7일 중 <b>아직 확정되지 않은</b> 날의 수다 — 확정된 날은 더 이상 성공으로 바뀌지 않는다.
      */
-    private Counts countFromJudgements(UUID userId, Challenge challenge, CycleScoreState cycle) {
+    private Counts countFromJudgements(UUID userId, Input challenge, CycleScoreState cycle) {
         LocalDate from = cycle.getStartedOn();
         LocalDate to = from.plusDays(ChallengeCycle.CYCLE_DAYS - 1L);
         List<VerificationDaily> dailies = dailyRepository

@@ -56,7 +56,7 @@ public class ChallengeInvitationService {
                         challenge.getId().toString(), challenge.getTitle(), challenge.getImageUrl(),
                         challenge.getCategory(), challenge.getParticipantCount(), challenge.getMaxParticipants(),
                         challenge.getMinTier() == null ? null : challenge.getMinTier().name(),
-                        challenge.getStartDate().toString(), challenge.getEndDate().toString()),
+                        challenge.getStartDate().toString(), challenge.getEndDate() == null ? null : challenge.getEndDate().toString()),
                 inviterNickname(invitation.getInviterId(), viewerId),
                 blockReason == null,
                 blockReason == null ? null : blockReason.name(),

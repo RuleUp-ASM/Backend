@@ -19,42 +19,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
 
-/**
- * 내 챌린지 목록 조회 (GET /api/v1/challenges).
- *
- * <p>원천이 둘이라 UNION 으로 읽는다. 살아 있는 방은 {@code challenges}, <b>완료 후 하드 삭제된 방</b>은
- * 삭제 배치가 직전에 적재한 이력({@code challenge_history} · {@code challenge_member_history})이다.
- * 완료 기록은 방이 사라진 뒤에도 마이페이지에서 열람할 수 있어야 하는데(마이페이지 §2-1),
- * 삭제 배치가 방 데이터를 통째로 지우므로 이력을 함께 읽지 않으면 완료 탭이 시간이 지날수록 비어 버린다.
- *
- * <p>정렬·커서 키는 두 원천이 모두 가진 <b>(종료일, 챌린지 id)</b> 내림차순이다. 이력에는 가입 시각도
- * 이탈 시각도 온전히 남지 않아 다른 키로는 두 원천을 한 줄로 세울 수 없다.
- *
- * <h2>⚠️ 알려진 제약 두 가지 — 레거시로 남긴다</h2>
- *
- * <p><b>① 이력에서 읽은 항목은 필드 절반이 null 이다.</b> {@code challenge_history} 가 보존하는 값은
- * 제목·이미지·카테고리·기간뿐이라 설명·모드·공개범위·인원·정원·최소티어·주간횟수·방장유형을 채울 수 없다.
- * 0 이나 기본값으로 메우면 완료 카드가 "정원 0명짜리 솔로 방"처럼 거짓을 그리므로 null 로 둔다.
- *
- * <p><b>{@code successRate} 만은 예외로 이력에서도 채워진다.</b> 완료 카드의 「최종 88%」가
- * 그 값이며, 삭제 배치가 삭제 직전에 계산해 {@code challenge_member_history.final_success_rate}
- * 에 적재한다. 삭제된 뒤에는 계산할 원천이 없어 <b>이미 삭제된 건은 소급이 불가능</b>하다.
- *
- * <p>이건 드문 경우가 아니다. 삭제 배치가 매일 04:10 에 {@code status='COMPLETED'} 를 전부 지우므로
- * 완료된 방이 살아 있는 시간은 길어야 하루다 — 즉 <b>완료 탭은 사실상 전부 이력에서 읽히고,
- * 위 필드들은 항상 null 이라고 봐야 한다</b>. 그럼에도 지금 막지 않는 전제는 하나다:
- * 완료 카드가 제목·이미지·기간·최종 랭킹만 그린다는 것. <b>이 전제가 깨지면 그때가 교체 시점이다.</b>
- * 스냅샷 컬럼을 늘리는 마이그레이션이 먼저이며, 적재가 삭제 직전 1회뿐이라
- * <b>그 이전 삭제분은 소급 복구되지 않는다</b>.
- *
- * <p><b>② {@code leftType} 이 두 값으로 뭉개진다.</b> {@code challenge_members.left_type} 이
- * {@code enum('LEAVE','KICK')} 이라 API 계약의 7종을 {@code SELF} · {@code KICK_BY_OWNER} 로만 내린다.
- * 지금 손실이 없는 이유는 나머지 5종을 남길 자동 강퇴 배치(신고 누적·연속 실패·권한 미허용·티어 미달·
- * 계정 잠금)가 <b>아직 존재하지 않아 실제 발생이 0건</b>이기 때문이다 — 값이 뭉개진 이력이 쌓이는
- * 상황이 아니다. <b>교체 시점</b>: 자동 강퇴 배치를 붙이는 순간. 그때는 API 매핑이 아니라
- * <b>저장 컬럼(enum 확장 마이그레이션)부터</b> 갈라야 한다. 배치를 먼저 붙이고 매핑을 나중에 고치면
- * 그사이 강퇴분은 원인을 영영 알 수 없다.
- */
+/** Live rooms and complete deletion snapshots share the same response and cursor. */
 @Service
 @RequiredArgsConstructor
 public class MyChallengeQueryService {
@@ -87,12 +52,12 @@ public class MyChallengeQueryService {
         }
         sql.append(") t ");
         if (cursor != null) {
-            sql.append("WHERE (t.end_date < ? OR (t.end_date = ? AND t.challenge_id < ?)) ");
+            sql.append("WHERE (COALESCE(t.end_date, '9999-12-31') < ? OR (COALESCE(t.end_date, '9999-12-31') = ? AND t.challenge_id < ?)) ");
             args.add(java.sql.Date.valueOf(cursor.endDate()));
             args.add(java.sql.Date.valueOf(cursor.endDate()));
             args.add(toBytes(cursor.challengeId()));
         }
-        sql.append("ORDER BY t.end_date DESC, t.challenge_id DESC LIMIT ?");
+        sql.append("ORDER BY COALESCE(t.end_date, '9999-12-31') DESC, t.challenge_id DESC LIMIT ?");
         args.add(size + 1);
 
         List<Row> fetched = jdbc.query(sql.toString(), (rs, i) -> mapRow(rs), args.toArray());
@@ -102,7 +67,7 @@ public class MyChallengeQueryService {
         List<ChallengeListResponse.Item> items = page.stream()
                 .map(r -> toItem(r, filter)).toList();
         String next = hasNext && !page.isEmpty()
-                ? encode(new Cursor(page.get(page.size() - 1).endDate, page.get(page.size() - 1).challengeId))
+                ? encode(new Cursor(page.get(page.size() - 1).endDate == null ? LocalDate.of(9999,12,31) : page.get(page.size() - 1).endDate, page.get(page.size() - 1).challengeId))
                 : null;
         return new ChallengeListResponse(items, next, hasNext);
     }
@@ -119,8 +84,8 @@ public class MyChallengeQueryService {
                 "       c.description, c.moderation_description, c.image_url, c.moderation_image, " +
                 "       c.category, c.mode, c.visibility, c.status, " +
                 "       c.participant_count, c.capacity, c.min_tier, c.weekly_count, " +
-                "       c.start_date, c.end_date, m.role AS my_role, c.owner_type, " +
-                "       m.left_type, m.left_at, " +
+                "       c.start_date, c.end_date, CASE WHEN c.owner_id=m.user_id THEN 'OWNER' ELSE 'MEMBER' END AS my_role, c.owner_type, " +
+                "       COALESCE(m.leave_reason,m.left_type) AS left_type, m.left_at, " +
                 // 성공률은 판정 대비다 — progress_rate(목표 대비 진척도)와 다른 값이므로 섞지 않는다.
                 // 판정이 하나도 없으면 NULL: 비율을 만들 수 없는 상태를 0 으로 채우면
                 // 아직 아무것도 하지 않은 사용자에게 「성공률 0%」를 그리게 된다.
@@ -140,21 +105,20 @@ public class MyChallengeQueryService {
                 : "h.left_type IN ('LEFT','REMOVED')";
         // 스냅샷에 없는 값은 CAST 로 타입을 못박고 테이블 콜레이션을 붙인다 — 맨 NULL 은 UNION 컬럼 타입이
         // 드라이버마다 갈리고, 문자열 리터럴은 접속 콜레이션을 따라와 컬럼과 섞이면 UNION 이 거절된다.
-        return "SELECT h.challenge_id, ch.title_snapshot AS title, " + NULL_TEXT + " AS ai_title, " +
-                "       " + text("APPROVED") + " AS moderation_title, " + NULL_TEXT + " AS description, " +
+        return "SELECT h.challenge_id, ch.title_snapshot AS title, ch.ai_title_snapshot AS ai_title, " +
+                "       " + text("APPROVED") + " AS moderation_title, ch.description_snapshot AS description, " +
                 "       " + text("APPROVED") + " AS moderation_description, " +
                 "       ch.image_snapshot AS image_url, " + text("APPROVED") + " AS moderation_image, " +
-                "       ch.category, " + NULL_TEXT + " AS mode, " + NULL_TEXT + " AS visibility, " +
+                "       ch.category, ch.mode, ch.visibility, " +
                 "       " + text("COMPLETED") + " AS status, " +
-                "       CAST(NULL AS SIGNED) AS participant_count, CAST(NULL AS SIGNED) AS capacity, " +
-                "       " + NULL_TEXT + " AS min_tier, CAST(NULL AS SIGNED) AS weekly_count, " +
+                "       ch.final_member_count AS participant_count, ch.capacity, ch.min_tier, ch.weekly_count, " +
                 "       ch.start_date, ch.end_date, h.final_role AS my_role, " +
-                "       " + NULL_TEXT + " AS owner_type, h.left_type, h.left_at, " +
+                "       ch.owner_type_snapshot AS owner_type, COALESCE(h.leave_reason,h.left_type) AS left_type, h.left_at, " +
                 // 이력에는 퍼센트(0~100)로 적재된다 — 계약은 0~1 이라 여기서 되돌린다.
                 "       CAST(h.final_success_rate / 100 AS DECIMAL(6,4)) AS success_rate " +
                 "FROM challenge_member_history h " +
                 "JOIN challenge_history ch ON ch.challenge_id = h.challenge_id " +
-                "WHERE h.user_id = ? AND " + leftTypeCondition;
+                "WHERE h.user_id = ? AND NOT EXISTS (SELECT 1 FROM challenges c WHERE c.id=h.challenge_id) AND " + leftTypeCondition;
     }
 
     private static String text(String literal) {
@@ -178,7 +142,7 @@ public class MyChallengeQueryService {
                 r.minTier,
                 r.weeklyCount,
                 r.startDate.toString(),
-                r.endDate.toString(),
+                r.endDate == null ? null : r.endDate.toString(),
                 myRole(r.myRole),
                 r.ownerType,
                 r.successRate,
@@ -201,8 +165,11 @@ public class MyChallengeQueryService {
     private String leftType(String raw) {
         if (raw == null) return null;
         return switch (raw) {
-            case LIVE_LEAVE, "LEFT" -> "SELF";
-            case LIVE_KICK, "REMOVED" -> "KICK_BY_OWNER";
+            case LIVE_LEAVE, "LEFT", "VOLUNTARY" -> "SELF";
+            case LIVE_KICK, "REMOVED", "KICKED" -> "KICK_BY_OWNER";
+            case "SANCTION" -> "AUTO_LOCK";
+            case "TIER_GATE" -> "AUTO_TIER";
+            case "DORMANT", "ADMIN_CLOSE" -> raw;
             default -> null;                      // ACTIVE_AT_DELETE — 나간 적이 없다
         };
     }
@@ -254,7 +221,7 @@ public class MyChallengeQueryService {
                 intOrNull(rs, "capacity"),
                 rs.getString("min_tier"),
                 intOrNull(rs, "weekly_count"),
-                rs.getDate("start_date").toLocalDate(), rs.getDate("end_date").toLocalDate(),
+                rs.getDate("start_date").toLocalDate(), rs.getDate("end_date") == null ? null : rs.getDate("end_date").toLocalDate(),
                 rs.getString("my_role"), rs.getString("owner_type"), rs.getString("left_type"),
                 leftAt == null ? null : leftAt.toInstant().toString(),
                 successRate(rs));

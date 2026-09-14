@@ -24,7 +24,7 @@ public enum ExploreSort {
     COMPLETION_RATE("s.completion_rate", false, "c.created_at", null),
     SUCCESS_FAIL_RATIO("s.retention_rate", false, "c.created_at", null),
     RECENT("c.created_at", false, null, null),
-    DEADLINE("c.end_date", true, "c.created_at", null);
+    DEADLINE("COALESCE(c.end_date, '9999-12-31')", true, "c.created_at", null);
 
     /** 1차 정렬 컬럼. */
     private final String primary;

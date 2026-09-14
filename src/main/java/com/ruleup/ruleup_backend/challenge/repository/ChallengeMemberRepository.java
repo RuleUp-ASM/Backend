@@ -88,7 +88,7 @@ public interface ChallengeMemberRepository extends JpaRepository<ChallengeMember
     @Query("SELECT m FROM ChallengeMember m, Challenge c " +
             "WHERE c.id = m.challengeId AND c.deletedAt IS NULL " +
             "AND m.status = 'ACTIVE' AND m.setupStatus = 'READY' " +
-            "AND c.startDate <= :date AND c.endDate >= :date")
+            "AND c.startDate <= :date AND (c.endDate IS NULL OR c.endDate >= :date)")
     List<ChallengeMember> findActiveOnDate(@Param("date") LocalDate date, Pageable pageable);
 
     /**

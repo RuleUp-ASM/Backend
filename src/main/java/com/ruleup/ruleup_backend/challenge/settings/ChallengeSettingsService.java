@@ -42,21 +42,18 @@ import java.util.UUID;
  *  - editableFields 는 서버가 잠금 규칙으로 계산한 결과가 최종 권위다:
  *    시작 전 + 방장 혼자 = 카테고리 제외 전부 / 그 외 = 제목·설명·정원·이미지.
  *  - PATCH 는 저장 직전 행 잠금 하에서 상태·참여 인원·version 을 재검증한다(가입과의 경합 감지).
- *    body 에 없는 필드는 변경하지 않고, null 은 imageUrl(기본 이미지 되돌리기)에서만 유효하다.
- *  - 제목·설명·이미지는 언제 고치든 재심사(세트 1회) — 반복 거부 잠금 중이면 429.
+ *    body 에 없는 필드는 변경하지 않는다. 설명·이미지 삭제와 무제한 정원·기간은 null 로 표현한다.
+ *  - 제목·설명·이미지 변경분은 재심사하며 반복 거부만으로 수정 잠금을 걸지 않는다.
  */
 @Service
 @RequiredArgsConstructor
 public class ChallengeSettingsService {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
-    /** 고를 수 있는 정원 (탐색 공통 5-3) — 생성과 같은 목록을 쓴다. 비우면 무제한. */
     /** 탐색의 노출 후보·필터·정렬을 정하는 값들. 이 중 하나라도 바뀌면 투영을 다시 만든다. */
     private static final java.util.Set<String> EXPLORE_FIELDS = java.util.Set.of(
             "visibility", "mode", "category", "verification", "minTier", "capacity", "period");
 
-    private static final java.util.Set<Integer> CAPACITY_CHOICES =
-            java.util.Set.of(5, 10, 20, 30, 50, 100, 200, 300);
 
     /** 시작 전 + 방장 혼자일 때 수정 가능한 전체 필드(카테고리 제외 — 어떤 상황에도 불변). */
     private static final List<String> FULL_EDITABLE = List.of(
@@ -86,7 +83,7 @@ public class ChallengeSettingsService {
                         c.getCategory(), c.getParticipationType().name(),
                         c.getVisibility(), c.getRankingVisible(), c.getMaxParticipants(),
                         (c.getMinTier() != null) ? c.getMinTier().name() : null,
-                        new DraftView.Period(c.getStartDate().toString(), c.getEndDate().toString()),
+                        new DraftView.Period(c.getStartDate().toString(), c.getEndDate() == null ? null : c.getEndDate().toString()),
                         c.getWeeklyCount(),
                         (c.getParamSpecs() != null) ? c.getParamSpecs() : List.of(),
                         verificationView(c),
@@ -111,23 +108,19 @@ public class ChallengeSettingsService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
         ensureOwner(c, userId);
 
+        if (c.getStatus() == ChallengeStatus.COMPLETED) rejectNotEditable(c);
+
         // version 필수 + 일치(그 사이 수정·가입이 있었으면 재조회 유도)
         if (body == null || !body.has("version") || !body.get("version").isNumber())
             throw new BusinessException(ErrorCode.INVALID_FIELD_VALUE);
         if (body.get("version").intValue() != c.getVersion())
             throw new BusinessException(ErrorCode.VERSION_CONFLICT);
 
-        // 반복 거부 수정 잠금(제목·설명·이미지 재심사 대상 항목만 잠근다)
         Instant now = Instant.now();
-        boolean touchesModerated = body.has("title") || body.has("description") || body.has("imageUrl");
-        if (touchesModerated && c.isModerationLocked(now)) {
-            long retryAfter = Math.max(1, Duration.between(now, c.getModerationLockedUntil()).toSeconds());
-            throw new BusinessException(ErrorCode.MODERATION_LOCKED, String.valueOf(retryAfter));
-        }
 
         // 잠금 범위: 카테고리는 항상 불가, 방 성격 항목은 시작 전+혼자일 때만.
-        // 여기는 challenges 행을 <b>쓰기 잠금</b>으로 들고 있으므로, 같은 방의 가입(정원 있는 방은
-        // 쓰기·무제한 방은 공유 잠금)과 직렬화된다 — 아래에서 센 수는 이 트랜잭션 동안 늘지 않는다.
+        // 여기는 challenges 행을 <b>쓰기 잠금</b>으로 들고 있으므로, 같은 방의 가입과
+        // 직렬화된다 — 아래에서 센 수는 이 트랜잭션 동안 늘지 않는다.
         boolean fullEditable = aloneAndUpcoming(c);
         if (body.has("category")) rejectNotEditable(c);
         if (!fullEditable) {
@@ -143,10 +136,10 @@ public class ChallengeSettingsService {
         applyTitle(c, body, updated, moderation);
         applyDescription(c, body, updated, moderation);
         applyImage(c, userId, body, now, updated, moderation);
+        if (fullEditable) applyMode(c, body, updated);
         applyCapacity(c, body, updated);
 
         if (fullEditable) {
-            applyMode(c, body, updated);
             applyVisibility(c, body, updated);
             applyRankingVisible(c, body, updated);
             applyMinTier(c, userId, body, updated);
@@ -158,7 +151,10 @@ public class ChallengeSettingsService {
         }
 
         if (!updated.isEmpty()) c.bumpVersion();
-        if (!moderation.isEmpty()) {
+        if (updated.containsKey("title") || updated.containsKey("description") || updated.containsKey("imageUrl")) {
+            c.refreshModerationPending(now);
+        }
+        if (c.hasPendingModeration() && (updated.containsKey("title") || updated.containsKey("description") || updated.containsKey("imageUrl"))) {
             eventPublisher.publishEvent(new ChallengeModerationRequested(c.getId()));
         }
         // 탐색 노출·필터를 정하는 값이 바뀌었으면 파생 인덱스를 <b>커밋 직후</b> 다시 만든다.
@@ -192,14 +188,15 @@ public class ChallengeSettingsService {
     private void applyDescription(Challenge c, JsonNode body, Map<String, Object> updated, Map<String, String> moderation) {
         if (!body.has("description")) return;
         JsonNode node = body.get("description");
-        if (node.isNull() || !node.isString()) throw new BusinessException(ErrorCode.INVALID_FIELD_VALUE);
-        String description = node.stringValue();
-        if (description.length() > 200) throw new BusinessException(ErrorCode.DESCRIPTION_TOO_LONG);
-        if (description.equals(c.getDescription())) return;
+        if (!node.isNull() && !node.isString()) throw new BusinessException(ErrorCode.INVALID_FIELD_VALUE);
+        String description = node.isNull() || node.stringValue().isBlank() ? null : node.stringValue();
+        if (description != null && description.length() > 200) throw new BusinessException(ErrorCode.DESCRIPTION_TOO_LONG);
+        if (java.util.Objects.equals(description, c.getDescription())) return;
         c.changeDescription(description);
-        c.markDescriptionInReview();
+        if (description == null) c.clearDescriptionModeration();
+        else c.markDescriptionInReview();
         updated.put("description", description);
-        moderation.put("description", "IN_REVIEW");
+        moderation.put("description", c.getModerationDescription().name());
     }
 
     private void applyImage(Challenge c, UUID userId, JsonNode body, Instant now,
@@ -225,12 +222,7 @@ public class ChallengeSettingsService {
         moderation.put("image", "IN_REVIEW");
     }
 
-    /**
-     * 정원 수정 — 생성과 <b>같은 규칙</b>이다(탐색 공통 5-3). 9종 중 하나이거나 비우면 무제한.
-     *
-     * <p>생성만 좁히고 수정을 열어 두면 수정으로 우회된다. 반대로 무제한 전환을 막으면 한 번
-     * 정원을 정한 방은 영영 가입마다 챌린지 행 락과 ACTIVE COUNT 를 지불한다.
-     */
+    /** 정원은 1~300 또는 null(무제한). 현재 ACTIVE 인원 미만으로 줄일 수 없다. */
     private void applyCapacity(Challenge c, JsonNode body, Map<String, Object> updated) {
         if (!body.has("capacity")) return;
         JsonNode node = body.get("capacity");
@@ -240,9 +232,9 @@ public class ChallengeSettingsService {
             updated.put("capacity", null);
             return;
         }
-        if (!node.isNumber()) throw new BusinessException(ErrorCode.INVALID_FIELD_VALUE);
+        if (!node.isIntegralNumber() || !node.canConvertToInt()) throw new BusinessException(ErrorCode.INVALID_FIELD_VALUE);
         int capacity = node.intValue();
-        if (!CAPACITY_CHOICES.contains(capacity))
+        if (capacity < 1 || capacity > 300)
             throw new BusinessException(ErrorCode.CAPACITY_OUT_OF_RANGE);
         // 비교 대상은 <b>원천</b>이다. 표시용 participant_count 는 커밋 뒤 비동기로 채워지므로
         // 그 값으로 판정하면 「방금 들어온 인원 아래로 정원을 줄이는」 요청이 통과할 수 있다.
@@ -276,7 +268,7 @@ public class ChallengeSettingsService {
     }
 
     private void applyVisibility(Challenge c, JsonNode body, Map<String, Object> updated) {
-        if (!body.has("visibility") || body.has("mode")) return;   // mode 전환 시 이미 정규화됨
+        if (!body.has("visibility")) return;   // mode 전환 시 이미 정규화됨
         JsonNode node = body.get("visibility");
         if (node.isNull() || !node.isString()) throw new BusinessException(ErrorCode.INVALID_FIELD_VALUE);
         String visibility = node.stringValue();
@@ -288,7 +280,7 @@ public class ChallengeSettingsService {
     }
 
     private void applyRankingVisible(Challenge c, JsonNode body, Map<String, Object> updated) {
-        if (!body.has("rankingVisible") || body.has("mode")) return;
+        if (!body.has("rankingVisible")) return;
         JsonNode node = body.get("rankingVisible");
         if (node.isNull() || !node.isBoolean()) throw new BusinessException(ErrorCode.INVALID_FIELD_VALUE);
         boolean rankingVisible = node.booleanValue();
@@ -325,14 +317,14 @@ public class ChallengeSettingsService {
         LocalDate start, end;
         try {
             start = LocalDate.parse(node.get("start").stringValue());
-            end = LocalDate.parse(node.get("end").stringValue());
+            end = node.get("end").isNull() ? null : LocalDate.parse(node.get("end").stringValue());
         } catch (Exception e) {
             throw new BusinessException(ErrorCode.INVALID_PERIOD);
         }
-        if (end.isBefore(start) || start.isBefore(LocalDate.now(KST)))
+        if ((end != null && end.isBefore(start)) || start.isBefore(LocalDate.now(KST)))
             throw new BusinessException(ErrorCode.INVALID_PERIOD);
         c.changePeriod(start, end);
-        updated.put("period", Map.of("start", start.toString(), "end", end.toString()));
+        updated.put("period", new DraftView.Period(start.toString(), end == null ? null : end.toString()));
     }
 
     private void applyWeeklyCount(Challenge c, JsonNode body, Map<String, Object> updated) {
@@ -450,7 +442,8 @@ public class ChallengeSettingsService {
     }
 
     private List<String> editableFields(Challenge c) {
-        return aloneAndUpcoming(c) ? FULL_EDITABLE : LIMITED_EDITABLE;
+        return c.getStatus() == ChallengeStatus.COMPLETED ? List.of()
+                : aloneAndUpcoming(c) ? FULL_EDITABLE : LIMITED_EDITABLE;
     }
 
     /**

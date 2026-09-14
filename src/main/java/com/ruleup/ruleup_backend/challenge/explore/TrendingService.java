@@ -130,7 +130,7 @@ public class TrendingService {
                         joinable(myTier, c)
                                 && !isFull(c, activeCounts.getOrDefault(c.getId(), 0L).intValue()),
                         myChallengeIds.contains(c.getId()),
-                        c.getEndDate().toString()));
+                        c.getEndDate() == null ? null : c.getEndDate().toString()));
             }
         }
         // 상한까지 훑고도 못 채웠다면 <b>아직 남아 있는데 못 본 것</b>이다. 짧은 목록을 정상인
