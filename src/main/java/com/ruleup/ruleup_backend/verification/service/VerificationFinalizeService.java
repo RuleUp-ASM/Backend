@@ -71,6 +71,12 @@ public class VerificationFinalizeService {
      * 넘기면 남은 대상은 다음 tick 이 이어 집는다(FOR UPDATE SKIP LOCKED 라 중복 처리도 없다).
      */
     private static final java.time.Duration DRAIN_BUDGET = java.time.Duration.ofSeconds(45);
+
+    /**
+     * 확정에 실패한 한 건을 다시 보기까지의 간격. 짧으면 같은 행이 계속 앞을 막고, 길면 일시적
+     * 장애로 실패한 건의 확정이 그만큼 늦어진다. 확정 시각 자체가 자정 경계라 10분은 무해하다.
+     */
+    private static final java.time.Duration RETRY_BACKOFF = java.time.Duration.ofMinutes(10);
     /** 한 번에 채울 무신호 대상 상한. 유저 2만 × 동시 3개 기준 일 6만 건이라 여유를 둔다. */
     private static final int MATERIALIZE_LIMIT = 100_000;
 
@@ -176,9 +182,10 @@ public class VerificationFinalizeService {
      * 돌리고, 시간 예산을 넘기면 다음 tick 에 넘긴다(폴러라 catch-up 은 그대로 유지된다).
      *
      * <h4>한 건이 전체를 되돌리지 않는다</h4>
-     * 트랜잭션은 <b>청크 단위</b>다. 청크가 통째로 실패하면 그 청크만 건별 트랜잭션으로 다시
-     * 돌려 문제 있는 한 건만 남기고 나머지를 통과시킨다 — 스펙의 「한 건의 판정 실패 때문에
-     * 전체 일 배치가 롤백되지 않도록」이 이 모양이다.
+     * 트랜잭션은 <b>청크 단위</b>다. 청크가 통째로 실패하면 같은 예산만큼을 <b>건별</b> 트랜잭션으로
+     * 다시 돌린다. 실패한 행은 폴링 커서를 잠깐 뒤로 미뤄 격리하므로, 문제 있는 한 건만 남고
+     * 나머지는 그대로 확정된다 — 스펙의 「한 건의 판정 실패 때문에 전체 일 배치가 롤백되지
+     * 않도록」이 이 모양이다.
      */
     @Scheduled(fixedDelay = 60_000)
     public void finalizeDue() {
@@ -186,9 +193,9 @@ public class VerificationFinalizeService {
         Instant deadline = Instant.now().plus(DRAIN_BUDGET);
         int total = 0;
         while (Instant.now().isBefore(deadline)) {
-            int done = finalizeChunkSafely();
+            int done = drainOnce();
+            if (done == 0) break;   // 대상이 바닥났다
             total += done;
-            if (done < CLAIM_LIMIT) break;   // 대상이 바닥났다
         }
         if (total > 0) {
             // 적재한 감시자 통지를 곧바로 흘린다. 실패해도 스윕이 다시 집는다.
@@ -198,13 +205,77 @@ public class VerificationFinalizeService {
         }
     }
 
-    /** 청크 하나. 통째로 실패하면 건별로 다시 돌려 나머지를 살린다. */
-    private int finalizeChunkSafely() {
+    /**
+     * 한 번 비우기. 청크가 통째로 실패하면 <b>같은 예산만큼</b> 건별로 다시 돌려 나머지를 살린다.
+     *
+     * <p>예전에는 실패 시 한 건만 다시 처리했는데, 그러면 (1) 반환값이 예산보다 작아 바깥 루프가
+     * 곧바로 멈추고 (2) 하필 그 한 건이 문제 행이면 예외가 그대로 밖으로 튀어 <b>그 행이 이후의
+     * 모든 확정을 막았다.</b> 격리의 요점은 「하나를 더 해보기」가 아니라 「문제 행을 비켜 가기」다.
+     */
+    private int drainOnce() {
         try {
             return finalizeChunk(CLAIM_LIMIT);
         } catch (RuntimeException e) {
-            log.warn("확정 청크 실패 — 건별로 다시 돌린다. err={}", e.toString());
-            return finalizeChunk(1);
+            log.warn("확정 청크 실패 — 건별 격리로 전환한다. err={}", e.toString());
+            return finalizeIndividually(CLAIM_LIMIT);
+        }
+    }
+
+    /**
+     * 건별 격리 처리. 한 건이 터져도 그 트랜잭션만 롤백되고, 터진 행은 폴링 커서를 뒤로 밀어
+     * 다음 대상이 굶지 않게 한다.
+     *
+     * @return 이번에 집은 대상 수(성공·실패 합). 0 이면 더 볼 것이 없다
+     */
+    private int finalizeIndividually(int budget) {
+        int handled = 0;
+        for (int i = 0; i < budget; i++) {
+            UUID id = claimOne();
+            if (id == null) break;               // 대상 소진
+            handled++;
+            if (!finalizeIsolated(id)) defer(id);
+        }
+        return handled;
+    }
+
+    /**
+     * 대상 하나의 id 만 집는다. 락은 이 짧은 트랜잭션 안에서만 유지되므로, 뒤이은 확정 사이에
+     * 다른 인스턴스가 같은 건을 가져갈 수 있다 — {@link #finalizeOne} 이 {@code isTerminal()} 로
+     * 되돌아가므로 중복 확정은 생기지 않는다. 격리 경로에서만 쓰는 느린 길이다.
+     */
+    private UUID claimOne() {
+        return transactionTemplate.execute(tx ->
+                dailyRepo.findDuePendingForUpdate(Instant.now(), 1).stream()
+                        .findFirst().map(VerificationDaily::getId).orElse(null));
+    }
+
+    /** 한 건 확정. 성공하면 true, 그 건 때문에 터지면 false(호출부가 격리한다). */
+    private boolean finalizeIsolated(UUID id) {
+        try {
+            Boolean changed = transactionTemplate.execute(tx -> {
+                VerificationDaily daily = dailyRepo.findById(id).orElse(null);
+                if (daily == null) return false;
+                boolean result = finalizeOne(daily, Instant.now());
+                if (result) {
+                    eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(
+                            daily.getChallengeId(), "VERIFICATION_FINALIZED"));
+                }
+                return result;
+            });
+            return changed != null;
+        } catch (RuntimeException e) {
+            log.error("인증 확정 실패 — 이 건만 미룬다. verificationId={} err={}", id, e.toString(), e);
+            return false;
+        }
+    }
+
+    /** 실패한 행을 뒤로 민다. 이 UPDATE 마저 실패하면 다음 tick 이 같은 자리에서 다시 시도한다. */
+    private void defer(UUID id) {
+        metrics.finalizeFailed();
+        try {
+            transactionTemplate.execute(tx -> dailyRepo.deferFinalize(id, Instant.now().plus(RETRY_BACKOFF)));
+        } catch (RuntimeException e) {
+            log.error("확정 실패 건 미루기 실패 — 다음 tick 이 다시 시도한다. verificationId={}", id, e);
         }
     }
 

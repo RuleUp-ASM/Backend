@@ -44,6 +44,7 @@ public class VerificationMetrics {
     private final Counter signalsConsentRejected;
     private final Counter finalized;
     private final Counter finalizeLate;
+    private final Counter finalizeFailed;
 
     /** 마지막으로 확정 배치가 대상을 비운 시각(epoch millis). 0 이면 아직 돈 적이 없다. */
     private final AtomicLong lastFinalizeCompletedAt = new AtomicLong();
@@ -70,6 +71,10 @@ public class VerificationMetrics {
         this.finalizeLate = Counter.builder("verification.finalize.late")
                 .description("03:30 탐색 reconciliation 이후까지 이어진 확정 배치 실행 수")
                 .register(registry);
+        // 스펙상 0 이어야 하는 값이라 1건이라도 세어져야 한다. 격리된 건은 조용히 미뤄지므로
+        // 이 카운터가 없으면 「확정되지 않은 채 계속 밀리는 판정」을 아무도 모른다.
+        this.finalizeFailed = Counter.builder("verification.finalize.failed")
+                .description("대상 단위 확정 실패 — 격리 후 뒤로 미뤄진 판정 수").register(registry);
         registry.gauge("verification.finalize.last_completed_epoch_ms", lastFinalizeCompletedAt,
                 AtomicLong::doubleValue);
     }
@@ -81,6 +86,11 @@ public class VerificationMetrics {
         if (deduped > 0) signalsDeduped.increment(deduped);
         if (gateDropped > 0) signalsGateDropped.increment(gateDropped);
         if (consentRejected > 0) signalsConsentRejected.increment(consentRejected);
+    }
+
+    /** 한 건의 확정이 실패해 격리·연기됐다. */
+    public void finalizeFailed() {
+        finalizeFailed.increment();
     }
 
     /**

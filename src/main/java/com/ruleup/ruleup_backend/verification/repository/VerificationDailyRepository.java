@@ -4,6 +4,7 @@ import com.ruleup.ruleup_backend.verification.domain.VerificationDaily;
 import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -97,6 +98,18 @@ public interface VerificationDailyRepository extends JpaRepository<VerificationD
             "ORDER BY finalizeAfter LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
     List<VerificationDaily> findDuePendingForUpdate(@Param("now") Instant now, @Param("limit") int limit);
 
+
+    /**
+     * 확정에 실패한 한 건을 뒤로 미룬다.
+     *
+     * <p>{@code finalizeAfter} 는 <b>확정 배치의 폴링 커서</b>다(사용자에게 보여 주는 값이 아니다 —
+     * 이의 기한은 {@code appealClosesAt} 이 따로 들고 있다). 실패한 행을 그대로 두면 폴러가 매번
+     * 같은 행을 먼저 집어 <b>뒤에 쌓인 정상 건이 통째로 굶는다</b>. 잠깐 미뤄 두면 나머지가 흐르고,
+     * 그 사이 원인이 해소되면 다음 차례에 스스로 확정된다.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE VerificationDaily d SET d.finalizeAfter = :next WHERE d.id = :id")
+    int deferFinalize(@Param("id") UUID id, @Param("next") Instant next);
 
     /**
      * 추천 아웃컴 수집(RoutineOutcomeCollector): 확정 시각이 워터마크 이후인 종결(SUCCESS/FAILED) 행.
