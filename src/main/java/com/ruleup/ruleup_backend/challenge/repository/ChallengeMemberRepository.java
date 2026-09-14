@@ -78,9 +78,15 @@ public interface ChallengeMemberRepository extends JpaRepository<ChallengeMember
     /**
      * 확정 배치의 무신호 날짜 채우기 대상: 그 날짜에 인증 대상일 수 있는 ACTIVE·READY 멤버.
      * 챌린지 기간으로 1차 좁히고, 요일·빈도 판정은 호출부가 한다(설정을 봐야 알 수 있어서).
+     *
+     * <p><b>챌린지 상태로 거르지 않는다.</b> 확정 대상은 항상 D-2 귀속 건인데, 마지막 활동일
+     * (endDate)이 귀속일이면 그 확정 시점의 방은 이미 COMPLETED 다 — 종료 전환이 endDate 다음
+     * 날 일어나기 때문이다. ACTIVE 만 집으면 <b>모든 챌린지의 마지막 날</b>이 통째로 확정되지
+     * 않고 통계에서 사라진다. 기간 조건({@code startDate ≤ date ≤ endDate})이 이미 그 날짜에
+     * 인증 대상이던 방만 남기므로 상태 조건은 필요하지 않다.
      */
     @Query("SELECT m FROM ChallengeMember m, Challenge c " +
-            "WHERE c.id = m.challengeId AND c.status = 'ACTIVE' " +
+            "WHERE c.id = m.challengeId AND c.deletedAt IS NULL " +
             "AND m.status = 'ACTIVE' AND m.setupStatus = 'READY' " +
             "AND c.startDate <= :date AND c.endDate >= :date")
     List<ChallengeMember> findActiveOnDate(@Param("date") LocalDate date, Pageable pageable);

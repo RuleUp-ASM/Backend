@@ -129,8 +129,14 @@ public class VerificationFinalizeService {
 
         Challenge challenge = challengeQuery.findChallenge(daily.getChallengeId()).orElse(null);
         if (challenge == null) {
-            daily.confirmFailure(now, daily.getMethod(), "NO_SIGNAL_RECEIVED");
-            recordFailureDetail(daily, null, "NO_SIGNAL_RECEIVED", now);
+            // 방이 사라졌으면 판정 기준도 함께 사라졌다. 여기서 실패로 확정하면 「신호를 못 받아서
+            // 실패」라는 <b>사실이 아닌 사유</b>가 기록에 남는다 — 실제로는 판정할 설정이 없었을
+            // 뿐이다. 대상이 아니었던 것으로 닫아 폴링에서 빼고 실패 통계에도 넣지 않는다.
+            // (자동 삭제 배치가 마지막 활동일의 확정 이후에만 방을 지우므로 정상 경로에서는
+            //  여기에 오지 않는다 — 수동 삭제·데이터 정합 사고의 방어선이다.)
+            log.warn("확정 대상의 챌린지가 없다 — 대상 아님으로 닫는다. verificationId={} challengeId={}",
+                    daily.getId(), daily.getChallengeId());
+            daily.recordResult(VerificationStatus.NOT_TARGET, daily.getMethod(), null, null);
             return false;
         }
         VerificationConfig config = configFactory.build(challenge);

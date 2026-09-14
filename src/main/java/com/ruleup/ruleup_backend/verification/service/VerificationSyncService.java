@@ -149,7 +149,11 @@ public class VerificationSyncService {
 
         for (ChallengeMember member : members) {
             Challenge challenge = challengeQuery.findActiveChallenge(member.getChallengeId()).orElse(null);
-            if (challenge == null || challenge.getStatus() != ChallengeStatus.ACTIVE) continue;
+            if (challenge == null) continue;
+            // 끝난 방도 유예 구간 동안은 열어 둔다. 종료 전환이 endDate 다음 날 일어나므로
+            // ACTIVE 만 받으면 마지막 활동일에 늦게 도착한 신호를 반영할 길이 없다.
+            boolean graceOnly = challenge.getStatus() != ChallengeStatus.ACTIVE;
+            if (graceOnly && !withinGraceOfCompleted(challenge, now)) continue;
 
             VerificationConfig config = configFactory.build(challenge);
             if (config.isManual()) continue;   // 수동 챌린지: 자동 평가 대상 아님
@@ -162,6 +166,16 @@ public class VerificationSyncService {
             // 유예 구간(어제 귀속·미확정)에 늦게 도착한 신호를 먼저 반영한다.
             // 귀속일이 끝났어도 확정 전이면 발생 시각이 맞는 신호는 그대로 인정한다(인증 정책 §2 지연 데이터).
             boolean graceChanged = evaluateGraceDay(member, challenge, config, fresh, gaps, today, now);
+
+            if (graceOnly) {
+                // 방이 끝났으니 오늘은 인증 대상일이 아니다. 열지도 않은 오늘 행을 NOT_TARGET 으로
+                // 만들 이유가 없어 여기서 멈춘다 — 유예분만 반영하고 회신에는 싣지 않는다.
+                if (graceChanged) {
+                    eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(
+                            challenge.getId(), "AUTO_VERIFICATION_FINALIZED"));
+                }
+                continue;
+            }
 
             VerificationDaily daily = loadOrCreateDaily(member, challenge, today);
             VerificationStatus before = daily.getStatus();
@@ -219,6 +233,18 @@ public class VerificationSyncService {
 
     private boolean becameFinal(VerificationStatus before, VerificationStatus after) {
         return after.isTerminal() && before != after;
+    }
+
+    /**
+     * 끝난 방이 아직 마지막 활동일의 유예 구간 안인지.
+     *
+     * <p>종료 전환은 endDate 다음 날 일어나는데 endDate 귀속 판정의 확정은 그 이틀 뒤다. 그 사이
+     * 하루가 「방은 COMPLETED 인데 판정은 아직 열려 있는」 구간이고, 절전·오프라인으로 밀린
+     * 마지막 날 신호가 올라오는 자리다. 확정 시각이 지나면 더는 열지 않는다.
+     */
+    private boolean withinGraceOfCompleted(Challenge challenge, Instant now) {
+        LocalDate endDate = challenge.getEndDate();
+        return endDate != null && !VerificationDeadlines.finalizeDue(endDate, now);
     }
 
     /**

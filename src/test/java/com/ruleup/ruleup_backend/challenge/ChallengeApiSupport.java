@@ -65,18 +65,28 @@ public abstract class ChallengeApiSupport extends AuthApiSupport {
         routineCatalog.evict();   // 메모리 카탈로그 캐시 무효화 — 공유 컨텍스트에서도 새 픽스처가 보이게
     }
 
-    /** 챌린지 1건 직접 insert(간이) — 상태·카테고리만 관심 있을 때. 반환: challengeId */
+    /**
+     * 챌린지 1건 직접 insert(간이) — 상태·카테고리만 관심 있을 때. 반환: challengeId
+     *
+     * <p>끝난 방(COMPLETED)은 <b>과거 기간</b>으로 넣는다. 종료 전환이 endDate 다음 날 일어나므로
+     * COMPLETED 인데 endDate 가 미래인 방은 실제로 존재할 수 없고, 그런 픽스처를 쓰면 「마지막
+     * 활동일의 인증 창(endDate+2)이 닫힌 뒤에만 지운다」 같은 시각 기준 규칙이 테스트에서만
+     * 다르게 동작한다. 확정이 이미 끝난 자리(endDate = 3일 전)에 둔다.
+     */
     protected UUID insertChallenge(UUID ownerId, String category, String status, String mode) {
         UUID id = UUID.randomUUID();
+        boolean completed = "COMPLETED".equals(status);
         jdbc().update("INSERT INTO challenges " +
                         "(id, owner_id, title, ai_title, description, category, mode, capacity, repeat_days, " +
                         " duration_days, start_date, end_date, verification_config, params, " +
                         " penalty_config, reward_config, anonymity, status, moderation_status, ai_assisted, participant_count) " +
                         "VALUES (?, ?, ?, ?, ?, ?, ?, 50, '[\"MON\",\"TUE\",\"WED\",\"THU\",\"FRI\",\"SAT\",\"SUN\"]', " +
-                        " 14, DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), DATE_ADD(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 14 DAY), " +
+                        " 14, DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL ? DAY), " +
+                        " DATE_ADD(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL ? DAY), " +
                         " '{\"selectedMethod\":\"MANUAL\",\"verificationType\":\"MANUAL\",\"signalSource\":\"SELF_CHECK\",\"wearableReq\":\"NONE\",\"requiredPermissions\":[]}', " +
                         " '{}', '{\"mannerDeduction\":1.0}', '{\"mannerGain\":1.0}', 'REAL', ?, 'NONE', 1, 1)",
-                bytes(id), bytes(ownerId), "테스트 챌린지", "테스트 챌린지", "설명", category, mode, status);
+                bytes(id), bytes(ownerId), "테스트 챌린지", "테스트 챌린지", "설명", category, mode,
+                completed ? 17 : 0, completed ? -3 : 14, status);
         return id;
     }
 
