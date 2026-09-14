@@ -44,9 +44,6 @@ public class OutboxDispatcher {
     /** 처리 완료분 보관 기간 — 장애 조사에 쓰고 그 뒤에는 지운다. */
     private static final Duration RETENTION = Duration.ofDays(14);
 
-    /** 자동 재적재 대상 창. 이보다 오래된 포기 건은 사람이 봐야 하는 건이다. */
-    private static final Duration RECENT_REDRIVE_WINDOW = Duration.ofDays(1);
-
     /** 자동 재적재 한 묶음 크기. 남은 게 없을 때까지 이어 돌린다. */
     private static final int REDRIVE_BATCH = 500;
 
@@ -185,13 +182,15 @@ public class OutboxDispatcher {
      * 몇 시간짜리 장애에는 통째로 걸린다 — 이의 인용 점수 정정이 그 사이 5회 실패하면
      * <b>사용자에게는 인용됐다고 응답해 놓고 점수는 끝내 안 돌아온다.</b>
      *
-     * <p>대상을 <b>최근 하루</b>로 묶는 것이 요점이다. 전부 다시 돌리면 영구히 고칠 수 없는
-     * 메시지를 매일 다시 태우게 되고, 그러면 「죽은 메시지」 목록이 영원히 비지 않아 알람이
-     * 무의미해진다. 하루가 지나도 살아나지 않은 건은 사람이 봐야 하는 건이다.
+     * <p><b>창을 두지 않는다.</b> 「최근 하루」로 묶으면 그보다 오래 끄는 장애에서 메시지가
+     * 자동 대상에서 빠져 수동 복구만 남는다 — 스펙의 「성공할 때까지 멱등 재시도」가 하루짜리
+     * 약속이 되어 버린다. 영구히 고칠 수 없는 메시지를 매일 한 번 더 태우는 비용은 하루 한 번이라
+     * 무시할 만하고, 그렇게 계속 죽는 건은 {@code outbox.dead_lettered.oldest_age_seconds} 가
+     * 자라는 것으로 드러난다 — 목록이 비지 않는다는 사실 자체가 신호다.
      */
     @Scheduled(cron = "0 40 4 * * *", zone = "Asia/Seoul")
     public int redriveRecentDeadLettered() {
-        Instant since = Instant.now().minus(RECENT_REDRIVE_WINDOW);
+        Instant since = Instant.EPOCH;
         int total = 0;
         // <b>남은 게 없을 때까지</b> 이어 돌린다. 한 묶음만 처리하고 끝내면 그 수를 넘긴 건은
         // 창이 지나 영구 잔류한다 — 「성공할 때까지 멱등 재시도」가 한 번으로 끝나 버린다.

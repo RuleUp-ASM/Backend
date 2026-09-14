@@ -63,6 +63,7 @@ public class AppealService {
     private final AppealRepository appealRepo;
     private final OutboxService outbox;
     private final OutboxDispatcher outboxDispatcher;
+    private final VerificationMetrics metrics;
     private final ChallengeQueryService challengeQuery;
     private final VerificationConfigFactory configFactory;
     private final VerificationProgressService progressService;
@@ -72,6 +73,8 @@ public class AppealService {
 
     @Transactional
     public AppealResponse submit(UUID userId, UUID verificationId, AppealSubmitRequest request) {
+        // 인정률의 <b>분모</b>다. 형식 요건에서 걸린 건까지 세야 「인정률 급변」을 물을 수 있다.
+        metrics.appealSubmitted();
         String reason = (request != null) ? request.reason() : null;
 
         // 남의 인증은 존재 자체를 알리지 않는다 — 본인 것이 아니면 없는 것과 같이 다룬다.
@@ -98,11 +101,13 @@ public class AppealService {
         refreshProgress(member, daily);
         eventPublisher.publishEvent(
                 ChallengeStatsRefreshRequested.of(daily.getChallengeId(), "APPEAL_ACCEPTED"));
-        // 이상탐지는 인용 이후 비동기로 돈다 — 개별 인용을 지연하거나 뒤집지 않는다.
-        // (인메모리 이벤트를 그대로 둔다. 탐지 입력 적재는 실패해도 사용자에게 돌려줄 것이 없다.)
-        eventPublisher.publishEvent(new AppealAccepted(
-                appeal.getId(), userId, daily.getChallengeId(), daily.getId(),
-                daily.getTargetDate(), now));
+        // 이상탐지는 인용 이후에 돈다 — 개별 인용을 지연하거나 뒤집지 않는다. 아웃박스에 실어
+        // 프로세스가 내려가도 유실되지 않고, 지연·적체가 기존 게이지로 그대로 보이게 한다.
+        outbox.enqueue(AppealAbuseOutboxHandler.OUTBOX_TYPE,
+                new AppealAbuseOutboxHandler.Payload(
+                        appeal.getId().toString(), userId.toString(), daily.getChallengeId().toString(),
+                        daily.getId().toString(), daily.getTargetDate().toString(), now.toString()),
+                AppealAbuseOutboxHandler.OUTBOX_TYPE + ":" + appeal.getId());
         // 점수 정정은 다르다. 사용자에게 "인용됐다"고 응답해 놓고 점수가 끝내 안 돌아오면
         // 되돌릴 방법이 없다 — 인용과 같은 커밋에 적어 두어야 재처리가 가능하다(공통 5-7).
         outbox.enqueue(AppealCorrectionOutboxHandler.OUTBOX_TYPE,
@@ -173,12 +178,4 @@ public class AppealService {
         return 0;
     }
 
-    /**
-     * 인용 사실. 이상탐지 기록과 <b>점수 소급 정정</b>을 트리거한다.
-     *
-     * <p>{@code verificationDailyId} 가 정정의 멱등 앵커다 — 같은 판정을 두 번 정정하면 점수가
-     * 두 번 오르므로 그 키로 막는다.
-     */
-    public record AppealAccepted(UUID appealId, UUID userId, UUID challengeId, UUID verificationDailyId,
-                                 LocalDate targetDate, Instant acceptedAt) {}
 }

@@ -391,7 +391,13 @@ public class VerificationSyncService {
                                              VerificationSignalReader.DaySignalSet daySignals,
                                              List<SyncRequest.Gap> gaps, LocalDate today, Instant now) {
         // 확정 이후 도착분은 저장만 하고 판정에 쓰지 않는다(인증 정책 §2 지연 데이터). 구제는 이의제기로만.
-        if (daily.isTerminal()) return daily.getStatus();
+        // 여기 닿는 것은 <b>정상</b>이다 — 오프라인 복구·재전송이 확정된 날짜로 계속 들어온다.
+        // 스펙 7절의 「확정 후 자동 정정 0건」은 이 early-return 이 구조적으로 보장하므로 따로
+        // 셀 자리가 없고, 대신 그 경로의 양을 관찰값으로 남긴다.
+        if (daily.isTerminal()) {
+            metrics.terminalDaySignals();
+            return daily.getStatus();
+        }
         // 원본을 전부 읽지 못한 날은 평가하지 않는다. 잘린 값으로 「실패 예정」이나 성공을 찍으면
         // 사용자에게 잘못된 결과가 그대로 보인다 — 판정을 미루는 편이 낫다.
         if (daySignals == null || !daySignals.complete()) {
