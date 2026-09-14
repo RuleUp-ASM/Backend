@@ -57,6 +57,13 @@ public class OutboxMessage {
     @Column(name = "processed_at")
     private Instant processedAt;
 
+    /**
+     * 재시도 상한을 넘겨 <b>포기한</b> 시각. {@code processedAt} 과 나눠 둔 이유는 「나갔다」와
+     * 「끝내 못 나갔다」가 집계에서 같은 모양이 되면 안 되기 때문이다.
+     */
+    @Column(name = "dead_lettered_at")
+    private Instant deadLetteredAt;
+
     @Column(name = "attempts", nullable = false)
     private int attempts;
 
@@ -80,24 +87,41 @@ public class OutboxMessage {
     }
 
     /**
-     * 실패 기록 — 재시도 여지가 있으면 백오프를 걸고, 상한을 넘으면 처리 완료로 닫는다.
+     * 실패 기록 — 재시도 여지가 있으면 백오프를 걸고, 상한을 넘으면 <b>포기</b>로 표시한다.
      *
      * <p>상한을 넘긴 건을 미처리로 남겨 두면 스윕이 영원히 같은 행을 다시 집어 뒤에 쌓인
-     * 정상 건까지 굶는다. 묻되 {@code lastError} 는 남겨 운영이 볼 수 있게 한다.
+     * 정상 건까지 굶는다. 그렇다고 {@code processedAt} 을 찍어 닫으면 발행된 건과 구분이
+     * 사라져, 감시자 통지나 강퇴가 조용히 없어져도 집계는 정상으로 보인다. 그래서 별도
+     * 시각으로 남긴다 — 스윕은 집지 않고, 운영은 찾아서 되살릴 수 있다.
      */
     public void markFailed(Instant at, String error) {
         this.attempts++;
         this.lastError = truncate(error);
         if (attempts >= MAX_ATTEMPTS) {
-            this.processedAt = at;      // 포기 — 더 집지 않는다
+            this.deadLetteredAt = at;   // 포기 — 더 집지 않되 발행된 것으로 세지도 않는다
             return;
         }
         // 지수 백오프: 1분 → 2 → 4 → 8분. 외부 장애가 원인일 때 몰아치지 않게 한다.
         this.availableAt = at.plus(Duration.ofMinutes(1L << (attempts - 1)));
     }
 
+    /**
+     * 포기한 메시지를 다시 줄에 세운다. 같은 사건이 다시 적재될 때와 운영이 직접 되살릴 때
+     * 모두 이 경로를 쓴다 — {@code dedupKey} 가 남아 있어 새 행을 만들 수 없기 때문이다.
+     */
+    public void redrive(Instant at) {
+        this.deadLetteredAt = null;
+        this.attempts = 0;
+        this.availableAt = at;
+    }
+
     public boolean isPending() {
-        return processedAt == null;
+        return processedAt == null && deadLetteredAt == null;
+    }
+
+    /** 끝내 발행되지 못한 채 닫혔는지. */
+    public boolean isDeadLettered() {
+        return deadLetteredAt != null;
     }
 
     private static String truncate(String s) {

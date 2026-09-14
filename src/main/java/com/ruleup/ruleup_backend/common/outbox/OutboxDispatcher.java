@@ -146,11 +146,34 @@ public class OutboxDispatcher {
             message.markProcessed(now);
             return true;
         } catch (Exception e) {
-            log.warn("아웃박스 처리 실패 type={} id={} attempts={}: {}",
-                    message.getType(), id, message.getAttempts() + 1, e.toString());
             message.markFailed(now, e.toString());
+            if (message.isDeadLettered()) {
+                // 여기서 멈춘 건 곧 <b>나가지 않은 통지·집행</b>이다. 경고로 묻으면 아무도 모른다.
+                log.error("아웃박스 발행 포기 — 이 사건은 수신측에 도달하지 않았다. type={} id={} err={}",
+                        message.getType(), id, e.toString(), e);
+            } else {
+                log.warn("아웃박스 처리 실패 type={} id={} attempts={}: {}",
+                        message.getType(), id, message.getAttempts(), e.toString());
+            }
             return false;
         }
+    }
+
+    /**
+     * 발행에 실패한 채 닫힌 메시지를 다시 줄에 세운다 — 운영 복구 경로.
+     *
+     * <p>원인(수신측 장애·배포 롤백 등)이 해소된 뒤 부르면 그때부터 정상 재시도가 돈다.
+     * 핸들러가 멱등하므로 이미 일부 처리된 건이 섞여 있어도 안전하다.
+     *
+     * @return 다시 줄에 세운 건수
+     */
+    @Transactional
+    public int redriveDeadLettered(int limit) {
+        List<OutboxMessage> dead = repository.findDeadLettered(Limit.of(limit));
+        Instant now = Instant.now();
+        dead.forEach(m -> m.redrive(now));
+        if (!dead.isEmpty()) log.warn("아웃박스 포기분 재적재 {}건", dead.size());
+        return dead.size();
     }
 
     /** 보관 기간 경과분 정리. 점검 창(02:00~03:00)과 아침 요약(08:00)을 피한다. */

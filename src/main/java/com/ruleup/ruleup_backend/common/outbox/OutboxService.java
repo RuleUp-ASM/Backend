@@ -37,11 +37,24 @@ public class OutboxService {
      */
     @Transactional(propagation = Propagation.REQUIRED)
     public void enqueue(String type, Object payload, String dedupKey) {
-        if (dedupKey != null && repository.findByDedupKey(dedupKey).isPresent()) {
-            log.debug("아웃박스 중복 — 적재하지 않는다. type={} dedupKey={}", type, dedupKey);
-            return;
+        Instant now = Instant.now();
+        if (dedupKey != null) {
+            OutboxMessage existing = repository.findByDedupKey(dedupKey).orElse(null);
+            if (existing != null) {
+                // 포기로 닫힌 건은 「이미 처리됐다」가 아니다. dedupKey 가 남아 새 행을 만들 수
+                // 없으므로, 같은 사건이 다시 적재되면 그 행을 되살린다 — 그러지 않으면 한 번
+                // 죽은 사건은 영원히 발행 불가가 된다.
+                if (existing.isDeadLettered()) {
+                    log.warn("포기했던 아웃박스를 되살린다. type={} dedupKey={} lastError={}",
+                            type, dedupKey, existing.getLastError());
+                    existing.redrive(now);
+                    return;
+                }
+                log.debug("아웃박스 중복 — 적재하지 않는다. type={} dedupKey={}", type, dedupKey);
+                return;
+            }
         }
-        repository.save(OutboxMessage.of(type, JSON.writeValueAsString(payload), dedupKey, Instant.now()));
+        repository.save(OutboxMessage.of(type, JSON.writeValueAsString(payload), dedupKey, now));
     }
 
     public static <T> T parse(String payload, Class<T> type) {
