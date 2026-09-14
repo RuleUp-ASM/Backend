@@ -48,6 +48,7 @@ public class VerificationMetrics {
     private final Counter finalizeFailed;
     private final Counter deviceIdMissing;
     private final Counter signalsStored;
+    private final Counter coordinatesPurged;
     private final Counter signalsReadTruncated;
     private final Counter payloadRejected;
     private final DistributionSummary payloadBytes;
@@ -88,6 +89,9 @@ public class VerificationMetrics {
                 .description("기기 식별자 없이 들어온 sync 요청 수").register(registry);
         this.signalsStored = Counter.builder("verification.signals.stored")
                 .description("실제로 적재된 원본 신호 수 — 저장량 증가율의 원천").register(registry);
+        // 파기가 실제로 돌고 있는지의 유일한 수치. 0 이 이어지면 배치가 죽은 것이다.
+        this.coordinatesPurged = Counter.builder("verification.location.coordinates_purged")
+                .description("파기된 GPS 원본 좌표 행 수").register(registry);
         // 판정이 원본 전량을 다시 읽는 구조라, 상한에 걸려 잘린 날은 <b>그 날 판정이 틀렸다</b>는 뜻이다.
         this.signalsReadTruncated = Counter.builder("verification.signals.read_truncated")
                 .description("일별 원본 조회가 상한에 걸려 잘린 횟수").register(registry);
@@ -127,6 +131,11 @@ public class VerificationMetrics {
     /** 본문 크기 상한을 넘겨 반려했다(413). */
     public void payloadRejected() {
         payloadRejected.increment();
+    }
+
+    /** GPS 좌표를 실제로 파기했다. */
+    public void locationCoordinatesPurged(int count) {
+        if (count > 0) coordinatesPurged.increment(count);
     }
 
     /** 원본을 실제로 적재했다. */

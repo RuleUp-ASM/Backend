@@ -1,6 +1,12 @@
 package com.ruleup.ruleup_backend.verification;
 
 import com.ruleup.ruleup_backend.verification.config.VerificationProperties;
+import com.ruleup.ruleup_backend.verification.domain.VerificationDeadlines;
+import com.ruleup.ruleup_backend.verification.service.LocationPurgeService;
+import com.ruleup.ruleup_backend.verification.service.SignalPartitionMaintainer;
+import java.time.Instant;
+import java.time.LocalDate;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -35,6 +41,42 @@ class GpsRetentionCoherenceTest {
         assertThat(defaults.gpsRetentionDays())
                 .as("파티션이 먼저 떨어지면 purgedAt 경로가 한 번도 돌지 않는다")
                 .isLessThan(defaults.signalRetentionDays());
+    }
+
+    @Test
+    @DisplayName("[P1] 파기 시각은 귀속일의 확정 경계로 정해진다 — 먼저 확정한 챌린지 기준이 아니다")
+    void purgeTimeIsDerivedFromTheDayNotFromWhoConfirmedFirst() {
+        LocalDate targetDate = LocalDate.of(2026, 9, 10);
+        Instant boundary = VerificationDeadlines.finalizeAfter(targetDate);   // D+2 00:00 KST
+
+        // 보관 0일 기본값이면 경계가 지나는 즉시 파기 대상이다.
+        assertThat(purgeService(properties(null, null)).purgeAfterFor(targetDate))
+                .as("위치 원본은 여러 챌린지가 공유한다 — 하나가 아침에 성공했다고 그날 좌표를 "
+                        + "일찍 지우면 D+2 에 확정되는 다른 챌린지가 판정할 근거를 잃는다")
+                .isEqualTo(boundary);
+
+        assertThat(purgeService(properties(2, 5)).purgeAfterFor(targetDate))
+                .isEqualTo(boundary.plus(java.time.Duration.ofDays(2)));
+    }
+
+    /**
+     * 파기 시각 계산만 쓰는 순수 메서드라 협력자 없이 만든다 — DB·지표를 건드리지 않는다.
+     */
+    private LocationPurgeService purgeService(VerificationProperties props) {
+        return new LocationPurgeService(null, props, null);
+    }
+
+    @Test
+    @DisplayName("[P1] 보관 일수는 「날짜 수」다 — 3이면 오늘·어제·그제 셋")
+    void retentionDaysMeansTheNumberOfDatesKept() {
+        LocalDate today = LocalDate.of(2026, 9, 14);
+
+        // today-3 을 경계로 쓰면 네 날짜가 남아 스펙의 「최대 30일」이 31일이 된다.
+        assertThat(SignalPartitionMaintainer.oldestKept(today, 3))
+                .isEqualTo(LocalDate.of(2026, 9, 12));
+        assertThat(SignalPartitionMaintainer.oldestKept(today, 30))
+                .as("이상탐지 입력은 스펙이 최대 30일로 못 박았다")
+                .isEqualTo(today.minusDays(29));
     }
 
     @Test

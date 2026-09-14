@@ -16,8 +16,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *                          실기기 테스트로 조절할 값이라 코드 상수로 두지 않는다
  * @param signalRetentionDays 판정 원본을 유지할 <b>일수</b>. raw 는 현재 귀속일과 직전 유예
  *                          귀속일만 필요한 hot storage 이고, D일 신호는 D+2 00:00 KST 확정이
- *                          끝나면 목적이 끝난다. 기본 3일(오늘·D-1·D-2)을 남기고 그보다 오래된
- *                          일자 파티션을 떨어뜨린다
+ *                          끝나면 목적이 끝난다. <b>정확히 이 일수</b>를 남긴다 — 기본 3이면
+ *                          오늘·D-1·D-2 세 날짜다(예전에는 경계 계산이 하루 더 남겼다)
  * @param signalPartitionLookaheadDays 미리 만들어 둘 미래 파티션 일수. 스펙이 <b>최소 7일</b>을
  *                          요구한다 — 잡이 하루 이틀 밀려도 적재가 MAXVALUE 파티션으로 몰리지
  *                          않게 하는 여유다
@@ -25,6 +25,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *                          즉시 파기 원칙 대상이라 다른 신호와 규칙이 다르다. 기준은 고정 일괄
  *                          시각이 아니라 <b>건별 확정 시각 + 이 값</b>이다 — 일괄로 잡으면 아직
  *                          확정 전인 건까지 지워진다.
+ *                          <p>기준 시각은 <b>귀속일의 확정 경계</b>(D+2 00:00 KST)다. 「이 판정이 확정된
+ *                          시각」이 아니다 — 위치 원본은 여러 챌린지가 공유하므로, 먼저 확정한 챌린지
+ *                          기준으로 잡으면 같은 날짜의 다른 챌린지가 확정되기 전에 좌표가 사라진다.
+ *                          <p>기본값 <b>0</b> 은 「경계가 지나면 곧바로 파기 대상」이라는 뜻이고,
+ *                          위치정보법의 목적 달성 시 즉시 파기 원칙에 가장 가깝다.
  *                          <p><b>반드시 {@code signalRetentionDays} 보다 짧아야 한다.</b> 공통 스펙은
  *                          「30일 예정」이라 적었지만 백엔드 스펙은 판정 원본을 D+2 확정 직후 파티션째
  *                          걷으라고 적었다. 30일로 두면 좌표 행이 파기 타이머가 도달하기 <b>전에</b>
@@ -59,7 +64,7 @@ public record VerificationProperties(Integer geofenceRadiusM, Integer maxPayload
     private static final int DEFAULT_AVOID_GRACE_MINUTES = 5;
     private static final int DEFAULT_SIGNAL_RETENTION_DAYS = 3;
     private static final int DEFAULT_SIGNAL_PARTITION_LOOKAHEAD_DAYS = 10;
-    private static final int DEFAULT_GPS_RETENTION_DAYS = 1;
+    private static final int DEFAULT_GPS_RETENTION_DAYS = 0;
     private static final int DEFAULT_ANOMALY_RETENTION_DAYS = 30;
 
     public VerificationProperties {
@@ -72,7 +77,8 @@ public record VerificationProperties(Integer geofenceRadiusM, Integer maxPayload
         signalRetentionDays = positiveOrDefault(signalRetentionDays, DEFAULT_SIGNAL_RETENTION_DAYS);
         signalPartitionLookaheadDays = positiveOrDefault(
                 signalPartitionLookaheadDays, DEFAULT_SIGNAL_PARTITION_LOOKAHEAD_DAYS);
-        gpsRetentionDays = positiveOrDefault(gpsRetentionDays, DEFAULT_GPS_RETENTION_DAYS);
+        // 0 은 「확정 경계가 지나면 즉시」라는 유효한 값이다.
+        gpsRetentionDays = nonNegativeOrDefault(gpsRetentionDays, DEFAULT_GPS_RETENTION_DAYS);
         if (gpsRetentionDays >= signalRetentionDays) {
             // 설정만으로 조용히 어긋나면 파기 경로가 죽은 것을 아무도 모른다. 기동 때 막는다.
             throw new IllegalArgumentException(

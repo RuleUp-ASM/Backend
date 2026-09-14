@@ -67,6 +67,7 @@ public class VerificationSignalIngestService {
     private final JdbcTemplate jdbc;
     private final com.ruleup.ruleup_backend.verification.config.VerificationProperties properties;
     private final VerificationMetrics metrics;
+    private final LocationPurgeService locationPurge;
 
     /**
      * 수신 결과.
@@ -177,7 +178,7 @@ public class VerificationSignalIngestService {
                 continue;
             }
             accepted.add(c.signal());
-            rows.add(row(userId, c, receivedAt, deviceId));
+            rows.add(row(userId, c, receivedAt, deviceId, domain, observedDate));
         }
         insertAll(domain, rows);
         metrics.signalsStored(rows.size());
@@ -243,18 +244,29 @@ public class VerificationSignalIngestService {
      * INSERT IGNORE 로 적재한다 — 동시 요청이 같은 키를 넣어도 예외 없이 한 건만 남는다.
      * 예외로 처리하면 트랜잭션이 롤백 표시돼 나머지 신호까지 잃는다.
      */
+    /**
+     * 적재. 위치 도메인만 컬럼이 하나 더 붙는다 — <b>파기 예정 시각</b>이다.
+     *
+     * <p>확정 때 거는 대신 여기서 미리 박는 이유는 두 가지다. 첫째, 시각이 <b>귀속일만으로</b>
+     * 정해져 미리 알 수 있다. 둘째, 인증에 한 번도 쓰이지 않은 좌표(위치 챌린지가 없는 사용자의
+     * 신호)도 파기 대상이 된다 — 확정 때만 걸면 그런 행은 타이머 없이 남아 파티션이 걷어갈 때까지
+     * 파기 기록조차 생기지 않는다.
+     */
     private void insertAll(SignalDomain domain, List<Object[]> rows) {
+        boolean location = (domain == SignalDomain.LOCATION);
+        String sql = "INSERT IGNORE INTO " + domain.table()
+                + " (id, observedDate, userId, deviceId, signalType, excludeReason, occurredAt,"
+                + "  receivedAt, payload, dedupKey" + (location ? ", purgeAfter)" : ")")
+                + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?" + (location ? ", ?)" : ")");
         for (int from = 0; from < rows.size(); from += INSERT_BATCH) {
             List<Object[]> chunk = rows.subList(from, Math.min(from + INSERT_BATCH, rows.size()));
-            jdbc.batchUpdate("INSERT IGNORE INTO " + domain.table()
-                    + " (id, observedDate, userId, deviceId, signalType, excludeReason, occurredAt,"
-                    + "  receivedAt, payload, dedupKey)"
-                    + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", chunk);
+            jdbc.batchUpdate(sql, chunk);
         }
     }
 
-    private Object[] row(UUID userId, Candidate c, Instant receivedAt, String deviceId) {
-        return new Object[]{
+    private Object[] row(UUID userId, Candidate c, Instant receivedAt, String deviceId,
+                         SignalDomain domain, LocalDate observedDate) {
+        Object[] base = {
                 bytes(UuidGenerator.generate()),
                 Date.valueOf(c.observedDate()),
                 bytes(userId),
@@ -265,6 +277,11 @@ public class VerificationSignalIngestService {
                 Timestamp.from(receivedAt),
                 JSON.writeValueAsString(c.signal()),
                 c.dedupKey()};
+        if (domain != SignalDomain.LOCATION) return base;
+
+        Object[] withPurge = java.util.Arrays.copyOf(base, base.length + 1);
+        withPurge[base.length] = Timestamp.from(locationPurge.purgeAfterFor(observedDate));
+        return withPurge;
     }
 
     /** recordId 가 있으면 그것으로, 없으면 신호 내용 전체로 만든 해시. */

@@ -121,7 +121,7 @@ public class SignalPartitionMaintainer {
      * 배치가 밀려도 원본이 먼저 사라지지 않는다.
      */
     private void dropExpiredPartitions(SignalDomain domain, LocalDate today, int retentionDays) {
-        LocalDate oldestKept = today.minusDays(retentionDays);
+        LocalDate oldestKept = oldestKept(today, retentionDays);
         for (String name : existingPartitions(domain.table())) {
             LocalDate date = dateOf(name);
             if (date == null || !date.isBefore(oldestKept)) continue;
@@ -131,12 +131,22 @@ public class SignalPartitionMaintainer {
     }
 
     private void dropAnomalyPartitions(String table, LocalDate today, int retentionDays) {
-        LocalDate oldestKept = today.minusDays(retentionDays);
+        LocalDate oldestKept = oldestKept(today, retentionDays);
         for (String name : existingPartitions(table)) {
             LocalDate date = dateOf(name);
             if (date == null || !date.isBefore(oldestKept)) continue;
             dropPartition(table, name);
         }
+    }
+
+    /**
+     * 남길 가장 오래된 날짜.
+     *
+     * <p>{@code retentionDays} 는 <b>보관할 날짜 수</b>다 — 3이면 오늘·어제·그제 셋이다.
+     * {@code today.minusDays(3)} 을 경계로 쓰면 네 날짜가 남아 스펙의 「최대 30일」이 31일이 된다.
+     */
+    public static LocalDate oldestKept(LocalDate today, int retentionDays) {
+        return today.minusDays(Math.max(retentionDays - 1, 0));
     }
 
     /**
@@ -173,9 +183,11 @@ public class SignalPartitionMaintainer {
      */
     public Integer countUnconfirmed(LocalDate partitionDate) {
         try {
+            // 파기 시각이 아직 오지 않았거나(확정 전) 파기되지 않은 채 남은 좌표.
             return jdbc.queryForObject(
                     "SELECT COUNT(*) FROM " + SignalDomain.LOCATION.table()
-                            + " WHERE observedDate = ? AND purgeAfter IS NULL",
+                            + " WHERE observedDate = ? AND purgedAt IS NULL"
+                            + "   AND (purgeAfter IS NULL OR purgeAfter > NOW(6))",
                     Integer.class, java.sql.Date.valueOf(partitionDate));
         } catch (RuntimeException e) {
             // 세지 못하면 붙잡는 쪽으로 기운다 — 판정 근거를 잃는 것보다 하루 더 두는 편이 낫다.
