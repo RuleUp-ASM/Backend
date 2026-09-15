@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.notification;
 
+import com.ruleup.ruleup_backend.notification.service.NotificationPublisher;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;

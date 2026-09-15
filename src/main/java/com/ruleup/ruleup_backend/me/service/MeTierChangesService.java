@@ -5,7 +5,7 @@ import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.me.dto.MeTierChangesResponse;
 import com.ruleup.ruleup_backend.me.dto.MeTierResponse;
-import com.ruleup.ruleup_backend.score.ScoreTransactionRepository;
+import com.ruleup.ruleup_backend.score.repository.ScoreTransactionRepository;
 import com.ruleup.ruleup_backend.score.domain.ScoreTransaction;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;

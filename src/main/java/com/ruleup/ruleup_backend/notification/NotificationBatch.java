@@ -1,5 +1,7 @@
 package com.ruleup.ruleup_backend.notification;
 
+import com.ruleup.ruleup_backend.notification.service.NotificationService;
+import com.ruleup.ruleup_backend.notification.repository.NotificationRepository;
 import com.ruleup.ruleup_backend.notification.domain.Notification;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;

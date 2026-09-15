@@ -25,7 +25,7 @@ import com.ruleup.ruleup_backend.routine.match.RoutineCandidate;
 import com.ruleup.ruleup_backend.routine.match.RoutineMatch;
 import com.ruleup.ruleup_backend.routine.service.RoutineCatalog;
 import com.ruleup.ruleup_backend.score.domain.Tier;
-import com.ruleup.ruleup_backend.score.UserScoreSummaryRepository;
+import com.ruleup.ruleup_backend.score.repository.UserScoreSummaryRepository;
 import com.ruleup.ruleup_backend.user.domain.InterestCategory;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;

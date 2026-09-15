@@ -4,7 +4,7 @@ import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.profile.dto.PublicProfileResponse;
 import com.ruleup.ruleup_backend.report.BlockService;
-import com.ruleup.ruleup_backend.score.UserScoreSummaryRepository;
+import com.ruleup.ruleup_backend.score.repository.UserScoreSummaryRepository;
 import com.ruleup.ruleup_backend.score.domain.Tier;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import com.ruleup.ruleup_backend.user.domain.User;

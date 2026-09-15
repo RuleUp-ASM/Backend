@@ -3,6 +3,7 @@ package com.ruleup.ruleup_backend.verification.service;
 import com.ruleup.ruleup_backend.challenge.lifecycle.*;
 import com.ruleup.ruleup_backend.common.outbox.*;
 import com.ruleup.ruleup_backend.score.*;
+import com.ruleup.ruleup_backend.score.service.*;
 import com.ruleup.ruleup_backend.verification.domain.VerificationDaily;
 import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;

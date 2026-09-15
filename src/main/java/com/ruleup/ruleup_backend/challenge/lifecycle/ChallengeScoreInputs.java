@@ -2,6 +2,7 @@ package com.ruleup.ruleup_backend.challenge.lifecycle;
 
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeCycle;
 import com.ruleup.ruleup_backend.score.*;
+import com.ruleup.ruleup_backend.score.service.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;

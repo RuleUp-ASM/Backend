@@ -13,12 +13,12 @@ import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
-import com.ruleup.ruleup_backend.notification.NotificationMuteCleaner;
+import com.ruleup.ruleup_backend.notification.service.NotificationMuteCleaner;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.room.RoomAuthority;
 import com.ruleup.ruleup_backend.report.BlockService;
 import com.ruleup.ruleup_backend.score.domain.IncidentType;
-import com.ruleup.ruleup_backend.score.UserScoreSummaryRepository;
+import com.ruleup.ruleup_backend.score.repository.UserScoreSummaryRepository;
 import com.ruleup.ruleup_backend.score.domain.Tier;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
 import com.ruleup.ruleup_backend.user.domain.User;
@@ -255,8 +255,8 @@ public class ChallengeMemberService {
             int completedWeeks = progressWeeks(me);
             scoreDelta = exemptReason == null ? IncidentType.VOLUNTARY_LEAVE.deduction(completedWeeks) : 0;
             String source = "leave:" + me.getId() + ":" + now;
-            outbox.enqueue(com.ruleup.ruleup_backend.score.LeaveScoreOutboxHandler.TYPE,
-                    new com.ruleup.ruleup_backend.score.LeaveScoreOutboxHandler.Payload(userId, challengeId,
+            outbox.enqueue(com.ruleup.ruleup_backend.score.service.LeaveScoreOutboxHandler.TYPE,
+                    new com.ruleup.ruleup_backend.score.service.LeaveScoreOutboxHandler.Payload(userId, challengeId,
                             source, completedWeeks, "AUTO", scoreDelta, now), source);
             outboxDispatcher.requestFlush();
         }

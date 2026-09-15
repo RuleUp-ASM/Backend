@@ -2,7 +2,7 @@ package com.ruleup.ruleup_backend.verification;
 
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
 import com.ruleup.ruleup_backend.challenge.service.CheatKickOutboxHandler;
-import com.ruleup.ruleup_backend.score.CheatScoreOutboxHandler;
+import com.ruleup.ruleup_backend.score.service.CheatScoreOutboxHandler;
 import com.ruleup.ruleup_backend.verification.domain.VerificationDaily;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
 import com.ruleup.ruleup_backend.verification.service.CheatDetectionService;

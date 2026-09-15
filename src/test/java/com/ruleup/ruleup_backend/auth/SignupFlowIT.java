@@ -10,7 +10,7 @@ import com.ruleup.ruleup_backend.config.AppProperties;
 import com.ruleup.ruleup_backend.moderation.ContentModerationClient;
 import com.ruleup.ruleup_backend.moderation.ModerationResult;
 import com.ruleup.ruleup_backend.moderation.domain.ModerationTarget;
-import com.ruleup.ruleup_backend.score.UserScoreSummaryRepository;
+import com.ruleup.ruleup_backend.score.repository.UserScoreSummaryRepository;
 import com.ruleup.ruleup_backend.score.domain.Tier;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import com.ruleup.ruleup_backend.user.domain.Gender;

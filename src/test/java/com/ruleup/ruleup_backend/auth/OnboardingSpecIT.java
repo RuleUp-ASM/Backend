@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.auth;
 
+import com.ruleup.ruleup_backend.auth.service.SignupTokenStore;
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
 import com.ruleup.ruleup_backend.challenge.ChallengeApiSupport;
 import com.ruleup.ruleup_backend.moderation.ContentModerationClient;

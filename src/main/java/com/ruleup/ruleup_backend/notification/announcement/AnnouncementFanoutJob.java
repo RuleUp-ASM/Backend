@@ -1,7 +1,7 @@
 package com.ruleup.ruleup_backend.notification.announcement;
 
 import com.ruleup.ruleup_backend.notification.NotificationEvent;
-import com.ruleup.ruleup_backend.notification.NotificationPublisher;
+import com.ruleup.ruleup_backend.notification.service.NotificationPublisher;
 import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import lombok.extern.slf4j.Slf4j;

@@ -10,7 +10,7 @@ import com.ruleup.ruleup_backend.common.outbox.OutboxDispatcher;
 import com.ruleup.ruleup_backend.common.outbox.OutboxService;
 import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
-import com.ruleup.ruleup_backend.notification.NotificationPublisher;
+import com.ruleup.ruleup_backend.notification.service.NotificationPublisher;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.sanction.SanctionRepository;
 import com.ruleup.ruleup_backend.sanction.SanctionService;

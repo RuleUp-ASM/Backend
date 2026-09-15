@@ -1,5 +1,7 @@
 package com.ruleup.ruleup_backend.notification;
 
+import com.ruleup.ruleup_backend.notification.repository.NotificationRepository;
+import com.ruleup.ruleup_backend.notification.repository.NotificationMuteRepository;
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
 import com.ruleup.ruleup_backend.challenge.ChallengeApiSupport;
 import com.ruleup.ruleup_backend.notification.domain.Notification;

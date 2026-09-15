@@ -19,7 +19,7 @@ import com.ruleup.ruleup_backend.common.outbox.OutboxDispatcher;
 import com.ruleup.ruleup_backend.common.outbox.OutboxService;
 import com.ruleup.ruleup_backend.watcher.service.WatcherFailureOutboxHandler;
 import com.ruleup.ruleup_backend.notification.NotificationEvent;
-import com.ruleup.ruleup_backend.notification.NotificationPublisher;
+import com.ruleup.ruleup_backend.notification.service.NotificationPublisher;
 import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import org.slf4j.Logger;

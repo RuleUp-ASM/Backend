@@ -43,7 +43,7 @@ spring:
 
   flyway:
     enabled: true
-    locations: classpath:db/migration   # 1단계에서 여기에 SQL 넣을 예정
+    locations: classpath:db/migration
 
   # 캐시는 Caffeine(JVM 로컬). 캐시 매니저는 CacheConfig(@Profile("!test"))가 명시적으로 구성한다.
   #

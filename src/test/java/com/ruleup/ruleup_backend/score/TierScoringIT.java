@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.score;
 
+import com.ruleup.ruleup_backend.score.service.ScoreService;
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
 import com.ruleup.ruleup_backend.challenge.ChallengeApiSupport;
 import com.ruleup.ruleup_backend.score.domain.IncidentType;

@@ -9,7 +9,7 @@ import com.ruleup.ruleup_backend.me.CompletionPolicy;
 import com.ruleup.ruleup_backend.me.dto.MeHomeResponse;
 import com.ruleup.ruleup_backend.sanction.SanctionService;
 import com.ruleup.ruleup_backend.sanction.domain.Sanction;
-import com.ruleup.ruleup_backend.score.UserScoreSummaryRepository;
+import com.ruleup.ruleup_backend.score.repository.UserScoreSummaryRepository;
 import com.ruleup.ruleup_backend.score.domain.UserScoreSummary;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import com.ruleup.ruleup_backend.user.domain.User;

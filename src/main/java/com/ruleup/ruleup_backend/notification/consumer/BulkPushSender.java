@@ -1,5 +1,7 @@
 package com.ruleup.ruleup_backend.notification.consumer;
 
+import com.ruleup.ruleup_backend.push.service.PushSender;
+
 import java.util.List;
 
 /**

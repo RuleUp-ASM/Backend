@@ -2,7 +2,7 @@ package com.ruleup.ruleup_backend.verification;
 
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
 import com.ruleup.ruleup_backend.common.outbox.OutboxDispatcher;
-import com.ruleup.ruleup_backend.score.UserScoreSummaryRepository;
+import com.ruleup.ruleup_backend.score.repository.UserScoreSummaryRepository;
 import com.ruleup.ruleup_backend.verification.domain.VerificationDaily;
 import com.ruleup.ruleup_backend.verification.repository.CheatDetectionRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
