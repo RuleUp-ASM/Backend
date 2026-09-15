@@ -81,6 +81,47 @@ class ContractGapIT extends ChallengeApiSupport {
     }
 
     @Nested
+    @DisplayName("신고한 챌린지 가리기")
+    class Masking {
+
+        @Test
+        @DisplayName("참여 중인 방을 신고하면 상세·방·목록·진행률이 모두 가려진 값으로 내려온다")
+        void reportedRoomIsMaskedEverywhere() throws Exception {
+            Member me = member(uniq("gap-mask"));
+            UUID id = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
+            insertActiveMembership(id, me.id(), "OWNER");
+            jdbc.update("UPDATE challenges SET title='원래 제목', ai_title='AI 임시 제목', " +
+                    "description='원래 설명', image_url='https://cdn.example/a.png' WHERE id=?", bytes(id));
+
+            assertThat((String) read(getAuth("/api/v1/challenges/" + id, me.token()), "$.data.title"))
+                    .as("신고 전에는 원문이다").isEqualTo("원래 제목");
+
+            var reported = postJsonAuth("/api/v1/reports", me.token(),
+                    Map.of("targetType", "CHALLENGE", "targetChallengeId", id.toString(),
+                            "reason", "INAPPROPRIATE", "contextType", "CHALLENGE_DETAIL"));
+            assertThat((String) read(reported, "$.data.hiddenEffect"))
+                    .as("참여 중이라 숨기지 않고 가린다").isEqualTo("CHALLENGE_MASKED");
+
+            var detail = getAuth("/api/v1/challenges/" + id, me.token());
+            assertThat((String) read(detail, "$.data.title")).isEqualTo("AI 임시 제목");
+            assertThat((String) read(detail, "$.data.description")).isNull();
+            assertThat((String) read(detail, "$.data.imageUrl")).isNull();
+
+            assertThat((String) read(getAuth("/api/v1/challenges/" + id + "/room", me.token()),
+                    "$.data.summary.title"))
+                    .as("방 안에서도 같은 값이어야 한다").isEqualTo("AI 임시 제목");
+
+            assertThat((String) read(getAuth("/api/v1/challenges", me.token()),
+                    "$.data.challenges[0].title"))
+                    .as("내 챌린지 목록도 같다").isEqualTo("AI 임시 제목");
+
+            assertThat((String) read(getAuth("/api/v1/verifications/progress", me.token()),
+                    "$.data.challenges[0].title"))
+                    .as("진행률 목록도 같다").isEqualTo("AI 임시 제목");
+        }
+    }
+
+    @Nested
     @DisplayName("증빙 사진 업로드")
     class AppealImage {
 

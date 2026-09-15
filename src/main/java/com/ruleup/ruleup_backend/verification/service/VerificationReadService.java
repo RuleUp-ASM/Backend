@@ -34,6 +34,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -51,6 +52,7 @@ public class VerificationReadService {
     private static final DateTimeFormatter ISO_OFFSET = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
 
     private final ChallengeQueryService challengeQuery;
+    private final com.ruleup.ruleup_backend.challenge.view.ChallengeMasking masking;
     private final VerificationDailyRepository dailyRepo;
     private final VerificationMethodResultRepository methodResultRepo;
     private final VerificationFailureDetailRepository failureDetailRepo;
@@ -77,13 +79,16 @@ public class VerificationReadService {
                 ? challengeQuery.findAllMemberships(userId)
                 : challengeQuery.findActiveMemberships(userId);
         LocalDate today = LocalDate.now(KST);
+        // 목록이라 차단 집합을 한 번만 읽는다 — 항목마다 물으면 화면 한 장에 왕복이 수십 번이다.
+        Set<UUID> masked = masking.maskedFor(userId);
         List<ChallengeProgress> out = new ArrayList<>();
         for (ChallengeMember m : members) {
             Challenge ch = challengeQuery.findActiveChallenge(m.getChallengeId()).orElse(null);
             if (ch == null) continue;
             // 시작 전(UPCOMING)은 남긴다 — 곧 시작할 방도 「내 챌린지」에 보여야 한다.
             if (!all && ch.getStatus() == ChallengeStatus.COMPLETED) continue;
-            out.add(toProgress(m, ch, configFactory.build(ch), today));
+            out.add(toProgress(m, ch, configFactory.build(ch), today,
+                    masked.contains(ch.getId()), ch.isOwner(userId)));
         }
         return out;
     }
@@ -213,13 +218,16 @@ public class VerificationReadService {
                 !alreadyFiled && daily.isAppealable(polarity, now));
     }
 
-    private ChallengeProgress toProgress(ChallengeMember m, Challenge ch, VerificationConfig config, LocalDate today) {
+    private ChallengeProgress toProgress(ChallengeMember m, Challenge ch, VerificationConfig config,
+                                         LocalDate today, boolean masked, boolean viewerIsOwner) {
         boolean freq = config.isFrequency();
         int remaining = freq
                 ? Math.max(m.getTargetDays() - m.getSuccessDays(), 0)
                 : Math.max(m.getTargetDays() - m.getSuccessDays() - m.getFailDays(), 0);
         return new ChallengeProgress(
-                ch.getId().toString(), ch.getTitle(), ch.getCategory(), ch.getParticipationType().name(),
+                ch.getId().toString(),
+                com.ruleup.ruleup_backend.challenge.view.ChallengeView.of(ch, viewerIsOwner, masked).title(),
+                ch.getCategory(), ch.getParticipationType().name(),
                 ch.getStatus().name(), m.getScheduleType().name(), m.getProgressRate(),
                 m.getSuccessDays(), m.getTargetDays(), remaining,
                 isTodayTarget(config, ch, m, today),
