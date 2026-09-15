@@ -142,7 +142,8 @@ class ProfileSpecAlignmentIT extends ChallengeApiSupport {
         service.detected(event);
         assertThat(jdbc.queryForObject("SELECT source_event_id FROM verification_permission_waits WHERE challenge_id=?",byte[].class,bytes(id))).isNotEqualTo(source);
         assertThat(((Number)read(getAuth("/api/v1/me/home",me.token()),"$.data.permissionWarnings[0].remainingCycles")).intValue()).isEqualTo(2);
-        assertThat(getAuth("/api/v1/me/invitation",me.token()).getResponse().getStatus()).isEqualTo(404);
+        // 초대 API 는 이제 연결돼 있다 — 예전에는 서비스만 있고 엔드포인트가 없어 404 였다.
+        assertThat(getAuth("/api/v1/me/invitation",me.token()).getResponse().getStatus()).isEqualTo(200);
     }
 
     /**

@@ -2,6 +2,7 @@ package com.ruleup.ruleup_backend.challenge.creation;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
+import com.ruleup.ruleup_backend.challenge.domain.ChallengeCapacity;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengePenalties;
 import com.ruleup.ruleup_backend.challenge.domain.ParticipationType;
@@ -67,10 +68,6 @@ public class ChallengeCreationService {
 
     private static final Logger log = LoggerFactory.getLogger(ChallengeCreationService.class);
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
-    /**
-     * 고를 수 있는 정원 (탐색 공통 5-3). 자유 입력이 아니라 <b>고르는 값</b>이다 —
-     * 300 이 최대이고 그보다 크면 무제한(GROUP 에서는 정원 미지정)만 가능하다.
-     */
     private static final int DEFAULT_WEEKLY_COUNT = 7;
     private static final int TITLE_MAX = 30;
     private static final int DESCRIPTION_MAX = 200;
@@ -248,15 +245,15 @@ public class ChallengeCreationService {
         }
     }
 
-    /** 정원은 1~300 또는 null(무제한). SOLO의 정원은 1이다. */
+    /**
+     * 정원은 {@link ChallengeCapacity#CHOICES} 중 하나 또는 null(무제한)이다. SOLO 의 정원은 1이다.
+     *
+     * <p>예전에는 1~300 아무 정수나 받았다. 화면이 선택지를 주는데 서버가 사이 값을 받으면,
+     * 클라이언트를 거치지 않은 요청만 다른 크기의 방을 만들 수 있다 — 서버가 거절해야 계약이다.
+     */
     private Integer validateCapacity(ParticipationType mode, Integer capacity) {
-        if (mode != ParticipationType.GROUP) return 1;
-        // 비우면 무제한이다. 큰 숫자로 무제한을 흉내 내면
-        // 무제한을 흉내 내려는 방은 큰 수를 골라 계속 락과 COUNT 를 지불한다.
-        if (capacity == null) return null;
-        if (capacity < 1 || capacity > 300)
-            throw new BusinessException(ErrorCode.CAPACITY_OUT_OF_RANGE);
-        return capacity;
+        if (mode != ParticipationType.GROUP) return ChallengeCapacity.SOLO;
+        return ChallengeCapacity.validateGroup(capacity);
     }
 
     /** minTier ≤ 생성자 표시 티어(서버 검증 필수 — 클라 검증만으로는 우회 가능). */

@@ -119,7 +119,8 @@ public class UserAccountService {
         });
 
         return new UserMeResponse(
-                UserResponse.from(user, summary),
+                UserResponse.from(user, summary,
+                        user.isSuspended() ? sanctionService.activeSanction(user.getId()).orElse(null) : null),
                 user.getGender() != null ? user.getGender().name() : null,
                 agreements);
     }

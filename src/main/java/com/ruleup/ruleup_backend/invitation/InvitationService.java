@@ -1,5 +1,7 @@
 package com.ruleup.ruleup_backend.invitation;
 
+import com.ruleup.ruleup_backend.applink.AppLinkType;
+import com.ruleup.ruleup_backend.applink.AppLinks;
 import com.ruleup.ruleup_backend.invitation.domain.InvitationSignup;
 import com.ruleup.ruleup_backend.invitation.domain.InviteCode;
 import com.ruleup.ruleup_backend.me.dto.MeInvitationResponse;
@@ -29,10 +31,18 @@ public class InvitationService {
     private static final String ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     private static final int CODE_LEN = 6;
     private static final int MAX_GEN_ATTEMPTS = 10;
-    private static final String INVITE_URL_PREFIX = "https://android.ruleup.app/inv/";
     private static final String REWARD_DESCRIPTION = "초대한 친구가 가입하면 혜택이 지급될 예정이에요";
 
     private final SecureRandom random = new SecureRandom();
+
+    /**
+     * 링크는 직접 조립하지 않고 앱링크 규칙을 따른다.
+     *
+     * <p>예전에는 {@code https://android.ruleup.app/inv/} 를 상수로 박아 뒀는데, 앱링크 도메인은
+     * {@code android.ruleup.co.kr} 이다. 도메인이 다르면 안드로이드의 도메인 검증이 걸리지 않아
+     * 링크를 눌러도 앱이 뜨지 않고 브라우저로 샌다 — 초대가 통째로 동작하지 않는다.
+     */
+    private final AppLinks appLinks;
 
     private final InviteCodeRepository inviteCodeRepository;
     private final InvitationSignupRepository invitationSignupRepository;
@@ -54,7 +64,8 @@ public class InvitationService {
             return new MeInvitationResponse.Invitee(nickname, "SIGNED_UP", s.getOccurredAt().toString());
         }).toList();
 
-        return new MeInvitationResponse(code, INVITE_URL_PREFIX + code, REWARD_DESCRIPTION, invitees);
+        return new MeInvitationResponse(code, appLinks.build(AppLinkType.FRIEND_INVITATION, code),
+                REWARD_DESCRIPTION, invitees);
     }
 
     /** 유저 초대 코드 조회 또는 생성(멱등). */

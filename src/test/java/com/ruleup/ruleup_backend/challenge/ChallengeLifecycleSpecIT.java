@@ -55,15 +55,15 @@ class ChallengeLifecycleSpecIT extends ChallengeApiSupport {
         insertActiveMembership(id,owner.id(),"OWNER");
         int version=jdbc.queryForObject("SELECT version FROM challenges WHERE id=?",Integer.class,bytes(id));
         var result=patchJsonAuth("/api/v1/challenges/"+id,owner.token(),
-                Map.of("version",version,"mode","GROUP","capacity",7,"visibility","PRIVATE"));
+                Map.of("version",version,"mode","GROUP","capacity",5,"visibility","PRIVATE"));
         assertThat(result.getResponse().getStatus()).isEqualTo(200);
         var row=jdbc.queryForMap("SELECT capacity,visibility,version FROM challenges WHERE id=?",bytes(id));
-        assertThat(row.get("capacity")).isEqualTo(7);
+        assertThat(row.get("capacity")).isEqualTo(5);
         assertThat(row.get("visibility")).isEqualTo("PRIVATE");
         var invalid=patchJsonAuth("/api/v1/challenges/"+id,owner.token(),
-                Map.of("version",row.get("version"),"mode","GROUP","capacity",8,"visibility","TYPO"));
+                Map.of("version",row.get("version"),"mode","GROUP","capacity",30,"visibility","TYPO"));
         assertThat(invalid.getResponse().getStatus()).isEqualTo(400);
-        assertThat(jdbc.queryForObject("SELECT capacity FROM challenges WHERE id=?",Integer.class,bytes(id))).isEqualTo(7);
+        assertThat(jdbc.queryForObject("SELECT capacity FROM challenges WHERE id=?",Integer.class,bytes(id))).isEqualTo(5);
     }
 
     @Test void unlimitedDurationCanBeSavedAndRead() throws Exception {

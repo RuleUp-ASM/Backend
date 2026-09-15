@@ -192,7 +192,7 @@ class ChallengePublicDetailCloneIT extends ChallengeApiSupport {
                     .isEqualTo(java.time.LocalDate.now(java.time.ZoneId.of("Asia/Seoul"))
                             .plusDays(1).toString());
             // 정원·티어는 생성 기본값으로 리셋, 이미지는 복사하지 않는다(초안 스키마에 이미지 없음)
-            assertThat((Integer) read(res, "$.data.draft.capacity")).isEqualTo(50);
+            assertThat((Integer) read(res, "$.data.draft.capacity")).isEqualTo(30);
             assertThat((String) read(res, "$.data.draft.minTier")).isEqualTo("BRONZE");
         }
 

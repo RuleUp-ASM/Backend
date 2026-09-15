@@ -58,7 +58,7 @@ class ChallengeInvitationFlowIT extends ChallengeApiSupport {
 
         assertThat(data.path("challenge").path("challengeId").asText()).isEqualTo(challengeId.toString());
         assertThat(data.path("challenge").path("title").asText()).isEqualTo("테스트 챌린지");
-        assertThat(data.path("challenge").path("capacity").asInt()).isEqualTo(50);
+        assertThat(data.path("challenge").path("capacity").asInt()).isEqualTo(30);
         assertThat(data.path("challenge").path("participantCount").asInt()).isEqualTo(1);
         assertThat(data.path("inviterNickname").asText()).isNotBlank();
         assertThat(data.path("joinable").asBoolean()).isTrue();

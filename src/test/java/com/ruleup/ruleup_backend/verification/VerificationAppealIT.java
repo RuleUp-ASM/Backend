@@ -198,7 +198,7 @@ class VerificationAppealIT extends VerificationApiSupport {
             FailedVerification f = failedVerification("appeal-photo");
 
             MvcResult upload = mvc.perform(multipart("/api/v1/appeals/images")
-                            .file(new MockMultipartFile("file", "proof.png", "image/png", pngBytes()))
+                            .file(new MockMultipartFile("image", "proof.png", "image/png", pngBytes()))
                             .header("Authorization", "Bearer " + f.owner().token()))
                     .andReturn();
             assertThat(upload.getResponse().getStatus()).isEqualTo(200);

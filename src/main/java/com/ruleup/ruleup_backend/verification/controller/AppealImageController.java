@@ -12,7 +12,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -35,7 +35,10 @@ public class AppealImageController {
                     """)
     @ApiErrorCodes({ErrorCode.IMAGE_TOO_LARGE, ErrorCode.IMAGE_CORRUPTED, ErrorCode.LOGIN_REQUIRED})
     @PostMapping(value = "/images", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ApiResponse<AppealImageResponse> upload(@RequestParam("file") MultipartFile file) {
-        return ApiResponse.ok(new AppealImageResponse(appealImageService.upload(file)));
+    public ApiResponse<AppealImageResponse> upload(
+            // part 이름은 프로필·챌린지 이미지와 같은 image 다. 여기만 file 이었던 탓에 클라가
+            // 규약대로 보낸 요청이 400 으로 떨어졌다 — 이름이 어긋나면 바인딩 단계에서 끝난다.
+            @RequestPart("image") MultipartFile image) {
+        return ApiResponse.ok(new AppealImageResponse(appealImageService.upload(image)));
     }
 }

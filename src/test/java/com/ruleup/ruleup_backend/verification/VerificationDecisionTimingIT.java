@@ -142,7 +142,16 @@ class VerificationDecisionTimingIT extends VerificationApiSupport {
                     .as("이의는 확정 전에 받는다 — 행을 여는 시점에 기한이 서 있다")
                     .isEqualTo(LocalDate.now(KST).plusDays(2).atStartOfDay(KST).toInstant());
             assertThat(shareableAtOf(memberId)).as("확정 전에는 피드에 실리지 않는다").isNull();
-            assertThat(todayApiStatus(me.token(), challenge)).isEqualTo("FAIL_EXPECTED");
+
+            MvcResult today = getAuth("/api/v1/challenges/" + challenge + "/verifications/today", me.token());
+            assertThat((String) read(today, "$.data.status")).isEqualTo("FAIL_EXPECTED");
+            assertThat((Boolean) read(today, "$.data.appeal.eligible"))
+                    .as("실패 예정 구간이 실제 이의 신청 창이다").isTrue();
+            // 이의 경로가 /verifications/{verificationId}/appeals 라, 버튼이 살아 있는데 대상 ID 가
+            // 없으면 화면에서 누를 수가 없다. 예전에는 unacknowledgedResult 안에만 있었고
+            // 그 값은 이미 확인한 판정에서는 사라진다.
+            assertThat((String) read(today, "$.data.verificationId"))
+                    .as("이의를 걸 대상 ID 가 최상위에 있어야 한다").isNotBlank();
         }
 
         @Test

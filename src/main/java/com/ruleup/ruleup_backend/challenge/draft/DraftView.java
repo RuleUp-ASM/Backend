@@ -18,7 +18,7 @@ public record DraftView(
         String mode,                  // SOLO / GROUP
         String visibility,            // 그룹: PUBLIC/PRIVATE, 솔로: null
         Boolean rankingVisible,       // 솔로: 기본 true, 그룹: null
-        Integer capacity,             // 기본 50
+        Integer capacity,             // 5·30·100·300 중 하나 또는 null(무제한); 기본 30
         String minTier,               // 기본 = 생성자 표시 티어(상한 동일)
         Period period,                // 시작=생성일+1일, 종료=시작+2주
         Integer weeklyCount,          // 주간 수행 횟수(1~7), 요일은 지정하지 않음

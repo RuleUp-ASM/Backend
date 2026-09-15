@@ -32,7 +32,7 @@ public record IntroResponse(
         @Schema(description = "지원하는 최소 앱 버전명 (이 미만이면 강제 업데이트)", example = "1.0.0")
         String minAppVersion,
 
-        @Schema(description = "현행 약관 버전 6종 — 가입 동의 버전 기록·약관 개정 시 재동의 판정용")
+        @Schema(description = "현행 동의 버전 7종(약관 5종 + 법정 개별 동의 2종) — 가입 동의 버전 기록·약관 개정 시 재동의 판정용")
         AppProperties.Client.TermsVersions termsVersions
 ) {
 

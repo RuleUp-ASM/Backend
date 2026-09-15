@@ -2,6 +2,7 @@ package com.ruleup.ruleup_backend.auth.dto;
 
 import com.ruleup.ruleup_backend.auth.service.TokenService;
 import com.ruleup.ruleup_backend.oauth.OAuthUserInfo;
+import com.ruleup.ruleup_backend.sanction.domain.Sanction;
 import com.ruleup.ruleup_backend.score.domain.UserScoreSummary;
 import com.ruleup.ruleup_backend.user.domain.User;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -127,12 +128,14 @@ public record OAuthLoginResponse(
         }
     }
 
+    /** @param lock 정지 상태일 때의 효력 있는 제재(아니면 null) — user.lockInfo 를 채운다. */
     public static OAuthLoginResponse existing(TokenService.TokenPair pair, User user,
-                                              UserScoreSummary summary, int flushIntervalSec) {
+                                              UserScoreSummary summary, int flushIntervalSec,
+                                              Sanction lock) {
         return new OAuthLoginResponse(false,
                 pair.accessToken(), pair.refreshToken(), "Bearer", pair.expiresIn(),
                 flushIntervalSec,
-                UserResponse.from(user, summary),
+                UserResponse.from(user, summary, lock),
                 DeviceSpecResponse.from(user),
                 null, null, null, null, false);
     }

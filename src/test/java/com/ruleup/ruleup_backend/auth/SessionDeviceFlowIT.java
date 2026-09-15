@@ -266,7 +266,13 @@ class SessionDeviceFlowIT {
             assertThat(res.getResponse().getStatus()).isEqualTo(200);
             assertThat((Boolean) read(res, "$.data.isNewUser")).isFalse();
             assertThat((String) read(res, "$.data.user.accountStatus")).isEqualTo("SUSPENDED");
-            assertThat((Object) read(res, "$.data.user.lockInfo")).isNotNull();
+            // 실제 제재의 사유와 해제 예정 시각이 실려야 한다. 예전에는 "계정 제재"·null 을
+            // 고정으로 내려서, 기간제 정지인데도 화면이 언제 풀리는지 말해 줄 수 없었다.
+            assertThat((String) read(res, "$.data.user.lockInfo.reason"))
+                    .as("운영자가 입력한 사유가 그대로 내려간다").isEqualTo("테스트 잠금");
+            assertThat(java.time.Instant.parse((String) read(res, "$.data.user.lockInfo.unlockAt")))
+                    .as("30일 뒤 해제 — 클라가 남은 기간을 계산할 수 있어야 한다")
+                    .isAfter(java.time.Instant.now().plus(java.time.Duration.ofDays(29)));
             assertThat((String) read(res, "$.data.accessToken")).isNotBlank();   // 열람 전용 홈 진입용
         }
 

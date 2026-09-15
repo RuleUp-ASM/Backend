@@ -32,6 +32,7 @@ public class AppLinkCheckService {
     private final ChallengeInvitationRepository challengeInvitationRepository;
     private final WatcherInvitationRepository watcherInvitationRepository;
     private final com.ruleup.ruleup_backend.watcher.infra.Tokens watcherTokens;
+    private final com.ruleup.ruleup_backend.invitation.InviteCodeRepository inviteCodeRepository;
 
     public AppLinkCheckDtos.Response check(String url) {
         if (url == null || url.isBlank()) throw new BusinessException(ErrorCode.APP_LINK_URL_REQUIRED);
@@ -40,13 +41,13 @@ public class AppLinkCheckService {
         if (!parsed.isWellFormed())
             return AppLinkCheckDtos.Response.invalid(null, null, parsed.failure(), null);
 
-        Optional<Instant> expiresAt = expiryOf(parsed);
-        if (expiresAt.isEmpty())
+        Target target = targetOf(parsed);
+        if (!target.exists())
             return AppLinkCheckDtos.Response.invalid(parsed.type(), parsed.token(),
                     AppLinkCheckReason.NOT_FOUND, null);
 
-        Instant expiry = expiresAt.get();
-        if (!expiry.isAfter(Instant.now()))
+        Instant expiry = target.expiresAt();
+        if (expiry != null && !expiry.isAfter(Instant.now()))
             return AppLinkCheckDtos.Response.invalid(parsed.type(), parsed.token(),
                     AppLinkCheckReason.EXPIRED, expiry.toString());
 
@@ -54,18 +55,41 @@ public class AppLinkCheckService {
     }
 
     /**
-     * 대상의 만료 시각. 비어 있으면 대상이 없다는 뜻이다.
+     * 링크가 가리키는 대상.
+     *
+     * <p><b>존재와 만료를 따로 담는다.</b> 예전에는 만료 시각 하나로 둘을 겸했는데, 그러면 만료가
+     * 없는 링크를 「대상 없음」과 구분할 수 없다 — 친구 초대 코드가 그런 경우다.
+     *
+     * @param exists    대상을 찾았는가
+     * @param expiresAt 만료 시각. {@code null} 이면 만료가 없는 링크다
+     */
+    private record Target(boolean exists, Instant expiresAt) {
+        static Target none() { return new Target(false, null); }
+        static Target neverExpires() { return new Target(true, null); }
+        static Target expiring(Instant at) { return new Target(true, at); }
+        static Target of(Optional<Instant> expiry) {
+            return expiry.map(Target::expiring).orElseGet(Target::none);
+        }
+    }
+
+    /**
+     * 대상을 찾는다.
      *
      * <p>토큰 원본은 어디에도 저장돼 있지 않으므로 각 타입의 해시 규칙으로 다시 해싱해 찾는다 —
      * DB 를 읽을 수 있게 된 사람이 곧바로 남의 방에 들어갈 수 없게 하려는 설계다.
      * 챌린지는 SHA-256 바이트, 감시자는 같은 해시의 hex 문자열로 저장한다.
+     *
+     * <p>친구 초대만 해싱하지 않는다. 그 값은 비밀이 아니라 <b>사람이 읽고 옮겨 적는 6자리 코드</b>라
+     * 가입 화면에 직접 입력하는 경로도 있다. 알아내도 얻는 것이 남의 가입에 내 코드를 붙이는 일뿐이다.
      */
-    private Optional<Instant> expiryOf(AppLinks.Parsed parsed) {
+    private Target targetOf(AppLinks.Parsed parsed) {
         return switch (parsed.type()) {
-            case CHALLENGE_INVITATION -> challengeInvitationRepository
+            case CHALLENGE_INVITATION -> Target.of(challengeInvitationRepository
                     .findByTokenHash(InvitationTokens.hash(parsed.token()))
-                    .map(i -> i.getExpiresAt());
-            case WATCHER_INVITATION -> watcherExpiry(parsed.token());
+                    .map(i -> i.getExpiresAt()));
+            case WATCHER_INVITATION -> Target.of(watcherExpiry(parsed.token()));
+            case FRIEND_INVITATION -> inviteCodeRepository.existsByCode(parsed.token())
+                    ? Target.neverExpires() : Target.none();
         };
     }
     private Optional<Instant> watcherExpiry(String token) {

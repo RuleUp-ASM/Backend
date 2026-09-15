@@ -819,7 +819,12 @@ class WatcherRelationIT extends ChallengeApiSupport {
         assertThat(data).containsEntry("status","INVITED").containsEntry("acceptRequiresLogin",true)
                 .containsEntry("consentVersion",WatcherRelation.CONSENT_VERSION);
         assertThat(data.get("appLink").toString()).startsWith("ruleup://watchers/invitations/").endsWith("/accept");
-        expectError(mvc.perform(get("/api/v1/watchers/invitations/"+token.substring(0,10)+"A"+token.substring(11))).andReturn(),404,"INVITATION_NOT_FOUND");
+        // 한 글자만 바꿔 위조한다. 무엇으로 바꿀지는 원래 글자를 보고 정해야 한다 —
+        // 고정으로 'A' 를 넣으면 원래가 'A' 인 토큰에서는 그대로라 200 이 되어 무작위로 깨진다.
+        char at10=token.charAt(10);
+        String forged=token.substring(0,10)+(at10=='A'?'B':'A')+token.substring(11);
+        assertThat(forged).isNotEqualTo(token);
+        expectError(mvc.perform(get("/api/v1/watchers/invitations/"+forged)).andReturn(),404,"INVITATION_NOT_FOUND");
         assertThat(columnExists("watcher_relations","push_enabled")).isFalse();
         assertThat(tableExists("watcher_consent_logs")).isFalse();
     }

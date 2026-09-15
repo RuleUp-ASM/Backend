@@ -80,7 +80,7 @@ public abstract class ChallengeApiSupport extends AuthApiSupport {
                         "(id, owner_id, title, ai_title, description, category, mode, capacity, repeat_days, " +
                         " duration_days, start_date, end_date, verification_config, params, " +
                         " penalty_config, reward_config, anonymity, status, moderation_status, ai_assisted, participant_count) " +
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, 50, '[\"MON\",\"TUE\",\"WED\",\"THU\",\"FRI\",\"SAT\",\"SUN\"]', " +
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, 30, '[\"MON\",\"TUE\",\"WED\",\"THU\",\"FRI\",\"SAT\",\"SUN\"]', " +
                         " 14, DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL ? DAY), " +
                         " DATE_ADD(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL ? DAY), " +
                         " '{\"selectedMethod\":\"MANUAL\",\"verificationType\":\"MANUAL\",\"signalSource\":\"SELF_CHECK\",\"wearableReq\":\"NONE\",\"requiredPermissions\":[]}', " +

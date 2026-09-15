@@ -53,14 +53,17 @@ public record SignupResponse(
 
     public static SignupResponse from(TokenService.TokenPair pair, User user, UserScoreSummary summary,
                                       int flushIntervalSec) {
+        // 갓 만들어진 계정이라 제재가 있을 수 없다.
         return new SignupResponse(true, false, pair.accessToken(), pair.refreshToken(), "Bearer",
-                pair.expiresIn(), flushIntervalSec, UserResponse.from(user, summary));
+                pair.expiresIn(), flushIntervalSec, UserResponse.from(user, summary, null));
     }
 
     /** 탈퇴 계정의 복귀 — 새 계정을 만든 게 아니라 이전 계정을 되살려 로그인시킨 경우. */
     public static SignupResponse restored(TokenService.TokenPair pair, User user, UserScoreSummary summary,
-                                          int flushIntervalSec) {
+                                          int flushIntervalSec,
+                                          com.ruleup.ruleup_backend.sanction.domain.Sanction lock) {
+        // 복원은 제재 이력도 함께 되살린다(세탁 불가) — 잠금 상세가 실제로 채워지는 경로다.
         return new SignupResponse(false, true, pair.accessToken(), pair.refreshToken(), "Bearer",
-                pair.expiresIn(), flushIntervalSec, UserResponse.from(user, summary));
+                pair.expiresIn(), flushIntervalSec, UserResponse.from(user, summary, lock));
     }
 }

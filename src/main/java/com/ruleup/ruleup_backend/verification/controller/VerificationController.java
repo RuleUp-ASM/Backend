@@ -141,7 +141,7 @@ public class VerificationController {
     @PostMapping("/{verificationId}/appeals")
     public ApiResponse<AppealResponse> appeal(
             @AuthenticationPrincipal String userId,
-            @Parameter(description = "이의 대상 인증 ID — today 응답의 unacknowledgedResult.verificationId")
+            @Parameter(description = "이의 대상 인증 ID — today 응답의 verificationId")
             @PathVariable UUID verificationId,
             @RequestBody AppealSubmitRequest request) {
         return ApiResponse.ok(appealService.submit(UUID.fromString(userId), verificationId, request));

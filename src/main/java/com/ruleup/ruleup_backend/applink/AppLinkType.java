@@ -12,7 +12,15 @@ public enum AppLinkType {
     CHALLENGE_INVITATION("c"),
 
     /** 감시자 초대 — 외부인에게 보내는 동의 요청. */
-    WATCHER_INVITATION("w");
+    WATCHER_INVITATION("w"),
+
+    /**
+     * 친구 초대 — 가입 시 초대 코드를 연동한다.
+     *
+     * <p>앞의 둘과 달리 <b>만료가 없다.</b> 토큰이 아니라 유저당 하나로 고정된 코드라서,
+     * 한 번 공유한 링크가 나중에 죽으면 안 된다.
+     */
+    FRIEND_INVITATION("inv");
 
     private final String segment;
 

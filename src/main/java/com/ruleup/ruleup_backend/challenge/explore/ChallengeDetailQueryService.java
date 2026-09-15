@@ -54,6 +54,7 @@ public class ChallengeDetailQueryService {
     private final JdbcTemplate jdbc;
     private final com.ruleup.ruleup_backend.room.service.ChallengeRejoinPolicy rejoinPolicy;
     private final com.ruleup.ruleup_backend.challenge.lifecycle.ChallengeHistoryQueryService history;
+    private final com.ruleup.ruleup_backend.challenge.view.ChallengeMasking masking;
 
     @Transactional(readOnly = true)
     public ChallengeDetailResponse detail(UUID viewerId, UUID challengeId) {
@@ -76,11 +77,14 @@ public class ChallengeDetailQueryService {
                 blockReason(c, viewerId, myMembership, isOwner, activeCount, eligible);
         LocalDate today = LocalDate.now(KST);
 
+        var view = com.ruleup.ruleup_backend.challenge.view.ChallengeView.of(
+                c, isOwner, masking.isMasked(viewerId, challengeId));
+
         return new ChallengeDetailResponse(
                 c.getId().toString(),
-                isOwner ? c.getTitle() : c.publicTitle(),
-                isOwner ? c.getDescription() : c.publicDescription(),
-                isOwner ? c.getImageUrl() : c.publicImageUrl(),
+                view.title(),
+                view.description(),
+                view.imageUrl(),
                 c.getCategory(),
                 c.getParticipationType().name(),
                 c.getVisibility(),

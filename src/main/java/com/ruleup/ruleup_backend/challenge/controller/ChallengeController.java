@@ -6,7 +6,6 @@ import com.ruleup.ruleup_backend.challenge.settings.ChallengeSettingsService;
 import com.ruleup.ruleup_backend.challenge.draft.ChallengeDraftService;
 import com.ruleup.ruleup_backend.challenge.explore.ChallengeCloneService;
 import com.ruleup.ruleup_backend.challenge.explore.ChallengeDetailQueryService;
-import com.ruleup.ruleup_backend.challenge.service.ChallengeService;
 import com.ruleup.ruleup_backend.challenge.service.MyChallengeQueryService;
 import com.ruleup.ruleup_backend.common.docs.ApiErrorCodes;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
@@ -27,7 +26,7 @@ import com.ruleup.ruleup_backend.challenge.recommendation.RecommendationRateLimi
 
 import java.util.UUID;
 
-@Tag(name = "Challenge", description = "챌린지 추천 · 생성 · 조회 · 수정 · 삭제")
+@Tag(name = "Challenge", description = "챌린지 추천 · 생성 · 조회 · 수정")
 @SecurityRequirement(name = "bearerAuth")
 @RestController
 @RequestMapping("/api/v1/challenges")
@@ -37,7 +36,6 @@ public class ChallengeController {
     private final ChallengeDraftService challengeDraftService;
     private final ChallengeCreationService challengeCreationService;
     private final ChallengeSettingsService challengeSettingsService;
-    private final ChallengeService challengeService;
     private final MyChallengeQueryService myChallengeQueryService;
     private final ChallengeDetailQueryService detailQueryService;
     private final ChallengeCloneService cloneService;
@@ -65,7 +63,12 @@ public class ChallengeController {
 
     @Operation(summary = "챌린지 최종 생성",
             description = "확인 화면에서 수정을 마친 초안으로 생성. Idempotency-Key 헤더 필수(DB 유니크 — 재시도 안전). "
-                    + "심사 대상은 서버가 draftId 원본 대조로 판정(자가 신고 없음). 201 + UPCOMING.")
+                    + "심사 대상은 서버가 draftId 원본 대조로 판정(자가 신고 없음). 201 + UPCOMING. "
+                    + "`capacity` 는 **고르는 값**이다 — 5·30·100·300 중 하나이거나 null(무제한)이고, "
+                    + "그 밖의 값은 사이 값이라도 400 `CAPACITY_OUT_OF_RANGE`. SOLO 는 1 고정이라 입력을 무시한다. "
+                    + "**확인 화면에서 SOLO 초안을 GROUP 으로 바꿨다면 `capacity` 를 반드시 고른 값으로 실어야 한다** — "
+                    + "SOLO 초안은 정원 1을 들고 오는데 1 은 GROUP 선택지가 아니라서, 그대로 보내면 400 이다. "
+                    + "서버가 기본값으로 메워 주지 않는 것은 정원이 사용자가 고르는 값이기 때문이다.")
     @PostMapping
     @ResponseStatus(org.springframework.http.HttpStatus.CREATED)
     public ApiResponse<CreateChallengeResponse> create(
@@ -162,7 +165,9 @@ public class ChallengeController {
     @Operation(summary = "챌린지 수정(방장)",
             description = "JSON Merge Patch 유사 — 미포함 필드 미변경, null 은 imageUrl(기본 이미지 되돌리기)만 유효. "
                     + "version 필수(불일치 409). 시작 전+혼자=카테고리 제외 전부, 그 외=제목·설명·정원·이미지. "
-                    + "제목·설명·이미지는 수정 시 재심사, 반복 거부 잠금 중 429.")
+                    + "제목·설명·이미지는 수정 시 재심사, 반복 거부 잠금 중 429. "
+                    + "`capacity` 는 생성과 **같은 선택지**다 — 5·30·100·300 또는 null(무제한). "
+                    + "현재 참여 인원보다 작게 줄이면 400 `CAPACITY_BELOW_CURRENT`.")
     @PatchMapping("/{challengeId}")
     public ApiResponse<PatchChallengeResponse> update(@AuthenticationPrincipal String userId,
                                                       @PathVariable String challengeId,

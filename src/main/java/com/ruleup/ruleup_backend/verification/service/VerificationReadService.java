@@ -1,6 +1,7 @@
 package com.ruleup.ruleup_backend.verification.service;
 
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
+import com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
@@ -33,6 +34,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -50,6 +52,7 @@ public class VerificationReadService {
     private static final DateTimeFormatter ISO_OFFSET = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
 
     private final ChallengeQueryService challengeQuery;
+    private final com.ruleup.ruleup_backend.challenge.view.ChallengeMasking masking;
     private final VerificationDailyRepository dailyRepo;
     private final VerificationMethodResultRepository methodResultRepo;
     private final VerificationFailureDetailRepository failureDetailRepo;
@@ -58,16 +61,34 @@ public class VerificationReadService {
     private final StreakService streakService;
 
     // ===== GET /api/v1/verifications/progress — 진행률 일괄 =====
+
+    /**
+     * 내 챌린지 진행률.
+     *
+     * <p>{@code ACTIVE} 는 <b>지금 진행 중인 방</b>이다. 그런데 방이 끝나도 멤버십은 ACTIVE 로
+     * 남는다 — 종료 배치는 방의 상태 축만 마감하고 멤버를 건드리지 않는다(완주율·최종 랭킹이
+     * 멤버 행을 그대로 읽어야 하기 때문이다). 그래서 멤버십만 보고 거르면 <b>끝난 방이 홈의
+     * 진행률 목록에 계속 남는다</b>.
+     *
+     * <p>{@code findActiveChallenge} 는 이름과 달리 소프트 삭제만 거른다. 그 이름을 믿고 한 번 더
+     * 거르지 않은 것이 이 버그였다.
+     */
     public List<ChallengeProgress> progress(UUID userId, String statusFilter) {
-        List<ChallengeMember> members = "ALL".equalsIgnoreCase(statusFilter)
+        boolean all = "ALL".equalsIgnoreCase(statusFilter);
+        List<ChallengeMember> members = all
                 ? challengeQuery.findAllMemberships(userId)
                 : challengeQuery.findActiveMemberships(userId);
         LocalDate today = LocalDate.now(KST);
+        // 목록이라 차단 집합을 한 번만 읽는다 — 항목마다 물으면 화면 한 장에 왕복이 수십 번이다.
+        Set<UUID> masked = masking.maskedFor(userId);
         List<ChallengeProgress> out = new ArrayList<>();
         for (ChallengeMember m : members) {
             Challenge ch = challengeQuery.findActiveChallenge(m.getChallengeId()).orElse(null);
             if (ch == null) continue;
-            out.add(toProgress(m, ch, configFactory.build(ch), today));
+            // 시작 전(UPCOMING)은 남긴다 — 곧 시작할 방도 「내 챌린지」에 보여야 한다.
+            if (!all && ch.getStatus() == ChallengeStatus.COMPLETED) continue;
+            out.add(toProgress(m, ch, configFactory.build(ch), today,
+                    masked.contains(ch.getId()), ch.isOwner(userId)));
         }
         return out;
     }
@@ -100,6 +121,7 @@ public class VerificationReadService {
         Failure failure = (failing && daily != null) ? failureOf(daily, config) : Failure.NONE;
 
         return new TodayVerificationResponse(
+                (daily != null) ? daily.getId().toString() : null,
                 today.toString(),
                 status,
                 TodayStatusView.NOT_TARGET.equals(status) ? null : windowLabel(config),
@@ -196,13 +218,16 @@ public class VerificationReadService {
                 !alreadyFiled && daily.isAppealable(polarity, now));
     }
 
-    private ChallengeProgress toProgress(ChallengeMember m, Challenge ch, VerificationConfig config, LocalDate today) {
+    private ChallengeProgress toProgress(ChallengeMember m, Challenge ch, VerificationConfig config,
+                                         LocalDate today, boolean masked, boolean viewerIsOwner) {
         boolean freq = config.isFrequency();
         int remaining = freq
                 ? Math.max(m.getTargetDays() - m.getSuccessDays(), 0)
                 : Math.max(m.getTargetDays() - m.getSuccessDays() - m.getFailDays(), 0);
         return new ChallengeProgress(
-                ch.getId().toString(), ch.getTitle(), ch.getCategory(), ch.getParticipationType().name(),
+                ch.getId().toString(),
+                com.ruleup.ruleup_backend.challenge.view.ChallengeView.of(ch, viewerIsOwner, masked).title(),
+                ch.getCategory(), ch.getParticipationType().name(),
                 ch.getStatus().name(), m.getScheduleType().name(), m.getProgressRate(),
                 m.getSuccessDays(), m.getTargetDays(), remaining,
                 isTodayTarget(config, ch, m, today),

@@ -17,6 +17,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /** Live rooms and complete deletion snapshots share the same response and cursor. */
@@ -36,6 +37,7 @@ public class MyChallengeQueryService {
     private static final String NULL_TEXT = "CAST(NULL AS CHAR)" + COLLATION;
 
     private final JdbcTemplate jdbc;
+    private final com.ruleup.ruleup_backend.challenge.view.ChallengeMasking masking;
 
     @Transactional(readOnly = true)
     public ChallengeListResponse myChallenges(UUID userId, String filterRaw, String cursorRaw, Integer sizeRaw) {
@@ -64,8 +66,10 @@ public class MyChallengeQueryService {
         boolean hasNext = fetched.size() > size;
         List<Row> page = hasNext ? fetched.subList(0, size) : fetched;
 
+        // 목록이라 차단 집합을 한 번만 읽는다.
+        Set<UUID> masked = masking.maskedFor(userId);
         List<ChallengeListResponse.Item> items = page.stream()
-                .map(r -> toItem(r, filter)).toList();
+                .map(r -> toItem(r, filter, masked)).toList();
         String next = hasNext && !page.isEmpty()
                 ? encode(new Cursor(page.get(page.size() - 1).endDate == null ? LocalDate.of(9999,12,31) : page.get(page.size() - 1).endDate, page.get(page.size() - 1).challengeId))
                 : null;
@@ -125,14 +129,16 @@ public class MyChallengeQueryService {
         return "_utf8mb4'" + literal + "'" + COLLATION;
     }
 
-    private ChallengeListResponse.Item toItem(Row r, MyChallengeFilter filter) {
+    private ChallengeListResponse.Item toItem(Row r, MyChallengeFilter filter, Set<UUID> masked) {
         boolean leftTab = filter == MyChallengeFilter.LEFT;
+        // 신고해 차단한 방은 심사 가려짐과 같은 자리로 내린다 — 표시 규칙은 ChallengeView 와 하나다.
+        boolean hidden = masked.contains(r.challengeId);
         return new ChallengeListResponse.Item(
                 r.challengeId.toString(),
                 // 심사 중·거부면 AI 임시 제목 / 빈 설명 / 기본 이미지로 대체 표시한다.
-                publicVisible(r.moderationTitle) ? r.title : r.aiTitle,
-                publicVisible(r.moderationDescription) ? r.description : null,
-                publicVisible(r.moderationImage) ? r.imageUrl : null,
+                (hidden || !publicVisible(r.moderationTitle)) ? r.aiTitle : r.title,
+                (hidden || !publicVisible(r.moderationDescription)) ? null : r.description,
+                (hidden || !publicVisible(r.moderationImage)) ? null : r.imageUrl,
                 r.category,
                 r.mode,
                 r.visibility,

@@ -1,6 +1,7 @@
 package com.ruleup.ruleup_backend.auth.dto;
 
 import com.ruleup.ruleup_backend.score.domain.Tier;
+import com.ruleup.ruleup_backend.sanction.domain.Sanction;
 import com.ruleup.ruleup_backend.score.domain.UserScoreSummary;
 import com.ruleup.ruleup_backend.user.domain.NicknameStatus;
 import com.ruleup.ruleup_backend.user.domain.ProfileImageStatus;
@@ -89,11 +90,19 @@ public record UserResponse(
 
     @Schema(name = "LockInfo", description = "계정 잠금 상세 (LOCKED 일 때만)")
     public record LockInfo(
-            @Schema(description = "잠금 사유", example = "계정 잠금") String reason,
-            @Schema(description = "잠금 해제 예정 시각(ISO-8601). 미정이면 null.", example = "2026-09-01T00:00:00Z")
+            @Schema(description = "운영자가 입력한 제재 사유. 그대로 화면에 보여 줄 문구다.",
+                    example = "커뮤니티 규정 위반으로 7일 이용이 제한되었습니다.") String reason,
+            @Schema(description = """
+                    해제 예정 시각(ISO-8601). **영구 정지와 탈퇴 동결은 null** 이다 —
+                    둘 다 끝나는 시각이 정해져 있지 않다.""",
+                    example = "2026-09-01T00:00:00Z")
             String unlockAt) {}
 
-    public static UserResponse from(User user, UserScoreSummary summary) {
+    /**
+     * @param lock 지금 효력이 있는 제재. <b>정지 상태가 아니면 호출부가 null 을 넘긴다</b> —
+     *             정상 사용자까지 제재 테이블을 읽게 하지 않으려는 것이다.
+     */
+    public static UserResponse from(User user, UserScoreSummary summary, Sanction lock) {
         Tier tier = (summary != null) ? summary.getActualTier() : Tier.UNRANKED;
         Tier displayTier = (summary != null) ? summary.getDisplayTier() : Tier.UNRANKED;
         // 티어 안에서 0~99 로 끊지 않는다 — 계정당 하나의 단일 축 0~2,000 이다(정책 §1.1, 2026-08-26).
@@ -109,7 +118,7 @@ public record UserResponse(
                 user.getInterestCategories(),
                 true,                                   // 가입이 원자적이라 완료 사용자만 존재
                 user.getStatus().name(),
-                lockInfo(user));
+                lockInfo(user, lock));
     }
 
     /**
@@ -130,12 +139,23 @@ public record UserResponse(
     }
 
     /**
-     * 제재 중이라는 사실만 알린다. 종류·사유·해제일은 {@code sanctions} 가 소유하므로
-     * 여기서 조회하지 않고 <b>GET /api/v1/users/me/sanctions</b> 로 보낸다 — 로그인 응답마다
-     * 제재 테이블을 읽으면 정상 사용자까지 비용을 물게 된다.
+     * 잠금 상세. <b>기간제 정지의 사유와 해제 예정 시각을 실제 값으로 채운다</b> — 클라이언트는
+     * 이 두 값으로 남은 기간을 계산해 보여 준다. 예전에는 "계정 제재"·null 을 고정으로 내려서,
+     * 기간제 정지인데도 화면이 언제 풀리는지 말해 줄 수 없었다.
+     *
+     * <p>조회 비용은 늘지 않는다. 호출부가 <b>정지 상태일 때만</b> 제재를 찾아 넘기므로 정상
+     * 사용자는 제재 테이블을 건드리지 않는다.
+     *
+     * <p>{@code unlockAt} 이 null 인 경우가 둘이라는 점이 중요하다 — <b>영구 정지</b>와
+     * <b>탈퇴로 동결된 잔여 기간</b>이다. 둘 다 「지금은 끝나는 시각이 없다」가 맞는 표현이라
+     * 같은 값으로 내린다. 종류까지 구분해야 하면 {@code GET /api/v1/users/me/sanctions} 를 쓴다.
      */
-    private static LockInfo lockInfo(User user) {
+    private static LockInfo lockInfo(User user, Sanction lock) {
         if (!user.isSuspended()) return null;
-        return new LockInfo("계정 제재", null);
+        // 정지 상태인데 효력 있는 제재 행이 없다 — 만료됐는데 상태가 아직 안 풀린 경우다.
+        // 화면이 빈 값을 그리지 않도록 예전 문구로 폴백한다.
+        if (lock == null) return new LockInfo("계정 제재", null);
+        return new LockInfo(lock.getReasonText(),
+                lock.getEndsAt() == null ? null : lock.getEndsAt().toString());
     }
 }

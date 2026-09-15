@@ -1,9 +1,11 @@
 package com.ruleup.ruleup_backend.user.domain;
 
 /**
- * 성별 (user_information.gender). API 계약(2026-08-03 확정)은 MALE/FEMALE/NON_BINARY.
- * "미응답" 표현은 정책 합의 전이라 DB·enum 은 NON_BINARY(API 계약)와
- * PREFER_NOT_TO_SAY(DB 정리 문서)를 모두 보유한다 — 확정 시 한쪽을 제거한다.
+ * 성별 (user_information.gender).
+ *
+ * <p><b>가입으로 들어올 수 있는 값은 MALE/FEMALE 뿐이다</b>(AuthService#parseGender). 아래 둘은
+ * 「미응답」을 어떻게 적을지 합의되기 전에 양쪽 표기가 함께 들어온 흔적으로, 지금 정책은 성별을
+ * 건너뛸 수 없게 하므로 새로 쌓이지 않는다. 남겨 두는 것은 이미 저장된 값을 읽기 위해서다.
  */
 public enum Gender {
     MALE, FEMALE, NON_BINARY, PREFER_NOT_TO_SAY

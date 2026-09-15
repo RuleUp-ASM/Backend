@@ -69,7 +69,7 @@ class ChallengeSettingsPatchIT extends ChallengeApiSupport {
         body.put("category", "EXERCISE");
         body.put("mode", "GROUP");
         body.put("visibility", "PUBLIC");
-        body.put("capacity", 50);
+        body.put("capacity", 30);
         body.put("minTier", "BRONZE");
         body.put("period", Map.of(
                 "start", (String) read(draft, "$.data.draft.period.start"),
@@ -136,7 +136,7 @@ class ChallengeSettingsPatchIT extends ChallengeApiSupport {
             assertThat((String) read(res, "$.data.config.category")).isEqualTo("EXERCISE");
             assertThat((String) read(res, "$.data.config.mode")).isEqualTo("GROUP");
             assertThat((String) read(res, "$.data.config.visibility")).isEqualTo("PUBLIC");
-            assertThat((Integer) read(res, "$.data.config.capacity")).isEqualTo(50);
+            assertThat((Integer) read(res, "$.data.config.capacity")).isEqualTo(30);
             assertThat((String) read(res, "$.data.config.minTier")).isEqualTo("BRONZE");
             assertThat((String) read(res, "$.data.config.verification.type")).isEqualTo("AUTO");
             assertThat((Boolean) read(res, "$.data.config.penalties.score")).isTrue();
@@ -206,12 +206,13 @@ class ChallengeSettingsPatchIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("[P1] 정원 수정도 1~300명만 받는다 — 생성과 같은 규칙이어야 한다")
+        @DisplayName("[P1] 정원 수정도 선택지만 받는다 — 생성과 같은 규칙이어야 한다")
         void capacityPatchRejectsOutOfRange() throws Exception {
             Member owner = member(uniq("pat-cap-choice"));
             String id = createGroupChallenge(owner.token());
 
-            for (int notAllowed : java.util.List.of(0, -1, 301, 1000)) {
+            // 사이값(47·50)까지 막아야 한다. 생성만 좁히고 수정을 열어 두면 수정으로 우회된다.
+            for (int notAllowed : java.util.List.of(0, -1, 47, 50, 301, 1000)) {
                 int v = currentVersion(owner.token(), id);
                 MvcResult res = patchJsonAuth("/api/v1/challenges/" + id, owner.token(),
                         Map.of("version", v, "capacity", notAllowed));

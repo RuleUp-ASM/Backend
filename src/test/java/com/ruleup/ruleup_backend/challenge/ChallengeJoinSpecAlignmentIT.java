@@ -305,11 +305,13 @@ class ChallengeJoinSpecAlignmentIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("[P1] 9종에 없는 값은 거절한다 — 정원은 고른 값이지 적어 넣는 값이 아니다")
+        @DisplayName("[P1] 선택지에 없는 값은 거절한다 — 정원은 고른 값이지 적어 넣는 값이 아니다")
         void capacityOutsideRangeIsRejected() throws Exception {
             String token = memberToken(uniq("cap-choice"));
 
-            for (int notAllowed : List.of(0, -1, 301, 1000)) {
+            // 47·50 이 핵심이다. 범위(1~300) 안이지만 선택지가 아니므로 거절해야 한다 —
+            // 범위만 보던 옛 검증은 이 둘을 통과시켰다.
+            for (int notAllowed : List.of(0, -1, 47, 50, 301, 1000)) {
                 MvcResult res = createWithCapacity(token, notAllowed);
                 assertThat(res.getResponse().getStatus())
                         .as("허용값 밖의 정원 %d 가 통과했다", notAllowed)
@@ -319,7 +321,7 @@ class ChallengeJoinSpecAlignmentIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("[P1] 무제한은 capacity 를 비워서 만든다 — 9종을 좁히면서 막아 두면 안 된다")
+        @DisplayName("[P1] 무제한은 capacity 를 비워서 만든다 — 선택지를 좁히면서 막아 두면 안 된다")
         void unlimitedIsCreatedWithNoCapacity() throws Exception {
             String token = memberToken(uniq("cap-unlimited-create"));
 
@@ -339,7 +341,7 @@ class ChallengeJoinSpecAlignmentIT extends ChallengeApiSupport {
         @DisplayName("[P1] 300 까지는 고를 수 있고, 그보다 크면 무제한뿐이다")
         void threeHundredIsTheLargestFiniteChoice() throws Exception {
             assertThat(createWithCapacity(memberToken(uniq("cap-300")), 300).getResponse().getStatus())
-                    .as("300 은 9종 중 하나다").isEqualTo(201);
+                    .as("300 은 선택지 중 하나다").isEqualTo(201);
         }
     }
 }
