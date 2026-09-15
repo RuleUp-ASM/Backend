@@ -88,6 +88,26 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.fail(ErrorResponse.of(code)));
     }
 
+    /**
+     * 멀티파트 part / 쿼리 파라미터가 계약과 다른 이름으로 왔다 → <b>400</b>.
+     *
+     * <p>바인딩 단계에서 터지므로 컨트롤러 본문은 실행되지도 않는다. 즉 <b>요청이 잘못된 것</b>이고
+     * 서버가 고장난 게 아닌데, 구체 핸들러가 없어 만능 핸들러가 500 으로 삼키고 있었다.
+     * 이의·문의 첨부가 통째로 실패하던 사건(QA CS-07)이 그 형태였다 — 앱은 명세대로
+     * {@code image} 를 보냈고 서버만 {@code file} 을 읽고 있었는데, 응답이 500 이라
+     * 앱·서버 양쪽 모두 원인을 이름 불일치가 아니라 저장소 장애에서 찾았다.
+     *
+     * <p>이름을 맞추는 것과 별개로 이 매핑이 필요하다. 500 은 재시도·알림·대시보드가 모두 다르게
+     * 반응하는 값이라, 클라이언트 실수를 500 으로 돌려주면 다음에도 같은 곳을 헤매게 된다.
+     */
+    @ExceptionHandler({org.springframework.web.multipart.support.MissingServletRequestPartException.class,
+            org.springframework.web.bind.MissingServletRequestParameterException.class})
+    public ResponseEntity<ApiResponse<Void>> handleMissingPart(Exception e) {
+        log.warn("요청 형식 불일치 — {}", e.getMessage());
+        ErrorCode code = ErrorCode.INVALID_REQUEST;
+        return ResponseEntity.status(code.getStatus()).body(ApiResponse.fail(ErrorResponse.of(code)));
+    }
+
     // 멀티파트 용량 초과 → 413
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ResponseEntity<ApiResponse<Void>> handleTooLarge(MaxUploadSizeExceededException e) {
