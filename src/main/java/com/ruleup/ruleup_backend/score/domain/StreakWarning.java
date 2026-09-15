@@ -3,7 +3,7 @@ package com.ruleup.ruleup_backend.score.domain;
 /**
  * 연속 실패 경고를 낼 시점 — 순수 함수다.
  *
- * <p>값은 {@link ChallengeStreak} 이 원본으로 적어 둔 <b>2사이클 경고 · 3사이클 강퇴</b>에서 온다.
+ * <p>값은 사이클 결과 이 원본으로 적어 둔 <b>2사이클 경고 · 3사이클 강퇴</b>에서 온다.
  * 경고는 강퇴 직전 고지라 <b>정확히 한 번</b> 울려야 한다.
  *
  * <ul>

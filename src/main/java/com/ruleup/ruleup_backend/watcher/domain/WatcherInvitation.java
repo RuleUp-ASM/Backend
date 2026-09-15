@@ -37,7 +37,8 @@ public class WatcherInvitation extends AssignedIdEntity {
     private UUID id;
 
     /** SHA-256 — <b>원본 미저장</b>. */
-    @Column(name = "token_hash", nullable = false, unique = true, length = 64, updatable = false)
+    @Convert(converter = com.ruleup.ruleup_backend.watcher.infra.HashConverter.class)
+    @Column(name = "token_hash", nullable = false, unique = true, columnDefinition = "BINARY(32)", updatable = false)
     private String tokenHash;
 
     @JdbcTypeCode(SqlTypes.BINARY)
@@ -74,7 +75,7 @@ public class WatcherInvitation extends AssignedIdEntity {
     }
 
     public boolean isExpired(Instant now) {
-        return expiresAt.isBefore(now);
+        return !expiresAt.isAfter(now);
     }
 
     public void markAccepted(Instant at) {

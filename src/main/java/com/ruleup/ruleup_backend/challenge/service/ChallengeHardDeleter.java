@@ -24,6 +24,7 @@ public class ChallengeHardDeleter {
     private EntityManager entityManager;
 
     private final ExploreIndexer exploreIndexer;
+    private final com.ruleup.ruleup_backend.room.service.CrossRankingSnapshotService crossRanking;
 
     private static void afterCommit(Runnable action) {
         if (!org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
@@ -42,6 +43,7 @@ public class ChallengeHardDeleter {
         entityManager.flush();
         // 파생 인덱스에서 뺄 때 필요하다 — 행이 사라진 뒤에는 읽을 수 없으므로 지금 읽어 둔다.
         String category = readCategory(challengeId);
+        crossRanking.removeChallenge(challengeId);
         // 인증 기록 원본(VerificationDaily·MethodResult)·이의(Objection)·통계(RoutineOutcome)는 보존한다
         // (자동 삭제 스펙: 잔디는 삭제, 인증 원본·통계값 보존 — V6 소프트 참조 전환).
         // 감시자 — 반응 → 통지 → 이력 → 관계 순으로 잎에서부터 지운다. FK 에 ON DELETE CASCADE 가
@@ -49,8 +51,6 @@ public class ChallengeHardDeleter {
         exec("DELETE FROM watcher_reactions WHERE notice_id IN (SELECT n.id FROM watcher_notices n " +
                 "JOIN watcher_relations r ON r.id = n.relation_id WHERE r.challenge_id = :cid)", challengeId);
         exec("DELETE FROM watcher_notices WHERE relation_id IN " +
-                "(SELECT id FROM watcher_relations WHERE challenge_id = :cid)", challengeId);
-        exec("DELETE FROM watcher_consent_logs WHERE relation_id IN " +
                 "(SELECT id FROM watcher_relations WHERE challenge_id = :cid)", challengeId);
         exec("DELETE FROM watcher_relations WHERE challenge_id = :cid", challengeId);
         exec("DELETE FROM watcher_invitations WHERE challenge_id = :cid", challengeId);

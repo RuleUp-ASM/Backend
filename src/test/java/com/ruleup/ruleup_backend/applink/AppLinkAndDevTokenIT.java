@@ -40,6 +40,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 @SpringBootTest(properties = "app.dev-tokens.secret=test-dev-secret")
 @Import(TestcontainersConfiguration.class)
 class AppLinkAndDevTokenIT extends ChallengeApiSupport {
+    @Autowired com.ruleup.ruleup_backend.watcher.infra.Tokens watcherTokens;
+    @Autowired com.ruleup.ruleup_backend.watcher.repository.WatcherInvitationRepository watcherInvitations;
 
     @Autowired WebApplicationContext wac;
     @Autowired JdbcTemplate jdbcTemplate;
@@ -145,13 +147,9 @@ class AppLinkAndDevTokenIT extends ChallengeApiSupport {
         void watcherInvitation() throws Exception {
             Member owner = member("link-watcher");
             UUID ch = insertChallenge(owner.id(), "EXERCISE", "ACTIVE", "GROUP");
-            String token = com.ruleup.ruleup_backend.challenge.domain.InvitationTokens.generate();
-            jdbc().update("INSERT INTO watcher_invitations " +
-                            "(id, token_hash, challenge_id, inviter_user_id, expires_at) " +
-                            "VALUES (?, ?, ?, ?, DATE_ADD(NOW(3), INTERVAL 7 DAY))",
-                    bytes(UUID.randomUUID()),
-                    com.ruleup.ruleup_backend.watcher.infra.WatcherHashes.sha256Hex(token),
-                    bytes(ch), bytes(owner.id()));
+            String token = watcherTokens.issue(ch, owner.id(), java.time.Instant.now().plus(java.time.Duration.ofDays(7)));
+            watcherInvitations.save(com.ruleup.ruleup_backend.watcher.domain.WatcherInvitation.issue(ch, owner.id(),
+                    com.ruleup.ruleup_backend.watcher.infra.WatcherHashes.sha256Hex(token), java.time.Instant.now()));
 
             Map<String, Object> d = read(check(linkBaseUrl + "/w/" + token), "$.data");
 

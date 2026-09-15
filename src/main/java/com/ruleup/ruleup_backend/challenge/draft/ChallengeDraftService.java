@@ -108,8 +108,12 @@ public class ChallengeDraftService {
 
         // Step 5 — 형식 검증·이상값 보정(신뢰 경계): 제목·설명·카테고리·설정 전부 sanitize
         ChallengeSettings s = suggestion.settingsOrEmpty();
-        String title = sanitizeTitle(s.title(), description);
-        String correctedDescription = sanitizeDescription(s.description(), description);
+        if (s.title() == null || s.title().isBlank()) {
+            log.info("draft_result success=false fallback_step=INVALID_TITLE userId={}", userId);
+            return DraftResponse.fallback(LLM_FAILURE_MESSAGE);
+        }
+        String title = sanitizeTitle(s.title(), "");
+        String correctedDescription = sanitizeDescription(s.description(), "");
         String category = (template != null)
                 ? template.getCategory().name()
                 : sanitizeCategory(s.category());
@@ -253,7 +257,7 @@ public class ChallengeDraftService {
                 title, description, category, mode,
                 group ? "PUBLIC" : null,
                 group ? null : Boolean.TRUE,
-                DEFAULT_CAPACITY,
+                group ? DEFAULT_CAPACITY : 1,
                 displayTier(userId).name(),
                 new DraftView.Period(start.toString(), end.toString()),
                 weeklyCount,

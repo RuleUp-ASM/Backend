@@ -92,6 +92,12 @@ public class UserAccountService {
         return new WithdrawResponse(true, archiveExpiresAt.toString(), RESTORE_NOTE);
     }
 
+    @Transactional
+    public void withdrawDormant(UUID userId) {
+        challengeMemberService.leaveAllExternally(userId, "DORMANT");
+        withdraw(userId, CONFIRM_PHRASE);
+    }
+
     /** 내 프로필 조회 — user 블록(로그인 응답과 동일) + 생일·성별·동의 7종 현재 상태. */
     @Transactional(readOnly = true)
     public UserMeResponse me(UUID userId) {
@@ -114,7 +120,6 @@ public class UserAccountService {
 
         return new UserMeResponse(
                 UserResponse.from(user, summary),
-                user.getBirthDate() != null ? user.getBirthDate().toString() : null,
                 user.getGender() != null ? user.getGender().name() : null,
                 agreements);
     }

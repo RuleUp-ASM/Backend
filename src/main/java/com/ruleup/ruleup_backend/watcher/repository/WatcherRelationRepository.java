@@ -13,24 +13,24 @@ import java.util.UUID;
 
 public interface WatcherRelationRepository extends JpaRepository<WatcherRelation, UUID> {
 
-    /**
-     * <b>발송 대상 조회</b> — 이 쿼리가 "PENDING 발송 0건" 가드레일의 실행부다.
-     *
-     * <p>{@code status = ACTIVE} · 미제거 · 토글 ON 세 조건을 인덱스
-     * {@code (challenge_id, target_user_id, status, push_enabled)} 안에서 끝낸다.
-     */
+    /** Consent-bearing active relations, serialized with removal and dispatch. */
+    @org.springframework.transaction.annotation.Transactional
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             select r from WatcherRelation r
              where r.challengeId = :challengeId
                and r.targetUserId = :targetUserId
                and r.status = com.ruleup.ruleup_backend.watcher.domain.WatcherRelationStatus.ACTIVE
                and r.removedAt is null
-               and r.pushEnabled = true
+               and r.acceptedAt is not null
+               and r.consentVersion is not null
             """)
     List<WatcherRelation> findDispatchTargets(@Param("challengeId") UUID challengeId,
                                               @Param("targetUserId") UUID targetUserId);
 
     /** 3중 유니크 — 수락 처리가 멱등해지는 근거. */
+    @org.springframework.transaction.annotation.Transactional
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
     Optional<WatcherRelation> findByChallengeIdAndTargetUserIdAndWatcherUserId(
             UUID challengeId, UUID targetUserId, UUID watcherUserId);
 
@@ -59,4 +59,10 @@ public interface WatcherRelationRepository extends JpaRepository<WatcherRelation
      * 누적되면 자동 제거 배치가 죽은 것이다.
      */
     long countByStatusAndRemovedAtIsNullAndInvitedAtBefore(WatcherRelationStatus status, Instant before);
+    @Query("""
+            select r from WatcherRelation r where r.removedAt is null and exists
+            (select c.id from Challenge c where c.id = r.challengeId and
+             (c.status = com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus.COMPLETED or c.deletedAt is not null))
+            """)
+    List<WatcherRelation> findFinishedRelations();
 }

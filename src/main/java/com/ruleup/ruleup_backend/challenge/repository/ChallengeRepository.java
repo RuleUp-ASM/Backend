@@ -115,7 +115,7 @@ public interface ChallengeRepository extends JpaRepository<Challenge, UUID> {
      */
     @Query("SELECT c FROM Challenge c WHERE c.deletedAt IS NULL " +
             "AND c.moderationStatus IN (com.ruleup.ruleup_backend.challenge.domain.ChallengeModerationStatus.NONE, com.ruleup.ruleup_backend.challenge.domain.ChallengeModerationStatus.APPROVED) " +
-            "AND c.endDate >= :today")
+            "AND (c.endDate IS NULL OR c.endDate >= :today)")
     List<Challenge> findExploreCandidates(@Param("today") LocalDate today);
 
     /** 템플릿별 사용자 수(§3.2.1): 파생된 모든(삭제 제외) 챌린지의 현재 참여자 수 합. */
@@ -126,7 +126,7 @@ public interface ChallengeRepository extends JpaRepository<Challenge, UUID> {
     /** 카테고리별 진행 중(종료 전) 챌린지 수(§2.2): 삭제 X · APPROVED · endDate ≥ today. */
     @Query("SELECT c.category, COUNT(c) FROM Challenge c WHERE c.deletedAt IS NULL " +
             "AND c.moderationStatus IN (com.ruleup.ruleup_backend.challenge.domain.ChallengeModerationStatus.NONE, com.ruleup.ruleup_backend.challenge.domain.ChallengeModerationStatus.APPROVED) " +
-            "AND c.endDate >= :today GROUP BY c.category")
+            "AND (c.endDate IS NULL OR c.endDate >= :today) GROUP BY c.category")
     List<Object[]> countActiveByCategory(@Param("today") LocalDate today);
 
     /** 완주율 집계 대상: 완료(COMPLETED)·삭제 X·템플릿 기반 챌린지의 (id, templateId). */

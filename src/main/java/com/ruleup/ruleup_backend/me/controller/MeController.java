@@ -50,7 +50,6 @@ public class MeController {
     private final MeTierService tierService;
     private final MeTierHistoryService tierHistoryService;
     private final MeTierChangesService tierChangesService;
-    private final InvitationService invitationService;
 
     @Operation(summary = "마이 홈 일괄 조회",
             description = """
@@ -95,7 +94,7 @@ public class MeController {
                     정책 지표 **4종 고정** — 전체 성공률 / 총 성공 인증 수 / 현재·최고 스트릭 / 완주 개수.
                     기간 파라미터가 없다(구 WEEKLY·MONTHLY·YEARLY 폐기).
 
-                    확정된 판정만 센다. 유예 구간(귀속일+2일 00:00 KST 이전)의 건은 아직 반영되지 않는다.
+                    성공은 즉시 집계한다. 실패 예정은 제외하고 귀속일+2일 00:00 KST 이후 확정된 실패만 집계한다.
                     """)
     @ApiErrorCodes({ErrorCode.LOGIN_REQUIRED})
     @GetMapping("/stats")
@@ -140,7 +139,7 @@ public class MeController {
 
     @Operation(summary = "티어 히스토리",
             description = """
-                    월말 스냅샷 그래프의 원천. 정책이 **그래프 형식 + 하락 사유 표기 없음**으로 정해
+                    점수 변동 시점별 그래프의 원천. 정책이 **그래프 형식 + 하락 사유 표기 없음**으로 정해
                     시리즈와 역대 최고만 내린다. 보관 1년 — 그 이전 이력은 조회되지 않는다.
                     """)
     @ApiErrorCodes({ErrorCode.INVALID_HISTORY_MONTHS, ErrorCode.LOGIN_REQUIRED})
@@ -150,10 +149,4 @@ public class MeController {
         return ApiResponse.ok(tierHistoryService.history(UUID.fromString(userId), months));
     }
 
-    @Operation(summary = "친구 초대", description = "내 초대 코드/딥링크(유저당 1개, 멱등 생성) + 초대 현황(피초대 가입).")
-    @ApiErrorCodes({ErrorCode.LOGIN_REQUIRED})
-    @GetMapping("/invitation")
-    public ApiResponse<MeInvitationResponse> invitation(@AuthenticationPrincipal String userId) {
-        return ApiResponse.ok(invitationService.myInvitation(UUID.fromString(userId)));
-    }
 }

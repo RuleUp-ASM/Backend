@@ -95,12 +95,13 @@ class MyPageContractIT extends ChallengeApiSupport {
     private void insertScoreEvent(UUID userId, UUID challengeId, String reason, String incidentType,
                                   long delta, long balanceAfter, int daysAgo) {
         jdbc().update("INSERT INTO score_transactions " +
-                        "(id, user_id, raw_delta, limited_delta, applied_delta, cycle_limit_applied, " +
-                        " balance_after, reason, challenge_id, cycle_no, incident_type, " +
-                        " idempotency_key, created_at) " +
-                        "VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, 1, ?, ?, DATE_SUB(NOW(3), INTERVAL ? DAY))",
+                        "(id, user_id, raw_delta, limited_delta, applied_delta, " +
+                        " balance_after, reason, challenge_id, incident_type, " +
+                        " idempotency_key, created_at, entry_kind, source_type, processing_key, effective_at, effective_order, actual_tier_after, display_tier_after, payload_json) " +
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_SUB(UTC_TIMESTAMP(3), INTERVAL ? DAY), 'RESULT', 'TEST', ?, DATE_SUB(UTC_TIMESTAMP(3), INTERVAL ? DAY), X'00', ?, ?, '{}')",
                 bytes(UUID.randomUUID()), bytes(userId), delta, delta, delta, balanceAfter, reason,
-                challengeId == null ? null : bytes(challengeId), incidentType, uniq("idem"), daysAgo);
+                challengeId == null ? null : bytes(challengeId), incidentType, uniq("idem"), daysAgo, uniq("processing"), daysAgo,
+                com.ruleup.ruleup_backend.score.domain.TierBands.of(balanceAfter).name(), com.ruleup.ruleup_backend.score.domain.TierBands.of(balanceAfter).name());
     }
 
     private void insertScoreEvent(UUID userId, UUID challengeId, String reason,
@@ -163,22 +164,6 @@ class MyPageContractIT extends ChallengeApiSupport {
         return id;
     }
 
-    /**
-     * 닉네임 검수 완료 폴링 — 최대 5초.
-     *
-     * <p>검수는 {@code AFTER_COMMIT} + {@code @Async} 라 저장 응답이 돌아온 뒤에도 잠시 더
-     * 돌고 있다. 그 사이에 테스트가 {@code nickname_status} 를 심으면 <b>뒤늦게 도착한 검수가
-     * 덮어써</b> 전제가 조용히 사라진다 — 로컬에서는 대개 이기지만 CI 처럼 느린 환경에서 진다.
-     */
-    private void awaitNicknameDecided(UUID userId) throws Exception {
-        for (int i = 0; i < 50; i++) {
-            String status = jdbc().queryForObject(
-                    "SELECT nickname_status FROM users WHERE id = ?", String.class, bytes(userId));
-            if (!"PENDING".equals(status)) return;
-            Thread.sleep(100);
-        }
-    }
-
     /** 삭제 배치가 하는 일 중 이 화면에 필요한 부분 — 제목 스냅샷 적재 후 방 행 제거. */
     private void archiveAndDeleteChallenge(UUID challengeId, String titleSnapshot) {
         jdbc().update("INSERT INTO challenge_history " +
@@ -202,14 +187,6 @@ class MyPageContractIT extends ChallengeApiSupport {
     @SuppressWarnings("unchecked")
     private Map<String, Object> data(MvcResult res) throws Exception {
         return read(res, "$.data");
-    }
-
-    /** cycles12w 의 마지막 칸 = 이번 주. 12칸 중 가장 최근이 맨 뒤다. */
-    @SuppressWarnings("unchecked")
-    private String currentWeek(Member me) throws Exception {
-        List<Map<String, Object>> cycles =
-                (List<Map<String, Object>>) data(getAuth("/api/v1/me/stats", me.token())).get("cycles12w");
-        return (String) cycles.get(cycles.size() - 1).get("result");
     }
 
     // ================================================================
@@ -609,11 +586,11 @@ class MyPageContractIT extends ChallengeApiSupport {
 
     // ================================================================
     @Nested
-    @DisplayName("GET /me/tier/history — 월말 스냅샷 그래프, 1년 보관")
+    @DisplayName("GET /me/tier/history — 점수 변동 시점 그래프, 1년 보관")
     class TierHistory {
 
         @Test
-        @DisplayName("월말 스냅샷과 역대 최고를 내리고 하락 사유는 표기하지 않는다")
+        @DisplayName("점수 변동 시점과 역대 최고를 내리고 하락 사유는 표기하지 않는다")
         void monthly_snapshots() throws Exception {
             Member me = member("hist-basic");
             UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
@@ -628,11 +605,11 @@ class MyPageContractIT extends ChallengeApiSupport {
             assertThat(best).containsEntry("score", 350).containsEntry("tier", "GOLD");
             assertThat(best.get("date")).asString().matches("\\d{4}-\\d{2}-\\d{2}");
 
-            List<Map<String, Object>> monthly = (List<Map<String, Object>>) d.get("monthly");
+            List<Map<String, Object>> monthly = (List<Map<String, Object>>) d.get("points");
             assertThat(monthly).isNotEmpty();
-            assertThat(monthly.getFirst()).containsOnlyKeys("month", "endTier", "endScore");
-            assertThat(monthly.getLast()).containsEntry("endScore", 300);   // 그 달의 마지막 값
-            assertThat(monthly.getFirst().get("month")).asString().matches("\\d{4}-\\d{2}");
+            assertThat(monthly.getFirst()).containsOnlyKeys("occurredAt", "tier", "score");
+            assertThat(monthly.getLast()).containsEntry("score", 300);   // 그 달의 마지막 값
+            assertThat(monthly).hasSize(3);
             // 그래프 원천이라 마일스톤·피크 피드는 없다.
             assertThat(d).doesNotContainKeys("milestones", "peak", "changes");
         }
@@ -658,7 +635,7 @@ class MyPageContractIT extends ChallengeApiSupport {
 
             Map<String, Object> d = data(getAuth("/api/v1/me/tier/history", me.token()));
 
-            assertThat((List<?>) d.get("monthly")).isEmpty();
+            assertThat((List<?>) d.get("points")).isEmpty();
             assertThat(d.get("best")).isNull();
         }
     }
@@ -676,7 +653,7 @@ class MyPageContractIT extends ChallengeApiSupport {
             Map<String, Object> d = data(getAuth("/api/v1/me/stats", me.token()));
 
             assertThat(d).containsOnlyKeys("successRate", "totalSuccessCount", "streak",
-                    "cycles12w", "completedCount", "weeklyScoreDelta");
+                    "completedCount");
             assertThat((Map<String, Object>) d.get("streak")).containsOnlyKeys("current", "best");
         }
 
@@ -747,73 +724,13 @@ class MyPageContractIT extends ChallengeApiSupport {
             assertThat(d).containsEntry("totalSuccessCount", 0).containsEntry("completedCount", 0);
         }
 
-        @Test
-        @DisplayName("cycles12w 는 언제나 12칸이다 — 판정 없는 주는 NONE 으로 채운다")
-        void cycles12w_always_twelve() throws Exception {
-            Member me = member("stats-cycles-shape");
 
-            List<Map<String, Object>> cycles =
-                    (List<Map<String, Object>>) data(getAuth("/api/v1/me/stats", me.token())).get("cycles12w");
 
-            // 빈 배열을 내리면 클라이언트가 ISO 주차를 직접 계산해 12칸을 만들어야 한다.
-            // 그리드를 그리는 쪽이 아니라 값을 아는 쪽이 채운다.
-            assertThat(cycles).hasSize(12);
-            assertThat(cycles).allSatisfy(c -> {
-                assertThat(c).containsOnlyKeys("week", "result");
-                assertThat((String) c.get("week")).matches("\\d{4}-W\\d{2}");
-            });
-            assertThat(cycles).extracting(c -> c.get("result")).containsOnly("NONE");
-            assertThat(cycles).extracting(c -> (String) c.get("week"))
-                    .as("오래된 주가 앞이다 — 그리드가 왼쪽부터 그려진다").isSorted();
-        }
 
-        @Test
-        @DisplayName("그 주 판정을 전부 성공하면 SUCCESS, 섞이면 PARTIAL, 전부 실패면 FAIL")
-        void cycles12w_classifies_week() throws Exception {
-            Member allSuccess = member("stats-cycles-ok");
-            UUID c1 = insertChallenge(allSuccess.id(), "EXERCISE", "ACTIVE", "SOLO");
-            insertOutcome(allSuccess.id(), c1, 0, "SUCCESS");
-            assertThat(currentWeek(allSuccess)).isEqualTo("SUCCESS");
 
-            Member mixed = member("stats-cycles-mixed");
-            UUID c2 = insertChallenge(mixed.id(), "EXERCISE", "ACTIVE", "SOLO");
-            UUID c3 = insertChallenge(mixed.id(), "READING", "ACTIVE", "SOLO");
-            insertOutcome(mixed.id(), c2, 0, "SUCCESS");
-            insertOutcome(mixed.id(), c3, 0, "FAILED");
-            assertThat(currentWeek(mixed)).isEqualTo("PARTIAL");
 
-            Member allFail = member("stats-cycles-fail");
-            UUID c4 = insertChallenge(allFail.id(), "EXERCISE", "ACTIVE", "SOLO");
-            insertOutcome(allFail.id(), c4, 0, "FAILED");
-            assertThat(currentWeek(allFail)).isEqualTo("FAIL");
-        }
 
-        @Test
-        @DisplayName("weeklyScoreDelta 는 계정 단위 이번 주 합계다 — 챌린지별 사이클 한도를 붙이지 않는다")
-        void weekly_score_delta_is_account_sum() throws Exception {
-            Member me = member("stats-weekly");
-            UUID c1 = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "SOLO");
-            UUID c2 = insertChallenge(me.id(), "READING", "ACTIVE", "SOLO");
-            insertScoreEvent(me.id(), c1, "DAILY_SUCCESS", 20, 30, 0);
-            insertScoreEvent(me.id(), c2, "DAILY_SUCCESS", 20, 50, 0);
-            insertScoreEvent(me.id(), c1, "CONFIRMED_MISS", -5, 45, 0);
 
-            // 정책 §4.7 의 ±20 은 「챌린지별 각 사이클」 한도이지 계정 주간 한도가 아니다.
-            // 무료 동시 참여 3개 기준으로 이번 주 변동은 ±60까지 나올 수 있다.
-            assertThat(data(getAuth("/api/v1/me/stats", me.token())))
-                    .containsEntry("weeklyScoreDelta", 35);
-        }
-
-        @Test
-        @DisplayName("지난주 변동은 weeklyScoreDelta 에 들어오지 않는다")
-        void weekly_score_delta_excludes_last_week() throws Exception {
-            Member me = member("stats-weekly-prev");
-            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "SOLO");
-            insertScoreEvent(me.id(), ch, "DAILY_SUCCESS", 12, 22, 8);
-
-            assertThat(data(getAuth("/api/v1/me/stats", me.token())))
-                    .containsEntry("weeklyScoreDelta", 0);
-        }
 
         @Test
         @DisplayName("판정이 전부 실패면 성공률 0.0 이다 — null 과 구분된다")
@@ -834,7 +751,7 @@ class MyPageContractIT extends ChallengeApiSupport {
     class Appeals {
 
         @Test
-        @DisplayName("신청 이력을 최신순으로 내리고 전건이 ACCEPTED 다")
+        @DisplayName("신청 이력을 최신순으로 내리고 인용된 신청만 반환하고 상태 필드는 없다")
         void history_is_all_accepted() throws Exception {
             Member me = member("appeal-list");
             UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
@@ -848,9 +765,9 @@ class MyPageContractIT extends ChallengeApiSupport {
 
             assertThat(history).hasSize(2);
             assertThat(history.getFirst()).containsOnlyKeys(
-                    "appealId", "date", "challengeId", "routineTitle", "reason", "track", "result");
+                    "appealId", "acceptedAt", "targetDate", "challengeId", "routineTitle", "reason");
             assertThat(history.getFirst().get("reason")).asString().startsWith("네트워크 지연");
-            assertThat(history).allSatisfy(h -> assertThat(h).containsEntry("result", "ACCEPTED"));
+            assertThat(history).allSatisfy(h -> assertThat(h).doesNotContainKeys("result", "status", "track"));
             assertThat(history.getFirst()).containsEntry("challengeId", ch.toString());
         }
 
@@ -931,7 +848,8 @@ class MyPageContractIT extends ChallengeApiSupport {
             Member me = member("profile-session");
             patchJsonAuth("/api/v1/users/me/profile", me.token(), body("첫번째닉", null, null));
 
-            // 잠금 시작이 방금이므로 아직 같은 저장 세션이다.
+            // Only an image-first save can attach one nickname edit; repeated nickname edits cannot open a session.
+            jdbc().update("UPDATE users SET profile_save_kind='IMAGE' WHERE id=?",bytes(me.id()));
             assertThat(patchJsonAuth("/api/v1/users/me/profile", me.token(), body("두번째닉", null, null))
                     .getResponse().getStatus()).isEqualTo(200);
         }
@@ -967,7 +885,6 @@ class MyPageContractIT extends ChallengeApiSupport {
             // 검수가 끝나기를 기다린 뒤에 전제를 심는다. 먼저 심으면 뒤늦게 도착한 검수가
             // nickname_status 를 APPROVED 로 덮어써, 잠긴 계정이 거부 상태가 아니게 되고
             // 재제출이 409 PROFILE_CHANGE_LOCKED 로 막힌다.
-            awaitNicknameDecided(me.id());
             // 잠금은 시각을 직접 심는다 — 앞선 저장을 한 번 더 거치면 그 저장이 검수를 또
             // 발행해 같은 경합이 되살아난다. 이 테스트가 보는 것은 저장 경로가 아니라
             // "잠긴 상태 + 거부 상태"에서의 재제출 허용이다.
@@ -982,15 +899,13 @@ class MyPageContractIT extends ChallengeApiSupport {
         @DisplayName("MODERATION_LOCKED 는 폐기됐다 — 거부 횟수만으로 수정을 제한하지 않는다")
         void no_moderation_lock() throws Exception {
             Member me = member("profile-nomodlock");
-            awaitNicknameDecided(me.id());
             jdbc().update("UPDATE users SET nickname_status = 'REJECTED' WHERE id = ?", bytes(me.id()));
             for (int i = 0; i < 4; i++) {
                 MvcResult res = patchJsonAuth("/api/v1/users/me/profile", me.token(),
                         body("재제출" + i + "번", null, null));
                 assertThat(res.getResponse().getStatus()).isEqualTo(200);
                 // 이번 저장이 발행한 검수가 끝난 뒤에 다시 거부로 돌린다 — 같은 경합이다.
-                awaitNicknameDecided(me.id());
-                jdbc().update("UPDATE users SET nickname_status = 'REJECTED' WHERE id = ?", bytes(me.id()));
+                    jdbc().update("UPDATE users SET nickname_status = 'REJECTED' WHERE id = ?", bytes(me.id()));
             }
         }
 
@@ -998,12 +913,12 @@ class MyPageContractIT extends ChallengeApiSupport {
         @DisplayName("removeProfileImage=true 면 기본 프로필로 되돌린다")
         void remove_image() throws Exception {
             Member me = member("profile-rmimg");
-            jdbc().update("UPDATE users SET profile_image_url = 'https://cdn/x.png', " +
+            jdbc().update("UPDATE users SET profile_image_key = 'https://cdn/x.png', " +
                     "profile_image_status = 'APPROVED' WHERE id = ?", bytes(me.id()));
 
             patchJsonAuth("/api/v1/users/me/profile", me.token(), body(null, null, true));
 
-            String url = jdbc().queryForObject("SELECT profile_image_url FROM users WHERE id = ?",
+            String url = jdbc().queryForObject("SELECT profile_image_key FROM users WHERE id = ?",
                     String.class, bytes(me.id()));
             assertThat(url).isNull();
         }

@@ -163,8 +163,8 @@ class OnboardingApiContractIT extends AuthApiSupport {
     class GenderPersistence {
 
         @ParameterizedTest(name = "gender={0} 로 가입하면 그대로 저장된다")
-        @ValueSource(strings = {"MALE", "FEMALE", "NON_BINARY", "PREFER_NOT_TO_SAY"})
-        @DisplayName("허용 성별 4종은 각각 가입에 성공하고 저장값이 일치한다")
+        @ValueSource(strings = {"MALE", "FEMALE"})
+        @DisplayName("허용 성별 2종은 각각 가입에 성공하고 저장값이 일치한다")
         void each_gender_value_signs_up(String gender) throws Exception {
             String tag = uniq("gd");
             Map<String, Object> body = preparedSignup(tag, "성별" + gender.charAt(0) + seq());
@@ -173,6 +173,14 @@ class OnboardingApiContractIT extends AuthApiSupport {
             MvcResult res = postJson("/api/v1/auth/signup", body);
             assertThat(res.getResponse().getStatus()).isEqualTo(200);
             assertThat(findUser(tag).getGender()).isEqualTo(Gender.valueOf(gender));
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"NON_BINARY", "PREFER_NOT_TO_SAY"})
+        void legacyGenderValuesAreRejected(String gender) throws Exception {
+            Map<String, Object> body = preparedSignup(uniq("legacy-gender"), "구성별" + seq());
+            body.put("gender", gender);
+            expectError(postJson("/api/v1/auth/signup", body), 400, "GENDER_REQUIRED");
         }
 
         @Test

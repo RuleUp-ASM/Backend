@@ -42,8 +42,7 @@ public record OAuthLoginRequest(
                 requiredMode = Schema.RequiredMode.REQUIRED)
         String deviceId,
 
-        @Schema(description = "기기 스펙. 필수이며 형식 위반 시 INVALID_DEVICE_INFO 로 거절한다.",
-                requiredMode = Schema.RequiredMode.REQUIRED)
+        @Schema(description = "기기 스펙. 전체 또는 일부 누락 시 서버의 sync 폴백 정책을 적용한다.")
         DeviceInfoRequest deviceInfo,
 
         @Schema(description = """

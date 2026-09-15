@@ -28,7 +28,9 @@ public class CheatScoreOutboxHandler implements OutboxHandler {
 
     private final ScoreService scoreService;
 
-    public record Payload(String userId, String challengeId, String detectionId) {}
+    public record Payload(String userId, String challengeId, String detectionId, java.time.Instant effectiveAt, String authType) {
+        public Payload(String userId,String challengeId,String detectionId) { this(userId,challengeId,detectionId,null,null); }
+    }
 
     @Override
     public String type() {
@@ -38,8 +40,9 @@ public class CheatScoreOutboxHandler implements OutboxHandler {
     @Override
     public void handle(String payload) {
         Payload event = OutboxService.parse(payload, Payload.class);
-        scoreService.applyIncident(UUID.fromString(event.userId()), UUID.fromString(event.challengeId()),
-                IncidentType.CHEAT_DETECTED, event.detectionId(), 0);
+        if(event.effectiveAt()==null || event.authType()==null)throw new IllegalStateException("SCORE_INCIDENT_SNAPSHOT_MISSING");
+        scoreService.submitIncident(UUID.fromString(event.userId()),new ScoreInput(ScoreInput.Kind.INCIDENT,"CHEAT_DETECTED:"+event.detectionId(),1,event.effectiveAt(),event.authType(),null,null,null,
+                IncidentType.CHEAT_DETECTED,UUID.fromString(event.challengeId()),-50,0,false));
         log.info("부정행위 감점 집행 userId={} detectionId={}", event.userId(), event.detectionId());
     }
 }

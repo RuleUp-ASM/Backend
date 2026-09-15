@@ -1,45 +1,73 @@
 package com.ruleup.ruleup_backend.challenge.recommendation;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
+import io.micrometer.core.instrument.MeterRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 
-import java.time.Instant;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.time.Duration;
+import java.util.List;
 
-/**
- * 챌린지 추천(LLM) 호출 사전 차단 — Step0 (생성 및 라이프사이클 §3-2).
- * 사용자당 1분 10회. 초과 시 429 RECOMMENDATION_RATE_LIMITED + retryAfterSeconds(응답 reason).
- * EC2 단일 인스턴스 기준 인메모리(UploadRateLimiter 와 동일 패턴).
- */
+/** 사용자별 60초 fixed window. Redis 장애 동안만 Caffeine으로 제한한다. */
 @Component
 public class RecommendationRateLimiter {
+    private static final Logger log = LoggerFactory.getLogger(RecommendationRateLimiter.class);
+    private static final DefaultRedisScript<List> SCRIPT = new DefaultRedisScript<>("""
+            local count = redis.call('INCR', KEYS[1])
+            if count == 1 then redis.call('EXPIRE', KEYS[1], 60) end
+            return {count, redis.call('TTL', KEYS[1])}
+            """, List.class);
+    private final StringRedisTemplate redis;
+    private final MeterRegistry metrics;
+    private final Cache<String, Window> windows = Caffeine.newBuilder()
+            .expireAfterWrite(Duration.ofMinutes(1)).build();
+    private volatile long retryRedisAt;
 
-    private static final int MAX_PER_MINUTE = 10;
-    private static final long WINDOW_MILLIS = 60_000;
-
-    private final Map<String, Window> windows = new ConcurrentHashMap<>();
+    public RecommendationRateLimiter(StringRedisTemplate redis, MeterRegistry metrics) {
+        this.redis = redis;
+        this.metrics = metrics;
+    }
 
     public void check(String userId) {
-        long now = Instant.now().toEpochMilli();
-        windows.values().removeIf(w -> now - w.startMillis >= WINDOW_MILLIS);
-        Window w = windows.compute(userId, (key, old) -> {
-            if (old == null || now - old.startMillis >= WINDOW_MILLIS) {
-                return new Window(now, 1);
+        long now = System.nanoTime();
+        if (retryRedisAt == 0 || now - retryRedisAt >= 0) {
+            List<?> result = null;
+            try {
+                result = redis.execute(SCRIPT, List.of("rate:challenge:draft:" + userId));
+                if (result == null || result.size() != 2
+                        || !(result.get(0) instanceof Number) || !(result.get(1) instanceof Number)) throw new IllegalStateException("Empty rate limit result");
+            } catch (RuntimeException unavailable) {
+                result = null;
+                retryRedisAt = now + Duration.ofSeconds(10).toNanos();
+                metrics.counter("challenge.draft.rate_limiter.fallback").increment();
+                log.warn("draft_rate_limit_fallback reason={}", unavailable.getClass().getSimpleName());
             }
-            old.count++;
-            return old;
-        });
-        if (w.count > MAX_PER_MINUTE) {
-            long retryAfterSeconds = Math.max(1, (WINDOW_MILLIS - (now - w.startMillis) + 999) / 1000);
-            throw new BusinessException(ErrorCode.RECOMMENDATION_RATE_LIMITED, String.valueOf(retryAfterSeconds));
+            if (result != null) {
+                rejectIfLimited(((Number) result.get(0)).longValue(), ((Number) result.get(1)).longValue());
+                return;
+            }
+        }
+        Window window = windows.get(userId, key -> new Window(now));
+        synchronized (window) {
+            rejectIfLimited(++window.count, Math.max(1,
+                    60 - Duration.ofNanos(now - window.startedAt).toSeconds()));
         }
     }
 
+    private static void rejectIfLimited(long count, long ttl) {
+        if (count > 10) throw new BusinessException(ErrorCode.RECOMMENDATION_RATE_LIMITED,
+                String.valueOf(Math.max(1, ttl)));
+    }
+
     private static class Window {
-        long startMillis;
+        final long startedAt;
         int count;
-        Window(long startMillis, int count) { this.startMillis = startMillis; this.count = count; }
+        Window(long startedAt) { this.startedAt = startedAt; }
     }
 }

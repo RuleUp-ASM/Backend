@@ -45,6 +45,7 @@ public class CheatDetectionService {
 
     private static final Logger log = LoggerFactory.getLogger(CheatDetectionService.class);
 
+    private final com.ruleup.ruleup_backend.challenge.lifecycle.ChallengeScoreSource scoreSource;
     private final CheatDetectionRepository repository;
     private final OutboxService outbox;
     private final OutboxDispatcher outboxDispatcher;
@@ -96,7 +97,8 @@ public class CheatDetectionService {
                 new CheatKickOutboxHandler.Payload(userId, challengeId, detectionId),
                 CheatKickOutboxHandler.OUTBOX_TYPE + ":" + detectionId);
         outbox.enqueue(CheatScoreOutboxHandler.OUTBOX_TYPE,
-                new CheatScoreOutboxHandler.Payload(userId, challengeId, detectionId),
+                new CheatScoreOutboxHandler.Payload(userId, challengeId, detectionId, detection.getDetectedAt(),
+                        scoreSource.findById(detection.getChallengeId()).map(c->c.automatic()?"AUTO":"MANUAL").orElseThrow()),
                 CheatScoreOutboxHandler.OUTBOX_TYPE + ":" + detectionId);
         // 커밋 직후 한 번 흘린다 — 제재는 즉시성이 중요하다. 실패해도 스윕이 다시 집으므로
         // 이 호출은 지연을 줄일 뿐 유실을 막는 장치가 아니다.

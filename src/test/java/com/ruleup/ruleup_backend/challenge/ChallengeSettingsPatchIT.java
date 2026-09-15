@@ -206,12 +206,12 @@ class ChallengeSettingsPatchIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("[P1] 정원 수정도 9종만 받는다 — 생성과 같은 규칙이어야 한다")
-        void capacityPatchAcceptsOnlyTheNineChoices() throws Exception {
+        @DisplayName("[P1] 정원 수정도 1~300명만 받는다 — 생성과 같은 규칙이어야 한다")
+        void capacityPatchRejectsOutOfRange() throws Exception {
             Member owner = member(uniq("pat-cap-choice"));
             String id = createGroupChallenge(owner.token());
 
-            for (int notAllowed : java.util.List.of(7, 25, 301, 1000)) {
+            for (int notAllowed : java.util.List.of(0, -1, 301, 1000)) {
                 int v = currentVersion(owner.token(), id);
                 MvcResult res = patchJsonAuth("/api/v1/challenges/" + id, owner.token(),
                         Map.of("version", v, "capacity", notAllowed));
@@ -313,7 +313,7 @@ class ChallengeSettingsPatchIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("반복 거부 수정 잠금 중 제목 수정 → 429 MODERATION_LOCKED")
+        @DisplayName("과거 거부 잠금이 남아 있어도 제목 수정 가능")
         void moderationLocked() throws Exception {
             Member owner = member(uniq("pat-mlock"));
             String id = createGroupChallenge(owner.token());
@@ -321,9 +321,8 @@ class ChallengeSettingsPatchIT extends ChallengeApiSupport {
                     "WHERE id = UNHEX(REPLACE(?, '-', ''))", id);
             int v = currentVersion(owner.token(), id);
 
-            expectError(patchJsonAuth("/api/v1/challenges/" + id, owner.token(),
-                            Map.of("version", v, "title", "다시 고친 제목")),
-                    429, "MODERATION_LOCKED");
+            assertThat(patchJsonAuth("/api/v1/challenges/" + id, owner.token(),
+                    Map.of("version", v, "title", "다시 고친 제목")).getResponse().getStatus()).isEqualTo(200);
         }
 
         @Test

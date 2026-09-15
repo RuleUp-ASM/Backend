@@ -76,7 +76,7 @@ public class VerificationManualService {
         LocalDate today = LocalDate.now(KST);
         LocalDate targetDate = parseTargetDate(req != null ? req.targetDate() : null, today);
         if (!targetDate.equals(today)
-                || targetDate.isBefore(ch.getStartDate()) || targetDate.isAfter(ch.getEndDate())) {
+                || targetDate.isBefore(ch.getStartDate()) || (ch.getEndDate() != null && targetDate.isAfter(ch.getEndDate()))) {
             throw new BusinessException(ErrorCode.INVALID_TARGET_DATE);
         }
 

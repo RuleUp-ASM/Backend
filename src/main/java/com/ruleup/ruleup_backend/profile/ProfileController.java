@@ -39,7 +39,7 @@ public class ProfileController {
             summary = "내 프로필 조회",
             description = """
                     프로필 화면용 상세 조회다. 로그인 응답의 `user` 블록보다 항목이 많다
-                    (이메일·매너온도·가입일·닉네임 변경 가능 시각).
+                    (이메일·가입일·프로필 변경 가능 시각).
 
                     `nickname`·`profileImageUrl` 은 **항상 본인이 정한 값**이다(본인 화면이므로).
                     타인에게 지금 어떻게 보이는지는 `nicknameStatus`·`profileImageStatus` 로 판단한다.
@@ -47,7 +47,7 @@ public class ProfileController {
                     - `PENDING` — 검수 중. 타인에게는 `tempNickname` 과 기본 프로필이 보인다
                     - `REJECTED` — 거절됨. 타인에게는 `tempNickname` 과 기본 프로필이 보이고, 변경을 유도해야 한다
 
-                    `nicknameChangeableAfter` 는 다음 닉네임 변경이 가능해지는 시각이다(마지막 변경 +30일).
+                    `nicknameChangeableAfter` 는 다음 닉네임 변경이 가능해지는 시각이다(통합 저장 +1개월).
                     null 이면 아직 한 번도 바꾸지 않아 지금 바로 변경할 수 있다.
 
                     잠금(LOCKED) 계정도 조회할 수 있다 — 열람 전용이라 읽기는 허용된다.
@@ -65,16 +65,17 @@ public class ProfileController {
                     `multipart/form-data` 로 `image` 파트 하나를 보낸다(jpg 또는 png, 최대 10MB).
                     가입 직후 등록용인 `POST /api/v1/users/me/profile-image` 와 동작이 같다 — 이쪽은 프로필 화면 경로다.
 
-                    **응답의 `status` 는 항상 `PENDING`** 이다(검수는 비동기).
+                    응답은 자동 심사의 최종 상태를 포함하며, 심사 제공자 장애 시 `PENDING`을 유지한다.
                     본인 화면에는 즉시 반영되지만 승인 전까지 **타인에게는 기본 프로필**이 보인다.
                     거절되면 사진이 내려가고 알림이 간다.
 
-                    다시 올리면 대기 중이던 검수 요청은 새 요청으로 대체된다(사용자당 대기 건은 하나만 유지).
+                    최초 등록은 잠금을 시작하지 않는다. 이후 변경·삭제는 닉네임과 같은 1개월 잠금을 사용한다.
 
                     남용 방지를 위해 **사용자당 1분에 10회**로 제한한다.
                     """
     )
     @ApiErrorCodes({
+            ErrorCode.PROFILE_CHANGE_LOCKED,
             ErrorCode.IMAGE_CORRUPTED,
             ErrorCode.LOGIN_REQUIRED,
             ErrorCode.ACCOUNT_LOCKED,

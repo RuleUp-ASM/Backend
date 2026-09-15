@@ -18,7 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.UUID;
 
 /** 방 밖 랭킹 — 챌린지끼리의 순위. */
-@Tag(name = "Challenge Ranking", description = "방 밖 랭킹 — 같은 모드(GROUP/SOLO)끼리 챌린지를 비교한다. 하루 1회 03시 갱신")
+@Tag(name = "Challenge Ranking", description = "방 밖 랭킹 — 같은 모드(GROUP/SOLO)끼리 챌린지를 비교한다. 하루 1회 판정 완료 후 갱신")
 @SecurityRequirement(name = "bearerAuth")
 @RestController
 @RequestMapping("/api/v1/rankings/challenges")
@@ -36,7 +36,7 @@ public class CrossRankingController {
                     **진행 중인 방만** 대상이며 기준은 방 전체 성공률이다. 등재 조건은 모드마다 다르다 —
                     **그룹 50회 · 솔로 10회** 이상 누적 판정이 있어야 순위에 들어온다.
 
-                    수치는 **하루 1회 03시 배치**로 갱신된 스냅샷이다. 실시간이 아니므로 오늘 인증한 결과가 곧바로
+                    수치는 **하루 1회 판정 작업 완료 후 배치**로 갱신된 스냅샷이다. 실시간이 아니므로 오늘 인증한 결과가 곧바로
                     반영되지 않는다. `updatedAt` 이 그 스냅샷 시각이니 화면에 함께 표시하면 오해가 줄어든다
                     (방 **안** 랭킹은 실시간이라 두 화면의 값이 다를 수 있다).
 

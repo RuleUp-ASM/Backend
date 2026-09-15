@@ -1,6 +1,7 @@
 package com.ruleup.ruleup_backend.score;
 
-import com.ruleup.ruleup_backend.challenge.domain.Challenge;
+import com.ruleup.ruleup_backend.challenge.lifecycle.ChallengeScoreSource;
+import com.ruleup.ruleup_backend.challenge.lifecycle.ChallengeScoreSource.Input;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeCycle;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.common.outbox.OutboxHandler;
@@ -34,7 +35,8 @@ public class AppealCorrectionOutboxHandler implements OutboxHandler {
     public static final String OUTBOX_TYPE = "APPEAL_SCORE_CORRECTION";
 
     private final ScoreService scoreService;
-    private final ChallengeRepository challengeRepository;
+    private final ChallengeScoreSource challengeRepository;
+    private final ScoreProcessor processor;
 
     public record Payload(String userId, String challengeId, String verificationId, String targetDate) {}
 
@@ -48,13 +50,13 @@ public class AppealCorrectionOutboxHandler implements OutboxHandler {
         Payload event = OutboxService.parse(payload, Payload.class);
         UUID challengeId = UUID.fromString(event.challengeId());
 
-        Challenge challenge = challengeRepository.findById(challengeId).orElse(null);
-        if (challenge == null || challenge.getStartDate() == null) {
-            // 방이 사라졌으면 재계산할 사이클도 없다. 재시도해도 달라지지 않으므로 종료로 본다.
-            log.info("이의 정정 대상 챌린지가 없다 — 재계산을 건너뛴다. challengeId={}", challengeId);
-            return;
+        UUID userId=UUID.fromString(event.userId());
+        UUID verificationId=UUID.fromString(event.verificationId());
+        var saved=processor.original(userId,ScoreInput.Kind.DAILY,event.verificationId());
+        if(saved.isPresent()) {
+            scoreService.recompute(userId,challengeId,saved.get().cycle().cycleNo(),verificationId);return;
         }
-
+        Input challenge=challengeRepository.findById(challengeId).orElseThrow(()->new IllegalStateException("SCORE_CORRECTION_SOURCE_MISSING"));
         LocalDate targetDate = LocalDate.parse(event.targetDate());
         long elapsed = ChronoUnit.DAYS.between(challenge.getStartDate(), targetDate);
         if (elapsed < 0) return;   // 시작 전 날짜 — 사이클에 속하지 않는다

@@ -23,6 +23,7 @@ public class JwtProvider {
     private static final String CLAIM_TYPE = "type";
 
     private final SecretKey key;
+    private final SecretKey signupKey;
     private final long accessTtl;
     private final long refreshTtl;
     private final long signupTtl;
@@ -30,6 +31,7 @@ public class JwtProvider {
     public JwtProvider(AppProperties props) {
         AppProperties.Jwt jwt = props.jwt();
         this.key = Keys.hmacShaKeyFor(jwt.secret().getBytes(StandardCharsets.UTF_8));
+        this.signupKey = deriveSignupKey(key);
         this.accessTtl = jwt.accessTokenTtl();
         this.refreshTtl = jwt.refreshTokenTtl();
         this.signupTtl = jwt.signupTokenTtl();
@@ -56,14 +58,28 @@ public class JwtProvider {
                 .claim("email", email)
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plusSeconds(signupTtl)))
-                .signWith(key, Jwts.SIG.HS256)
+                .signWith(signupKey, Jwts.SIG.HS256)
                 .compact();
     }
 
     /** 서명·만료 검증 후 클레임 반환. 실패 시 jjwt 예외를 던진다 */
     public Claims parse(String token) {
-        return Jwts.parser().verifyWith(key).build()
-                .parseSignedClaims(token).getPayload();
+        try {
+            return Jwts.parser().verifyWith(key).build().parseSignedClaims(token).getPayload();
+        } catch (io.jsonwebtoken.security.SignatureException mismatch) {
+            Claims claims = Jwts.parser().verifyWith(signupKey).build().parseSignedClaims(token).getPayload();
+            if (!TokenType.SIGNUP.name().equals(claims.get(CLAIM_TYPE)))
+                throw new io.jsonwebtoken.JwtException("Signup key cannot sign application tokens");
+            return claims;
+        }
+    }
+
+    private static SecretKey deriveSignupKey(SecretKey master) {
+        try {
+            javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+            mac.init(master);
+            return Keys.hmacShaKeyFor(mac.doFinal("RuleUp/signup-token/v1".getBytes(StandardCharsets.UTF_8)));
+        } catch (java.security.GeneralSecurityException e) { throw new IllegalStateException(e); }
     }
 
     private String build(String subject, TokenType type, long ttlSeconds) {

@@ -173,8 +173,7 @@ public class SanctionService {
     /** 가입·로그인 게이트 — 영구 정지 계정이 계정을 바꿔 돌아오는 경로를 막는다. */
     @Transactional(readOnly = true)
     public boolean isBanned(String provider, String subject, String installationId) {
-        if (banEntryRepository.existsByOauthHash(hashes.ofOauth(provider, subject))) return true;
-        String installHash = hashes.ofInstallation(installationId);
-        return installHash != null && banEntryRepository.existsByInstallationHash(installHash);
+        // 기기는 사람의 식별자가 아니다. 소셜 계정 해시만 확정 차단에 사용한다.
+        return banEntryRepository.existsByOauthHash(hashes.ofOauth(provider, subject));
     }
 }

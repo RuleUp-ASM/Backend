@@ -7,8 +7,8 @@ import com.ruleup.ruleup_backend.user.domain.User;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 /**
- * OAuth 검증 결과. 활성 사용자면 토큰+user, 그 외(신규·탈퇴)면 signupToken+oauthProfile.
- * 탈퇴 계정의 복원은 여기서 하지 않는다 — 가입 요청(POST /auth/signup)에서 처리한다.
+ * OAuth 검증 결과. 기존·복원 사용자면 토큰+user, 신규면 signupToken+oauthProfile.
+ * 탈퇴 계정은 같은 UUID로 복원하며 restored=true로 표시한다.
  */
 @Schema(name = "OAuthLoginResponse", description = """
         소셜 로그인 결과. isNewUser 로 분기한다.
@@ -66,7 +66,13 @@ public record OAuthLoginResponse(
                 서버가 이전 정보를 그대로 살려 로그인시키므로 입력받을 게 없다.
                 false 면 평소대로 닉네임·관심사·약관을 입력받아 가입을 진행한다.""",
                 example = "false")
-        Boolean returningUser) {
+        Boolean returningUser,
+        boolean restored) {
+
+    public OAuthLoginResponse withRestored(boolean value) {
+        return new OAuthLoginResponse(isNewUser, accessToken, refreshToken, tokenType, expiresIn, flushIntervalSec,
+                user, device, signupToken, signupTokenExpiresIn, oauthProfile, returningUser, value);
+    }
 
     /**
      * 온보딩 프리필 힌트 — 닉네임·프로필 사진(·이메일)에만 적용(2026-08-03).
@@ -128,7 +134,7 @@ public record OAuthLoginResponse(
                 flushIntervalSec,
                 UserResponse.from(user, summary),
                 DeviceSpecResponse.from(user),
-                null, null, null, null);
+                null, null, null, null, false);
     }
 
     /** 신규 분기. returningUser=true 면 예전에 탈퇴한 계정이 있어 입력 없이 복원될 사람이다. */
@@ -136,6 +142,6 @@ public record OAuthLoginResponse(
                                              boolean returningUser) {
         return new OAuthLoginResponse(true,
                 null, null, null, null, null, null, null,
-                signupToken, expiresIn, OAuthProfileResponse.from(info), returningUser);
+                signupToken, expiresIn, OAuthProfileResponse.from(info), returningUser, false);
     }
 }

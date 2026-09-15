@@ -18,7 +18,7 @@ import java.io.IOException;
  * 바깥 주소는 저장소와 무관하게 {@code /files/{파일명}} 으로 고정이다.
  *
  * <p>주소를 고정하는 이유가 핵심이다. 이 값은 응답으로만 나가는 게 아니라
- * {@code users.profile_image_url} · {@code challenges.image_url} ·
+ * {@code users.profile_image_key} · {@code challenges.image_url} ·
  * {@code challenge_image_uploads.image_url} 에 <b>저장되고</b>, 챌린지 생성 때 클라이언트가
  * 되돌려 보내면 서버가 <b>문자열 일치로 업로드 소유를 확인</b>한다. 주소가 저장소 사정으로
  * 바뀌면 그 순간 기존 이미지가 전부 죽고 소유 검증도 깨진다 — 저장소 교체가 곧 데이터

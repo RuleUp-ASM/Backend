@@ -33,7 +33,7 @@ public class UserScoreSummary extends AssignedIdEntity {
     private UUID userId;
 
     @Column(name = "total_score", nullable = false)
-    private long totalScore;
+    private int totalScore;
 
     /** 점수만으로 계산한 실제 티어. */
     @Enumerated(EnumType.STRING)
@@ -45,17 +45,16 @@ public class UserScoreSummary extends AssignedIdEntity {
     @Column(name = "display_tier", nullable = false)
     private Tier displayTier = Tier.UNRANKED;
 
-    @Column(name = "tier_grace_until")
-    private Instant tierGraceUntil;
 
     /** 점수 동시 업데이트 낙관적 락. */
     @Version
     @Column(name = "version", nullable = false)
     private long version;
 
-    @Generated(event = EventType.INSERT)
-    @Column(name = "created_at", nullable = false, updatable = false)
-    private Instant createdAt;
+    @Column(name = "updated_at", nullable = false, insertable = false, updatable = false)
+    private Instant updatedAt;
+
+    public long getTotalScore() { return totalScore; }
 
     @Override
     public UUID getId() { return userId; }   // Persistable(신규 판별)용 — PK는 user_id
@@ -73,7 +72,7 @@ public class UserScoreSummary extends AssignedIdEntity {
      * 표시 티어는 강등에만 20점 유예를 둔다 — 승급은 유예 없이 즉시다.
      */
     public void applyScore(long scoreAfter) {
-        this.totalScore = scoreAfter;
+        this.totalScore = Math.toIntExact(scoreAfter);
         Tier actual = TierBands.of(scoreAfter);
         this.displayTier = TierBands.displayTier(scoreAfter, actual, this.displayTier);
         this.actualTier = actual;
@@ -83,7 +82,7 @@ public class UserScoreSummary extends AssignedIdEntity {
     public static UserScoreSummary initialize(UUID userId) {
         UserScoreSummary s = new UserScoreSummary();
         s.userId = userId;
-        s.totalScore = INITIAL_SCORE;
+        s.totalScore = (int) INITIAL_SCORE;
         s.actualTier = Tier.BRONZE;
         s.displayTier = Tier.BRONZE;
         return s;

@@ -166,6 +166,7 @@ class LegacyRoomAdminApiIT extends ChallengeApiSupport {
         Member owner = member(uniq("nograce-owner"));
         Member joiner = member(uniq("nograce-joiner"));
         UUID challengeId = openGroup(owner.id());
+        jdbcTemplate.update("UPDATE challenges SET verification_config=JSON_SET(verification_config,'$.selectedMethod','AUTO') WHERE id=?", bytes(challengeId));
         join(joiner.token(), challengeId);
 
         MvcResult transfer = patchJsonAuth("/api/v1/challenges/" + challengeId + "/owner", owner.token(),

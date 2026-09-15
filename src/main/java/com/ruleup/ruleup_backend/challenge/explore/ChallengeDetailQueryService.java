@@ -54,9 +54,12 @@ public class ChallengeDetailQueryService {
     private final UserScoreSummaryRepository scoreSummaryRepository;
     private final RoutineCatalog catalog;
     private final JdbcTemplate jdbc;
+    private final com.ruleup.ruleup_backend.room.service.ChallengeRejoinPolicy rejoinPolicy;
+    private final com.ruleup.ruleup_backend.challenge.lifecycle.ChallengeHistoryQueryService history;
 
     @Transactional(readOnly = true)
     public ChallengeDetailResponse detail(UUID viewerId, UUID challengeId) {
+        if (history.archived(challengeId)) return history.detail(viewerId, challengeId);
         Challenge c = challengeRepository.findByIdAndDeletedAtIsNull(challengeId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
 
@@ -93,15 +96,15 @@ public class ChallengeDetailQueryService {
                 c.getWeeklyCount(),
                 full,
                 new ChallengeDetailResponse.Period(
-                        c.getStartDate().toString(), c.getEndDate().toString(),
-                        (int) ChronoUnit.DAYS.between(today, c.getEndDate())),
+                        c.getStartDate().toString(), c.getEndDate() == null ? null : c.getEndDate().toString(),
+                        c.getEndDate() == null ? null : (int) ChronoUnit.DAYS.between(today, c.getEndDate())),
                 verification(c),
                 stats(challengeId),
                 new ChallengeDetailResponse.Gate(
                         (c.getMinTier() != null) ? c.getMinTier().name() : null, myTier.name(), eligible),
                 (blockReason != null) ? blockReason.name() : null,
                 (blockReason == JoinBlockReason.REJOIN_COOLDOWN)
-                        ? myMembership.getRejoinAvailableAt().toString() : null,
+                        ? rejoinPolicy.availableAt(challengeId, viewerId, myMembership).toString() : null,
                 ChallengeCycle.startsNextCycle(c.getStartDate(), today) ? "NEXT_CYCLE" : "IMMEDIATE",
                 cloneable(c),
                 // 방장은 멤버 행과 무관하게 참여 중이다(솔로 방·시작 전 방도 마찬가지).
@@ -130,10 +133,10 @@ public class ChallengeDetailQueryService {
         if (c.getStatus() == ChallengeStatus.COMPLETED) return JoinBlockReason.CHALLENGE_COMPLETED;
         if (isOwner || (myMembership != null && myMembership.isActive())) return JoinBlockReason.ALREADY_JOINED;
         if (c.isGroup() && "PRIVATE".equals(c.getVisibility())) return JoinBlockReason.PRIVATE_INVITE_ONLY;
-        if (myMembership != null) {
+        {
             // 가입 게이트와 같은 순서 — 영구 차단이 재입장 대기보다 먼저다(ChallengeMemberService.join ③).
-            if (myMembership.isRejoinBanned()) return JoinBlockReason.BANNED;
-            Instant availableAt = myMembership.getRejoinAvailableAt();
+            if (rejoinPolicy.permanentlyBanned(c.getId(), viewerId) || (myMembership != null && myMembership.isRejoinBanned())) return JoinBlockReason.PERMANENT_BAN;
+            Instant availableAt = rejoinPolicy.availableAt(c.getId(), viewerId, myMembership);
             if (availableAt != null && Instant.now().isBefore(availableAt))
                 return JoinBlockReason.REJOIN_COOLDOWN;
         }
@@ -178,7 +181,7 @@ public class ChallengeDetailQueryService {
     private String myRole(Challenge c, UUID viewerId, ChallengeMember m,
                           boolean isOwner, boolean isActiveMember) {
         if (isOwner) return "OWNER";
-        return isActiveMember ? m.getRole().name() : "NONE";
+        return isActiveMember ? "MEMBER" : "NONE";
     }
 
     private Tier displayTier(UUID userId) {

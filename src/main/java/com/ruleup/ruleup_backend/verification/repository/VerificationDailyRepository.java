@@ -132,4 +132,11 @@ public interface VerificationDailyRepository extends JpaRepository<VerificationD
             "ORDER BY d.verifiedAt ASC")
     List<VerificationDaily> findTerminalSince(@Param("statuses") Collection<VerificationStatus> statuses,
                                               @Param("since") Instant since, Pageable pageable);
+    @Query("""
+            select d from VerificationDaily d where d.status = com.ruleup.ruleup_backend.common.verification.VerificationStatus.FAILED
+             and d.verifiedAt >= :since and d.verifiedAt <= :now and d.shareableAt <= :now
+             and (:cursor is null or d.id > :cursor) order by d.id
+            """)
+    List<VerificationDaily> findWatcherRecoveryPage(@Param("since") Instant since, @Param("now") Instant now,
+                                                    @Param("cursor") UUID cursor, Pageable pageable);
 }

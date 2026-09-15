@@ -34,7 +34,7 @@ public class WatcherInvitationController {
                     딥링크로 열렸을 때 "누가 무엇으로 초대했는지"를 보여준다.
                     **이 호출만으로는 어떤 동의도 성립하지 않는다.**
                     """)
-    @ApiErrorCodes({ErrorCode.INVITATION_INVALID, ErrorCode.INVITATION_EXPIRED})
+    @ApiErrorCodes({ErrorCode.INVITATION_NOT_FOUND, ErrorCode.INVITATION_EXPIRED})
     @GetMapping("/invitations/{token}")
     public ApiResponse<InvitationEntryResponse> entry(@PathVariable String token) {
         return ApiResponse.ok(invitationService.getByToken(token));
@@ -50,8 +50,8 @@ public class WatcherInvitationController {
                     **로그인 필수**다. 웹 수락은 동의 주체 확인이 약해 인정하지 않으며,
                     미설치자는 스토어를 거쳐 가입한 뒤 이 경로로 들어온다.
                     """)
-    @ApiErrorCodes({ErrorCode.INVITATION_INVALID, ErrorCode.INVITATION_EXPIRED,
-            ErrorCode.ALREADY_WATCHER, ErrorCode.CANNOT_WATCH_SELF, ErrorCode.LOGIN_REQUIRED})
+    @ApiErrorCodes({ErrorCode.INVITATION_NOT_FOUND, ErrorCode.INVITATION_EXPIRED,
+            ErrorCode.WATCHER_BLOCKED, ErrorCode.WATCHER_PENALTY_DISABLED, ErrorCode.ALREADY_WATCHER, ErrorCode.CANNOT_WATCH_SELF, ErrorCode.LOGIN_REQUIRED})
     @PostMapping("/invitations/{token}/accept")
     public ApiResponse<WatcherAcceptResponse> accept(@AuthenticationPrincipal String userId,
                                                      @PathVariable String token) {

@@ -35,7 +35,12 @@ public record MeHomeResponse(
 
         @Schema(description = "ACTIVE / LOCKED", example = "ACTIVE") String accountStatus,
 
-        @Schema(description = "LOCKED 일 때만 — 잠금 사유와 해제일") LockInfo lockInfo) {
+        @Schema(description = "LOCK/BAN 제재가 활성일 때만 — 잠금 사유와 해제일") LockInfo lockInfo,
+
+        @Schema(description="측정 불가가 확인된 권한과 강퇴까지 남은 유예 사이클")
+        java.util.List<PermissionWarning> permissionWarnings) {
+
+    public record PermissionWarning(String challengeId,String signalType,int remainingCycles,String waitingUntil) {}
 
     @Schema(name = "MeHomeCounts")
     public record Counts(int inProgress, int completed, int left) {}

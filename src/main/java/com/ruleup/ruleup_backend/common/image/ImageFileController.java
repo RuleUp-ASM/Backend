@@ -22,7 +22,7 @@ import java.time.Duration;
  * 그대로 소모된다. <b>302 로 presigned URL 을 넘기면 바이트는 S3 가 직접 준다.</b>
  *
  * <h4>왜 주소를 presigned 로 바로 내리지 않는가</h4>
- * presigned URL 은 만료된다. 그런데 이미지 주소는 {@code users.profile_image_url} ·
+ * presigned URL 은 만료된다. 그런데 이미지 주소는 {@code users.profile_image_key} ·
  * {@code challenges.image_url} 처럼 <b>DB 에 저장되고 클라이언트가 되돌려 보내는 값</b>이다.
  * 만료되는 값을 저장하면 하루 뒤에 전부 죽고, 왕복 검증(업로드 소유 확인)도 문자열이 매번
  * 달라져 성립하지 않는다. 그래서 <b>저장·왕복용 주소는 이 경로로 고정</b>하고, 만료되는 주소는

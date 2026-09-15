@@ -72,6 +72,7 @@ public class VerificationSyncService {
             Stream.of("GEOFENCE_TRANSITION")   // Android 와이어 별칭
     ).collect(Collectors.toUnmodifiableSet());
 
+    private final com.ruleup.ruleup_backend.verification.service.DeviceSyncPolicyService syncPolicy;
     private final ChallengeQueryService challengeQuery;
     private final VerificationDailyRepository dailyRepo;
     private final VerificationMethodResultRepository methodResultRepo;
@@ -96,7 +97,7 @@ public class VerificationSyncService {
     private final VerificationMetrics metrics;
     private final Map<VerificationMethod, MethodEvaluator> evaluators;
 
-    public VerificationSyncService(ChallengeQueryService challengeQuery,
+    public VerificationSyncService(DeviceSyncPolicyService syncPolicy, ChallengeQueryService challengeQuery,
                                    VerificationDailyRepository dailyRepo,
                                    VerificationMethodResultRepository methodResultRepo,
                                    SyncRateLimiter rateLimiter,
@@ -119,6 +120,7 @@ public class VerificationSyncService {
                                    SignalConsentGate consentGate,
                                    VerificationMetrics metrics,
                                    List<MethodEvaluator> evaluatorList) {
+        this.syncPolicy = syncPolicy;
         this.challengeQuery = challengeQuery;
         this.dailyRepo = dailyRepo;
         this.methodResultRepo = methodResultRepo;
@@ -247,7 +249,7 @@ public class VerificationSyncService {
         // flushIntervalSec: 기기 스펙 기반 산정값을 매 ACK마다 전체값으로 회신(§6 제어 모델).
         // maxPayloadBytes: 클라가 이 값을 보고 전송 구간을 쪼갠다(설정값, 실측 후 조정).
         backfillCountry(user, req.timeZone());
-        int flushIntervalSec = FlushIntervalPolicy.forUser(user);
+        int flushIntervalSec = syncPolicy.forUser(user);
         metrics.sync(System.nanoTime() - startedAt, signals.size(), ingested.droppedCount(),
                 gateDropped, consent.rejectedTypes().size());
         // 봉투의 모양 — 압축·요약 전송 도입 판단의 근거다(백엔드 7절).
@@ -436,10 +438,12 @@ public class VerificationSyncService {
                 VerificationTargetDays.of(config, challenge, member, today);
         if (disp == VerificationTargetDays.Disposition.NOT_TARGET) {
             daily.recordResult(VerificationStatus.NOT_TARGET, null, null, null);
+            eventPublisher.publishEvent(new VerificationScoreEvents.Confirmed(daily));
             return VerificationStatus.NOT_TARGET;
         }
         if (disp == VerificationTargetDays.Disposition.NOT_REQUIRED) {
             daily.recordResult(VerificationStatus.NOT_REQUIRED, null, null, null);
+            eventPublisher.publishEvent(new VerificationScoreEvents.Confirmed(daily));
             return VerificationStatus.NOT_REQUIRED;
         }
         return evaluateAndApply(member, challenge, config, daily, signals, gaps, today, now);
@@ -482,6 +486,14 @@ public class VerificationSyncService {
                     member.getUserId(), member.getChallengeId(), method.name(), today, now));
         }
 
+        if (!permissionGap(gaps, method, today)) {
+            ofDay.stream().filter(signal -> MethodSignalTypes.anyFor(method, List.of(signal)))
+                    .map(SyncSignal::observedAt).filter(Objects::nonNull).map(value -> {
+                        try { return Instant.parse(value); } catch (RuntimeException invalid) { return Instant.MIN; }
+                    }).filter(at -> !at.isAfter(now)).max(Instant::compareTo)
+                    .filter(at -> !Instant.MIN.equals(at)).ifPresent(at -> eventPublisher.publishEvent(
+                            new PermissionWaitService.MeasurementReceived(member.getChallengeId(),member.getUserId(),method.name(),at)));
+        }
         if (mr == null) {
             mr = VerificationMethodResult.create(daily.getId(), method.name(), VerificationPolarity.of(config), true);
         }
@@ -500,6 +512,7 @@ public class VerificationSyncService {
             String contributing = (outcome.status() == VerificationStatus.SUCCESS) ? method.name() : null;
             Instant verifiedAt = (outcome.status() == VerificationStatus.SUCCESS) ? now : null;
             daily.recordResult(outcome.status(), contributing, null, verifiedAt);
+            eventPublisher.publishEvent(new VerificationScoreEvents.Confirmed(daily));
             if (config.isFrequency() && outcome.status() == VerificationStatus.SUCCESS) {
                 member.incrementPeriodCompleted();   // 빈도형: 주기 완료 +1 (미확정 상태에서 첫 SUCCESS 전이 1회)
             }

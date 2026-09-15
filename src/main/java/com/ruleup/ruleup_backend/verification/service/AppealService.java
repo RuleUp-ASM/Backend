@@ -102,6 +102,7 @@ public class AppealService {
 
         // 인용 — 정상 성공과 동일하게 정정한다.
         daily.correctByAppeal(now);
+        eventPublisher.publishEvent(new VerificationScoreEvents.Confirmed(daily));
         // 인정률의 <b>분자</b>는 커밋 이후에 센다. 여기서 올리면 뒤이은 진행률 갱신·아웃박스
         // 적재·알림 적재나 최종 커밋이 실패했을 때 DB 는 롤백되는데 지표에만 인용이 남아,
         // 인정률이 실제보다 높게 보인다 — 분모는 그대로이므로 그 차이가 그대로 왜곡이 된다.

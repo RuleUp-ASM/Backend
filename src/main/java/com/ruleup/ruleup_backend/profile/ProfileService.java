@@ -2,11 +2,6 @@ package com.ruleup.ruleup_backend.profile;
 
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
-import com.ruleup.ruleup_backend.moderation.ModerationRequestRepository;
-import com.ruleup.ruleup_backend.moderation.UserModerationRequested;
-import com.ruleup.ruleup_backend.moderation.domain.ModerationRequest;
-import com.ruleup.ruleup_backend.moderation.domain.ModerationRequestStatus;
-import com.ruleup.ruleup_backend.moderation.domain.ModerationTarget;
 import com.ruleup.ruleup_backend.profile.dto.ProfileImageResponse;
 import com.ruleup.ruleup_backend.profile.dto.ProfileResponse;
 import com.ruleup.ruleup_backend.profile.dto.ProfileUpdateResponse;
@@ -31,9 +26,10 @@ import java.util.UUID;
 public class ProfileService {
 
     private final UserRepository userRepository;
-    private final ModerationRequestRepository moderationRequestRepository;
+    private final com.ruleup.ruleup_backend.moderation.UserModerationService moderation;
+    private final org.springframework.transaction.support.TransactionTemplate tx;
     private final ImageStorageService imageStorage;
-    private final ApplicationEventPublisher eventPublisher;
+
 
     @Transactional(readOnly = true)
     public ProfileResponse getMyProfile(UUID userId) {
@@ -52,9 +48,16 @@ public class ProfileService {
      * 구 {@code MODERATION_LOCKED}(1시간 3회) 는 폐기됐고, 반복 제출은 이상 행위로 기록해
      * 운영 검토로 보낸다(콘텐츠 모더레이션 §1, 오픈 이슈 #8).
      */
-    @Transactional
     public ProfileUpdateResponse updateProfile(UUID userId, UpdateProfileRequest req) {
-        User user = loadActive(userId);
+        tx.executeWithoutResult(ignored -> updateStoredProfile(userId, req));
+        User user = moderation.moderate(userId);
+        Instant until = user.profileLockedUntil();
+        return new ProfileUpdateResponse(user.getNickname(), user.getNicknameStatus().name(),
+                user.getInterestCategories(), until == null ? null : until.toString());
+    }
+
+    private void updateStoredProfile(UUID userId, UpdateProfileRequest req) {
+        User user = loadLocked(userId);
         Instant now = Instant.now();
 
         boolean changingNickname = req.nickname() != null && !req.nickname().equals(user.getNickname());
@@ -63,8 +66,13 @@ public class ProfileService {
         boolean touchesLocked = changingNickname || removingImage;
 
         // 잠금은 상태 충돌이지 재시도로 풀리는 게 아니라 409 다(오픈 이슈 #9 — 온보딩 문서와 409 로 통일).
-        if (touchesLocked && user.isProfileLocked(now))
-            throw new BusinessException(ErrorCode.PROFILE_CHANGE_LOCKED);
+        boolean nicknameRepair = user.getNicknameStatus() == com.ruleup.ruleup_backend.user.domain.NicknameStatus.REJECTED
+                || user.getNicknameStatus() == com.ruleup.ruleup_backend.user.domain.NicknameStatus.CONFLICT;
+        boolean imageRepair = user.getProfileImageStatus() == com.ruleup.ruleup_backend.user.domain.ProfileImageStatus.REJECTED;
+        boolean normalNickname = changingNickname && !nicknameRepair;
+        boolean normalImage = removingImage && !imageRepair;
+        boolean attachedSave = normalNickname && !normalImage && user.canAttachNicknameToImageSave(now);
+        if ((normalNickname || normalImage) && !attachedSave) requireUnlocked(user,now);
 
         if (changingNickname) {
             if (!NicknamePolicy.isValid(req.nickname()))
@@ -74,7 +82,6 @@ public class ProfileService {
             // 쓰던 닉네임은 여기서 풀리지 않는다 — approved_nickname 이 그대로라 심사 중에는 계속 본인 점유다.
             // 새 닉네임이 승인되는 순간(User#approveNickname) 비로소 이전 값이 해제된다.
             user.changeNickname(req.nickname());   // 상태를 PENDING 으로 되돌림 → 재검수 필요
-            submitModerationRequest(userId, ModerationTarget.NICKNAME, req.nickname());
         }
 
         if (removingImage) user.removeProfileImage();
@@ -88,43 +95,46 @@ public class ProfileService {
             user.changeInterestCategories(req.interestCategories());
         }
 
-        if (touchesLocked) {
-            user.startProfileLock(now);
-            if (changingNickname) eventPublisher.publishEvent(new UserModerationRequested(userId));
-        }
-        Instant until = user.profileLockedUntil();
-        return new ProfileUpdateResponse(user.getNickname(), user.getNicknameStatus().name(),
-                user.getInterestCategories(), until != null ? until.toString() : null);
+        if (attachedSave) user.consumeImageSave();
+        else if (normalNickname || normalImage) user.startProfileLock(now);
     }
 
-    @Transactional
     public ProfileImageResponse uploadImage(UUID userId, MultipartFile image) {
-        User user = loadActive(userId);
-        String filename = imageStorage.store(image);
-        String url = ServletUriComponentsBuilder.fromCurrentContextPath()
-                .path("/files/").path(filename).toUriString();
-        user.changeProfileImage(url);   // 상태 PENDING → 커밋 후 재검수
-        submitModerationRequest(userId, ModerationTarget.PROFILE_IMAGE, url);
-        eventPublisher.publishEvent(new UserModerationRequested(userId));
-        // 등록 직후는 항상 PENDING — 심사는 커밋 후 비동기로 돈다(계약: {imageUrl, status})
-        return ProfileImageResponse.of(url, user.getProfileImageStatus());
+        // Early check avoids uploading known-invalid changes. Recheck under lock after external I/O.
+        tx.executeWithoutResult(ignored -> requireImageEditable(loadLocked(userId),Instant.now()));
+        String url = imageStorage.urlOf(imageStorage.store(image));
+        try {
+            tx.executeWithoutResult(ignored -> {
+                User user=loadLocked(userId);
+                Instant now=Instant.now();
+                requireImageEditable(user,now);
+                boolean repairing=user.getProfileImageStatus()==com.ruleup.ruleup_backend.user.domain.ProfileImageStatus.REJECTED;
+                user.registerProfileImage(now,repairing);
+                user.changeProfileImage(url);
+            });
+        } catch (RuntimeException failed) {
+            try { imageStorage.deleteByUrl(url); } catch (RuntimeException cleanup) { failed.addSuppressed(cleanup); }
+            throw failed;
+        }
+        User reviewed=moderation.moderate(userId);
+        return ProfileImageResponse.of(reviewed.visibleProfileImageTo(userId),reviewed.getProfileImageStatus());
     }
 
-    /**
-     * 심사 요청 제출 — 사용자·target당 PENDING 은 하나만(UNIQUE)이므로,
-     * 아직 결정되지 않은 기존 요청은 새 제출로 대체(삭제 후 재등록)한다.
-     */
-    private void submitModerationRequest(UUID userId, ModerationTarget target, String content) {
-        moderationRequestRepository
-                .findByUserIdAndTargetAndStatus(userId, target, ModerationRequestStatus.PENDING)
-                .ifPresent(moderationRequestRepository::delete);
-        moderationRequestRepository.flush();   // UNIQUE(user_id, pending_target) 해제 후 INSERT
-        moderationRequestRepository.save(ModerationRequest.request(userId, target, content));
-    }
-
-    @Transactional
     public void deleteImage(UUID userId) {
-        loadActive(userId).removeProfileImage();
+        tx.executeWithoutResult(ignored -> updateStoredProfile(userId,new UpdateProfileRequest(null,null,true)));
+    }
+
+    private void requireImageEditable(User user,Instant now) {
+        if (user.getProfileImageStatus()!=com.ruleup.ruleup_backend.user.domain.ProfileImageStatus.REJECTED) requireUnlocked(user,now);
+    }
+
+    private void requireUnlocked(User user,Instant now) {
+        if (user.isProfileLocked(now)) throw BusinessException.profileChangeLocked(user.profileLockedUntil().toString());
+    }
+
+    private User loadLocked(UUID userId) {
+        return userRepository.findByIdForUpdate(userId).filter(user -> !user.isWithdrawn())
+                .orElseThrow(() -> new BusinessException(ErrorCode.LOGIN_REQUIRED));
     }
 
     private User loadActive(UUID userId) {

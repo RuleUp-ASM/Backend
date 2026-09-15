@@ -74,8 +74,6 @@ public class ChallengeCreationService {
      * 고를 수 있는 정원 (탐색 공통 5-3). 자유 입력이 아니라 <b>고르는 값</b>이다 —
      * 300 이 최대이고 그보다 크면 무제한(GROUP 에서는 정원 미지정)만 가능하다.
      */
-    private static final java.util.Set<Integer> CAPACITY_CHOICES =
-            java.util.Set.of(5, 10, 20, 30, 50, 100, 200, 300);
     private static final int DEFAULT_WEEKLY_COUNT = 7;
     private static final int TITLE_MAX = 30;
     private static final int DESCRIPTION_MAX = 200;
@@ -146,7 +144,8 @@ public class ChallengeCreationService {
         // ⑤ 심사 대상 서버 판정 — draft 원본 대조(클라 자가 신고 없음)
         TargetModerationStatus moderationTitle = title.equals(draft.getTitle())
                 ? TargetModerationStatus.EXEMPT : TargetModerationStatus.IN_REVIEW;
-        TargetModerationStatus moderationDescription = Objects.equals(description, draft.getDescription())
+        TargetModerationStatus moderationDescription = description == null || description.isBlank()
+                ? TargetModerationStatus.NONE : Objects.equals(description, draft.getDescription())
                 ? TargetModerationStatus.EXEMPT : TargetModerationStatus.IN_REVIEW;
         TargetModerationStatus moderationImage = (req.imageUrl() == null)
                 ? TargetModerationStatus.NONE : TargetModerationStatus.IN_REVIEW;
@@ -166,6 +165,7 @@ public class ChallengeCreationService {
         // saveAndFlush 여야 한다. 아래 createRow 는 raw JDBC 라 Hibernate 의 자동 flush 를 타지 않고,
         // challenges 행이 아직 INSERT 되지 않은 채 challenge_stats 가 그 행을 참조해 FK 가 깨진다.
         // 예전에는 뒤따르던 participant_count 증가가 우연히 flush 를 유발해 가려져 있던 함정이다.
+        challenge.recordOrigin(draft);
         challengeRepository.saveAndFlush(challenge);
 
         memberRepository.save(ChallengeMember.owner(challenge.getId(), userId));
@@ -251,19 +251,13 @@ public class ChallengeCreationService {
         }
     }
 
-    /**
-     * 정원 검증 — 9종 중 하나이거나 무제한이다(탐색 공통 5-3).
-     *
-     * <p>임의 값을 받으면 정원이 사실상 무한대의 선택지가 되어, 정원 있는 방에만 거는 락·COUNT 의
-     * 경계가 흐려진다. 무제한은 {@code null} 한 가지로만 표현한다 — 10,000 같은 큰 수로 "사실상
-     * 무제한"을 흉내 내면 그 방은 계속 락과 COUNT 를 지불한다.
-     */
+    /** 정원은 1~300 또는 null(무제한). SOLO의 정원은 1이다. */
     private Integer validateCapacity(ParticipationType mode, Integer capacity) {
         if (mode != ParticipationType.GROUP) return 1;
-        // 비우면 무제한이다. 9종으로 좁히면서 이 길을 막으면 300 이 사실상 상한이 되고,
+        // 비우면 무제한이다. 큰 숫자로 무제한을 흉내 내면
         // 무제한을 흉내 내려는 방은 큰 수를 골라 계속 락과 COUNT 를 지불한다.
         if (capacity == null) return null;
-        if (!CAPACITY_CHOICES.contains(capacity))
+        if (capacity < 1 || capacity > 300)
             throw new BusinessException(ErrorCode.CAPACITY_OUT_OF_RANGE);
         return capacity;
     }
@@ -286,16 +280,16 @@ public class ChallengeCreationService {
     }
 
     private LocalDate[] validatePeriod(CreateChallengeRequest.Period period) {
-        if (period == null || period.start() == null || period.end() == null)
+        if (period == null || period.start() == null)
             throw new BusinessException(ErrorCode.INVALID_PERIOD);
         LocalDate start, end;
         try {
             start = LocalDate.parse(period.start());
-            end = LocalDate.parse(period.end());
+            end = period.end() == null ? null : LocalDate.parse(period.end());
         } catch (Exception e) {
             throw new BusinessException(ErrorCode.INVALID_PERIOD);
         }
-        if (end.isBefore(start) || start.isBefore(LocalDate.now(KST)))
+        if ((end != null && end.isBefore(start)) || start.isBefore(LocalDate.now(KST)))
             throw new BusinessException(ErrorCode.INVALID_PERIOD);
         return new LocalDate[]{start, end};
     }

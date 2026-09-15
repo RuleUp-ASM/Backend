@@ -100,6 +100,7 @@ public class VerificationFinalizeService {
     private final OutboxService outbox;
     private final OutboxDispatcher outboxDispatcher;
     private final VerificationMetrics metrics;
+    private final VerificationBatchCompletion batchCompletion;
     /** 확정 시각 판단의 유일한 출처. 주입 가능해야 「이틀 뒤」를 시험할 수 있다. */
     private final java.time.Clock clock;
     private final org.springframework.transaction.support.TransactionTemplate transactionTemplate;
@@ -122,6 +123,7 @@ public class VerificationFinalizeService {
                                        OutboxService outbox,
                                        OutboxDispatcher outboxDispatcher,
                                        VerificationMetrics metrics,
+                                       VerificationBatchCompletion batchCompletion,
                                        org.springframework.transaction.support.TransactionTemplate transactionTemplate,
                                        java.time.Clock clock,
                                        List<MethodEvaluator> evaluatorList) {
@@ -142,6 +144,7 @@ public class VerificationFinalizeService {
         this.outbox = outbox;
         this.outboxDispatcher = outboxDispatcher;
         this.metrics = metrics;
+        this.batchCompletion = batchCompletion;
         this.transactionTemplate = transactionTemplate;
         this.clock = clock;
         this.evaluators = evaluatorList.stream().collect(
@@ -169,55 +172,63 @@ public class VerificationFinalizeService {
      *
      * <p>대상 아닌 날(요일 밖·기간 밖·빈도 몫 충족)은 열지 않는다 — 확정되지 않을 행을 만들 이유가 없다.
      */
-    @Scheduled(cron = "30 0 0 * * *", zone = "Asia/Seoul")
+    @Scheduled(fixedDelay = 60_000)
+    public void materializeIfNeeded() {
+        if (batchCompletion.needsMaterialization(LocalDate.now(clock.withZone(KST)))) materializeDueTargets();
+    }
+
     public void materializeDueTargets() {
         LocalDate today = LocalDate.now(clock.withZone(KST));
         // D-2 가 확정 시각이 막 지난 귀속일이고, 그보다 오래된 날짜는 이전 실행이 놓친 몫이다.
+        boolean complete = true;
         for (int back = 0; back < properties.materializeCatchupDays(); back++) {
-            materializeForDate(today.minusDays(2L + back));
+            complete &= materializeForDate(today.minusDays(2L + back));
         }
+        if (complete) batchCompletion.materialized(today);
     }
 
-    private void materializeForDate(LocalDate targetDate) {
-        List<ChallengeMember> members = challengeQuery.findActiveOnDate(targetDate, MATERIALIZE_LIMIT);
+    private boolean materializeForDate(LocalDate targetDate) {
         int opened = 0;
-        for (int from = 0; from < members.size(); from += MATERIALIZE_CHUNK) {
-            List<ChallengeMember> chunk =
-                    members.subList(from, Math.min(from + MATERIALIZE_CHUNK, members.size()));
-            opened += openChunkSafely(chunk, targetDate);
+        boolean complete = true;
+        // Stable keyset pages avoid a silent 100,000-member truncation.
+        UUID after = new UUID(0, 0);
+        while (true) {
+            List<ChallengeMember> chunk = challengeQuery.findActiveOnDateAfter(targetDate, after, MATERIALIZE_CHUNK);
+            if (chunk.isEmpty()) break;
+            OpenResult result = openChunkSafely(chunk, targetDate);
+            opened += result.opened();
+            complete &= result.complete();
+            after = chunk.getLast().getId();
         }
         if (opened > 0) log.info("무신호 귀속일 채우기: {} 대상 {}건 개시", targetDate, opened);
+        return complete;
     }
 
-    /** 청크 하나. 통째로 터지면 멤버별로 다시 돌려 나머지를 살린다. */
-    private int openChunkSafely(List<ChallengeMember> chunk, LocalDate targetDate) {
+    private record OpenResult(int opened, boolean complete) {}
+
+    private OpenResult openChunkSafely(List<ChallengeMember> chunk, LocalDate targetDate) {
         try {
             Integer opened = transactionTemplate.execute(tx -> {
                 int n = 0;
                 for (ChallengeMember member : chunk) n += openIfMissing(member, targetDate) ? 1 : 0;
                 return n;
             });
-            return (opened != null) ? opened : 0;
+            return new OpenResult(opened == null ? 0 : opened, opened != null);
         } catch (RuntimeException e) {
-            log.warn("무신호 채우기 청크 실패 — 멤버별 격리로 전환한다. date={} err={}",
-                    targetDate, e.toString());
-            return openEachIndividually(chunk, targetDate);
-        }
-    }
-
-    private int openEachIndividually(List<ChallengeMember> chunk, LocalDate targetDate) {
-        int opened = 0;
-        for (ChallengeMember member : chunk) {
-            try {
-                Boolean done = transactionTemplate.execute(tx -> openIfMissing(member, targetDate));
-                if (Boolean.TRUE.equals(done)) opened++;
-            } catch (RuntimeException e) {
-                metrics.materializeFailed();
-                log.error("무신호 채우기 실패 — 이 멤버만 건너뛴다. memberId={} date={} err={}",
-                        member.getId(), targetDate, e.toString(), e);
+            log.warn("무신호 채우기 청크 실패 — 멤버별 격리로 전환한다. date={}", targetDate);
+            int opened = 0;
+            boolean complete = true;
+            for (ChallengeMember member : chunk) {
+                try {
+                    if (Boolean.TRUE.equals(transactionTemplate.execute(tx -> openIfMissing(member, targetDate)))) opened++;
+                } catch (RuntimeException failure) {
+                    complete = false;
+                    metrics.materializeFailed();
+                    log.error("무신호 채우기 실패 memberId={} date={}", member.getId(), targetDate, failure);
+                }
             }
+            return new OpenResult(opened, complete);
         }
-        return opened;
     }
 
     /** 그 멤버·날짜의 판정 행이 없으면 연다. 이미 있으면 아무것도 하지 않는다(재실행 안전). */
@@ -262,6 +273,7 @@ public class VerificationFinalizeService {
             if (done == 0) break;   // 대상이 바닥났다
             total += done;
         }
+        batchCompletion.finishIfDrained(LocalDate.now(clock.withZone(KST)));
         if (total > 0) {
             // 적재한 감시자 통지를 곧바로 흘린다. 실패해도 스윕이 다시 집는다.
             outboxDispatcher.requestFlush();
@@ -416,6 +428,7 @@ public class VerificationFinalizeService {
             log.warn("확정 대상의 챌린지가 없다 — 대상 아님으로 닫는다. verificationId={} challengeId={}",
                     daily.getId(), daily.getChallengeId());
             daily.recordResult(VerificationStatus.NOT_TARGET, daily.getMethod(), null, null);
+            eventPublisher.publishEvent(new VerificationScoreEvents.Confirmed(daily));
             return false;
         }
         VerificationConfig config = configFactory.build(challenge);
@@ -433,10 +446,12 @@ public class VerificationFinalizeService {
         if (succeeded || (polarity == Polarity.CONSTRAINT && failureReason == null)) {
             // 성공 조건을 채웠거나, 정해진 기간 동안 유효한 위반이 없었다 → 완료 확정.
             daily.recordResult(VerificationStatus.SUCCESS, method.name(), null, now);
+            eventPublisher.publishEvent(new VerificationScoreEvents.Confirmed(daily));
             confirmedFail = false;
         } else {
             String reasonCode = finalFailureReason(failureReason, evidence, method, config);
             daily.confirmFailure(now, method.name(), reasonCode);
+            eventPublisher.publishEvent(new VerificationScoreEvents.Confirmed(daily));
             // 실패 상세는 **확정된 실패에만** 남긴다. 실패 예정은 뒤집힐 수 있는 계산 상태라
             // 행을 만들면 이의로 완료가 된 뒤에도 「실패했다는 기록」이 남는다.
             recordFailureDetail(daily, reasonCode, evidence, now);
@@ -619,7 +634,7 @@ public class VerificationFinalizeService {
             int shortfall = Math.max(need - done, 0);
 
             LocalDate nextStart = m.getCurPeriodEnd().plusDays(1);
-            if (nextStart.isAfter(ch.getEndDate())) {
+            if (ch.getEndDate() != null && nextStart.isAfter(ch.getEndDate())) {
                 // 챌린지 종료: 마지막 주기 미달만 정산하고 advance 안 함(루프 종료)
                 m.rolloverPeriod(m.getCurPeriodStart(), m.getCurPeriodEnd(), shortfall);
                 changed = true;
@@ -627,7 +642,8 @@ public class VerificationFinalizeService {
             }
             int periodDays = (m.getPeriodUnit() == PeriodUnit.WEEK) ? 7 : 30;
             LocalDate nextEnd = nextStart.plusDays(periodDays - 1L);
-            if (nextEnd.isAfter(ch.getEndDate())) nextEnd = ch.getEndDate();
+            if (ch.getEndDate() != null && nextEnd.isAfter(ch.getEndDate())) nextEnd = ch.getEndDate();
+            if (ch.getEndDate() == null) m.extendTargetDays(need);
             m.rolloverPeriod(nextStart, nextEnd, shortfall);
             changed = true;
         }

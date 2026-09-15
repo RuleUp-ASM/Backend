@@ -9,10 +9,6 @@ import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.web.CountryResolver;
 import com.ruleup.ruleup_backend.config.AppProperties;
-import com.ruleup.ruleup_backend.moderation.ModerationRequestRepository;
-import com.ruleup.ruleup_backend.moderation.UserModerationRequested;
-import com.ruleup.ruleup_backend.moderation.domain.ModerationRequest;
-import com.ruleup.ruleup_backend.moderation.domain.ModerationTarget;
 import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
@@ -64,13 +60,16 @@ public class AuthService {
     /** 만 14세 미만 가입 불가 — 법적 요구사항(가드레일: 통과 0건). */
     private static final int MIN_AGE_YEARS = 14;
 
+    private final com.ruleup.ruleup_backend.verification.service.DeviceSyncPolicyService syncPolicy;
+    private final com.ruleup.ruleup_backend.moderation.UserModerationService moderation;
     private final OAuthClientResolver resolver;
     private final UserRepository userRepository;
+    private final com.ruleup.ruleup_backend.user.UserActivityService activity;
     private final RefreshTokenRepository refreshTokenRepository;
     private final AgreementService agreementService;
     private final com.ruleup.ruleup_backend.sanction.SanctionService sanctionService;
-    private final ModerationRequestRepository moderationRequestRepository;
     private final UserScoreSummaryRepository scoreSummaryRepository;
+    private final com.ruleup.ruleup_backend.score.ScoreService scoreService;
     private final TokenService tokenService;
     private final JwtProvider jwtProvider;
     private final SignupTokenStore signupTokenStore;
@@ -100,15 +99,10 @@ public class AuthService {
         // 1) 외부 IdP 호출 (트랜잭션 밖)
         OAuthUserInfo info = client.fetchUserInfo(req.code(), req.codeVerifier(), req.redirectUri());
 
-        // 2) DB 분기 — 활성 회원이면 토큰 발급, 그 외(신규·탈퇴)는 signupToken 만.
-        //    탈퇴 계정을 여기서 되살리지 않는 이유: 복귀도 "회원가입을 거쳐 로그인"하는 흐름이기 때문이다.
-        //    복원 판단은 가입 요청 시점에 한다(회원 정책 §6).
-        User active = userRepository.findByOauthProviderAndOauthSubject(provider, info.subject())
-                .filter(u -> !u.isWithdrawn())
-                .orElse(null);
-        if (active != null) {
-            return loginSessionService.loginExisting(active.getId(), provider, req, info);
-        }
+        if (sanctionService.isBanned(provider.name(), info.subject(), req.installationId()))
+            throw new BusinessException(ErrorCode.ACCOUNT_BANNED);
+        User existing = userRepository.findByOauthProviderAndOauthSubject(provider, info.subject()).orElse(null);
+        if (existing != null) return loginSessionService.loginExisting(existing.getId(), provider, req, info);
         return issueSignupToken(provider, req, info);
     }
 
@@ -164,7 +158,11 @@ public class AuthService {
         for (int attempt = 1; ; attempt++) {
             try {
                 final int current = attempt;
-                return requireNotBanned(transactionTemplate.execute(status -> register(req, tokenConsumed, current)));
+                SignupResponse response = requireNotBanned(transactionTemplate.execute(status -> register(req, tokenConsumed, current)));
+                User reviewed = moderation.moderate(UUID.fromString(response.user().id()));
+                return new SignupResponse(response.isNewUser(), response.restored(), response.accessToken(),
+                        response.refreshToken(), response.tokenType(), response.expiresIn(), response.flushIntervalSec(),
+                        UserResponse.from(reviewed, scoreSummaryRepository.findById(reviewed.getId()).orElse(null)));
             } catch (DataIntegrityViolationException e) {
                 // 동시 가입 경합 — 사전 조회 후 다른 요청이 먼저 가입했다.
                 // 계약: "후발 요청은 기존 유저 로그인으로 수렴"(테크 스펙 4-3).
@@ -212,8 +210,15 @@ public class AuthService {
         // (provider, subject) 로 이전 계정을 먼저 본다.
         //  · 살아 있는 계정 → 동시 가입 경합. 후발 요청은 기존 유저 로그인으로 수렴(테크 스펙 4-3)
         //  · 탈퇴한 계정 → <b>복귀</b>. 입력값을 받지 않고 이전 정보를 그대로 살려 로그인시킨다(회원 정책 §6)
+        if (sanctionService.isBanned(provider.name(), oauthSubject, req.installationId()))
+            throw new BusinessException(ErrorCode.ACCOUNT_BANNED);
         User existing = userRepository.findByOauthProviderAndOauthSubject(provider, oauthSubject).orElse(null);
-        if (existing != null && !existing.isWithdrawn()) return loginResponseFor(existing);
+        if (existing != null && !existing.isWithdrawn()) {
+            if (!tokenConsumed[0] && !signupTokenStore.consume(claims.getId()))
+                throw new BusinessException(ErrorCode.INVALID_SIGNUP_TOKEN);
+            tokenConsumed[0] = true;
+            return loginResponseFor(existing);
+        }
         if (existing != null) return restoreAndLogin(existing, req, claims, tokenConsumed);
 
         // 검사 순서가 계약이다 — 뒤로 갈수록 비싸다(온보딩 5-10).
@@ -271,21 +276,19 @@ public class AuthService {
         applyDeviceInfo(user, req.deviceInfo());              // 가입 시 기기 정보 최초 저장
         user.attachInstallation(req.installationId(), req.deviceId());
         applyCountry(user, req.deviceInfo());   // 지오 헤더 → 기기 지역 → Accept-Language → 기기 타임존 → 기본값
-        userRepository.save(user);
+        userRepository.saveAndFlush(user);
+        activity.touch(user.getId());
 
-        UserScoreSummary summary = scoreSummaryRepository.save(UserScoreSummary.initialize(user.getId()));   // 브론즈 10점
+        UserScoreSummary summary = scoreService.initialize(user.getId());   // 브론즈 10점
         invitationService.recordSignup(req.inviteCode(), user.getId(), java.time.Instant.now());   // 친구 초대 기록(선택)
         saveAgreements(user, ag);
-        moderationRequestRepository.save(
-                ModerationRequest.request(user.getId(), ModerationTarget.NICKNAME, req.nickname()));
         socialTokenService.flushPending(claims.getId(), user.getId(), provider);   // IdP 토큰 암호화 저장
 
         // 가입은 여기서 그대로 완료(닉네임 상태는 PENDING — 심사 중 기능 제한 없음).
         // 커밋 후 비동기로 LLM 검수 → 문제면 타인에게 임시 닉네임 + 알림.
-        eventPublisher.publishEvent(new UserModerationRequested(user.getId()));
 
         TokenService.TokenPair pair = tokenService.issueTokenPair(user);
-        int flushIntervalSec = FlushIntervalPolicy.forUser(user);   // deviceInfo 확정 저장 시점 → 주기 부트스트랩
+        int flushIntervalSec = syncPolicy.forUser(user);   // deviceInfo 확정 저장 시점 → 주기 부트스트랩
         return SignupResponse.from(pair, user, summary, flushIntervalSec);
     }
 
@@ -303,7 +306,6 @@ public class AuthService {
     private void requireInstallationAvailable(String installationId, OAuthProvider provider, String subject) {
         if (installationId == null || installationId.isBlank()) return;
         User holder = userRepository.findActiveHolderOfInstallation(installationId)
-                .or(() -> userRepository.findWithdrawnHolderOfInstallation(installationId))
                 .orElse(null);
         if (holder == null || holder.hasIdentity(provider, subject)) return;
         throw new BusinessException(ErrorCode.INSTALLATION_ALREADY_REGISTERED,
@@ -358,7 +360,7 @@ public class AuthService {
 
         TokenService.TokenPair pair = tokenService.issueTokenPair(user);
         UserScoreSummary summary = scoreSummaryRepository.findById(user.getId()).orElse(null);
-        return SignupResponse.restored(pair, user, summary, FlushIntervalPolicy.forUser(user));
+        return SignupResponse.restored(pair, user, summary, syncPolicy.forUser(user));
     }
 
     /** 임시 승인 닉네임 UNIQUE 위반인지 — 이 경우에만 새 후보로 가입을 재시도한다. */
@@ -392,7 +394,7 @@ public class AuthService {
         TokenService.TokenPair pair = tokenService.issueTokenPair(existing);
         UserScoreSummary summary = scoreSummaryRepository.findById(existing.getId()).orElse(null);
         return new SignupResponse(false, false, pair.accessToken(), pair.refreshToken(), "Bearer",
-                pair.expiresIn(), FlushIntervalPolicy.forUser(existing),
+                pair.expiresIn(), syncPolicy.forUser(existing),
                 UserResponse.from(existing, summary));
     }
 
@@ -423,7 +425,9 @@ public class AuthService {
         if (raw == null || raw.isBlank())
             throw new BusinessException(ErrorCode.GENDER_REQUIRED);
         try {
-            return Gender.valueOf(raw.trim().toUpperCase());
+            Gender gender = Gender.valueOf(raw.trim().toUpperCase());
+            if (gender != Gender.MALE && gender != Gender.FEMALE) throw new IllegalArgumentException();
+            return gender;
         } catch (IllegalArgumentException e) {
             throw new BusinessException(ErrorCode.GENDER_REQUIRED);
         }
@@ -460,15 +464,18 @@ public class AuthService {
     private void requireValidDevice(String deviceId, DeviceInfoRequest device) {
         if (deviceId == null || deviceId.isBlank())
             throw new BusinessException(ErrorCode.INVALID_DEVICE_INFO, "MISSING_DEVICE_ID");
-        if (device == null)
-            throw new BusinessException(ErrorCode.INVALID_DEVICE_INFO, "MISSING_DEVICE_INFO");
-        if (!device.isValid())
+        if (device != null && !device.isValid())
             throw new BusinessException(ErrorCode.INVALID_DEVICE_INFO, "MALFORMED_DEVICE_INFO");
     }
 
     /** 기기 정보를 유저에 반영(최신 1건 갱신). 호출 전 requireValidDevice 로 검증됨. */
     private void applyDeviceInfo(User user, DeviceInfoRequest device) {
-        if (device == null) return;
+        if (device == null) {
+            user.updateDeviceInfo(null, null, null, null, null, null, null, null);
+            user.updateRamMb(null);
+            return;
+        }
+        user.updateRamMb(device.ramMb());
         user.updateDeviceInfo(device.toPlatform(), device.versionCode(), device.versionName(),
                 device.osVersion(), device.sdkInt(), device.deviceModel(),
                 device.manufacturer(), device.lowRam());
@@ -540,7 +547,7 @@ public class AuthService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_EXPIRED));
 
         stored.revoke();                                   // 기존 무효화(회전)
-        return TokenResponse.from(tokenService.issueRotatedPair(user, stored.getFamilyId(), stored.getId()));
+        return TokenResponse.from(tokenService.issueRotatedPair(user, stored.getFamilyId(), stored.getId()), syncPolicy.forUser(user));
     }
 
     // ===== 로그아웃 (멱등) =====

@@ -21,9 +21,9 @@ public record TokenResponse(
         String tokenType,
 
         @Schema(description = "accessToken 만료까지 남은 시간(초)", example = "3600")
-        Long expiresIn) {
+        Long expiresIn, Integer flushIntervalSec) {
 
-    public static TokenResponse from(TokenService.TokenPair pair) {
-        return new TokenResponse(pair.accessToken(), pair.refreshToken(), "Bearer", pair.expiresIn());
+    public static TokenResponse from(TokenService.TokenPair pair, int flushIntervalSec) {
+        return new TokenResponse(pair.accessToken(), pair.refreshToken(), "Bearer", pair.expiresIn(), flushIntervalSec);
     }
 }

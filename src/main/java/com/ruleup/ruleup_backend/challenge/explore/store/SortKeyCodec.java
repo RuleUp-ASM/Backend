@@ -76,7 +76,7 @@ public final class SortKeyCodec {
     /** epoch day. 마감 임박(오름차순)에서 쓴다. */
     public static long ofEpochDay(Long day) {
         // 1970 이전 날짜가 들어올 일은 없지만 음수는 인코딩이 깨지므로 바닥을 둔다.
-        return day == null ? ABSENT : Math.max(0, day);
+        return day == null ? java.time.LocalDate.of(9999,12,31).toEpochDay() : Math.max(0, day);
     }
 
     // ===== 인코딩 =====

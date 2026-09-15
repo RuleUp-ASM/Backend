@@ -139,12 +139,24 @@ public class BlockService {
     private String userSnapshot(User target, UUID challengeId, String contextType, String contextId) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("targetType", TARGET_USER);
-        payload.put("nickname", target.visibleNicknameTo(null));
-        payload.put("profileImageUrl", target.visibleProfileImageTo(null));
+        payload.put("nickname", target.getNickname());
+        payload.put("nicknameStatus", target.getNicknameStatus().name());
+        payload.put("profileImageStatus", target.getProfileImageStatus().name());
+        payload.put("profileImageKey", target.getProfileImageUrl());
         if (challengeId != null) {
             payload.put("challengeId", challengeId.toString());
-            challengeRepository.findById(challengeId)
-                    .ifPresent(c -> payload.put("challengeTitle", c.publicTitle()));
+            challengeRepository.findById(challengeId).ifPresent(c -> payload.put("challenge", challengeContent(c)));
+            payload.put("membership", jdbc.queryForList("SELECT status,leave_reason,CAST(joined_at AS CHAR) AS joinedAt,CAST(left_at AS CHAR) AS leftAt " +
+                    "FROM challenge_members WHERE challenge_id=? AND user_id=?", bytes(challengeId),bytes(target.getId())));
+            if (contextId != null && "ROOM".equals(contextType)) {
+                try {
+                    UUID verificationId=UUID.fromString(contextId);
+                    payload.put("verification",jdbc.queryForList("SELECT d.status,d.method,d.failureReason,CAST(d.targetDate AS CHAR) AS targetDate, " +
+                            "CAST(d.shareableAt AS CHAR) AS shareableAt,CAST(r.evidence AS CHAR) AS evidence FROM VerificationDaily d " +
+                            "LEFT JOIN VerificationMethodResult r ON r.verificationDailyId=d.id WHERE d.id=? AND d.challengeId=? AND d.userId=?",
+                            bytes(verificationId),bytes(challengeId),bytes(target.getId())));
+                } catch (IllegalArgumentException ignored) { /* A non-verification screen context has no judgement evidence. */ }
+            }
         }
         payload.put("contextType", contextType);
         if (contextId != null && !contextId.isBlank()) payload.put("contextId", contextId);
@@ -156,9 +168,7 @@ public class BlockService {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("targetType", TARGET_CHALLENGE);
         payload.put("challengeId", challenge.getId().toString());
-        payload.put("challengeTitle", challenge.publicTitle());
-        payload.put("challengeDescription", challenge.publicDescription());
-        payload.put("imageUrl", challenge.getImageUrl());
+        payload.putAll(challengeContent(challenge));
         payload.put("contextType", contextType);
         if (contextId != null && !contextId.isBlank()) payload.put("contextId", contextId);
         payload.put("reportedAt", Instant.now().toString());
@@ -265,25 +275,20 @@ public class BlockService {
         }
     }
 
-    /** 스냅샷은 값만 담는 평평한 맵이라 직렬화기를 끌어오지 않는다. */
-    private String toJson(Map<String, Object> payload) {
-        StringBuilder sb = new StringBuilder("{");
-        boolean first = true;
-        for (Map.Entry<String, Object> e : payload.entrySet()) {
-            if (e.getValue() == null) continue;
-            if (!first) sb.append(',');
-            first = false;
-            sb.append('"').append(escape(e.getKey())).append("\":");
-            Object v = e.getValue();
-            if (v instanceof Boolean || v instanceof Number) sb.append(v);
-            else sb.append('"').append(escape(v.toString())).append('"');
-        }
-        return sb.append('}').toString();
+    private Map<String,Object> challengeContent(Challenge challenge) {
+        Map<String,Object> content=new LinkedHashMap<>();
+        content.put("challengeTitle",challenge.getTitle());
+        content.put("challengeDescription",challenge.getDescription());
+        content.put("imageUrl",challenge.getImageUrl());
+        content.put("moderationTitle",challenge.getModerationTitle().name());
+        content.put("moderationDescription",challenge.getModerationDescription().name());
+        content.put("moderationImage",challenge.getModerationImage().name());
+        content.put("status",challenge.getStatus().name());
+        return content;
     }
 
-    private String escape(String s) {
-        return s.replace("\\", "\\\\").replace("\"", "\\\"")
-                .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
+    private String toJson(Map<String,Object> payload) {
+        return tools.jackson.databind.json.JsonMapper.builder().build().writeValueAsString(payload);
     }
 
     private static byte[] bytes(UUID id) {

@@ -38,7 +38,9 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class LoginSessionService {
 
+    private final com.ruleup.ruleup_backend.verification.service.DeviceSyncPolicyService syncPolicy;
     private final UserRepository userRepository;
+    private final com.ruleup.ruleup_backend.user.UserActivityService activity;
     private final com.ruleup.ruleup_backend.sanction.SanctionService sanctionService;
     private final RefreshTokenRepository refreshTokenRepository;
     private final UserScoreSummaryRepository scoreSummaryRepository;
@@ -47,11 +49,12 @@ public class LoginSessionService {
     private final DeviceTokenRepository deviceTokenRepository;
     private final CountryResolver countryResolver;
     private final TokenService tokenService;
+    private final com.ruleup.ruleup_backend.user.domain.TempNicknameAllocator tempNicknameAllocator;
 
     @Transactional
     public OAuthLoginResponse loginExisting(UUID userId, OAuthProvider provider,
                                             OAuthLoginRequest req, OAuthUserInfo info) {
-        User user = userRepository.findById(userId)
+        User user = userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> BusinessException.withMessage(ErrorCode.LOGIN_FAILED, "ACCOUNT_NOT_FOUND",
                         "로그인 정보를 확인하지 못했어요. 처음부터 다시 로그인해주세요."));
 
@@ -59,8 +62,19 @@ public class LoginSessionService {
         if (sanctionService.isBanActive(user.getId()))
             throw new BusinessException(ErrorCode.ACCOUNT_BANNED);
 
-        // 탈퇴 계정은 여기로 오지 않는다 — AuthService 가 신규 분기(signupToken)로 보내고,
-        // 복원은 가입 요청에서 처리한다("탈퇴 후에는 회원가입을 거쳐 로그인", 회원 정책 §6).
+        boolean restored = user.isWithdrawn();
+        if (restored) {
+            boolean conflict = userRepository.isNicknameTaken(user.getApprovedNickname(), userId)
+                    || (user.isNicknamePending() && userRepository.isNicknameTaken(user.getNickname(), userId));
+            if (conflict) {
+                tempNicknameAllocator.assign(user, value -> userRepository.isNicknameTaken(value, userId));
+                user.markNicknameConflict();
+                notificationPublisher.publish(NotificationEvent.of(userId, NotificationType.MODERATION_REJECTED,
+                        Map.of(NotificationParams.VARIANT, "NICKNAME_TAKEN", NotificationParams.TARGET_KEY, "nickname",
+                                NotificationParams.EVENT_KEY, "restore:" + Instant.now())));
+            }
+            // 같은 계정의 개인정보·점수·이력을 유지하고 제재 잔여 기간을 해동한다.
+        }
 
         // ===== 단일 활성 기기 — 다른 기기 로그인이면 기존 세션 전부 종료 =====
         boolean deviceChanged = user.getDeviceId() != null && req.deviceId() != null
@@ -95,19 +109,24 @@ public class LoginSessionService {
                     });
         }
 
+        if (restored) {
+            user.restore(req.installationId(), req.deviceId());
+            sanctionService.thawAll(userId, Instant.now());
+        }
         applyDeviceInfo(user, req.deviceInfo());
         user.attachInstallation(req.installationId(), req.deviceId());
         applyCountry(user, req.deviceInfo());
         user.touchLastLogin();
-        user.touchLastActive();
-        userRepository.save(user);
+        activity.touch(user.getId());
+        userRepository.saveAndFlush(user);
+        activity.touch(user.getId());
 
         socialTokenService.upsert(user.getId(), provider, info.idpTokens());   // unlink 근거 최신화
 
         TokenService.TokenPair pair = tokenService.issueTokenPair(user);
         UserScoreSummary summary = scoreSummaryRepository.findById(user.getId()).orElse(null);
-        int flushIntervalSec = FlushIntervalPolicy.forUser(user);
-        return OAuthLoginResponse.existing(pair, user, summary, flushIntervalSec);
+        int flushIntervalSec = syncPolicy.forUser(user);
+        return OAuthLoginResponse.existing(pair, user, summary, flushIntervalSec).withRestored(restored);
     }
 
     /**
@@ -121,7 +140,12 @@ public class LoginSessionService {
     }
 
     private void applyDeviceInfo(User user, DeviceInfoRequest device) {
-        if (device == null) return;
+        if (device == null) {
+            user.updateDeviceInfo(null, null, null, null, null, null, null, null);
+            user.updateRamMb(null);
+            return;
+        }
+        user.updateRamMb(device.ramMb());
         user.updateDeviceInfo(device.toPlatform(), device.versionCode(), device.versionName(),
                 device.osVersion(), device.sdkInt(), device.deviceModel(),
                 device.manufacturer(), device.lowRam());

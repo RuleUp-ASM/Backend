@@ -68,6 +68,10 @@ public class ChallengeQueryService {
         return memberRepository.findActiveOnDate(date, org.springframework.data.domain.PageRequest.of(0, limit));
     }
 
+    public List<ChallengeMember> findActiveOnDateAfter(LocalDate date, UUID after, int limit) {
+        return memberRepository.findActiveOnDateAfter(date, after, org.springframework.data.domain.PageRequest.of(0, limit));
+    }
+
     public List<ChallengeMember> findFrequencyRolloverTargets(LocalDate date) {
         return memberRepository.findByScheduleTypeAndStatusAndCurPeriodEndLessThan(
                 ScheduleType.FREQUENCY, MemberStatus.ACTIVE, date);

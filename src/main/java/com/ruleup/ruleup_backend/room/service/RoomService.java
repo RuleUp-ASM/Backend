@@ -30,11 +30,13 @@ public class RoomService {
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     private final RoomAuthority authority;
+    private final com.ruleup.ruleup_backend.challenge.lifecycle.ChallengeHistoryQueryService history;
     private final RankingService rankingService;
     private final ChallengeMemberRepository memberRepository;
     private final VerificationDailyRepository verificationRepository;
 
     public RoomDtos.RankingResponse ranking(UUID userId, UUID challengeId) {
+        if (history.archived(challengeId)) return history.ranking(userId, challengeId);
         Challenge challenge = authority.requireMember(challengeId, userId);
         List<RankingService.Ranked> rows = rankingService.rank(challenge, userId);
         BigDecimal firstRate = rows.stream().filter(RankingService.Ranked::ranked)
@@ -64,7 +66,7 @@ public class RoomService {
                 .map(r -> new RoomDtos.RoomResponse.TopRank(r.rank(), r.userId().toString(), r.nickname(),
                         r.profileImageUrl(), r.successRate(), r.blocked())).toList();
         RoomDtos.RoomResponse.MyWeekly weekly = myWeekly(challenge, me, now.toLocalDate());
-        return new RoomDtos.RoomResponse(me.isOwner() ? "OWNER" : "MEMBER", challenge.getOwnerType().name(), summary,
+        return new RoomDtos.RoomResponse(challenge.isOwner(userId) ? "OWNER" : "MEMBER", challenge.getOwnerType().name(), summary,
                 top, weekly, todayStatus(challenge, me, weekly, now), null);
     }
 
@@ -129,7 +131,7 @@ public class RoomService {
                 : BigDecimal.valueOf(success).divide(BigDecimal.valueOf(total), 4, RoundingMode.HALF_UP);
     }
 
-    private int remainingDays(Challenge challenge, LocalDate today) {
-        return (int) Math.max(0, ChronoUnit.DAYS.between(today, challenge.getEndDate()));
+    private Integer remainingDays(Challenge challenge, LocalDate today) {
+        return challenge.getEndDate() == null ? null : (int) Math.max(0, ChronoUnit.DAYS.between(today, challenge.getEndDate()));
     }
 }

@@ -102,7 +102,7 @@ public record UserResponse(
                 user.getId().toString(),
                 selfDisplayNickname(user),
                 user.getNicknameStatus().name(),
-                user.getProfileImageUrl(),
+                user.visibleProfileImageTo(user.getId()),
                 profileImageStatus(user),
                 tier.name(), score, displayTier.name(),
                 user.getOauthProvider().name(),

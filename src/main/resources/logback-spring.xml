@@ -25,6 +25,10 @@
         <appender-ref ref="PUSH_JSON"/>
     </logger>
 
+    <logger name="com.ruleup.ruleup_backend.watcher.service.WatcherAudit" level="INFO" additivity="false">
+        <appender-ref ref="PUSH_JSON"/>
+    </logger>
+
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>
     </root>

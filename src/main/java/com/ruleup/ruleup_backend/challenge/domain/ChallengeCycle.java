@@ -23,7 +23,7 @@ public final class ChallengeCycle {
     public static LocalDate countFrom(LocalDate startDate, LocalDate joinDate) {
         if (!joinDate.isAfter(startDate)) return startDate;
         long elapsed = ChronoUnit.DAYS.between(startDate, joinDate);
-        long nextBoundary = ((elapsed / CYCLE_DAYS) + 1) * CYCLE_DAYS;
+        long nextBoundary = ((elapsed + CYCLE_DAYS - 1) / CYCLE_DAYS) * CYCLE_DAYS;
         return startDate.plusDays(nextBoundary);
     }
 

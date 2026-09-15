@@ -78,7 +78,7 @@ public final class RoomDtos {
                         + "갓 만든 방과 전원 실패한 방이 같아 보인다.", example = "0.92")
                 BigDecimal roomSuccessRate,
 
-                @Schema(description = "종료까지 남은 일수", example = "14") int remainingDays,
+                @Schema(description = "종료까지 남은 일수", example = "14") Integer remainingDays,
                 @Schema(description = "현재 참여 인원", example = "14") int participantCount,
                 @Schema(description = "정원. 제한이 없으면 null.", example = "50") Integer capacity) {}
 

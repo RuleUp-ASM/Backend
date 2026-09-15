@@ -16,7 +16,7 @@ public enum CycleResult {
     PARTIAL,
 
     /** 달성률 50% 이하. 연속 성공 0, 연속 실패 +1. */
-    FAILURE;
+    FAILURE, INVALID;
 
     /**
      * 달성률 판정. <b>부동소수점 나눗셈을 쓰지 않는다</b> — 정수 비교(성공 × 2 &gt; 목표)로 한다.

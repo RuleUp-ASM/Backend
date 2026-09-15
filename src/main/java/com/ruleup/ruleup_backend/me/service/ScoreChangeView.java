@@ -31,7 +31,7 @@ public class ScoreChangeView {
      */
     public ScoreReason displayReason(ScoreTransaction t) {
         return switch (t.getReason()) {
-            case DAILY_SUCCESS, STREAK_BONUS -> ScoreReason.CYCLE_SUCCESS;
+            case SIGNUP, CYCLE_CLOSED, PROCESSING_COMMIT, CORRECTION_COMMIT, DAILY_SUCCESS, STREAK_BONUS -> ScoreReason.CYCLE_SUCCESS;
             case CONFIRMED_MISS, STREAK_PENALTY -> ScoreReason.CYCLE_FAIL;
             case REVERSAL -> ScoreReason.APPEAL_RESTORE;
             case INCIDENT -> switch (t.getIncidentType()) {
