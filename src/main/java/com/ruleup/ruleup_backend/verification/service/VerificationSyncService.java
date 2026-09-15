@@ -484,6 +484,14 @@ public class VerificationSyncService {
                     member.getUserId(), member.getChallengeId(), method.name(), today, now));
         }
 
+        if (!permissionGap(gaps, method, today)) {
+            ofDay.stream().filter(signal -> MethodSignalTypes.anyFor(method, List.of(signal)))
+                    .map(SyncSignal::observedAt).filter(Objects::nonNull).map(value -> {
+                        try { return Instant.parse(value); } catch (RuntimeException invalid) { return Instant.MIN; }
+                    }).filter(at -> !at.isAfter(now)).max(Instant::compareTo)
+                    .filter(at -> !Instant.MIN.equals(at)).ifPresent(at -> eventPublisher.publishEvent(
+                            new PermissionWaitService.MeasurementReceived(member.getChallengeId(),member.getUserId(),method.name(),at)));
+        }
         if (mr == null) {
             mr = VerificationMethodResult.create(daily.getId(), method.name(), VerificationPolarity.of(config), true);
         }

@@ -40,6 +40,7 @@ import java.util.stream.Collectors;
  * <p>페이징은 노출 시각과 id의 복합 seek 커서를 SQL에 적용하고 {@code size+1}건만 읽는다.
  * 커서는 base64url 인코딩되어 내부 정렬 키를 클라이언트 계약에서 감춘다.
  */
+@lombok.extern.slf4j.Slf4j
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
@@ -72,6 +73,8 @@ public class ThreadService {
         List<ThreadDtos.Item> items = page.stream().map(row -> {
             boolean success = row.getStatus() == VerificationStatus.SUCCESS;
             Instant at = eventAt(row);
+            if (!success) log.info("failure_feed_exposed verificationId={} shareableAt={} viewedAt={}",
+                    row.getId(), row.getShareableAt(), now);
             User user = users.get(row.getUserId());
             boolean masked = blocked.contains(row.getUserId());
             // 마스킹은 "가린 모습으로 남기는 것"이지 지우는 것이 아니다. 닉네임을 비우면 클라가 빈 줄을

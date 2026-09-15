@@ -33,8 +33,8 @@ public class CrossRankingService {
                 ? new Object[]{mode, size + 1}
                 : new Object[]{mode, cursor.rank(), cursor.rank(), bytes(cursor.challengeId()), size + 1};
         List<CrossRankingDtos.Item> fetched = jdbc.query(
-                "SELECT rank_no,challenge_id,title,member_count,total_count,success_rate " +
-                        "FROM challenge_cross_ranking_snapshot WHERE mode=? AND rank_no IS NOT NULL " + seek +
+                "SELECT rank_no,challenge_id,(SELECT CASE WHEN c.moderation_title IN ('APPROVED','EXEMPT') THEN c.title ELSE c.ai_title END FROM challenges c WHERE c.id=s.challenge_id),member_count,total_count,success_rate " +
+                        "FROM challenge_cross_ranking_snapshot s WHERE mode=? AND rank_no IS NOT NULL " + seek +
                         "ORDER BY rank_no,challenge_id LIMIT ?",
                 (rs, row) -> new CrossRankingDtos.Item(rs.getInt(1), uuid(rs.getBytes(2)).toString(),
                         rs.getString(3), rs.getInt(4), rs.getInt(5), rs.getBigDecimal(6)), args);

@@ -81,6 +81,8 @@ public class ScoreService {
     private final ScoreCorrectionRepository correctionRepository;
     private final ChallengeScoreSource challengeRepository;
     private final VerificationDailyRepository dailyRepository;
+    private final com.ruleup.ruleup_backend.common.outbox.OutboxService outbox;
+    private final com.ruleup.ruleup_backend.common.outbox.OutboxDispatcher outboxDispatcher;
 
     // ===== 날짜별 판정 반영 =====
 
@@ -144,8 +146,14 @@ public class ScoreService {
             }
             // 경고는 연속 기록을 실제로 올린 이 자리에서만 낸다 — alreadyApplied 가 이미 멱등을
             // 보장하므로 마감이 재실행돼도 두 번 울리지 않는다.
-            if (StreakWarning.shouldWarn(result, streak.getFailureStreak())) {
-                notifyConsecutiveFailure(userId, challengeId, cycleNo);
+            if (result == CycleResult.FAILURE && streak.getFailureStreak() >= 2) {
+                UUID eventId = com.ruleup.ruleup_backend.common.UuidGenerator.generate();
+                outbox.enqueue(com.ruleup.ruleup_backend.room.service.RoomCycleResultHandler.TYPE,
+                        new com.ruleup.ruleup_backend.room.service.RoomCycleResultHandler.Payload(eventId, userId, challengeId,
+                                cycleNo, streak.getFailureStreak(), cycle.getStartedOn(),
+                                cycle.getStartedOn().plusDays(7).atStartOfDay(java.time.ZoneId.of("Asia/Seoul")).toInstant()),
+                        "room-cycle:" + userId + ":" + challengeId + ":" + cycleNo);
+                outboxDispatcher.requestFlush();
             }
         }
         cycle.close(result, Instant.now());

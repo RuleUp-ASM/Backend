@@ -374,6 +374,7 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
             jdbcTemplate.update("UPDATE challenge_members SET rejoin_available_at = DATE_SUB(NOW(6), INTERVAL 1 HOUR) "
                     + "WHERE challenge_id = ? AND user_id = ?", bytes(challengeId), bytes(joiner.id()));
 
+            jdbcTemplate.update("UPDATE challenge_rejoin_backoffs SET available_at=DATE_SUB(NOW(6),INTERVAL 1 HOUR) WHERE challenge_id=? AND user_id=?", bytes(challengeId),bytes(joiner.id()));
             assertThat(join(joiner.token(), challengeId).getResponse().getStatus()).isEqualTo(200);
         }
     }

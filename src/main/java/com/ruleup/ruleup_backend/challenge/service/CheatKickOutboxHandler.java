@@ -32,7 +32,7 @@ public class CheatKickOutboxHandler implements OutboxHandler {
     /** 아웃박스 라우팅 키. */
     public static final String OUTBOX_TYPE = "CHEAT_DETECTION_KICK";
 
-    private final RoomAdminService roomAdminService;
+    private final com.ruleup.ruleup_backend.room.service.AutomaticKickService kicks;
 
     public record Payload(String userId, String challengeId, String detectionId) {}
 
@@ -44,7 +44,9 @@ public class CheatKickOutboxHandler implements OutboxHandler {
     @Override
     public void handle(String payload) {
         Payload event = OutboxService.parse(payload, Payload.class);
-        roomAdminService.kickForCheat(UUID.fromString(event.challengeId()), UUID.fromString(event.userId()));
+        kicks.enforce(UUID.fromString(event.challengeId()), UUID.fromString(event.userId()),
+                com.ruleup.ruleup_backend.room.service.AutomaticKickService.Reason.CHEAT_DETECTED,
+                UUID.fromString(event.detectionId()), null, java.util.Map.of("detectionId", event.detectionId()));
         log.info("부정행위 강퇴 집행 userId={} challengeId={}", event.userId(), event.challengeId());
     }
 }

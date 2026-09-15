@@ -18,6 +18,10 @@ import java.util.UUID;
 /** challenge_members 접근. */
 public interface ChallengeMemberRepository extends JpaRepository<ChallengeMember, UUID> {
 
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT m FROM ChallengeMember m WHERE m.challengeId=:challengeId AND m.userId=:userId")
+    java.util.Optional<ChallengeMember> findForUpdate(@Param("challengeId") UUID challengeId, @Param("userId") UUID userId);
+
     /** 특정 챌린지의 특정 사용자 멤버십 (참여 중복 검사·승인/거절 대상 조회) */
     Optional<ChallengeMember> findByChallengeIdAndUserId(UUID challengeId, UUID userId);
 
@@ -90,6 +94,11 @@ public interface ChallengeMemberRepository extends JpaRepository<ChallengeMember
             "AND m.status = 'ACTIVE' AND m.setupStatus = 'READY' " +
             "AND c.startDate <= :date AND (c.endDate IS NULL OR c.endDate >= :date)")
     List<ChallengeMember> findActiveOnDate(@Param("date") LocalDate date, Pageable pageable);
+
+    @Query("SELECT m FROM ChallengeMember m, Challenge c WHERE c.id=m.challengeId AND c.deletedAt IS NULL " +
+            "AND m.status='ACTIVE' AND m.setupStatus='READY' AND c.startDate<=:date " +
+            "AND (c.endDate IS NULL OR c.endDate>=:date) AND m.id>:after ORDER BY m.id")
+    List<ChallengeMember> findActiveOnDateAfter(@Param("date") LocalDate date, @Param("after") UUID after, Pageable pageable);
 
     /**
      * 방별 확정 실패 인원(§3.2.4): 남은 날을 다 성공해도 90% 날 달성이 불가능해진 ACTIVE 멤버 수.

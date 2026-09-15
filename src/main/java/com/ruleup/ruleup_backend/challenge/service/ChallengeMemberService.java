@@ -82,6 +82,7 @@ public class ChallengeMemberService {
     private final org.springframework.jdbc.core.JdbcTemplate jdbc;
     private final RoomAuthority roomAuthority;
     private final BlockService blockService;
+    private final com.ruleup.ruleup_backend.room.service.ChallengeRejoinPolicy rejoinPolicy;
     private final com.ruleup.ruleup_backend.common.outbox.OutboxService outbox;
     private final com.ruleup.ruleup_backend.common.outbox.OutboxDispatcher outboxDispatcher;
 
@@ -129,9 +130,9 @@ public class ChallengeMemberService {
         // ③ 영구 차단 → 재입장 대기. 부정행위 검출 강퇴만 영구 차단이고(방 내부 5-6) 대기 시각이 없다 —
         //    백오프로 치환하면 치팅으로 쫓겨난 사용자가 1주 뒤 그대로 돌아온다.
         //    나머지(자진 탈퇴 1주 / 연속 실패·권한 미허용 강퇴 배수)는 대기 시각으로 판정한다.
-        if (existing != null) {
-            if (existing.isRejoinBanned()) throw blocked(JoinBlockReason.PERMANENT_BAN);
-            Instant availableAt = existing.getRejoinAvailableAt();
+        {
+            if (rejoinPolicy.permanentlyBanned(challengeId, userId) || (existing != null && existing.isRejoinBanned())) throw blocked(JoinBlockReason.PERMANENT_BAN);
+            Instant availableAt = rejoinPolicy.availableAt(challengeId, userId, existing);
             if (availableAt != null && now.isBefore(availableAt))
                 throw new BusinessException(ErrorCode.JOIN_BLOCKED,
                         JoinBlockReason.REJOIN_COOLDOWN.name(), availableAt.toString());
@@ -191,9 +192,9 @@ public class ChallengeMemberService {
         if (existing != null && existing.isActive()) return JoinBlockReason.ALREADY_JOINED;
         if (!invited && c.isGroup() && "PRIVATE".equals(c.getVisibility()))
             return JoinBlockReason.PRIVATE_INVITE_ONLY;
-        if (existing != null && existing.isRejoinBanned()) return JoinBlockReason.PERMANENT_BAN;
-        if (existing != null && existing.getRejoinAvailableAt() != null
-                && Instant.now().isBefore(existing.getRejoinAvailableAt()))
+        if (rejoinPolicy.permanentlyBanned(c.getId(), userId) || (existing != null && existing.isRejoinBanned())) return JoinBlockReason.PERMANENT_BAN;
+        Instant availableAt = rejoinPolicy.availableAt(c.getId(), userId, existing);
+        if (availableAt != null && Instant.now().isBefore(availableAt))
             return JoinBlockReason.REJOIN_COOLDOWN;
         Integer cap = c.getMaxParticipants();
         if (cap != null && memberRepository.countByChallengeIdAndStatus(c.getId(), MemberStatus.ACTIVE) >= cap)
@@ -238,6 +239,7 @@ public class ChallengeMemberService {
 
         Instant rejoinAt = now.plus(LEAVE_REJOIN_COOLDOWN);
         me.leave(now, rejoinAt);
+        rejoinPolicy.voluntaryLeave(challengeId, userId, rejoinAt);
         // 참여 인원 변화 → version 증가. decrementParticipantCount 는 clearAutomatically 라
         // 그 뒤에서 부르면 c 가 준영속이 되어 증가가 조용히 사라진다(반드시 앞에서).
         c.bumpVersion();
