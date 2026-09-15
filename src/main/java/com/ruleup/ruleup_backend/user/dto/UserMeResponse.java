@@ -7,22 +7,19 @@ import java.util.Map;
 
 /**
  * GET /api/v1/users/me 응답 (내 프로필 조회 API 계약 — 2026-08-03 신설, 오픈 이슈 #5).
- * user 블록은 로그인 응답과 동일 스키마 + 본인만 볼 수 있는 항목(생일·성별·약관 동의)을 추가.
+ * user 블록은 로그인 응답과 동일 스키마 + 본인만 볼 수 있는 항목(성별·약관 동의)을 추가.
  * agreements 키: termsOfService/privacyPolicy/locationService/marketing/event/locationInfo/healthInfo.
  */
 @Schema(name = "UserMeResponse", description = """
-        내 프로필. 로그인 응답의 user 블록에 본인만 볼 수 있는 항목(생일·성별·약관 동의 상태)을 더한 것이다.""")
+        내 프로필. 로그인 응답의 user 블록에 본인만 볼 수 있는 항목(성별·약관 동의 상태)을 더한 것이다.""")
 public record UserMeResponse(
 
         @Schema(description = "로그인·가입 응답과 동일한 사용자 정보 블록",
                 requiredMode = Schema.RequiredMode.REQUIRED)
         UserResponse user,
 
-        @Schema(description = "생년월일(YYYY-MM-DD). 수집하지 않았으면 null.", example = "1998-03-21")
-        String birthDate,
-
         @Schema(description = "성별. 수집하지 않았으면 null.", example = "MALE",
-                allowableValues = {"MALE", "FEMALE", "NON_BINARY", "PREFER_NOT_TO_SAY"})
+                allowableValues = {"MALE", "FEMALE"})
         String gender,
 
         @Schema(description = """

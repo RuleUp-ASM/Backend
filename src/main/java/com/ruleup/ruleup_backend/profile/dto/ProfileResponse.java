@@ -67,7 +67,7 @@ public record ProfileResponse(
         String changeableAfter = (changedAt != null)
                 ? changedAt.plus(NicknamePolicy.CHANGE_INTERVAL).toString() : null;
         return new ProfileResponse(
-                user.getId().toString(), user.getNickname(), user.getEmail(), user.getProfileImageUrl(),
+                user.getId().toString(), user.getNickname(), user.getEmail(), user.visibleProfileImageTo(user.getId()),
                 user.getNicknameStatus().name(), user.getProfileImageStatus().name(), user.getApprovedNickname(),
                 (changedAt != null ? changedAt.toString() : null),
                 changeableAfter,

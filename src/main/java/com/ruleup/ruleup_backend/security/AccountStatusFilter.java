@@ -98,10 +98,13 @@ public class AccountStatusFilter extends OncePerRequestFilter {
 
     private final UserRepository userRepository;
     private final SanctionService sanctionService;
+    private final com.ruleup.ruleup_backend.user.UserActivityService activity;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
+        UUID userId = currentUserId();
+        if (userId != null) activity.touch(userId);
         Blocked blocked = blockedReason(request);
         if (blocked != null) {
             writeError(response, blocked);

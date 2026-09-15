@@ -13,7 +13,7 @@ import java.net.URI;
 import java.time.Duration;
 
 @Configuration(proxyBeanMethods = false)
-@ConditionalOnExpression("!'${app.moderation.queue.url:}'.trim().isEmpty()")
+@ConditionalOnExpression("!'${app.moderation.queue.url:}'.trim().isEmpty() || !'${app.moderation.user-queue-url:}'.trim().isEmpty()")
 public class ChallengeModerationQueueConfig {
     @Bean(destroyMethod = "close")
     public SqsClient challengeModerationSqsClient(

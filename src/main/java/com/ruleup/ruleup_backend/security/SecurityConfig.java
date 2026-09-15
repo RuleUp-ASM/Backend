@@ -21,6 +21,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 @RequiredArgsConstructor
 public class SecurityConfig {
 
+    private final com.ruleup.ruleup_backend.user.UserActivityService activity;
     private final JwtProvider jwtProvider;
     private final JwtAuthenticationEntryPoint entryPoint;
     private final com.ruleup.ruleup_backend.user.UserRepository userRepository;
@@ -54,7 +55,7 @@ public class SecurityConfig {
         JwtAuthenticationFilter jwtFilter = new JwtAuthenticationFilter(jwtProvider);
         // 계정 상태 게이트 — status 를 먼저 보고 SUSPENDED 일 때만 sanctions 로 차단 범위를 정한다.
         // (@Component 로 두면 Boot 가 서블릿 필터로도 자동 등록해 이중 실행되므로 여기서 직접 만든다)
-        AccountStatusFilter accountStatusFilter = new AccountStatusFilter(userRepository, sanctionService);
+        AccountStatusFilter accountStatusFilter = new AccountStatusFilter(userRepository, sanctionService, activity);
 
         http
                 .csrf(AbstractHttpConfigurer::disable)

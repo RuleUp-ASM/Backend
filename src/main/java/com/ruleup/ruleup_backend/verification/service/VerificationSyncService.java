@@ -72,6 +72,7 @@ public class VerificationSyncService {
             Stream.of("GEOFENCE_TRANSITION")   // Android 와이어 별칭
     ).collect(Collectors.toUnmodifiableSet());
 
+    private final com.ruleup.ruleup_backend.verification.service.DeviceSyncPolicyService syncPolicy;
     private final ChallengeQueryService challengeQuery;
     private final VerificationDailyRepository dailyRepo;
     private final VerificationMethodResultRepository methodResultRepo;
@@ -96,7 +97,7 @@ public class VerificationSyncService {
     private final VerificationMetrics metrics;
     private final Map<VerificationMethod, MethodEvaluator> evaluators;
 
-    public VerificationSyncService(ChallengeQueryService challengeQuery,
+    public VerificationSyncService(DeviceSyncPolicyService syncPolicy, ChallengeQueryService challengeQuery,
                                    VerificationDailyRepository dailyRepo,
                                    VerificationMethodResultRepository methodResultRepo,
                                    SyncRateLimiter rateLimiter,
@@ -119,6 +120,7 @@ public class VerificationSyncService {
                                    SignalConsentGate consentGate,
                                    VerificationMetrics metrics,
                                    List<MethodEvaluator> evaluatorList) {
+        this.syncPolicy = syncPolicy;
         this.challengeQuery = challengeQuery;
         this.dailyRepo = dailyRepo;
         this.methodResultRepo = methodResultRepo;
@@ -247,7 +249,7 @@ public class VerificationSyncService {
         // flushIntervalSec: 기기 스펙 기반 산정값을 매 ACK마다 전체값으로 회신(§6 제어 모델).
         // maxPayloadBytes: 클라가 이 값을 보고 전송 구간을 쪼갠다(설정값, 실측 후 조정).
         backfillCountry(user, req.timeZone());
-        int flushIntervalSec = FlushIntervalPolicy.forUser(user);
+        int flushIntervalSec = syncPolicy.forUser(user);
         metrics.sync(System.nanoTime() - startedAt, signals.size(), ingested.droppedCount(),
                 gateDropped, consent.rejectedTypes().size());
         // 봉투의 모양 — 압축·요약 전송 도입 판단의 근거다(백엔드 7절).

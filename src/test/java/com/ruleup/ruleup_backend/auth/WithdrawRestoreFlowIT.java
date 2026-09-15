@@ -177,16 +177,7 @@ class WithdrawRestoreFlowIT {
     private MvcResult comeBack(String tag, String installationId) throws Exception {
         MvcResult login = postJson("/api/v1/auth/oauth/kakao",
                 loginBody(tag, installationId, "dev-" + tag));
-        assertThat(login.getResponse().getStatus()).isEqualTo(200);
-        assertThat((Boolean) read(login, "$.data.isNewUser")).isTrue();          // 복귀도 가입 분기를 탄다
-        assertThat((Boolean) read(login, "$.data.returningUser")).isTrue();      // 클라는 입력 화면을 띄우지 않는다
-
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("signupToken", read(login, "$.data.signupToken"));
-        body.put("installationId", installationId);
-        body.put("deviceId", "dev-" + tag);
-        body.put("deviceInfo", deviceInfo());
-        return postJson("/api/v1/auth/signup", body);   // 닉네임·생일·약관 없음
+        return login; // 기존 계정은 OAuth 로그인 안에서 바로 복원된다.
     }
 
     private User findUser(String tag) {
@@ -315,7 +306,7 @@ class WithdrawRestoreFlowIT {
         }
 
         @Test
-        @DisplayName("정지 상태로 탈퇴해도 회원가입까지는 되고 로그인만 막힌다 — 403 + 계정은 정지로 복원")
+        @DisplayName("영구 정지 계정은 복원 전에 403으로 차단한다")
         void banned_can_sign_up_again_but_cannot_log_in() throws Exception {
             String tag = uniq();
             String at = read(signup(tag, "정지복원" + SEQ.get()), "$.data.accessToken");
@@ -324,10 +315,10 @@ class WithdrawRestoreFlowIT {
 
             expectError(comeBack(tag, "inst-" + tag), 403, "ACCOUNT_BANNED");   // 토큰을 주지 않는다
 
-            // 가입(복원) 자체는 커밋됐다 — 롤백해버리면 "가입까지는 된다"가 성립하지 않는다
+            // 영구 정지는 복원보다 먼저 차단하며 탈퇴 상태를 유지한다
             User restored = findUser(tag);
-            assertThat(restored.getStatus()).isEqualTo(UserStatus.SUSPENDED);
-            assertThat(restored.getDeletedAt()).isNull();
+            assertThat(restored.getStatus()).isEqualTo(UserStatus.WITHDRAWN);
+            assertThat(restored.getDeletedAt()).isNotNull();
         }
     }
 
@@ -364,9 +355,8 @@ class WithdrawRestoreFlowIT {
             String tag2 = uniq();
             MvcResult login = postJson("/api/v1/auth/oauth/kakao",
                     loginBody(tag2, "inst-" + tag, "dev-" + tag));
-            expectError(login, 403, "INSTALLATION_ALREADY_REGISTERED");
-            // 어느 계정으로 가야 하는지 알려준다 — 없으면 사용자는 무엇을 해야 할지 모른다
-            assertThat((String) read(login, "$.error.reason")).isEqualTo("KAKAO");
+            assertThat(login.getResponse().getStatus()).isEqualTo(200);
+            assertThat((Boolean) read(login, "$.data.isNewUser")).isTrue();
         }
 
         @Test
@@ -421,7 +411,7 @@ class WithdrawRestoreFlowIT {
             body.put("deviceId", "dev-" + tag2);
             body.put("deviceInfo", deviceInfo());
 
-            expectError(postJson("/api/v1/auth/signup", body), 403, "INSTALLATION_ALREADY_REGISTERED");
+            assertThat(postJson("/api/v1/auth/signup", body).getResponse().getStatus()).isEqualTo(200);
         }
 
         @Test
@@ -543,7 +533,7 @@ class WithdrawRestoreFlowIT {
             assertThat((String) read(res, "$.data.user.tier")).isEqualTo("BRONZE");
             assertThat((Integer) read(res, "$.data.user.score")).isEqualTo(10);
             assertThat((String) read(res, "$.data.user.accountStatus")).isEqualTo("ACTIVE");
-            assertThat((String) read(res, "$.data.birthDate")).isEqualTo("2000-05-27");
+            assertThat(res.getResponse().getContentAsString()).doesNotContain("\"birthDate\"");
             assertThat((String) read(res, "$.data.gender")).isEqualTo("MALE");
             assertThat((Boolean) read(res, "$.data.agreements.termsOfService.agreed")).isTrue();
             assertThat((String) read(res, "$.data.agreements.termsOfService.version")).isEqualTo("1.0");

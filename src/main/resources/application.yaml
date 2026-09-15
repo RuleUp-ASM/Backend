@@ -74,6 +74,7 @@ management:
 app:
   moderation:
     local: ${MODERATION_LOCAL:false}
+    user-queue-url: ${USER_MODERATION_QUEUE_URL:}
     queue:
       url: ${MODERATION_QUEUE_URL:}
       region: ${AWS_REGION:ap-northeast-2}
@@ -175,7 +176,7 @@ app:
       # 각 단계 제한 시간을 분리한다. Duration 형식(예: 500ms, 3s)으로 운영 환경에서 조정 가능하다.
       connection-request-timeout: ${OAUTH_CONNECTION_REQUEST_TIMEOUT:1s}
       connect-timeout: ${OAUTH_CONNECT_TIMEOUT:3s}
-      response-timeout: ${OAUTH_RESPONSE_TIMEOUT:5s}
+      response-timeout: ${OAUTH_RESPONSE_TIMEOUT:3s}
     kakao:
       client-id: ${KAKAO_REST_API_KEY}
       client-secret: ${KAKAO_CLIENT_SECRET}

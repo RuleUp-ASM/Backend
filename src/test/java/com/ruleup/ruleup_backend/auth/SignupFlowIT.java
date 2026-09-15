@@ -8,10 +8,7 @@ import com.ruleup.ruleup_backend.agreement.domain.AgreementType;
 import com.ruleup.ruleup_backend.agreement.domain.UserAgreementEvent;
 import com.ruleup.ruleup_backend.config.AppProperties;
 import com.ruleup.ruleup_backend.moderation.ContentModerationClient;
-import com.ruleup.ruleup_backend.moderation.ModerationRequestRepository;
 import com.ruleup.ruleup_backend.moderation.ModerationResult;
-import com.ruleup.ruleup_backend.moderation.domain.ModerationRequest;
-import com.ruleup.ruleup_backend.moderation.domain.ModerationRequestStatus;
 import com.ruleup.ruleup_backend.moderation.domain.ModerationTarget;
 import com.ruleup.ruleup_backend.score.UserScoreSummaryRepository;
 import com.ruleup.ruleup_backend.score.domain.Tier;
@@ -84,7 +81,6 @@ class SignupFlowIT {
     @Autowired AppProperties props;
     @Autowired UserRepository userRepository;
     @Autowired UserAgreementEventRepository agreementRepository;
-    @Autowired ModerationRequestRepository moderationRequestRepository;
     @Autowired UserScoreSummaryRepository scoreSummaryRepository;
 
     /**
@@ -266,14 +262,6 @@ class SignupFlowIT {
                     .satisfies(a -> assertThat(a.isAgreed()).isTrue());
             assertThat(ags).filteredOn(a -> a.getAgreementType() == AgreementType.EVENT).singleElement()
                     .satisfies(a -> assertThat(a.isAgreed()).isFalse());
-
-            // 닉네임 심사 요청 기록
-            List<ModerationRequest> reqs = moderationRequestRepository
-                    .findByUserIdAndTarget(user.getId(), ModerationTarget.NICKNAME);
-            assertThat(reqs).isNotEmpty();
-            assertThat(reqs.getFirst().getContent()).isEqualTo(user.getNickname());
-            assertThat(reqs.getFirst().getStatus()).isIn(
-                    ModerationRequestStatus.PENDING, ModerationRequestStatus.APPROVED);
 
             // 시작 티어 브론즈 10점
             var summary = scoreSummaryRepository.findById(user.getId()).orElseThrow();
@@ -556,11 +544,13 @@ class SignupFlowIT {
         }
 
         @Test
-        @DisplayName("deviceInfo 누락은 400 INVALID_DEVICE_INFO")
+        @DisplayName("deviceInfo 누락은 기본 sync 정책을 적용한다")
         void device_info_missing_rejected() throws Exception {
             Map<String, Object> body = preparedSignup(uniq(), "무기기유저" + SEQ.get());
             body.remove("deviceInfo");
-            expectError(postJson("/api/v1/auth/signup", body), 400, "INVALID_DEVICE_INFO");
+            MvcResult result = postJson("/api/v1/auth/signup", body);
+            assertThat(result.getResponse().getStatus()).isEqualTo(200);
+            assertThat((Integer) read(result, "$.data.flushIntervalSec")).isEqualTo(1800);
         }
 
         @Test

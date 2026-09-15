@@ -47,8 +47,8 @@ class DormancyNoticeIT {
 
     /** 마지막 활동 시각을 과거로 돌린다. SQL 안에서 상대 계산을 해 시간대 해석을 피한다. */
     private void silentFor(UUID userId, int days) {
-        jdbc.update("UPDATE users SET last_active_at = DATE_SUB(NOW(3), INTERVAL ? DAY)"
-                + " WHERE id = ?", days, bytes(userId));
+        jdbc.update("INSERT INTO user_activity(user_id,last_active_on) VALUES(?,DATE_SUB(CURDATE(),INTERVAL ? DAY)) " +
+                "ON DUPLICATE KEY UPDATE last_active_on=VALUES(last_active_on),notified_stage='NONE'", bytes(userId), days);
     }
 
     private List<Notification> noticesOf(UUID userId, String type) {
@@ -73,7 +73,7 @@ class DormancyNoticeIT {
         @DisplayName("휴면 예고선을 넘으면 고지가 쌓인다")
         void notifiesPastDormancyLine() {
             UUID userId = newUser();
-            silentFor(userId, 340);   // 기본 335일 초과
+            silentFor(userId, 23);   // 기본 335일 초과
 
             batch.notifyInactive();
 
@@ -101,7 +101,8 @@ class DormancyNoticeIT {
         @DisplayName("탈퇴 예고선을 넘으면 휴면 예고 대신 탈퇴 예고만 간다")
         void onlyWithdrawalNotice() {
             UUID userId = newUser();
-            silentFor(userId, 720);   // 기본 700일 초과
+            silentFor(userId, 335);
+            jdbc.update("UPDATE user_activity SET notified_stage='D30' WHERE user_id=?", bytes(userId));   // 기본 700일 초과
 
             batch.notifyInactive();
 
@@ -119,7 +120,7 @@ class DormancyNoticeIT {
         @DisplayName("매일 돌아도 같은 침묵 구간에서는 한 번만 적재된다")
         void publishesOncePerSilentSpell() {
             UUID userId = newUser();
-            silentFor(userId, 340);
+            silentFor(userId, 23);
 
             batch.notifyInactive();
             batch.notifyInactive();
@@ -133,11 +134,11 @@ class DormancyNoticeIT {
         @DisplayName("돌아왔다가 다시 잠잠해지면 새 고지가 나간다")
         void newSpellNotifiesAgain() {
             UUID userId = newUser();
-            silentFor(userId, 340);
+            silentFor(userId, 23);
             batch.notifyInactive();
 
             // 다시 들어왔다가(활동 시각 갱신) 또 오래 비웠다 — 다른 침묵 구간이다.
-            silentFor(userId, 350);
+            silentFor(userId, 24);
             batch.notifyInactive();
 
             assertThat(noticesOf(userId, "DORMANCY_NOTICE")).hasSize(2);

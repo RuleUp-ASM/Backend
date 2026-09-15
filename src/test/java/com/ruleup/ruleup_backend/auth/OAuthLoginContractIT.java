@@ -144,7 +144,7 @@ class OAuthLoginContractIT extends AuthApiSupport {
     class InstallationGateAcrossProviders {
 
         @Test
-        @DisplayName("구글로 가입·탈퇴한 기기에서 카카오로 가입하려 하면 막고, 구글로 가라고 알려준다")
+        @DisplayName("탈퇴한 구글 계정의 설치에서 카카오 신규 가입을 허용한다")
         void google_first_then_kakao_is_blocked() throws Exception {
             String tag = uniq("g");
             String install = "inst-" + tag;
@@ -152,15 +152,12 @@ class OAuthLoginContractIT extends AuthApiSupport {
 
             MvcResult kakao = postJson("/api/v1/auth/oauth/kakao",
                     loginBody(uniq("k"), install, "dev-" + tag));
-            expectError(kakao, 403, "INSTALLATION_ALREADY_REGISTERED");
-            assertThat((String) read(kakao, "$.error.reason")).isEqualTo("GOOGLE");
-            // 어느 소셜인지는 reason 으로만 알린다 — 문구에 이름을 드러내지 않는 게 방침이다.
-            assertThat((String) read(kakao, "$.error.message"))
-                    .doesNotContain("구글").doesNotContain("카카오");
+            assertThat(kakao.getResponse().getStatus()).isEqualTo(200);
+            assertThat((Boolean) read(kakao, "$.data.isNewUser")).isTrue();
         }
 
         @Test
-        @DisplayName("카카오로 가입·탈퇴한 기기에서 구글로 가입하려 하면 막고, 카카오로 가라고 알려준다")
+        @DisplayName("탈퇴한 카카오 계정의 설치에서 구글 신규 가입을 허용한다")
         void kakao_first_then_google_is_blocked() throws Exception {
             String tag = uniq("k");
             String install = "inst-" + tag;
@@ -168,10 +165,8 @@ class OAuthLoginContractIT extends AuthApiSupport {
 
             MvcResult google = postJson("/api/v1/auth/oauth/google",
                     googleLoginBody(uniq("g"), install, "dev-" + tag));
-            expectError(google, 403, "INSTALLATION_ALREADY_REGISTERED");
-            assertThat((String) read(google, "$.error.reason")).isEqualTo("KAKAO");
-            assertThat((String) read(google, "$.error.message"))
-                    .doesNotContain("카카오").doesNotContain("구글");
+            assertThat(google.getResponse().getStatus()).isEqualTo(200);
+            assertThat((Boolean) read(google, "$.data.isNewUser")).isTrue();
         }
 
         @Test
@@ -186,15 +181,8 @@ class OAuthLoginContractIT extends AuthApiSupport {
             MvcResult login = postJson("/api/v1/auth/oauth/google",
                     googleLoginBody(tag, install, "dev-" + tag));
             assertThat(login.getResponse().getStatus()).isEqualTo(200);
-            assertThat((Boolean) read(login, "$.data.isNewUser")).isTrue();
-            assertThat((Boolean) read(login, "$.data.returningUser")).isTrue();
-
-            Map<String, Object> body = new LinkedHashMap<>();
-            body.put("signupToken", read(login, "$.data.signupToken"));
-            body.put("installationId", install);
-            body.put("deviceId", "dev-" + tag);
-            body.put("deviceInfo", deviceInfo());
-            MvcResult res = postJson("/api/v1/auth/signup", body);   // 입력 없이 복원
+            assertThat((Boolean) read(login, "$.data.isNewUser")).isFalse();
+            MvcResult res = login;
 
             assertThat(res.getResponse().getStatus()).isEqualTo(200);
             assertThat((Boolean) read(res, "$.data.restored")).isTrue();
@@ -384,7 +372,7 @@ class OAuthLoginContractIT extends AuthApiSupport {
     class DeviceInfo {
 
         @Test
-        @DisplayName("로그인도 deviceId·deviceInfo 가 필수다 — 400 INVALID_DEVICE_INFO")
+        @DisplayName("deviceId는 필수이며 deviceInfo 누락은 허용한다")
         void login_requires_device() throws Exception {
             String tag = uniq("ld");
             Map<String, Object> noDeviceId = loginBody(tag, "inst-" + tag, "dev-" + tag);
@@ -393,7 +381,7 @@ class OAuthLoginContractIT extends AuthApiSupport {
 
             Map<String, Object> noDeviceInfo = loginBody(tag, "inst-" + tag, "dev-" + tag);
             noDeviceInfo.remove("deviceInfo");
-            expectError(postJson("/api/v1/auth/oauth/kakao", noDeviceInfo), 400, "INVALID_DEVICE_INFO");
+            assertThat(postJson("/api/v1/auth/oauth/kakao", noDeviceInfo).getResponse().getStatus()).isEqualTo(200);
         }
 
         @Test

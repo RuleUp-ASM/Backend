@@ -31,6 +31,10 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     Optional<User> findByIdAndDeletedAtIsNull(UUID id);
 
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("select u from User u where u.id=:id")
+    Optional<User> findByIdForUpdate(@Param("id") UUID id);
+
     /**
      * 계정 상태만 읽는다 — 요청마다 제재를 확인하는 {@code AccountStatusFilter} 전용.
      * 엔티티 전체(관심사·개인정보 컬렉션 포함)를 로드하지 않으려고 projection 으로 둔다.

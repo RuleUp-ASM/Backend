@@ -1,119 +1,102 @@
 package com.ruleup.ruleup_backend.moderation;
 
-import com.ruleup.ruleup_backend.moderation.domain.ModerationRequest;
-import com.ruleup.ruleup_backend.moderation.domain.ModerationRequestStatus;
-import com.ruleup.ruleup_backend.moderation.domain.ModerationTarget;
-import com.ruleup.ruleup_backend.notification.NotificationPublisher;
+import com.ruleup.ruleup_backend.common.image.ImageStorageService;
 import com.ruleup.ruleup_backend.notification.NotificationEvent;
+import com.ruleup.ruleup_backend.notification.NotificationPublisher;
 import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
-import com.ruleup.ruleup_backend.user.domain.User;
 import com.ruleup.ruleup_backend.user.UserRepository;
-import lombok.RequiredArgsConstructor;
+import com.ruleup.ruleup_backend.user.domain.User;
+import jakarta.persistence.EntityManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
-import java.util.UUID;
-import java.time.Instant;
+import java.nio.ByteBuffer;
 import java.util.Map;
+import java.util.UUID;
 
-/**
- * 가입/변경 이후 닉네임·프로필 사진을 LLM으로 검수하고 그 결과를 DB에 반영한다.
- *  - 통과   → APPROVED (approved_* 갱신 → 타인에게도 노출). 단, 승인 직전 선점 재검사에서
- *             충돌하면 CONFLICT (DB 정리 §7.2 — 큐 대기 중 다른 요청이 먼저 승인된 경우)
- *  - 거절   → REJECTED + "바꿔주세요" 알림 (타인에게는 직전 승인본/임시 닉네임 유지)
- *  - 보류   → PENDING 유지 (AI 막힘 등. 가입은 이미 끝났으니 영향 없음)
- * 결정은 moderation_requests 이력에도 함께 기록한다.
- *
- * 가입 자체를 절대 막지 않는다. 여기서 DB 값만 바뀐다.
- */
+/** Synchronous review after submission commits. Only the daily sweep retries pending fields. */
 @Service
-@RequiredArgsConstructor
 public class UserModerationService {
-
     private static final Logger log = LoggerFactory.getLogger(UserModerationService.class);
+    private final JdbcTemplate jdbc;
+    private final UserRepository users;
+    private final ContentModerationClient client;
+    private final NotificationPublisher notifications;
+    private final ImageStorageService images;
+    private final EntityManager em;
+    private final TransactionTemplate tx;
 
-    private final UserRepository userRepository;
-    private final ModerationRequestRepository moderationRequestRepository;
-    private final ContentModerationClient moderationClient;
-    private final NotificationPublisher notificationPublisher;
-
-    @Transactional
-    public void moderate(UUID userId) {
-        // 커밋 직후 비동기로 도는 사이 사용자가 탈퇴했을 수 있다 → 그러면 검수할 대상이 없다.
-        // (엔티티는 @DynamicUpdate 라 여기서 상태 컬럼을 되돌리지는 않는다)
-        User user = userRepository.findByIdAndDeletedAtIsNull(userId).orElse(null);
-        if (user == null) return;
-
-        boolean checked = false;
-
-        // ===== 닉네임 검수 =====
-        if (user.isNicknamePending()) {
-            ModerationResult r = moderationClient.moderateNickname(user.getNickname());
-            switch (r) {
-                case APPROVED -> {
-                    // 승인 직전 선점 재검사 — 심사 대기 중 타인이 같은 닉네임을 먼저 승인받았을 수 있다
-                    if (userRepository.isNicknameTaken(user.getNickname(), userId)) {
-                        user.markNicknameConflict();
-                        decideRequest(userId, ModerationTarget.NICKNAME, false, "닉네임 선점 충돌(CONFLICT)");
-                    } else {
-                        user.approveNickname();
-                        decideRequest(userId, ModerationTarget.NICKNAME, true, null);
-                    }
-                    checked = true;
-                }
-                case REJECTED -> {
-                    user.rejectNickname();
-                    decideRequest(userId, ModerationTarget.NICKNAME, false, "커뮤니티 기준 위반");
-                    checked = true;
-                    notificationPublisher.publish(NotificationEvent.of(userId,
-                            NotificationType.MODERATION_REJECTED,
-                            // 바꾼 닉네임이 또 거부될 수 있으므로 대상만으로는 키가 되지 않는다.
-                            Map.of(NotificationParams.VARIANT, "NICKNAME",
-                                    NotificationParams.TARGET_KEY, "nickname",
-                                    NotificationParams.EVENT_KEY,
-                                    userId + ":nickname:" + Instant.now().toEpochMilli())));
-                }
-                case UNAVAILABLE -> log.info("닉네임 검수 보류(PENDING 유지) userId={}", userId);
-            }
-        }
-
-        // ===== 프로필 사진 검수 =====
-        if (user.isProfileImagePending()) {
-            ModerationResult r = moderationClient.moderateImage(user.getProfileImageUrl());
-            switch (r) {
-                case APPROVED -> {
-                    user.approveProfileImage();
-                    decideRequest(userId, ModerationTarget.PROFILE_IMAGE, true, null);
-                    checked = true;
-                }
-                case REJECTED -> {
-                    user.rejectProfileImage();
-                    decideRequest(userId, ModerationTarget.PROFILE_IMAGE, false, "커뮤니티 기준 위반");
-                    checked = true;
-                    notificationPublisher.publish(NotificationEvent.of(userId,
-                            NotificationType.MODERATION_REJECTED,
-                            Map.of(NotificationParams.VARIANT, "PROFILE_IMAGE",
-                                    NotificationParams.TARGET_KEY, "profile_image",
-                                    NotificationParams.EVENT_KEY,
-                                    userId + ":profile_image:" + Instant.now().toEpochMilli())));
-                }
-                case UNAVAILABLE -> log.info("사진 검수 보류(PENDING 유지) userId={}", userId);
-            }
-        }
-
-        if (checked) user.markModerationChecked();
+    public UserModerationService(JdbcTemplate jdbc, UserRepository users, ContentModerationClient client,
+                                 NotificationPublisher notifications, ImageStorageService images,
+                                 EntityManager em, PlatformTransactionManager manager) {
+        this.jdbc = jdbc; this.users = users; this.client = client;
+        this.notifications = notifications; this.images = images; this.em = em;
+        tx = new TransactionTemplate(manager);
+        tx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
-    /** PENDING 심사 요청에 결정을 기록(이력 보존). 요청 행이 없어도 검수 자체는 유효하다. */
-    private void decideRequest(UUID userId, ModerationTarget target, boolean approved, String reason) {
-        moderationRequestRepository
-                .findByUserIdAndTargetAndStatus(userId, target, ModerationRequestStatus.PENDING)
-                .ifPresent(req -> {
-                    if (approved) req.approve();
-                    else req.reject(reason);
-                });
+    public User moderate(UUID userId) {
+        byte[] id = bytes(userId);
+        var rows = jdbc.queryForList("SELECT nickname,nickname_status,profile_image_key,profile_image_status " +
+                "FROM users WHERE id=? AND status<>'WITHDRAWN'", (Object) id);
+        if (rows.isEmpty()) return null;
+        var submitted = rows.getFirst();
+        for (boolean nickname : new boolean[]{true, false}) {
+            String column = nickname ? "nickname" : "profile_image_key";
+            String statusColumn = nickname ? "nickname_status" : "profile_image_status";
+            if (!"PENDING".equals(submitted.get(statusColumn))) continue;
+            String content = (String) submitted.get(column);
+            ModerationResult verdict;
+            try {
+                verdict = nickname ? client.moderateNickname(content) : client.moderateImage(content);
+            } catch (RuntimeException unavailable) {
+                log.warn("user_moderation_pending userId={} target={} error={}", userId, column,
+                        unavailable.getClass().getSimpleName());
+                continue;
+            }
+            if (verdict == null || verdict == ModerationResult.UNAVAILABLE) continue;
+            String result = verdict.name();
+            Boolean applied = tx.execute(ignored -> {
+                // Claim the user row only after the external request completes.
+                User user = users.findByIdForUpdate(userId).orElse(null);
+                if (user == null || user.isWithdrawn()) return false;
+                String decision = nickname && "APPROVED".equals(result) && users.isNicknameTaken(content, userId)
+                        ? "CONFLICT" : result;
+                String assignment = nickname && "APPROVED".equals(decision) ? ",approved_nickname=nickname" : "";
+                int changed = jdbc.update("UPDATE users SET " + statusColumn + "=?" + assignment +
+                        " WHERE id=? AND " + statusColumn + "='PENDING' AND BINARY " + column + " <=> BINARY ?",
+                        decision, id, content);
+                if (changed == 0) return false;
+                // Keep the request's persistence context consistent with the guarded SQL update.
+                em.refresh(user);
+                if ("REJECTED".equals(decision)) {
+                    notifications.publish(NotificationEvent.of(userId, NotificationType.MODERATION_REJECTED,
+                            Map.of(NotificationParams.VARIANT, nickname ? "NICKNAME" : "PROFILE_IMAGE",
+                                    NotificationParams.TARGET_KEY, nickname ? "nickname" : "profile_image",
+                                    NotificationParams.EVENT_KEY, UUID.randomUUID().toString())));
+                }
+                log.info("user_moderation_decided userId={} target={} result={}", userId, column, decision);
+                return true;
+            });
+            if (Boolean.TRUE.equals(applied) && !nickname && verdict == ModerationResult.REJECTED) {
+                try { images.deleteByUrl(content); }
+                catch (RuntimeException failure) { log.warn("rejected_image_cleanup_failed userId={}", userId); }
+            }
+        }
+        return tx.execute(ignored -> {
+            User user = users.findById(userId).orElse(null);
+            if (user != null) { em.refresh(user); user.getInterestCategories().size(); }
+            return user;
+        });
+    }
+
+    private static byte[] bytes(UUID id) {
+        return ByteBuffer.allocate(16).putLong(id.getMostSignificantBits()).putLong(id.getLeastSignificantBits()).array();
     }
 }

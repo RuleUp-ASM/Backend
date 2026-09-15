@@ -87,6 +87,7 @@ class TempNicknameCollisionIT extends AuthApiSupport {
     void unique_constraint_rejects_duplicate_approved_nickname() throws Exception {
         String occupied = "cafebabe";
         blockerHolding(occupied);
+        org.mockito.Mockito.clearInvocations(userRepository);
 
         User clash = User.create(OAuthProvider.GOOGLE, "sub-" + uniq("g"), null,
                 "충돌유저" + seq(), null, null);
@@ -102,6 +103,7 @@ class TempNicknameCollisionIT extends AuthApiSupport {
         // 1) 점유된 승인 닉네임 하나를 확보
         String occupied = "deadbeef";
         blockerHolding(occupied);
+        org.mockito.Mockito.clearInvocations(userRepository);
 
         // 2) 경합 창 재현: 사전 검사는 "비어 있다"고 답하게 하고, 첫 후보를 점유된 값으로 고정
         doReturn(false).when(userRepository).isNicknameTaken(anyString(), any());
@@ -119,7 +121,7 @@ class TempNicknameCollisionIT extends AuthApiSupport {
         User created = findUser(tag);
         assertThat(created.getApprovedNickname()).isNotEqualTo(occupied);
         verify(tempNicknameGenerator, atLeast(2)).next();          // 최소 한 번은 재발급했다
-        verify(userRepository, times(2)).save(any(User.class));    // INSERT 는 정확히 두 번 시도됐다
+        verify(userRepository, times(2)).saveAndFlush(any(User.class));    // INSERT 는 정확히 두 번 시도됐다
     }
 
     @Test
@@ -127,6 +129,7 @@ class TempNicknameCollisionIT extends AuthApiSupport {
     void retried_signup_leaves_no_partial_rows() throws Exception {
         String occupied = "feedface";
         blockerHolding(occupied);
+        org.mockito.Mockito.clearInvocations(userRepository);
 
         long before = userRepository.count();
 
@@ -160,6 +163,7 @@ class TempNicknameCollisionIT extends AuthApiSupport {
     void gives_up_after_max_attempts() throws Exception {
         String occupied = "badc0ffe";
         blockerHolding(occupied);
+        org.mockito.Mockito.clearInvocations(userRepository);
 
         // 사전 검사는 계속 통과시키고, 후보는 항상 점유된 값 → 매 시도가 INSERT 충돌
         doReturn(false).when(userRepository).isNicknameTaken(anyString(), any());
@@ -170,7 +174,7 @@ class TempNicknameCollisionIT extends AuthApiSupport {
 
         // 상한만큼 "실제로" 트랜잭션을 다시 열었는지 — 생성기 호출 수는 사전 검사 루프와 섞이므로
         // INSERT 시도(=save) 횟수로 센다.
-        verify(userRepository, times(AuthService.MAX_SIGNUP_ATTEMPTS)).save(any(User.class));
+        verify(userRepository, times(AuthService.MAX_SIGNUP_ATTEMPTS)).saveAndFlush(any(User.class));
 
         // 사용자 입력 문제가 아니므로 닉네임 중복(409)으로 위장하지 않는다
         assertThat(res.getResponse().getStatus()).isEqualTo(500);

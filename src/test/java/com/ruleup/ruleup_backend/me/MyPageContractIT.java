@@ -998,12 +998,12 @@ class MyPageContractIT extends ChallengeApiSupport {
         @DisplayName("removeProfileImage=true 면 기본 프로필로 되돌린다")
         void remove_image() throws Exception {
             Member me = member("profile-rmimg");
-            jdbc().update("UPDATE users SET profile_image_url = 'https://cdn/x.png', " +
+            jdbc().update("UPDATE users SET profile_image_key = 'https://cdn/x.png', " +
                     "profile_image_status = 'APPROVED' WHERE id = ?", bytes(me.id()));
 
             patchJsonAuth("/api/v1/users/me/profile", me.token(), body(null, null, true));
 
-            String url = jdbc().queryForObject("SELECT profile_image_url FROM users WHERE id = ?",
+            String url = jdbc().queryForObject("SELECT profile_image_key FROM users WHERE id = ?",
                     String.class, bytes(me.id()));
             assertThat(url).isNull();
         }

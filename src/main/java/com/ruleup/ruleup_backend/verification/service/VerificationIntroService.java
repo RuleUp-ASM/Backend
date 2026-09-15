@@ -26,13 +26,14 @@ public class VerificationIntroService {
     private static final int BACKOFF_MAX_SEC = 14400;     // 4시간
     private static final double BACKOFF_FACTOR = 2.0;
 
+    private final com.ruleup.ruleup_backend.verification.service.DeviceSyncPolicyService syncPolicy;
     private final UserRepository userRepository;
     private final VerificationSyncSessionStore sessionStore;
 
     public VerificationIntroResponse resolve(UUID userId, VerificationIntroRequest req) {
         Cadence on = new Cadence(true, null);
         Collection collection = new Collection(on, on, on, on);
-        int flushIntervalSec = FlushIntervalPolicy.forUser(userRepository.findById(userId).orElse(null));
+        int flushIntervalSec = syncPolicy.forUser(userRepository.findById(userId).orElse(null));
         Instant now = Instant.now();
         UUID sessionId = sessionStore.issue(userId,
                 (req != null) ? req.deviceId() : null,

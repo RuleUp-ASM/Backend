@@ -98,20 +98,16 @@ public class User extends AssignedIdEntity {
     private Instant profileChangedAt;
 
     /** 사용자가 현재 제출한 이미지 (PENDING/REJECTED 상태일 수 있음). */
-    @Column(name = "profile_image_url")
+    @Column(name = "profile_image_key")
     private String profileImageUrl;
 
     /** 다른 사용자에게 실제 노출되는 승인 이미지. NULL이면 기본 프로필. */
-    @Column(name = "approved_profile_image_url")
-    private String approvedProfileImageUrl;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "profile_image_status", nullable = false)
     private ProfileImageStatus profileImageStatus = ProfileImageStatus.NONE;
 
     /** 마지막으로 LLM 검수를 실제 수행한 시각 (보류/재시도 판단용). */
-    @Column(name = "moderation_checked_at")
-    private Instant moderationCheckedAt;
 
     // ===== 단일 활성 기기 (멀티 디바이스 미지원 — 현재 설치·기기만 저장, 새 로그인 시 덮어씀) =====
     /** 앱 설치 단위 UUID. UNIQUE — 하나의 설치가 여러 계정에 연결되는 것을 방지. */
@@ -165,6 +161,11 @@ public class User extends AssignedIdEntity {
     @Column(name = "low_ram")
     private Boolean lowRam;
 
+    @Column(name = "ram_mb")
+    private Integer ramMb;
+
+    public void updateRamMb(Integer value) { ramMb = value; }
+
     /** 기기 정보 마지막 갱신 시각(로그인마다 갱신). */
     @Column(name = "device_info_updated_at")
     private Instant deviceInfoUpdatedAt;
@@ -196,7 +197,6 @@ public class User extends AssignedIdEntity {
         u.approvedNickname = u.deriveTempNickname();   // 승인 전 타인 노출용 임시 닉네임
         u.nicknameStatus = NicknameStatus.PENDING;
         u.profileImageUrl = profileImageUrl;
-        u.approvedProfileImageUrl = null;              // 승인 전까지 기본 프로필
         u.profileImageStatus = (profileImageUrl != null) ? ProfileImageStatus.PENDING : ProfileImageStatus.NONE;
         u.interestCategories = (interestCategories != null) ? new ArrayList<>(interestCategories) : new ArrayList<>();
         u.information = UserInformation.of(u, email);
@@ -290,7 +290,6 @@ public class User extends AssignedIdEntity {
         boolean fixingRejection = (this.nicknameStatus == NicknameStatus.REJECTED);
         this.nickname = newNickname;
         this.nicknameStatus = NicknameStatus.PENDING;
-        this.moderationCheckedAt = null;
         if (!fixingRejection) this.nicknameChangedAt = Instant.now();
     }
 
@@ -311,12 +310,10 @@ public class User extends AssignedIdEntity {
     public void markNicknameConflict() { this.nicknameStatus = NicknameStatus.CONFLICT; }
 
     public void approveProfileImage() {
-        this.approvedProfileImageUrl = this.profileImageUrl;
         this.profileImageStatus = ProfileImageStatus.APPROVED;
     }
 
     public void rejectProfileImage()   { this.profileImageStatus = ProfileImageStatus.REJECTED; }
-    public void markModerationChecked(){ this.moderationCheckedAt = Instant.now(); }
 
     public boolean isNicknamePending()     { return nicknameStatus == NicknameStatus.PENDING; }
     public boolean isProfileImagePending() { return profileImageUrl != null && profileImageStatus == ProfileImageStatus.PENDING; }
@@ -329,8 +326,9 @@ public class User extends AssignedIdEntity {
 
     /** 본인에게는 제출 이미지, 타인에게는 승인 이미지(없으면 null=기본 프로필). */
     public String visibleProfileImageTo(UUID viewerId) {
-        if (viewerId != null && viewerId.equals(this.id)) return profileImageUrl;
-        return approvedProfileImageUrl;
+        if (profileImageStatus == ProfileImageStatus.APPROVED) return profileImageUrl;
+        if (profileImageStatus == ProfileImageStatus.PENDING && id.equals(viewerId)) return profileImageUrl;
+        return null;
     }
 
     /**
@@ -426,14 +424,12 @@ public class User extends AssignedIdEntity {
         if (url != null) {
             this.profileImageStatus = ProfileImageStatus.PENDING;   // 승인 전까지 타인에겐 직전 승인본
         } else {
-            this.approvedProfileImageUrl = null;
             this.profileImageStatus = ProfileImageStatus.NONE;
         }
     }
 
     public void removeProfileImage() {
         this.profileImageUrl = null;
-        this.approvedProfileImageUrl = null;
         this.profileImageStatus = ProfileImageStatus.NONE;
     }
 }

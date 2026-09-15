@@ -17,7 +17,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
  */
 @Schema(name = "DeviceInfoRequest", description = """
         기기 스펙. 로그인·가입마다 최신 1건으로 갱신한다.
-        최소 platform·versionCode 는 유효해야 하며, 누락/형식오류는 INVALID_DEVICE_INFO 로 거절한다.
+        필드는 일부 또는 전부 누락 가능하다. 전달한 값의 형식이 잘못됐을 때만 INVALID_DEVICE_INFO 로 거절한다.
         인증 sync 주기(flushIntervalSec)를 기기 성능에 맞춰 산정하는 데도 쓴다.""")
 public record DeviceInfoRequest(
 
@@ -58,7 +58,13 @@ public record DeviceInfoRequest(
                 지오 헤더도 기기 지역도 없을 때 국가 코드를 정하는 마지막 근거다 —
                 이게 비면 국가는 서비스 기본값으로 채워진다.""",
                 example = "Asia/Seoul")
-        String timeZone) {
+        String timeZone, Integer ramMb) {
+
+    public DeviceInfoRequest(String platform, String osVersion, Integer sdkInt, String deviceModel,
+                             String manufacturer, Boolean lowRam, String versionName, Integer versionCode,
+                             String country, String timeZone) {
+        this(platform, osVersion, sdkInt, deviceModel, manufacturer, lowRam, versionName, versionCode, country, timeZone, null);
+    }
 
     /** 문자열 platform 을 enum 으로(대소문자 무시, 알 수 없거나 비면 null). */
     public Platform toPlatform() {
@@ -71,10 +77,12 @@ public record DeviceInfoRequest(
     }
 
     /**
-     * 계약상 deviceInfo는 로그인·가입에 필수. 최소 필드(platform·versionCode)가 유효해야 한다.
+     * 누락된 기기 정보는 정책 폴백을 사용하고, 전달한 값만 검증한다.
      * 형식 위반 시 호출부에서 INVALID_DEVICE_INFO 로 거부.
      */
     public boolean isValid() {
-        return toPlatform() != null && versionCode != null;
+        return (platform == null || toPlatform() != null)
+                && (versionCode == null || versionCode >= 0)
+                && (sdkInt == null || sdkInt >= 0);
     }
 }

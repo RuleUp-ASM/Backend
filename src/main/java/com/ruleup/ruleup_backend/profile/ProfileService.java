@@ -2,11 +2,6 @@ package com.ruleup.ruleup_backend.profile;
 
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
-import com.ruleup.ruleup_backend.moderation.ModerationRequestRepository;
-import com.ruleup.ruleup_backend.moderation.UserModerationRequested;
-import com.ruleup.ruleup_backend.moderation.domain.ModerationRequest;
-import com.ruleup.ruleup_backend.moderation.domain.ModerationRequestStatus;
-import com.ruleup.ruleup_backend.moderation.domain.ModerationTarget;
 import com.ruleup.ruleup_backend.profile.dto.ProfileImageResponse;
 import com.ruleup.ruleup_backend.profile.dto.ProfileResponse;
 import com.ruleup.ruleup_backend.profile.dto.ProfileUpdateResponse;
@@ -31,7 +26,8 @@ import java.util.UUID;
 public class ProfileService {
 
     private final UserRepository userRepository;
-    private final ModerationRequestRepository moderationRequestRepository;
+    private final com.ruleup.ruleup_backend.moderation.UserModerationService moderation;
+    private final org.springframework.transaction.support.TransactionTemplate tx;
     private final ImageStorageService imageStorage;
     private final ApplicationEventPublisher eventPublisher;
 
@@ -52,8 +48,15 @@ public class ProfileService {
      * 구 {@code MODERATION_LOCKED}(1시간 3회) 는 폐기됐고, 반복 제출은 이상 행위로 기록해
      * 운영 검토로 보낸다(콘텐츠 모더레이션 §1, 오픈 이슈 #8).
      */
-    @Transactional
     public ProfileUpdateResponse updateProfile(UUID userId, UpdateProfileRequest req) {
+        tx.executeWithoutResult(ignored -> updateStoredProfile(userId, req));
+        User user = moderation.moderate(userId);
+        Instant until = user.profileLockedUntil();
+        return new ProfileUpdateResponse(user.getNickname(), user.getNicknameStatus().name(),
+                user.getInterestCategories(), until == null ? null : until.toString());
+    }
+
+    private void updateStoredProfile(UUID userId, UpdateProfileRequest req) {
         User user = loadActive(userId);
         Instant now = Instant.now();
 
@@ -74,7 +77,6 @@ public class ProfileService {
             // 쓰던 닉네임은 여기서 풀리지 않는다 — approved_nickname 이 그대로라 심사 중에는 계속 본인 점유다.
             // 새 닉네임이 승인되는 순간(User#approveNickname) 비로소 이전 값이 해제된다.
             user.changeNickname(req.nickname());   // 상태를 PENDING 으로 되돌림 → 재검수 필요
-            submitModerationRequest(userId, ModerationTarget.NICKNAME, req.nickname());
         }
 
         if (removingImage) user.removeProfileImage();
@@ -90,36 +92,14 @@ public class ProfileService {
 
         if (touchesLocked) {
             user.startProfileLock(now);
-            if (changingNickname) eventPublisher.publishEvent(new UserModerationRequested(userId));
         }
-        Instant until = user.profileLockedUntil();
-        return new ProfileUpdateResponse(user.getNickname(), user.getNicknameStatus().name(),
-                user.getInterestCategories(), until != null ? until.toString() : null);
     }
 
-    @Transactional
     public ProfileImageResponse uploadImage(UUID userId, MultipartFile image) {
-        User user = loadActive(userId);
-        String filename = imageStorage.store(image);
-        String url = ServletUriComponentsBuilder.fromCurrentContextPath()
-                .path("/files/").path(filename).toUriString();
-        user.changeProfileImage(url);   // 상태 PENDING → 커밋 후 재검수
-        submitModerationRequest(userId, ModerationTarget.PROFILE_IMAGE, url);
-        eventPublisher.publishEvent(new UserModerationRequested(userId));
-        // 등록 직후는 항상 PENDING — 심사는 커밋 후 비동기로 돈다(계약: {imageUrl, status})
-        return ProfileImageResponse.of(url, user.getProfileImageStatus());
-    }
-
-    /**
-     * 심사 요청 제출 — 사용자·target당 PENDING 은 하나만(UNIQUE)이므로,
-     * 아직 결정되지 않은 기존 요청은 새 제출로 대체(삭제 후 재등록)한다.
-     */
-    private void submitModerationRequest(UUID userId, ModerationTarget target, String content) {
-        moderationRequestRepository
-                .findByUserIdAndTargetAndStatus(userId, target, ModerationRequestStatus.PENDING)
-                .ifPresent(moderationRequestRepository::delete);
-        moderationRequestRepository.flush();   // UNIQUE(user_id, pending_target) 해제 후 INSERT
-        moderationRequestRepository.save(ModerationRequest.request(userId, target, content));
+        String url = imageStorage.urlOf(imageStorage.store(image));
+        tx.executeWithoutResult(ignored -> loadActive(userId).changeProfileImage(url));
+        User reviewed = moderation.moderate(userId);
+        return ProfileImageResponse.of(reviewed.visibleProfileImageTo(userId), reviewed.getProfileImageStatus());
     }
 
     @Transactional
