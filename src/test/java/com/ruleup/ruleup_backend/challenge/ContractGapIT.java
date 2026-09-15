@@ -52,6 +52,35 @@ class ContractGapIT extends ChallengeApiSupport {
     }
 
     @Nested
+    @DisplayName("진행률 목록")
+    class Progress {
+
+        @Test
+        @DisplayName("끝난 방은 ACTIVE 목록에서 빠지고 ALL 에는 남는다")
+        void completedRoomLeavesActiveList() throws Exception {
+            Member me = member(uniq("gap-progress"));
+            UUID running = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
+            UUID ended = insertChallenge(me.id(), "EXERCISE", "COMPLETED", "GROUP");
+            insertActiveMembership(running, me.id(), "OWNER");
+            insertActiveMembership(ended, me.id(), "OWNER");
+
+            // 종료 배치는 방만 마감하고 멤버십은 ACTIVE 로 남긴다 — 그 상태를 그대로 재현한다.
+            assertThat(jdbc.queryForObject(
+                    "SELECT status FROM challenge_members WHERE challenge_id=?", String.class, bytes(ended)))
+                    .as("멤버십은 여전히 ACTIVE 다").isEqualTo("ACTIVE");
+
+            List<?> active = read(getAuth("/api/v1/verifications/progress?status=ACTIVE", me.token()),
+                    "$.data.challenges");
+            assertThat(active).hasSize(1);
+            assertThat((String) read(getAuth("/api/v1/verifications/progress?status=ACTIVE", me.token()),
+                    "$.data.challenges[0].challengeId")).isEqualTo(running.toString());
+
+            assertThat((List<?>) read(getAuth("/api/v1/verifications/progress?status=ALL", me.token()),
+                    "$.data.challenges")).as("ALL 은 끝난 방도 준다").hasSize(2);
+        }
+    }
+
+    @Nested
     @DisplayName("증빙 사진 업로드")
     class AppealImage {
 

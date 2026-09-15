@@ -1,6 +1,7 @@
 package com.ruleup.ruleup_backend.verification.service;
 
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
+import com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
@@ -59,8 +60,20 @@ public class VerificationReadService {
 
     // ===== GET /api/v1/verifications/progress — 진행률 일괄 =====
 
+    /**
+     * 내 챌린지 진행률.
+     *
+     * <p>{@code ACTIVE} 는 <b>지금 진행 중인 방</b>이다. 그런데 방이 끝나도 멤버십은 ACTIVE 로
+     * 남는다 — 종료 배치는 방의 상태 축만 마감하고 멤버를 건드리지 않는다(완주율·최종 랭킹이
+     * 멤버 행을 그대로 읽어야 하기 때문이다). 그래서 멤버십만 보고 거르면 <b>끝난 방이 홈의
+     * 진행률 목록에 계속 남는다</b>.
+     *
+     * <p>{@code findActiveChallenge} 는 이름과 달리 소프트 삭제만 거른다. 그 이름을 믿고 한 번 더
+     * 거르지 않은 것이 이 버그였다.
+     */
     public List<ChallengeProgress> progress(UUID userId, String statusFilter) {
-        List<ChallengeMember> members = "ALL".equalsIgnoreCase(statusFilter)
+        boolean all = "ALL".equalsIgnoreCase(statusFilter);
+        List<ChallengeMember> members = all
                 ? challengeQuery.findAllMemberships(userId)
                 : challengeQuery.findActiveMemberships(userId);
         LocalDate today = LocalDate.now(KST);
@@ -68,6 +81,8 @@ public class VerificationReadService {
         for (ChallengeMember m : members) {
             Challenge ch = challengeQuery.findActiveChallenge(m.getChallengeId()).orElse(null);
             if (ch == null) continue;
+            // 시작 전(UPCOMING)은 남긴다 — 곧 시작할 방도 「내 챌린지」에 보여야 한다.
+            if (!all && ch.getStatus() == ChallengeStatus.COMPLETED) continue;
             out.add(toProgress(m, ch, configFactory.build(ch), today));
         }
         return out;
