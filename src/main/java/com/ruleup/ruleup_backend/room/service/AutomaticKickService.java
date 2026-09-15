@@ -84,7 +84,8 @@ public class AutomaticKickService {
                 Map.of(NotificationParams.EVENT_KEY, sourceEventId.toString(), NotificationParams.REASON, reason.name())));
         if (reason == Reason.PERMISSION_MISSING) {
             outbox.enqueue(PermissionKickScoreHandler.TYPE,
-                    new PermissionKickScoreHandler.Payload(userId, challengeId, sourceEventId), "permission-score:" + sourceEventId);
+                    new PermissionKickScoreHandler.Payload(userId, challengeId, sourceEventId, now,
+                            challenge != null && challenge.getPenalties().score() ? "AUTO" : "MANUAL"), "permission-score:" + sourceEventId);
             dispatcher.requestFlush();
         }
         return true;

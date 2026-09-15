@@ -62,7 +62,7 @@ public class ChallengeMemberService {
     private static final Duration LEAVE_REJOIN_COOLDOWN = Duration.ofDays(7);
     /** "1년 이상 성공을 이어왔다" 면제 기준(정책 §10.1). */
     private static final Duration LONG_SUCCESS_THRESHOLD = Duration.ofDays(365);
-    /** 중도 탈퇴 감점 — ⚠️ 수치 미확정. 실제 반영은 티어 모듈 소관이고 여기서는 계약값·트리거만. */
+    /** 날짜 단위 정책은 KST를 사용한다. */
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     private final ChallengeRepository challengeRepository;
@@ -251,12 +251,13 @@ public class ChallengeMemberService {
         // 중도 탈퇴 감점은 정액이 아니라 진행 기간에 반비례한다 — −⌈15 × (1 − 진행주간/52)⌉.
         // 오래 해온 방일수록 가볍고, 1년을 채웠으면 면제다(점수 및 티어 정책 §4.8).
         int scoreDelta = 0;
-        if (exemptReason == null && c.getPenalties().score()) {
-            scoreDelta = IncidentType.VOLUNTARY_LEAVE.deduction(progressWeeks(me));
+        if (c.getPenalties().score()) {
+            int completedWeeks = progressWeeks(me);
+            scoreDelta = exemptReason == null ? IncidentType.VOLUNTARY_LEAVE.deduction(completedWeeks) : 0;
             String source = "leave:" + me.getId() + ":" + now;
             outbox.enqueue(com.ruleup.ruleup_backend.score.LeaveScoreOutboxHandler.TYPE,
                     new com.ruleup.ruleup_backend.score.LeaveScoreOutboxHandler.Payload(userId, challengeId,
-                            source, progressWeeks(me), "AUTO", scoreDelta, now), source);
+                            source, completedWeeks, "AUTO", scoreDelta, now), source);
             outboxDispatcher.requestFlush();
         }
         log.info("challenge_leave challengeId={} userId={} penalty={} exempt={} botOwner={}",
@@ -300,6 +301,12 @@ public class ChallengeMemberService {
                     .filter(ChallengeMember::isActive).orElse(null);
             if (me == null) continue;
             if (c == null) continue;   // 이미 삭제된 방 — 멤버 행도 곧 사라진다
+            if ("TIER_GATE".equals(reason)) {
+                if (c.getStatus() == ChallengeStatus.COMPLETED) continue;
+                var state = scoreSummaryRepository.findForUpdate(userId).orElseThrow();
+                if (c.getMinTier() == null || state.getDisplayTier().ordinal() >= c.getMinTier().ordinal()) continue;
+            }
+
 
             if (c.isOwner(userId)) {
                 c.convertToBotOwner(now);
@@ -307,32 +314,25 @@ public class ChallengeMemberService {
             }
             me.leaveExternally(now, reason);       // rejoinAt=null — 재입장 대기 없음
             c.bumpVersion();
-            eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "WITHDRAW"));
+            muteCleaner.clearMute(userId, challengeId);
+            eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, reason));
             left++;
         }
 
         // 계정이 사라지므로 참여 중이던 방·종료된 방을 가리지 않고 전부 정리한다.
-        muteCleaner.clearMutesOfUser(userId);
+        if (!"TIER_GATE".equals(reason)) muteCleaner.clearMutesOfUser(userId);
 
         if (left > 0) log.info("회원 탈퇴 정리 userId={} 나간 방 {}건", userId, left);
         return left;
     }
 
     /**
-     * 감점 면제 사유. 우선순위는 1년 이상 성공 → 승계 3일 면책.
-     * 승계 면책은 <b>모든 멤버 기준</b>이다 — 봇방장 전환·선착순 클레임 시점부터 3일간은 잔류 멤버 누구나 면책이고,
-     * 전 방장이 직접 넘겨준 경우(GRANT_TRANSFER)만 대상이 아니다(정책 §11.3).
-     */
-    /**
-     * 감점 계산에 쓰는 진행 주간 수 — <b>판정이 완료된</b> 주만 센다(정책 §4.8). 첫 성공부터 세는 이유는
-     * 면제 기준이 "해당 챌린지 성공 기간 1년 이상"이라 참여만 걸어 둔 기간은 근거가 되지 않기 때문이다.
+     * 감점 계산에는 판정이 끝난 유효 주간만 센다. 경과 시간이나 미완료/중립 주간은 포함하지 않는다.
      */
     private int progressWeeks(ChallengeMember me) {
-        LocalDate firstSuccess = verificationDailyRepository
-                .findEarliestDate(me.getId(), VerificationStatus.SUCCESS);
-        if (firstSuccess == null) return 0;
-        long days = java.time.temporal.ChronoUnit.DAYS.between(firstSuccess, LocalDate.now(KST));
-        return (int) Math.max(0, days / 7);   // 진행 중인 주는 인정하지 않는다
+        return jdbc.queryForObject("SELECT COUNT(*) FROM cycle_score_states WHERE user_id=? AND challenge_id=? AND closed_at IS NOT NULL AND cycle_result<>'INVALID'",
+                Integer.class, com.ruleup.ruleup_backend.score.ScoreKeys.bytes(me.getUserId()),
+                com.ruleup.ruleup_backend.score.ScoreKeys.bytes(me.getChallengeId()));
     }
 
     private String resolveExemptReason(Challenge c, ChallengeMember me, Instant now) {

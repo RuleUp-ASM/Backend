@@ -98,12 +98,12 @@ public class ChallengeArchiveService {
     private void snapshot(byte[] key, String reason, int active) {
         jdbc.update("INSERT INTO challenge_history " +
                 "(challenge_id,title_snapshot,ai_title_snapshot,description_snapshot,image_snapshot,category,start_date,end_date,deleted_at, " +
-                "owner_id_snapshot,owner_type_snapshot,mode,visibility,capacity,min_tier,weekly_count,verification_config,params,penalties, " +
+                "owner_id_snapshot,owner_type_snapshot,mode,visibility,capacity,min_tier,weekly_count,verification_config,params,penalties,repeat_days, " +
                 "final_member_count,close_reason,closed_at,template_id,origin,source_challenge_id) " +
                 "SELECT id,CASE WHEN moderation_title IN ('IN_REVIEW','REJECTED') THEN ai_title ELSE title END,ai_title, " +
                 "CASE WHEN moderation_description IN ('IN_REVIEW','REJECTED') THEN NULL ELSE description END, " +
                 "CASE WHEN moderation_image IN ('IN_REVIEW','REJECTED') THEN NULL ELSE image_url END,category,start_date,end_date,UTC_TIMESTAMP(6), " +
-                "owner_id,owner_type,mode,visibility,capacity,min_tier,weekly_count,verification_config,params,penalties,?,?,UTC_TIMESTAMP(6),template_id,origin,source_challenge_id " +
+                "owner_id,owner_type,mode,visibility,capacity,min_tier,weekly_count,verification_config,params,penalties,repeat_days,?,?,UTC_TIMESTAMP(6),template_id,origin,source_challenge_id " +
                 "FROM challenges WHERE id=? ON DUPLICATE KEY UPDATE title_snapshot=VALUES(title_snapshot), " +
                 "description_snapshot=VALUES(description_snapshot),image_snapshot=VALUES(image_snapshot), " +
                 "final_member_count=VALUES(final_member_count),deleted_at=VALUES(deleted_at)", active, reason, key);

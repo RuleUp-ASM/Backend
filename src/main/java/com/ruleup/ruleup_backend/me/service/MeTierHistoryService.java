@@ -35,7 +35,7 @@ public class MeTierHistoryService {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
-    /** 보관 기간. 그 이전 이력은 삭제되어 조회되지 않는다. */
+    /** 화면 조회 범위. 원장의 물리 보존·복구 범위와 별개다. */
     private static final int RETENTION_MONTHS = 12;
     private static final String RETENTION_NOTE = "1년 보관";
 
@@ -69,11 +69,11 @@ public class MeTierHistoryService {
         if (peak == null) return null;
         return new MeTierHistoryResponse.Best(
                 TierBands.of(peak.getBalanceAfter()).name(), peak.getBalanceAfter(),
-                LocalDate.ofInstant(peak.getCreatedAt(), KST).toString());
+                LocalDate.ofInstant(peak.getEffectiveAt(), KST).toString());
     }
 
     private List<MeTierHistoryResponse.Point> points(List<ScoreTransaction> ledger) {
-        return ledger.stream().map(t->new MeTierHistoryResponse.Point(t.getCreatedAt().toString(),
+        return ledger.stream().map(t->new MeTierHistoryResponse.Point(t.getEffectiveAt().toString(),
                 TierBands.of(t.getBalanceAfter()).name(),t.getBalanceAfter())).toList();
     }
 }

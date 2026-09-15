@@ -158,6 +158,9 @@ class RoomSpecAlignmentIT extends ChallengeApiSupport {
         jdbc.update("UPDATE challenge_join_events SET joined_at=? WHERE challenge_id=?",java.sql.Timestamp.from(start.atStartOfDay(ZoneId.of("Asia/Seoul")).toInstant()),bytes(id));
         var handler=wac.getBean(RoomCycleResultHandler.class);
         for (int streak=2;streak<=3;streak++) {
+            LocalDate cycleStart=start.plusDays(7L*(streak-1));
+            jdbc.update("INSERT INTO cycle_score_states (user_id,challenge_id,cycle_id,cycle_start_on,cycle_end_on,membership_joined_at_snapshot,policy_version,tier_snapshot,target_count,success_weight,miss_weight,cycle_result,success_streak_after,failure_streak_after,closed_at) VALUES (?,?,?,?,?,UTC_TIMESTAMP(3),'2026-09-14','BRONZE',1,10,4,'FAILURE',0,?,UTC_TIMESTAMP(3))",
+                    bytes(owner.id()),bytes(id),bytes(UUID.randomUUID()),cycleStart,cycleStart.plusDays(6),streak);
             var event=new RoomCycleResultHandler.Payload(UUID.randomUUID(),owner.id(),id,streak,streak,start.plusDays(7L*(streak-1)),Instant.now());
             String json=tools.jackson.databind.json.JsonMapper.builder().build().writeValueAsString(event);
             transactions.executeWithoutResult(tx -> handler.handle(json));

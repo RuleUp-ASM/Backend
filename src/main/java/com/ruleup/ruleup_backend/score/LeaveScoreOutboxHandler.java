@@ -19,7 +19,7 @@ public class LeaveScoreOutboxHandler implements OutboxHandler {
     @Override public String type() { return TYPE; }
     @Override public void handle(String json) {
         Payload event=OutboxService.parse(json,Payload.class);
-        if (!"AUTO".equals(event.verificationMethod()) || event.confirmedDelta() == 0) return;
-        scores.applyIncident(event.userId(),event.challengeId(), IncidentType.VOLUNTARY_LEAVE,event.sourceId(),event.progressWeeks());
+        scores.submitIncident(event.userId(),new ScoreInput(ScoreInput.Kind.INCIDENT,"VOLUNTARY_LEAVE:"+event.sourceId(),1,event.occurredAt(),
+                event.verificationMethod(),null,null,null,IncidentType.VOLUNTARY_LEAVE,event.challengeId(),event.confirmedDelta(),event.progressWeeks(),event.confirmedDelta()==0));
     }
 }

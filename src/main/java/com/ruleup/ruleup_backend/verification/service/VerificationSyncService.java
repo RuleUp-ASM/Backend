@@ -438,10 +438,12 @@ public class VerificationSyncService {
                 VerificationTargetDays.of(config, challenge, member, today);
         if (disp == VerificationTargetDays.Disposition.NOT_TARGET) {
             daily.recordResult(VerificationStatus.NOT_TARGET, null, null, null);
+            eventPublisher.publishEvent(new VerificationScoreEvents.Confirmed(daily));
             return VerificationStatus.NOT_TARGET;
         }
         if (disp == VerificationTargetDays.Disposition.NOT_REQUIRED) {
             daily.recordResult(VerificationStatus.NOT_REQUIRED, null, null, null);
+            eventPublisher.publishEvent(new VerificationScoreEvents.Confirmed(daily));
             return VerificationStatus.NOT_REQUIRED;
         }
         return evaluateAndApply(member, challenge, config, daily, signals, gaps, today, now);
@@ -510,6 +512,7 @@ public class VerificationSyncService {
             String contributing = (outcome.status() == VerificationStatus.SUCCESS) ? method.name() : null;
             Instant verifiedAt = (outcome.status() == VerificationStatus.SUCCESS) ? now : null;
             daily.recordResult(outcome.status(), contributing, null, verifiedAt);
+            eventPublisher.publishEvent(new VerificationScoreEvents.Confirmed(daily));
             if (config.isFrequency() && outcome.status() == VerificationStatus.SUCCESS) {
                 member.incrementPeriodCompleted();   // 빈도형: 주기 완료 +1 (미확정 상태에서 첫 SUCCESS 전이 1회)
             }

@@ -13,10 +13,12 @@ import java.util.UUID;
 public class PermissionKickScoreHandler implements OutboxHandler {
     public static final String TYPE = "PERMISSION_KICK_SCORE";
     private final ScoreService scores;
-    public record Payload(UUID userId, UUID challengeId, UUID sourceEventId) {}
+    public record Payload(UUID userId, UUID challengeId, UUID sourceEventId, java.time.Instant effectiveAt, String authType) {}
     @Override public String type() { return TYPE; }
     @Override public void handle(String payload) {
         var event = OutboxService.parse(payload, Payload.class);
-        scores.applyIncident(event.userId(), event.challengeId(), IncidentType.PERMISSION_KICK, event.sourceEventId().toString(), 0);
+        scores.submitIncident(event.userId(),new com.ruleup.ruleup_backend.score.ScoreInput(com.ruleup.ruleup_backend.score.ScoreInput.Kind.INCIDENT,
+                "PERMISSION_KICK:"+event.sourceEventId(),1,event.effectiveAt(),event.authType(),null,null,null,
+                IncidentType.PERMISSION_KICK,event.challengeId(),-15,0,false));
     }
 }

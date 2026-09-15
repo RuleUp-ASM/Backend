@@ -428,6 +428,7 @@ public class VerificationFinalizeService {
             log.warn("확정 대상의 챌린지가 없다 — 대상 아님으로 닫는다. verificationId={} challengeId={}",
                     daily.getId(), daily.getChallengeId());
             daily.recordResult(VerificationStatus.NOT_TARGET, daily.getMethod(), null, null);
+            eventPublisher.publishEvent(new VerificationScoreEvents.Confirmed(daily));
             return false;
         }
         VerificationConfig config = configFactory.build(challenge);
@@ -445,10 +446,12 @@ public class VerificationFinalizeService {
         if (succeeded || (polarity == Polarity.CONSTRAINT && failureReason == null)) {
             // 성공 조건을 채웠거나, 정해진 기간 동안 유효한 위반이 없었다 → 완료 확정.
             daily.recordResult(VerificationStatus.SUCCESS, method.name(), null, now);
+            eventPublisher.publishEvent(new VerificationScoreEvents.Confirmed(daily));
             confirmedFail = false;
         } else {
             String reasonCode = finalFailureReason(failureReason, evidence, method, config);
             daily.confirmFailure(now, method.name(), reasonCode);
+            eventPublisher.publishEvent(new VerificationScoreEvents.Confirmed(daily));
             // 실패 상세는 **확정된 실패에만** 남긴다. 실패 예정은 뒤집힐 수 있는 계산 상태라
             // 행을 만들면 이의로 완료가 된 뒤에도 「실패했다는 기록」이 남는다.
             recordFailureDetail(daily, reasonCode, evidence, now);

@@ -26,10 +26,9 @@ import static org.springframework.security.test.web.servlet.setup.SecurityMockMv
 /**
  * 티어·점수 엔진 — 점수 및 티어 정책 §4 + 티어·점수 백엔드 테크 스펙.
  *
- * <p>엔진의 설계 전제는 <b>"반영 누계는 카운트만의 함수"</b>다. 그래서 이 테스트는 이벤트를 흘려보내는
- * 대신 판정 원본(VerificationDaily)을 심고 정산을 다시 돌린다 — 실제 운영 경로도 같은 모양이다.
- * 성공에는 별도 도메인 이벤트가 없고 확정 경로가 여러 곳이라, 이벤트를 잡는 대신 원본에서 카운트를
- * 다시 세는 편이 누락도 중복도 없다.
+ * <p>판정 원본을 심고 누락 보정 진입점을 호출해 정수 배점과 경계/정정 시나리오를 검증한다.
+ * 실제 확정 경로는 같은 입력을 아웃박스로 전달한다. 계정 경계 손실이 있는 반영 누계는
+ * 단순 카운트가 아니라 보존 입력의 논리 순서 재생으로 복원한다.
  *
  * <p>확인하는 성질이 넷이다.
  * <ol>
@@ -70,10 +69,10 @@ class TierScoringIT extends ChallengeApiSupport {
                 (rs, row) -> uuid(rs.getBytes(1)), bytes(id));
         jdbc().update("UPDATE challenges SET status='COMPLETED',end_date=DATE_SUB(CURDATE(),INTERVAL 3 DAY) WHERE id=?", bytes(id));
         assertThat(archive.deleteIfEligible(id)).isTrue();
-        jdbc().update("UPDATE VerificationDaily SET status='SUCCESS',verifiedVia='APPEAL' WHERE id=?", bytes(original));
+        jdbc().update("UPDATE VerificationDaily SET status='SUCCESS',verifiedVia='APPEAL',version=version+1 WHERE id=?", bytes(original));
         scoreService.recompute(me.id(), id, 1, original);
         assertThat(scoreOf(me.id())).isGreaterThan(before);
-        assertThat(jdbc().queryForObject("SELECT COUNT(*) FROM score_corrections WHERE challenge_id=?", Integer.class, bytes(id))).isEqualTo(1);
+        assertThat(jdbc().queryForObject("SELECT COUNT(*) FROM score_transactions WHERE reason='CORRECTION_COMMIT' AND JSON_UNQUOTE(JSON_EXTRACT(payload_json,'$.inputs[0].challengeId'))=?", Integer.class, id.toString())).isEqualTo(1);
     }
 
     @Test
@@ -101,6 +100,10 @@ class TierScoringIT extends ChallengeApiSupport {
         jdbc().update("UPDATE challenges SET verification_config=JSON_SET(verification_config,'$.selectedMethod','AUTO'),weekly_count = ?, " +
                         " start_date = DATE_SUB(start_date, INTERVAL ? DAY) WHERE id = ?",
                 weeklyCount, startedDaysAgo, bytes(id));
+        jdbc().update("UPDATE challenge_join_events e JOIN challenges c ON c.id=e.challenge_id SET e.joined_at=DATE_SUB(c.start_date,INTERVAL 1 DAY) WHERE c.id=?",bytes(id));
+        jdbc().update("UPDATE challenge_members m JOIN challenges c ON c.id=m.challenge_id SET m.joined_at=DATE_SUB(c.start_date,INTERVAL 1 DAY) WHERE c.id=?",bytes(id));
+        // This fixture's account predates its challenge, as it would in production.
+        jdbc().update("UPDATE score_transactions SET effective_at='2001-01-01 00:00:00',payload_json=JSON_SET(payload_json,'$.input.effectiveAt','2001-01-01T00:00:00Z') WHERE user_id=? AND reason='SIGNUP'",bytes(ownerId));
         return id;
     }
 
@@ -137,8 +140,13 @@ class TierScoringIT extends ChallengeApiSupport {
     }
 
     private void setScore(UUID userId, long score, Tier actual, Tier display) {
-        jdbc().update("UPDATE user_score_summaries SET total_score = ?, actual_tier = ?, display_tier = ? " +
-                "WHERE user_id = ?", score, actual.name(), display.name(), bytes(userId));
+        // A verified retained-history boundary, preceding all test cycles, replaces direct unaudited score edits.
+        jdbc().update("UPDATE score_transactions SET effective_at='2001-01-01 00:00:00',payload_json=JSON_SET(payload_json,'$.input.effectiveAt','2001-01-01T00:00:00Z') WHERE user_id=? AND reason='SIGNUP'",bytes(userId));
+        String key=ScoreKeys.hash("SCORE_BOUNDARY",userId,(int)score,display,java.time.Instant.parse("2002-01-01T00:00:00Z"));
+        String payload="{\"score\":"+score+",\"displayTier\":\""+display.name()+"\",\"effectiveAt\":\"2002-01-01T00:00:00Z\",\"verificationHash\":\""+key+"\"}";
+        jdbc().update("INSERT INTO score_transactions(id,user_id,entry_kind,reason,source_type,processing_key,idempotency_key,effective_at,effective_order,raw_delta,limited_delta,applied_delta,balance_after,actual_tier_after,display_tier_after,payload_json,created_at) VALUES (?,?,'COMMIT','PROCESSING_COMMIT','CHECKPOINT',?,?,'2002-01-01 00:00:00',X'00',0,0,0,?,?,?,?,UTC_TIMESTAMP(3))",
+                bytes(UUID.randomUUID()),bytes(userId),key,key,score,actual.name(),display.name(),payload);
+        jdbc().update("UPDATE user_score_summaries SET total_score=?,actual_tier=?,display_tier=? WHERE user_id=?",score,actual.name(),display.name(),bytes(userId));
     }
 
     private long scoreOf(UUID userId) {
@@ -154,13 +162,13 @@ class TierScoringIT extends ChallengeApiSupport {
 
     private Map<String, Object> cycleState(UUID userId, UUID challengeId, int cycleNo) {
         return jdbc().queryForMap("SELECT * FROM cycle_score_states " +
-                        "WHERE user_id = ? AND challenge_id = ? AND cycle_no = ?",
-                bytes(userId), bytes(challengeId), cycleNo);
+                        "WHERE user_id = ? AND challenge_id = ? AND cycle_start_on=(SELECT DATE_ADD(start_date,INTERVAL ? DAY) FROM challenges WHERE id=?)",
+                bytes(userId), bytes(challengeId), (cycleNo-1)*7,bytes(challengeId));
     }
 
     private List<Map<String, Object>> ledger(UUID userId) {
         return jdbc().queryForList("SELECT reason, raw_delta, limited_delta, applied_delta, balance_after, " +
-                "incident_type FROM score_transactions WHERE user_id = ? ORDER BY created_at, id", bytes(userId));
+                "incident_type FROM score_transactions WHERE user_id = ? AND entry_kind<>'COMMIT' AND reason<>'SIGNUP' AND raw_delta<>0 ORDER BY created_at, id", bytes(userId));
     }
 
     private static UUID uuid(byte[] b) {
@@ -254,7 +262,7 @@ class TierScoringIT extends ChallengeApiSupport {
             scoreService.reconcileCycle(me.id(), ch, 1);
 
             assertThat(scoreOf(me.id())).isEqualTo(10);
-            assertThat(cycleState(me.id(), ch, 1)).containsEntry("success_count", 0);
+            assertThat(jdbc().queryForObject("SELECT COUNT(*) FROM cycle_score_states WHERE user_id=? AND challenge_id=?",Integer.class,bytes(me.id()),bytes(ch))).isZero();
         }
 
         @Test
@@ -269,13 +277,15 @@ class TierScoringIT extends ChallengeApiSupport {
             assertThat(cycleState(me.id(), ch, 1)).containsEntry("tier_snapshot", "BRONZE");
 
             // 승급시킨 뒤에도 이 사이클의 배점 티어는 브론즈 그대로다.
-            setScore(me.id(), 150, Tier.SILVER, Tier.SILVER);
+            UUID other=challengeWith(me.id(),1,0);
+            judge(other,me.id(),1,1,"SUCCESS");
+            scoreService.reconcileCycle(me.id(),other,1);
             for (int d = 1; d < 7; d++) judge(ch, me.id(), 1, d, "SUCCESS");
             scoreService.reconcileCycle(me.id(), ch, 1);
 
             assertThat(cycleState(me.id(), ch, 1)).containsEntry("tier_snapshot", "BRONZE");
             // 브론즈 주 7회 전량 성공 = f(7) = W = +10. 첫 반영 +1 뒤 +9 가 더 붙는다.
-            assertThat(scoreOf(me.id())).isEqualTo(159);
+            assertThat(scoreOf(me.id())).isEqualTo(115);
         }
     }
 
@@ -384,8 +394,8 @@ class TierScoringIT extends ChallengeApiSupport {
             scoreService.closeCycle(me.id(), ch, 1);
 
             assertThat(cycleState(me.id(), ch, 1)).containsEntry("cycle_result", "SUCCESS");
-            assertThat(jdbc().queryForObject("SELECT success_streak FROM challenge_streaks " +
-                            "WHERE user_id = ? AND challenge_id = ?", Integer.class,
+            assertThat(jdbc().queryForObject("SELECT success_streak_after FROM cycle_score_states " +
+                            "WHERE user_id = ? AND challenge_id = ? AND closed_at IS NOT NULL ORDER BY cycle_start_on DESC LIMIT 1", Integer.class,
                     bytes(me.id()), bytes(ch))).isEqualTo(1);
         }
 
@@ -402,8 +412,8 @@ class TierScoringIT extends ChallengeApiSupport {
 
             // 성공 2 × 2 = 4 > 목표 4 가 아니다 → 정확히 50% 는 실패다.
             assertThat(cycleState(me.id(), ch, 1)).containsEntry("cycle_result", "FAILURE");
-            assertThat(jdbc().queryForObject("SELECT failure_streak FROM challenge_streaks " +
-                            "WHERE user_id = ? AND challenge_id = ?", Integer.class,
+            assertThat(jdbc().queryForObject("SELECT failure_streak_after FROM cycle_score_states " +
+                            "WHERE user_id = ? AND challenge_id = ? AND closed_at IS NOT NULL ORDER BY cycle_start_on DESC LIMIT 1", Integer.class,
                     bytes(me.id()), bytes(ch))).isEqualTo(1);
         }
 
@@ -414,6 +424,7 @@ class TierScoringIT extends ChallengeApiSupport {
             UUID ch = challengeWith(me.id(), 4, 21);
             // 1주차 성공으로 연속 성공 1을 만든다.
             for (int d = 0; d < 4; d++) judge(ch, me.id(), 1, d, "SUCCESS");
+            for (int d = 4; d < 7; d++) judge(ch, me.id(), 1, d, "NOT_REQUIRED");
             scoreService.reconcileCycle(me.id(), ch, 1);
             scoreService.closeCycle(me.id(), ch, 1);
 
@@ -424,8 +435,8 @@ class TierScoringIT extends ChallengeApiSupport {
             scoreService.closeCycle(me.id(), ch, 2);
 
             assertThat(cycleState(me.id(), ch, 2)).containsEntry("cycle_result", "PARTIAL");
-            assertThat(jdbc().queryForObject("SELECT success_streak FROM challenge_streaks " +
-                            "WHERE user_id = ? AND challenge_id = ?", Integer.class,
+            assertThat(jdbc().queryForObject("SELECT success_streak_after FROM cycle_score_states " +
+                            "WHERE user_id = ? AND challenge_id = ? AND closed_at IS NOT NULL ORDER BY cycle_start_on DESC LIMIT 1", Integer.class,
                     bytes(me.id()), bytes(ch))).isEqualTo(1);   // 유지 — 오르지도 끊기지도 않는다
         }
 
@@ -543,7 +554,7 @@ class TierScoringIT extends ChallengeApiSupport {
             scoreService.applyIncident(me.id(), ch, IncidentType.CHEAT_DETECTED, "dup", 0);
 
             assertThat(scoreOf(me.id())).isEqualTo(250);
-            assertThat(ledger(me.id())).hasSize(1);
+            assertThat(ledger(me.id()).stream().filter(r->"INCIDENT".equals(r.get("reason"))).toList()).hasSize(1);
         }
 
         @Test
@@ -633,7 +644,7 @@ class TierScoringIT extends ChallengeApiSupport {
             long beforeAppeal = scoreOf(me.id());
 
             // 이의 인용 — 판정 원본이 성공으로 정정된다.
-            jdbc().update("UPDATE VerificationDaily SET status = 'SUCCESS', failureReason = NULL WHERE id = ?",
+            jdbc().update("UPDATE VerificationDaily SET status = 'SUCCESS', failureReason = NULL,version=version+1 WHERE id = ?",
                     bytes(failed));
             scoreService.recompute(me.id(), ch, 1, failed);
 
@@ -651,10 +662,10 @@ class TierScoringIT extends ChallengeApiSupport {
             UUID failed = judge(ch, me.id(), 1, 0, "FAILED");
             scoreService.reconcileCycle(me.id(), ch, 1);
 
-            jdbc().update("UPDATE VerificationDaily SET status = 'SUCCESS' WHERE id = ?", bytes(failed));
+            jdbc().update("UPDATE VerificationDaily SET status = 'SUCCESS',version=version+1 WHERE id = ?", bytes(failed));
             scoreService.recompute(me.id(), ch, 1, failed);
 
-            assertThat(jdbc().queryForObject("SELECT COUNT(*) FROM score_corrections WHERE user_id = ?",
+            assertThat(jdbc().queryForObject("SELECT COUNT(*) FROM score_transactions WHERE reason='CORRECTION_COMMIT' AND user_id = ?",
                     Integer.class, bytes(me.id()))).isEqualTo(1);
             // 원장의 옛 감점 행도 남아 있다 — 덮어쓰지 않는다.
             assertThat(ledger(me.id())).anySatisfy(row ->
@@ -669,7 +680,7 @@ class TierScoringIT extends ChallengeApiSupport {
             UUID failed = judge(ch, me.id(), 1, 0, "FAILED");
             scoreService.reconcileCycle(me.id(), ch, 1);
 
-            jdbc().update("UPDATE VerificationDaily SET status = 'SUCCESS' WHERE id = ?", bytes(failed));
+            jdbc().update("UPDATE VerificationDaily SET status = 'SUCCESS',version=version+1 WHERE id = ?", bytes(failed));
             scoreService.recompute(me.id(), ch, 1, failed);
             long once = scoreOf(me.id());
             scoreService.recompute(me.id(), ch, 1, failed);

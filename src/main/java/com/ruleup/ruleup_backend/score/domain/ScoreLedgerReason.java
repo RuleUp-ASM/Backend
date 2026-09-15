@@ -22,5 +22,5 @@ public enum ScoreLedgerReason {
     INCIDENT,
 
     /** 소급 정정으로 만들어진 되돌림. */
-    REVERSAL
+    REVERSAL, SIGNUP, CYCLE_CLOSED, PROCESSING_COMMIT, CORRECTION_COMMIT
 }

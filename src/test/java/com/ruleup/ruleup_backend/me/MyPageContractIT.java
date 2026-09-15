@@ -95,12 +95,13 @@ class MyPageContractIT extends ChallengeApiSupport {
     private void insertScoreEvent(UUID userId, UUID challengeId, String reason, String incidentType,
                                   long delta, long balanceAfter, int daysAgo) {
         jdbc().update("INSERT INTO score_transactions " +
-                        "(id, user_id, raw_delta, limited_delta, applied_delta, cycle_limit_applied, " +
-                        " balance_after, reason, challenge_id, cycle_no, incident_type, " +
-                        " idempotency_key, created_at) " +
-                        "VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, 1, ?, ?, DATE_SUB(NOW(3), INTERVAL ? DAY))",
+                        "(id, user_id, raw_delta, limited_delta, applied_delta, " +
+                        " balance_after, reason, challenge_id, incident_type, " +
+                        " idempotency_key, created_at, entry_kind, source_type, processing_key, effective_at, effective_order, actual_tier_after, display_tier_after, payload_json) " +
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_SUB(UTC_TIMESTAMP(3), INTERVAL ? DAY), 'RESULT', 'TEST', ?, DATE_SUB(UTC_TIMESTAMP(3), INTERVAL ? DAY), X'00', ?, ?, '{}')",
                 bytes(UUID.randomUUID()), bytes(userId), delta, delta, delta, balanceAfter, reason,
-                challengeId == null ? null : bytes(challengeId), incidentType, uniq("idem"), daysAgo);
+                challengeId == null ? null : bytes(challengeId), incidentType, uniq("idem"), daysAgo, uniq("processing"), daysAgo,
+                com.ruleup.ruleup_backend.score.domain.TierBands.of(balanceAfter).name(), com.ruleup.ruleup_backend.score.domain.TierBands.of(balanceAfter).name());
     }
 
     private void insertScoreEvent(UUID userId, UUID challengeId, String reason,

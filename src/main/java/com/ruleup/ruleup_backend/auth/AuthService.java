@@ -69,6 +69,7 @@ public class AuthService {
     private final AgreementService agreementService;
     private final com.ruleup.ruleup_backend.sanction.SanctionService sanctionService;
     private final UserScoreSummaryRepository scoreSummaryRepository;
+    private final com.ruleup.ruleup_backend.score.ScoreService scoreService;
     private final TokenService tokenService;
     private final JwtProvider jwtProvider;
     private final SignupTokenStore signupTokenStore;
@@ -278,7 +279,7 @@ public class AuthService {
         userRepository.saveAndFlush(user);
         activity.touch(user.getId());
 
-        UserScoreSummary summary = scoreSummaryRepository.save(UserScoreSummary.initialize(user.getId()));   // 브론즈 10점
+        UserScoreSummary summary = scoreService.initialize(user.getId());   // 브론즈 10점
         invitationService.recordSignup(req.inviteCode(), user.getId(), java.time.Instant.now());   // 친구 초대 기록(선택)
         saveAgreements(user, ag);
         socialTokenService.flushPending(claims.getId(), user.getId(), provider);   // IdP 토큰 암호화 저장

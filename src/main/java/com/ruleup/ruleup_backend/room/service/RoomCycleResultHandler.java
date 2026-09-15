@@ -21,11 +21,17 @@ import java.util.UUID;
 public class RoomCycleResultHandler implements OutboxHandler {
     public static final String TYPE = "ROOM_CYCLE_RESULT";
     public record Payload(UUID sourceEventId, UUID userId, UUID challengeId, int cycleNo,
-                          int failureStreak, LocalDate cycleStartedOn, Instant effectiveAt) {}
+                          int failureStreak, LocalDate cycleStartedOn, Instant effectiveAt, UUID cycleId, long stateVersion, boolean correction,
+                          String cycleResult, int successStreak, Instant membershipJoinedAt) {
+        public Payload(UUID sourceEventId, UUID userId, UUID challengeId, int cycleNo, int failureStreak, LocalDate start, Instant at) {
+            this(sourceEventId,userId,challengeId,cycleNo,failureStreak,start,at,null,0,false,null,0,null);
+        }
+    }
     private final AutomaticKickService kicks;
     private final ChallengeRepository challenges;
     private final com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository members;
     private final NotificationPublisher notifications;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
     @Override public String type() { return TYPE; }
 
     @Override public void handle(String json) {
@@ -33,6 +39,11 @@ public class RoomCycleResultHandler implements OutboxHandler {
         var challenge = challenges.findByIdForUpdate(event.challengeId()).orElse(null);
         if (challenge == null || members.findByChallengeIdAndUserId(event.challengeId(),event.userId())
                 .filter(com.ruleup.ruleup_backend.challenge.domain.ChallengeMember::isActive).isEmpty()) return;
+        // Current row/version wins over delayed or corrected cycle events.
+        var rows=jdbc.queryForList("SELECT failure_streak_after,version FROM cycle_score_states WHERE user_id=? AND challenge_id=? AND cycle_start_on=? AND closed_at IS NOT NULL",
+                com.ruleup.ruleup_backend.score.ScoreKeys.bytes(event.userId()),com.ruleup.ruleup_backend.score.ScoreKeys.bytes(event.challengeId()),event.cycleStartedOn());
+        if(rows.isEmpty() || ((Number)rows.getFirst().get("failure_streak_after")).intValue()!=event.failureStreak()
+                || (event.stateVersion()>0 && ((Number)rows.getFirst().get("version")).longValue()!=event.stateVersion()))return;
         Instant joinedAt = kicks.latestJoin(event.challengeId(), event.userId());
         if (Instant.MIN.equals(joinedAt)) return;
         LocalDate countedFrom = ChallengeCycle.countFrom(challenge.getStartDate(), joinedAt.atZone(ZoneId.of("Asia/Seoul")).toLocalDate());
