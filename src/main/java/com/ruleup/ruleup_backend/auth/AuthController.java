@@ -192,7 +192,7 @@ public class AuthController {
                       선택 3종(마케팅·이벤트·야간알림)은 전부 거부해도 가입된다. `version` 을 생략하면 서버 현행 버전으로 기록한다.
                     - `installationId` — 필수. 위 2번(설치 게이트) 대상이다.
 
-                    가입 직후 상태는 항상 같다 — 티어 BRONZE·점수 10, `nicknameStatus=PENDING`, `accountStatus=ACTIVE`.
+                    가입 직후 티어 BRONZE·점수 10, `accountStatus=ACTIVE`이며 닉네임 상태는 동기 심사 결과를 반영한다.
                     닉네임은 커밋 후 비동기로 검수되며, **심사 중이라고 기능이 제한되지는 않는다**.
                     검수에서 거부되면 타인에게만 임시 닉네임이 보이고 본인에게는 알림이 간다.
 

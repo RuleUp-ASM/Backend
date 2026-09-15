@@ -1,0 +1,34 @@
+package com.ruleup.ruleup_backend.me.service;
+
+import com.ruleup.ruleup_backend.me.dto.MeHomeResponse;
+import lombok.RequiredArgsConstructor;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+import java.nio.ByteBuffer;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
+import java.util.UUID;
+import static com.ruleup.ruleup_backend.me.service.MeJudgementQuery.bytes;
+
+/** Only observed, unresolved measurement gaps are warnings; absence does not assert an OS permission grant. */
+@Service
+@RequiredArgsConstructor
+public class MePermissionWarnings {
+    private final JdbcTemplate jdbc;
+    public List<MeHomeResponse.PermissionWarning> of(UUID userId) {
+        ZoneId kst=ZoneId.of("Asia/Seoul");
+        LocalDate today=LocalDate.now(kst);
+        return jdbc.query("SELECT w.challenge_id,w.signal_type,w.waiting_from_on FROM verification_permission_waits w " +
+                "JOIN challenge_members m ON m.challenge_id=w.challenge_id AND m.user_id=w.user_id " +
+                "WHERE w.user_id=? AND w.resolved_at IS NULL AND m.status='ACTIVE' AND m.left_at IS NULL " +
+                "AND w.first_observed_at>=(SELECT MAX(joined_at) FROM challenge_join_events e WHERE e.challenge_id=w.challenge_id AND e.user_id=w.user_id)",
+                (rs,n)->{
+                    var b=ByteBuffer.wrap(rs.getBytes(1));
+                    LocalDate until=rs.getDate(3).toLocalDate().plusDays(14);
+                    int cycles=(int)Math.max(0,Math.min(2,(ChronoUnit.DAYS.between(today,until)+6)/7));
+                    return new MeHomeResponse.PermissionWarning(new UUID(b.getLong(),b.getLong()).toString(),rs.getString(2),cycles,until.atStartOfDay(kst).toInstant().toString());
+                },bytes(userId));
+    }
+}

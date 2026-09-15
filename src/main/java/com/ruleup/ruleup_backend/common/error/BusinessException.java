@@ -30,6 +30,7 @@ public class BusinessException extends RuntimeException {
      * 뭘 눌러야 하는지 안다. code 는 그대로라 클라이언트 분기 계약은 바뀌지 않는다.
      */
     private final String userMessage;
+    private String profileLockedUntil;
 
     public BusinessException(ErrorCode errorCode) {
         this(errorCode, null);
@@ -63,6 +64,12 @@ public class BusinessException extends RuntimeException {
         this.rejoinAvailableAt = rejoinAvailableAt;
         this.nextChangeAvailableAt = nextChangeAvailableAt;
         this.confirmation = confirmation;
+    }
+
+    public static BusinessException profileChangeLocked(String until) {
+        BusinessException exception=new BusinessException(ErrorCode.PROFILE_CHANGE_LOCKED);
+        exception.profileLockedUntil=until;
+        return exception;
     }
 
     /**

@@ -29,7 +29,7 @@ public class ProfileService {
     private final com.ruleup.ruleup_backend.moderation.UserModerationService moderation;
     private final org.springframework.transaction.support.TransactionTemplate tx;
     private final ImageStorageService imageStorage;
-    private final ApplicationEventPublisher eventPublisher;
+
 
     @Transactional(readOnly = true)
     public ProfileResponse getMyProfile(UUID userId) {
@@ -57,7 +57,7 @@ public class ProfileService {
     }
 
     private void updateStoredProfile(UUID userId, UpdateProfileRequest req) {
-        User user = loadActive(userId);
+        User user = loadLocked(userId);
         Instant now = Instant.now();
 
         boolean changingNickname = req.nickname() != null && !req.nickname().equals(user.getNickname());
@@ -66,8 +66,13 @@ public class ProfileService {
         boolean touchesLocked = changingNickname || removingImage;
 
         // 잠금은 상태 충돌이지 재시도로 풀리는 게 아니라 409 다(오픈 이슈 #9 — 온보딩 문서와 409 로 통일).
-        if (touchesLocked && user.isProfileLocked(now))
-            throw new BusinessException(ErrorCode.PROFILE_CHANGE_LOCKED);
+        boolean nicknameRepair = user.getNicknameStatus() == com.ruleup.ruleup_backend.user.domain.NicknameStatus.REJECTED
+                || user.getNicknameStatus() == com.ruleup.ruleup_backend.user.domain.NicknameStatus.CONFLICT;
+        boolean imageRepair = user.getProfileImageStatus() == com.ruleup.ruleup_backend.user.domain.ProfileImageStatus.REJECTED;
+        boolean normalNickname = changingNickname && !nicknameRepair;
+        boolean normalImage = removingImage && !imageRepair;
+        boolean attachedSave = normalNickname && !normalImage && user.canAttachNicknameToImageSave(now);
+        if ((normalNickname || normalImage) && !attachedSave) requireUnlocked(user,now);
 
         if (changingNickname) {
             if (!NicknamePolicy.isValid(req.nickname()))
@@ -90,21 +95,46 @@ public class ProfileService {
             user.changeInterestCategories(req.interestCategories());
         }
 
-        if (touchesLocked) {
-            user.startProfileLock(now);
-        }
+        if (attachedSave) user.consumeImageSave();
+        else if (normalNickname || normalImage) user.startProfileLock(now);
     }
 
     public ProfileImageResponse uploadImage(UUID userId, MultipartFile image) {
+        // Early check avoids uploading known-invalid changes. Recheck under lock after external I/O.
+        tx.executeWithoutResult(ignored -> requireImageEditable(loadLocked(userId),Instant.now()));
         String url = imageStorage.urlOf(imageStorage.store(image));
-        tx.executeWithoutResult(ignored -> loadActive(userId).changeProfileImage(url));
-        User reviewed = moderation.moderate(userId);
-        return ProfileImageResponse.of(reviewed.visibleProfileImageTo(userId), reviewed.getProfileImageStatus());
+        try {
+            tx.executeWithoutResult(ignored -> {
+                User user=loadLocked(userId);
+                Instant now=Instant.now();
+                requireImageEditable(user,now);
+                boolean repairing=user.getProfileImageStatus()==com.ruleup.ruleup_backend.user.domain.ProfileImageStatus.REJECTED;
+                user.registerProfileImage(now,repairing);
+                user.changeProfileImage(url);
+            });
+        } catch (RuntimeException failed) {
+            try { imageStorage.deleteByUrl(url); } catch (RuntimeException cleanup) { failed.addSuppressed(cleanup); }
+            throw failed;
+        }
+        User reviewed=moderation.moderate(userId);
+        return ProfileImageResponse.of(reviewed.visibleProfileImageTo(userId),reviewed.getProfileImageStatus());
     }
 
-    @Transactional
     public void deleteImage(UUID userId) {
-        loadActive(userId).removeProfileImage();
+        tx.executeWithoutResult(ignored -> updateStoredProfile(userId,new UpdateProfileRequest(null,null,true)));
+    }
+
+    private void requireImageEditable(User user,Instant now) {
+        if (user.getProfileImageStatus()!=com.ruleup.ruleup_backend.user.domain.ProfileImageStatus.REJECTED) requireUnlocked(user,now);
+    }
+
+    private void requireUnlocked(User user,Instant now) {
+        if (user.isProfileLocked(now)) throw BusinessException.profileChangeLocked(user.profileLockedUntil().toString());
+    }
+
+    private User loadLocked(UUID userId) {
+        return userRepository.findByIdForUpdate(userId).filter(user -> !user.isWithdrawn())
+                .orElseThrow(() -> new BusinessException(ErrorCode.LOGIN_REQUIRED));
     }
 
     private User loadActive(UUID userId) {

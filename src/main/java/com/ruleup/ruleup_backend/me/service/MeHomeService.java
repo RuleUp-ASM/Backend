@@ -32,8 +32,9 @@ public class MeHomeService {
 
     private final UserRepository userRepository;
     private final UserScoreSummaryRepository scoreRepository;
-    private final ChallengeMemberRepository memberRepository;
+    private final MeChallengeCounts challengeCounts;
     private final SanctionService sanctionService;
+    private final MePermissionWarnings permissionWarnings;
 
     public MeHomeResponse home(UUID userId) {
         User user = userRepository.findById(userId)
@@ -43,13 +44,15 @@ public class MeHomeService {
 
         Optional<Sanction> active = sanctionService.activeSanction(userId);
 
+        Optional<Sanction> lock=active.filter(s->s.getType()==com.ruleup.ruleup_backend.sanction.domain.SanctionType.LOCK
+                || s.getType()==com.ruleup.ruleup_backend.sanction.domain.SanctionType.BAN);
         return new MeHomeResponse(
                 user.getNickname(), user.getNicknameStatus().name(),
-                user.getProfileImageUrl(), user.getProfileImageStatus().name(),
+                user.visibleProfileImageTo(userId), user.getProfileImageStatus().name(),
                 score.getActualTier().name(), score.getTotalScore(), score.getDisplayTier().name(),
-                counts(userId),
-                active.isPresent() ? LOCKED : ACTIVE,
-                active.map(this::lockInfo).orElse(null));
+                challengeCounts.counts(userId),
+                lock.isPresent()?LOCKED:ACTIVE,
+                lock.map(this::lockInfo).orElse(null),permissionWarnings.of(userId));
     }
 
     /** 잠금 사유와 해제일. 사유를 볼 수 없으면 사용자는 왜 막혔는지 알 방법이 없다. */
@@ -59,21 +62,4 @@ public class MeHomeService {
                 sanction.getEndsAt() != null ? sanction.getEndsAt().toString() : null);
     }
 
-    /**
-     * 진행 중 / 완주 / 이탈. 마이페이지 탭 세 개가 그대로 이 셋이다.
-     *
-     * <p>완주와 이탈은 겹치지 않는다 — 완주 커트라인을 넘긴 뒤 방을 나간 사람은 완주로 센다.
-     * 이탈 탭은 "못 채우고 나온 방"을 보여주는 자리이기 때문이다.
-     */
-    private MeHomeResponse.Counts counts(UUID userId) {
-        int inProgress = 0, completed = 0, left = 0;
-        List<ChallengeMember> memberships = memberRepository.findByUserId(userId);
-        for (ChallengeMember m : memberships) {
-            boolean done = CompletionPolicy.isCompleted(m.getProgressRate());
-            if (done) { completed++; continue; }
-            if (m.getStatus() == MemberStatus.LEFT || m.getStatus() == MemberStatus.REMOVED) left++;
-            else if (m.isActive()) inProgress++;
-        }
-        return new MeHomeResponse.Counts(inProgress, completed, left);
-    }
 }

@@ -61,7 +61,7 @@ public class UserAccountController {
                     가입 API 에서는 사진을 받지 않는다. 가입을 마친 뒤 accessToken 으로 이 API 를 따로 호출한다.
                     `multipart/form-data` 로 `image` 파트 하나를 보낸다(jpg 또는 png, 최대 10MB).
 
-                    **응답의 `status` 는 항상 `PENDING`** 이다. 업로드 직후 자동 검수가 비동기로 돌기 때문이다.
+                    응답에는 자동 심사의 상태가 반영된다. 심사 제공자 장애 시 PENDING 을 유지한다.
                     본인 화면에는 방금 올린 사진이 바로 보이지만, 승인 전까지 **타인에게는 기본 프로필**이 보인다.
                     검수에서 거부되면 사진이 내려가고 알림이 간다.
 
@@ -71,6 +71,7 @@ public class UserAccountController {
                     """
     )
     @ApiErrorCodes({
+            ErrorCode.PROFILE_CHANGE_LOCKED,
             ErrorCode.IMAGE_CORRUPTED,
             ErrorCode.LOGIN_REQUIRED,
             ErrorCode.ACCOUNT_LOCKED,

@@ -35,7 +35,7 @@ public record ProfileResponse(
 
         @Schema(description = """
                 닉네임 검수 상태. PENDING·REJECTED 이면 타인에게는 tempNickname 이 보인다.
-                REJECTED 는 변경을 유도해야 하고, 이 경우의 재변경은 30일 제한에서 빠진다.""",
+                REJECTED 는 변경을 유도해야 하고, 이 경우의 재변경은 1개월 제한에서 빠진다.""",
                 example = "APPROVED", allowableValues = {"PENDING", "APPROVED", "REJECTED", "CONFLICT"})
         String nicknameStatus,
 
@@ -51,7 +51,7 @@ public record ProfileResponse(
         String nicknameChangedAt,
 
         @Schema(description = """
-                다음 닉네임 변경이 가능해지는 시각(마지막 변경 +30일).
+                닉네임·사진 통합 잠금 해제 시각(통합 프로필 저장 +1개월).
                 null 이면 지금 바로 변경할 수 있다.""",
                 example = "2026-08-15T04:11:07Z")
         String nicknameChangeableAfter,
@@ -64,8 +64,7 @@ public record ProfileResponse(
 
     public static ProfileResponse from(User user) {
         Instant changedAt = user.getNicknameChangedAt();
-        String changeableAfter = (changedAt != null)
-                ? changedAt.plus(NicknamePolicy.CHANGE_INTERVAL).toString() : null;
+        String changeableAfter=user.profileLockedUntil()==null ? null : user.profileLockedUntil().toString();
         return new ProfileResponse(
                 user.getId().toString(), user.getNickname(), user.getEmail(), user.visibleProfileImageTo(user.getId()),
                 user.getNicknameStatus().name(), user.getProfileImageStatus().name(), user.getApprovedNickname(),

@@ -21,7 +21,7 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * 티어 히스토리(GET /me/tier/history) — 월말 스냅샷 그래프.
+ * 티어 히스토리(GET /me/tier/history) — 점수 변동 시점별 그래프.
  *
  * <p>스냅샷 테이블을 따로 두지 않고 변동 원장에서 접어 만든다. 이의가 자동 인용이라 과거 판정이
  * 수시로 뒤집히는데, 물질화한 스냅샷은 정정마다 과거 월을 되짚어 고쳐야 한다. 원장에서 파생하면
@@ -48,7 +48,7 @@ public class MeTierHistoryService {
 
         List<ScoreTransaction> ledger = transactionRepository.findSince(userId, since);
 
-        return new MeTierHistoryResponse(best(ledger), monthly(ledger), RETENTION_NOTE);
+        return new MeTierHistoryResponse(best(ledger), points(ledger), RETENTION_NOTE);
     }
 
     private int window(Integer months) {
@@ -72,16 +72,8 @@ public class MeTierHistoryService {
                 LocalDate.ofInstant(peak.getCreatedAt(), KST).toString());
     }
 
-    /** 월말 스냅샷 — 그 달 마지막 변동의 잔액. 변동이 없던 달은 점이 없다(그래프가 직선으로 잇는다). */
-    private List<MeTierHistoryResponse.Monthly> monthly(List<ScoreTransaction> ledger) {
-        Map<YearMonth, Integer> lastOfMonth = new LinkedHashMap<>();
-        for (ScoreTransaction t : ledger) {
-            YearMonth ym = YearMonth.from(LocalDate.ofInstant(t.getCreatedAt(), KST));
-            lastOfMonth.put(ym, t.getBalanceAfter());   // 오래된 순이라 마지막 put 이 월말 값이다
-        }
-        List<MeTierHistoryResponse.Monthly> out = new ArrayList<>(lastOfMonth.size());
-        lastOfMonth.forEach((ym, score) -> out.add(new MeTierHistoryResponse.Monthly(
-                ym.toString(), TierBands.of(score).name(), score)));
-        return out;
+    private List<MeTierHistoryResponse.Point> points(List<ScoreTransaction> ledger) {
+        return ledger.stream().map(t->new MeTierHistoryResponse.Point(t.getCreatedAt().toString(),
+                TierBands.of(t.getBalanceAfter()).name(),t.getBalanceAfter())).toList();
     }
 }

@@ -41,6 +41,10 @@ public class PermissionWaitService {
     public void detected(PermissionGapDetected event) {
         var challenge = challenges.findById(event.challengeId()).orElse(null);
         if (challenge == null) return;
+        // A previous membership's unresolved wait cannot be reused after rejoining.
+        jdbc.update("UPDATE verification_permission_waits w SET resolved_at=UTC_TIMESTAMP(6) WHERE challenge_id=? AND user_id=? " +
+                "AND signal_type=? AND first_observed_at<(SELECT MAX(joined_at) FROM challenge_join_events e WHERE e.challenge_id=w.challenge_id AND e.user_id=w.user_id)",
+                bytes(event.challengeId()),bytes(event.userId()),event.signalType());
         // A partial current cycle is not a full waiting cycle.
         LocalDate from = ChallengeCycle.countFrom(challenge.getStartDate(), event.detectedAt().atZone(KST).toLocalDate());
         pushes.enqueuePermissionGap(event.userId(), event.challengeId(), event.targetDate(), event.signalType(), event.detectedAt());

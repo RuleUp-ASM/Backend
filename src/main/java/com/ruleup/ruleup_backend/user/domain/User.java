@@ -97,6 +97,12 @@ public class User extends AssignedIdEntity {
     @Column(name = "profile_changed_at")
     private Instant profileChangedAt;
 
+    @Column(name="profile_image_registered_at")
+    private Instant profileImageRegisteredAt;
+
+    @Column(name="profile_save_kind")
+    private String profileSaveKind;
+
     /** 사용자가 현재 제출한 이미지 (PENDING/REJECTED 상태일 수 있음). */
     @Column(name = "profile_image_key")
     private String profileImageUrl;
@@ -287,7 +293,7 @@ public class User extends AssignedIdEntity {
      * 모더레이션 거부에 따른 재수정은 횟수에서 제외하므로(정책 §3) 시각을 갱신하지 않는다.
      */
     public void changeNickname(String newNickname) {
-        boolean fixingRejection = (this.nicknameStatus == NicknameStatus.REJECTED);
+        boolean fixingRejection = (this.nicknameStatus == NicknameStatus.REJECTED || this.nicknameStatus == NicknameStatus.CONFLICT);
         this.nickname = newNickname;
         this.nicknameStatus = NicknameStatus.PENDING;
         if (!fixingRejection) this.nicknameChangedAt = Instant.now();
@@ -395,12 +401,13 @@ public class User extends AssignedIdEntity {
      * 서버가 물린 거부를 사용자 책임으로 셀 수 없기 때문이다.
      */
     public boolean isProfileLocked(Instant now) {
-        return !isFixingRejection() && ProfileLockPolicy.isLocked(profileChangedAt, now);
+        return ProfileLockPolicy.isLocked(profileChangedAt, now);
     }
 
     /** 이번 저장으로 잠금을 시작한다. 이미 같은 저장 세션 안이면 시작 시각을 밀지 않는다. */
     public void startProfileLock(Instant now) {
-        if (!ProfileLockPolicy.isSameSaveSession(profileChangedAt, now)) this.profileChangedAt = now;
+        this.profileChangedAt = now;
+        this.profileSaveKind = "PROFILE";
     }
 
     /** 잠금 해제 시각(마지막 저장 +1개월). 잠긴 적이 없으면 null. */
@@ -408,10 +415,19 @@ public class User extends AssignedIdEntity {
         return ProfileLockPolicy.lockedUntil(profileChangedAt);
     }
 
-    /** 모더레이션이 거부한 값을 고치는 중인지 — 이 재제출은 잠금에서 제외된다. */
-    private boolean isFixingRejection() {
-        return nicknameStatus == NicknameStatus.REJECTED
-                || profileImageStatus == ProfileImageStatus.REJECTED;
+    public boolean canAttachNicknameToImageSave(Instant now) {
+        return "IMAGE".equals(profileSaveKind) && ProfileLockPolicy.isSameSaveSession(profileChangedAt,now);
+    }
+
+    public void consumeImageSave() { this.profileSaveKind="PROFILE"; }
+
+    public void registerProfileImage(Instant now, boolean repairing) {
+        boolean first=profileImageRegisteredAt==null;
+        if (first) this.profileImageRegisteredAt=now;
+        if (!first && !repairing) {
+            this.profileChangedAt=now;
+            this.profileSaveKind="IMAGE";
+        }
     }
 
     public void changeInterestCategories(List<String> categories) {

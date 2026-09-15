@@ -39,7 +39,14 @@ public record ErrorResponse(
                 description = """
                         2단계 확인 봉투 — CONFIRMATION_REQUIRED 일 때만 실린다.
                         토큰 · 만료 · 대상 · 집행 내용 · 해제 예정 · 부수 효과가 함께 들어 있다.""")
-        Confirmation confirmation) {
+        Confirmation confirmation,
+
+        @io.swagger.v3.oas.annotations.media.Schema(description="통합 프로필 변경 잠금 해제 시각")
+        String profileLockedUntil) {
+
+    public ErrorResponse(String code,String message,String reason,String rejoinAvailableAt,String nextChangeAvailableAt,Confirmation confirmation) {
+        this(code,message,reason,rejoinAvailableAt,nextChangeAvailableAt,confirmation,null);
+    }
 
     public static ErrorResponse of(ErrorCode errorCode) {
         return new ErrorResponse(errorCode.name(), errorCode.getMessage(), null, null, null, null);
@@ -58,6 +65,6 @@ public record ErrorResponse(
         ErrorCode code = e.getErrorCode();
         return new ErrorResponse(code.name(), e.getUserMessage(),
                 e.getDetail(), e.getRejoinAvailableAt(), e.getNextChangeAvailableAt(),
-                e.getConfirmation());
+                e.getConfirmation(), e.getProfileLockedUntil());
     }
 }

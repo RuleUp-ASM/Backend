@@ -17,7 +17,7 @@ public record UpdateProfileRequest(
 
         @Schema(description = """
                 변경할 닉네임. 저장하면 재심사(PENDING)에 들어가고, 그 시점부터 닉네임·사진이
-                함께 1개월 잠긴다. 내려놓은 이전 닉네임은 1주간 다른 사람이 쓸 수 없다.""",
+                함께 1개월 잠긴다. 승인 후 해제된 이전 닉네임에는 별도 대기 기간이 없다.""",
                 example = "새벽러너")
         String nickname,
 
