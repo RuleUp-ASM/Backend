@@ -38,8 +38,8 @@ public class WatcherBatch {
 
     private final WatcherRelationRepository relationRepository;
     private final WatcherInvitationRepository invitationRepository;
-    private final ChallengeRepository challengeRepository;
     private final NotificationPublisher notificationPublisher;
+    private final WatcherAudit audit;
 
     /**
      * 종료된 챌린지의 관계를 제거한다. 멱등하며 이미 제거된 행은 건드리지 않는다.
@@ -49,21 +49,14 @@ public class WatcherBatch {
     @Scheduled(cron = "0 10 4 * * *", zone = "Asia/Seoul")
     @Transactional
     public int removeFinishedRelations() {
-        List<UUID> finished = challengeRepository.findAll().stream()
-                .filter(c -> isFinished(c))
-                .map(Challenge::getId)
-                .toList();
-        if (finished.isEmpty()) return 0;
-
         Instant now = Instant.now();
-        List<WatcherRelation> live = relationRepository.findLiveByChallengeIds(finished);
-        live.forEach(r -> r.remove(now));
+        List<WatcherRelation> live = relationRepository.findFinishedRelations();
+        live.forEach(r -> {
+            r.remove(now);
+            audit.afterCommit("WATCHER_ROUTINE_ENDED", r.getId(), null, "ACTIVE", "ENDED", r.getConsentVersion());
+        });
         if (!live.isEmpty()) log.info("감시자 관계 자동 제거 — {}건", live.size());
         return live.size();
-    }
-
-    private boolean isFinished(Challenge c) {
-        return c.getStatus() == ChallengeStatus.COMPLETED || c.getDeletedAt() != null;
     }
 
     /**
@@ -88,6 +81,7 @@ public class WatcherBatch {
                     // 초대 id 가 곧 사건이다. 멀티 태스크가 같은 만료 건을 집어도 한 번만 쌓인다.
                     Map.of(NotificationParams.CHALLENGE_ID, invitation.getChallengeId().toString(),
                             NotificationParams.WATCHER_ID, invitation.getId().toString())));
+            audit.afterCommit("WATCHER_INVITATION_EXPIRED", invitation.getId(), invitation.getInviterUserId(), "INVITED", "EXPIRED", null);
             invitation.markExpiryNotified(now);   // 중복 발송 방지
         }
         log.info("감시자 초대 만료 알림 — {}건", expired.size());

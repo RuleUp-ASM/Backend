@@ -31,6 +31,7 @@ public class AppLinkCheckService {
     private final AppLinks appLinks;
     private final ChallengeInvitationRepository challengeInvitationRepository;
     private final WatcherInvitationRepository watcherInvitationRepository;
+    private final com.ruleup.ruleup_backend.watcher.infra.Tokens watcherTokens;
 
     public AppLinkCheckDtos.Response check(String url) {
         if (url == null || url.isBlank()) throw new BusinessException(ErrorCode.APP_LINK_URL_REQUIRED);
@@ -64,9 +65,15 @@ public class AppLinkCheckService {
             case CHALLENGE_INVITATION -> challengeInvitationRepository
                     .findByTokenHash(InvitationTokens.hash(parsed.token()))
                     .map(i -> i.getExpiresAt());
-            case WATCHER_INVITATION -> watcherInvitationRepository
-                    .findByTokenHash(WatcherHashes.sha256Hex(parsed.token()))
-                    .map(i -> i.getExpiresAt());
+            case WATCHER_INVITATION -> watcherExpiry(parsed.token());
         };
+    }
+    private Optional<Instant> watcherExpiry(String token) {
+        try {
+            var claims = watcherTokens.verify(token);
+            return watcherInvitationRepository.findByTokenHash(WatcherHashes.sha256Hex(token))
+                    .filter(i -> i.getChallengeId().equals(claims.challengeId()) && i.getInviterUserId().equals(claims.inviterId()))
+                    .map(i -> i.getExpiresAt().isBefore(claims.expiresAt()) ? i.getExpiresAt() : claims.expiresAt());
+        } catch (BusinessException e) { return Optional.empty(); }
     }
 }

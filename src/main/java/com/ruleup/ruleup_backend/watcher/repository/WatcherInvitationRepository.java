@@ -28,12 +28,7 @@ public interface WatcherInvitationRepository extends JpaRepository<WatcherInvita
             """)
     List<WatcherInvitation> findExpiredUnnotified(@Param("now") Instant now, Limit limit);
 
-    /**
-     * 아직 살아 있는 미수락 초대 — 목록의 {@code INVITED} 줄이자 슬롯을 먹는 대상이다.
-     *
-     * <p>만료된 초대를 빼는 것이 핵심이다. 죽은 링크가 슬롯을 계속 차지하면 사용자가 풀 방법이
-     * 없어 「3/3」에서 영영 못 벗어난다.
-     */
+    /** 미수락·미만료 초대 목록. */
     @Query("""
             select i from WatcherInvitation i
              where i.challengeId = :challengeId
@@ -45,4 +40,7 @@ public interface WatcherInvitationRepository extends JpaRepository<WatcherInvita
     List<WatcherInvitation> findOutstanding(@Param("challengeId") UUID challengeId,
                                             @Param("inviterUserId") UUID inviterUserId,
                                             @Param("now") Instant now);
+    @org.springframework.data.jpa.repository.Modifying
+    @Query("update WatcherInvitation i set i.acceptedAt=:now where i.id=:id and i.acceptedAt is null")
+    int acceptOnce(@Param("id") UUID id, @Param("now") Instant now);
 }

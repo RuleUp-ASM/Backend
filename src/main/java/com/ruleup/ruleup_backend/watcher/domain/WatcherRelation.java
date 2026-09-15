@@ -25,6 +25,7 @@ import java.util.UUID;
  * <p>감시자는 <b>방 멤버가 아니다.</b> 방 내부 권한 모델과 무관한 별도 관계이며, 통지에 담기는
  * 3개 필드 외에는 아무것도 보여주지 않는다.
  */
+@org.hibernate.annotations.DynamicUpdate
 @Entity
 @Table(name = "watcher_relations")
 @Getter
@@ -54,16 +55,10 @@ public class WatcherRelation extends AssignedIdEntity {
     @Column(name = "status", nullable = false, length = 10)
     private WatcherRelationStatus status;
 
-    /**
-     * 푸시 수신 토글. 관계를 끊지 않고 통지만 닫는 스위치다.
-     *
-     * <p>스펙 5-3의 표에는 없는 컬럼이지만 API #6(수신 토글)의 <b>현재 상태를 담을 곳</b>이
-     * 필요하다. 이력({@link WatcherConsentLog})에서 파생하면 발송 대상 조회가 매번 로그
-     * 테이블을 훑어야 해서, "PENDING 발송 0건을 성능 문제 없이 지킨다"는 인덱스 설계 근거가
-     * 깨진다. 그래서 동의 체계와 같은 방식으로 <b>상태는 여기, 이력은 로그</b>로 나눴다.
-     */
-    @Column(name = "push_enabled", nullable = false)
-    private boolean pushEnabled;
+    public static final String CONSENT_VERSION = "2026-09-14";
+
+    @Column(name = "consent_version", length = 20)
+    private String consentVersion;
 
     @Column(name = "invited_at", nullable = false, updatable = false)
     private Instant invitedAt;
@@ -84,7 +79,7 @@ public class WatcherRelation extends AssignedIdEntity {
         r.targetUserId = targetUserId;
         r.watcherUserId = watcherUserId;
         r.status = WatcherRelationStatus.ACTIVE;
-        r.pushEnabled = true;
+        r.consentVersion = CONSENT_VERSION;
         r.invitedAt = invitedAt;
         r.acceptedAt = acceptedAt;
         return r;
@@ -94,10 +89,7 @@ public class WatcherRelation extends AssignedIdEntity {
     public void accept(Instant at) {
         this.status = WatcherRelationStatus.ACTIVE;
         this.acceptedAt = at;
-    }
-
-    public void togglePush(boolean enabled) {
-        this.pushEnabled = enabled;
+        this.consentVersion = CONSENT_VERSION;
     }
 
     /** 루틴 종료 자동 제거. 이 배치의 정확도가 곧 수신거부권이다. */
@@ -107,6 +99,7 @@ public class WatcherRelation extends AssignedIdEntity {
 
     /** 통지를 보낼 수 있는 상태인지 — 발송 직전에 다시 확인한다. */
     public boolean isDispatchable() {
-        return status == WatcherRelationStatus.ACTIVE && removedAt == null && pushEnabled;
+        return status == WatcherRelationStatus.ACTIVE && removedAt == null && acceptedAt != null
+                && consentVersion != null && !consentVersion.isBlank();
     }
 }

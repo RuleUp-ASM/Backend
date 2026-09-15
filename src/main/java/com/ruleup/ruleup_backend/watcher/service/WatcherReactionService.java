@@ -40,6 +40,8 @@ public class WatcherReactionService {
     private final WatcherRelationRepository relationRepository;
     private final NotificationPublisher notificationPublisher;
     private final UserRepository userRepository;
+    private final com.ruleup.ruleup_backend.report.BlockService blocks;
+    private final WatcherAudit audit;
 
     @Transactional
     public WatcherReactionDtos.Response react(UUID watcherUserId, UUID noticeId,
@@ -74,8 +76,8 @@ public class WatcherReactionService {
         // 실패 당사자 1명에게만 알린다. 감시자 닉네임은 공개한다 — 누가 보냈는지 모르면
         // 응원도 놀림도 의미가 없다.
         //
-        // 차단 여부를 여기서 보지 않는다. 차단은 감시자 관계 생성을 막는 게이트라(공통 2절)
-        // 관계가 있다는 것 자체가 차단되지 않았다는 뜻이고, 알림 모듈에는 필터가 없다.
+        audit.afterCommit("WATCHER_REACTED", relation.getId(), watcherUserId, null, reaction.name(), relation.getConsentVersion());
+        if (!blocks.isUserBlocked(relation.getTargetUserId(), watcherUserId))
         notificationPublisher.publish(NotificationEvent.of(
                 relation.getTargetUserId(),
                 NotificationType.WATCHER_REACTION,

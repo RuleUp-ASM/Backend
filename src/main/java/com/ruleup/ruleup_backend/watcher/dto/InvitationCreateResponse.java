@@ -19,6 +19,8 @@ public record InvitationCreateResponse(
         @Schema(description = "공유 링크. URL 에 개인정보를 담지 않는다.")
         String inviteUrl,
 
+        String status,
+
         @Schema(description = "만료 시각 — 발급 + 7일") String expiresAt,
 
         @Schema(description = "카카오톡 공유 카드 메타") KakaoShare kakaoShare) {

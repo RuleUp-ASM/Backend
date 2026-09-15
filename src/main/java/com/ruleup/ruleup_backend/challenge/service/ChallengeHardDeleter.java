@@ -52,8 +52,6 @@ public class ChallengeHardDeleter {
                 "JOIN watcher_relations r ON r.id = n.relation_id WHERE r.challenge_id = :cid)", challengeId);
         exec("DELETE FROM watcher_notices WHERE relation_id IN " +
                 "(SELECT id FROM watcher_relations WHERE challenge_id = :cid)", challengeId);
-        exec("DELETE FROM watcher_consent_logs WHERE relation_id IN " +
-                "(SELECT id FROM watcher_relations WHERE challenge_id = :cid)", challengeId);
         exec("DELETE FROM watcher_relations WHERE challenge_id = :cid", challengeId);
         exec("DELETE FROM watcher_invitations WHERE challenge_id = :cid", challengeId);
         exec("DELETE FROM challenge_delegations WHERE challenge_id = :cid", challengeId);

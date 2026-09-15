@@ -23,21 +23,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
-/**
- * 실패 통지 발송 — 패널티 감시자 백엔드 4-2.
- *
- * <h4>두 개의 절대 가드레일</h4>
- * <ol>
- *   <li><b>PENDING 발송 0건</b> — 발송 직전에 관계 상태를 다시 확인한다</li>
- *   <li><b>이의 기간 종료 전 발송 0건</b> — 트리거가 실패 <i>확정</i> 이벤트이므로 구조적으로
- *       보장된다. 인증 모듈은 귀속일+2일 00:00 KST 이후에만 이 이벤트를 발행하고,
- *       <b>이의가 인용된 건은 애초에 오지 않는다</b></li>
- * </ol>
- *
- * <p>야간 보류·중복 제어·푸시 발송은 <b>여기서 하지 않는다</b>. 알림 모듈 소관이므로 이벤트만
- * 발행한다 — 예전에는 이 모듈이 22:00 기준으로 자체 야간 큐를 굴려 알림 정책의 21:00 과
- * 어긋나 있었다.
- */
+/** Validates current consent and the persisted final judgement before atomically recording and publishing. */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -49,6 +35,14 @@ public class WatcherNoticeService {
     private final ChallengeQueryService challengeQuery;
     private final RoutineCatalog routineCatalog;
     private final UserRepository userRepository;
+    private final com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository challenges;
+    private final com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository verifications;
+    private final com.ruleup.ruleup_backend.report.BlockService blocks;
+    private final jakarta.persistence.EntityManager em;
+    private final WatcherAudit audit;
+    @org.springframework.beans.factory.annotation.Value("${app.watcher.dispatch-enabled:true}")
+    private boolean dispatchEnabled;
+
 
     /**
      * 실패 확정 1건 → ACTIVE 감시자 전원에게 통지.
@@ -59,6 +53,22 @@ public class WatcherNoticeService {
     @Transactional
     public void onFailureConfirmed(UUID challengeId, UUID failedUserId, UUID verificationId,
                                    LocalDate targetDate, Instant confirmedAt) {
+        if (!dispatchEnabled) return;
+        Challenge lockedChallenge = challenges.findByIdForUpdate(challengeId).orElse(null);
+        if (lockedChallenge == null || lockedChallenge.getDeletedAt() != null
+                || lockedChallenge.getStatus() == com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus.COMPLETED
+                || lockedChallenge.getPenalties() == null || !lockedChallenge.getPenalties().watcher()) return;
+        var daily = verifications.findById(verificationId).orElse(null);
+        if (daily == null) return;
+        em.refresh(daily, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+        Instant now = Instant.now();
+        if (!daily.getChallengeId().equals(challengeId) || !daily.getUserId().equals(failedUserId)
+                || !daily.getTargetDate().equals(targetDate)
+                || daily.getStatus() != com.ruleup.ruleup_backend.common.verification.VerificationStatus.FAILED
+                || com.ruleup.ruleup_backend.verification.domain.VerificationDeadlines.finalizeAfter(daily.getTargetDate()).isAfter(now)
+                || daily.getVerifiedAt() == null || daily.getVerifiedAt().isAfter(now)
+                || daily.getShareableAt() == null || daily.getShareableAt().isAfter(now)
+                || daily.getAppealClosesAt() == null || daily.getAppealClosesAt().isAfter(now)) return;
         List<WatcherRelation> targets = relationRepository.findDispatchTargets(challengeId, failedUserId);
         if (targets.isEmpty()) return;   // 감시자가 없으면 방 외부 알림 자체가 없다
 
@@ -70,14 +80,17 @@ public class WatcherNoticeService {
                 .map(u -> u.visibleNicknameTo(null)).orElse("회원");
 
         for (WatcherRelation relation : targets) {
-            // 발송 직전 재확인 — 조회와 발송 사이에 토글이 꺼졌을 수 있다.
-            if (!relation.isDispatchable()) continue;
+            // 관계와 판정 행을 잠근 상태에서 동의·차단·수락 시각을 확인한다.
+            if (!relation.isDispatchable() || relation.getAcceptedAt().isAfter(daily.getVerifiedAt())
+                    || blocks.isUserBlocked(relation.getWatcherUserId(), failedUserId)) continue;
             // 이벤트가 재전송돼도 같은 건으로 두 번 나가지 않는다.
             if (noticeRepository.existsByRelationIdAndVerificationId(relation.getId(), verificationId))
                 continue;
 
             WatcherNotice notice = noticeRepository.save(
-                    WatcherNotice.sent(relation.getId(), verificationId, Instant.now()));
+                    WatcherNotice.sent(relation.getId(), verificationId, now));
+
+            audit.afterCommit("WATCHER_NOTICE_SENT", relation.getId(), failedUserId, null, "SENT", relation.getConsentVersion());
 
             // 통지에 담는 것은 3개 필드뿐이다 — 감시자는 방 멤버가 아니므로 방 상세·랭킹·
             // 멤버 진입점을 주지 않으며 템플릿 복제 진입점도 노출하지 않는다.
