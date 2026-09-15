@@ -16,9 +16,9 @@ RuleUp은 사용자가 루틴을 챌린지로 만들고 여러 사람과 함께 
 | --- | --- |
 | 서비스 | 함께 목표를 실천하고 자동·수동 인증으로 완주하는 챌린지 플랫폼 |
 | 백엔드 범위 | 로그인·회원, 챌린지, 인증, 추천, 랭킹, 알림, 감시자, 신고·검수, 배치 |
-| API | 38개 Controller, 104개 Endpoint |
-| 데이터 관리 | MySQL 8.4, Flyway Migration 33개, JPA `ddl-auto: none` |
-| 품질 관리 | 테스트 클래스 65개, Testcontainers, JaCoCo 커버리지 게이트 |
+| API | 40개 Controller, 120개 Endpoint |
+| 데이터 관리 | MySQL(운영 8.0 · 로컬/CI 8.4), Flyway 도메인별 베이스라인 11개, JPA `ddl-auto: none` |
+| 품질 관리 | 테스트 클래스 116개·테스트 1,166건, Testcontainers, JaCoCo 커버리지 게이트 |
 | 문서화 | Swagger UI, OpenAPI JSON, 도메인별 기술 스펙 |
 | 배포 | Docker, GitHub Actions, Amazon ECR/ECS |
 
@@ -65,10 +65,10 @@ flowchart LR
     Security --> API[REST Controllers]
     API --> Domain[Domain Services]
     Domain --> JPA[Spring Data JPA]
-    JPA --> DB[(MySQL 8.4)]
+    JPA --> DB[(MySQL)]
 
     Domain --> Cache[(Caffeine Cache)]
-    Domain --> Redis[(Redis<br/>Explore Index · MySQL Fallback)]
+    Domain --> Redis[(Redis<br/>Explore Index)]
     Domain --> Event[Domain Events]
     Event --> Async[Async Workers]
     Async --> Outbox[(Notification / Push Outbox)]
@@ -261,7 +261,7 @@ JaCoCo HTML 리포트는 `build/reports/jacoco/test/html/index.html`에 생성�
 | --- | --- |
 | Language | Java 25 |
 | Framework | Spring Boot 4.1, Spring MVC, Spring Security, Spring Data JPA |
-| Database | MySQL 8.4, Flyway |
+| Database | MySQL(운영 8.0 · 로컬/CI 8.4), Flyway |
 | Cache · Index | Caffeine(JVM 로컬), Redis(탐색 파생 인덱스) |
 | Auth | JWT, Kakao OAuth, Google OAuth, AES-GCM |
 | Storage | Amazon S3(이미지), 로컬 파일 시스템(로컬 프로필) |
@@ -314,13 +314,30 @@ src/main/java/com/ruleup/ruleup_backend/
 └── config                        # Security, OpenAPI, Cache, S3, HTTP 설정
 ```
 
+스키마는 도메인별 베이스라인으로 관리합니다. 파일 안의 순서가 외래키 방향이고 파일 사이의 순서도 같아서, 앞 파일만 뒤 파일을 가리킵니다.
+
+```text
+src/main/resources/db/migration/
+├── V1__identity.sql              # 계정, 인증, 약관 — 모든 도메인이 users를 가리킴
+├── V2__routine_catalog.sql       # 루틴 템플릿 카탈로그
+├── V3__challenge.sql             # 챌린지와 멤버십
+├── V4__room.sql                  # 공지, 댓글, 랭킹, 활동 로그
+├── V5__verification.sql          # 인증·판정과 원본 신호
+├── V6__score.sql                 # 점수·티어 원장
+├── V7__notification.sql          # 알림과 발송 큐
+├── V8__watcher.sql               # 감시자 관계와 응원
+├── V9__safety.sql                # 신고, 차단, 제재
+├── V10__admin.sql                # 운영 콘솔과 CS
+└── V11__platform.sql             # 아웃박스, 멱등키, 시스템 지표
+```
+
 ## 현재 한계와 확장 방향
 
 | 현재 선택 | 확장 시 고려할 점 |
 | --- | --- |
 | JVM local Caffeine cache(탐색 인덱스 제외) | 다중 인스턴스 간 즉시 일관성이 필요해지면 Redis 또는 event 기반 invalidation 도입 |
 | S3 presigned GET 302 이미지 서빙 | 트래픽이 늘면 CloudFront 같은 CDN을 앞에 두고 원본 요청 수를 줄임 |
-| Redis 인덱스가 비면 재기동·일일 대조까지 MySQL 폴백 | 폴백 구간을 줄이려면 스윕이 워밍업 플래그까지 복구하도록 확장 |
+| Redis 탐색 인덱스가 준비되지 않으면 목록·인기는 503 | 「서버 간 순위 동일」이 계약이라 다른 저장소로 대신 내리지 않는다. 5분 스윕이 워밍업 플래그까지 복구하므로 구간은 짧다 |
 | DB 상태 기반 멱등 scheduler | 배치 규모가 커지면 분산 lock 또는 별도 job orchestrator 도입 |
 | 규칙 기반 추천 | 충분한 행동 데이터가 쌓이면 offline evaluation을 거쳐 학습 기반 ranking과 혼합 |
 | 프로세스 내부 `@Async` | 유실 허용이 어려운 작업은 message broker 기반 비동기 처리로 이전 |
