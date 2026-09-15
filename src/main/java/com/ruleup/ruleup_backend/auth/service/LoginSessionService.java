@@ -128,7 +128,9 @@ public class LoginSessionService {
         TokenService.TokenPair pair = tokenService.issueTokenPair(user);
         UserScoreSummary summary = scoreSummaryRepository.findById(user.getId()).orElse(null);
         int flushIntervalSec = syncPolicy.forUser(user);
-        return OAuthLoginResponse.existing(pair, user, summary, flushIntervalSec).withRestored(restored);
+        // 잠금 상세는 정지 상태일 때만 읽는다 — 정상 로그인은 제재 테이블을 건드리지 않는다.
+        var lock = user.isSuspended() ? sanctionService.activeSanction(user.getId()).orElse(null) : null;
+        return OAuthLoginResponse.existing(pair, user, summary, flushIntervalSec, lock).withRestored(restored);
     }
 
     /**

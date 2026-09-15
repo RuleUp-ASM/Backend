@@ -173,7 +173,8 @@ public class AuthService {
                 User reviewed = moderation.moderate(UUID.fromString(response.user().id()));
                 return new SignupResponse(response.isNewUser(), response.restored(), response.accessToken(),
                         response.refreshToken(), response.tokenType(), response.expiresIn(), response.flushIntervalSec(),
-                        UserResponse.from(reviewed, scoreSummaryRepository.findById(reviewed.getId()).orElse(null)));
+                        UserResponse.from(reviewed, scoreSummaryRepository.findById(reviewed.getId()).orElse(null),
+                                lockOf(reviewed)));
             } catch (DataIntegrityViolationException e) {
                 // 동시 가입 경합 — 사전 조회 후 다른 요청이 먼저 가입했다.
                 // 계약: "후발 요청은 기존 유저 로그인으로 수렴"(테크 스펙 4-3).
@@ -371,7 +372,7 @@ public class AuthService {
 
         TokenService.TokenPair pair = tokenService.issueTokenPair(user);
         UserScoreSummary summary = scoreSummaryRepository.findById(user.getId()).orElse(null);
-        return SignupResponse.restored(pair, user, summary, syncPolicy.forUser(user));
+        return SignupResponse.restored(pair, user, summary, syncPolicy.forUser(user), lockOf(user));
     }
 
     /** 임시 승인 닉네임 UNIQUE 위반인지 — 이 경우에만 새 후보로 가입을 재시도한다. */
@@ -406,8 +407,15 @@ public class AuthService {
         UserScoreSummary summary = scoreSummaryRepository.findById(existing.getId()).orElse(null);
         return new SignupResponse(false, false, pair.accessToken(), pair.refreshToken(), "Bearer",
                 pair.expiresIn(), syncPolicy.forUser(existing),
-                UserResponse.from(existing, summary));
+                UserResponse.from(existing, summary, lockOf(existing)));
     }
+    /**
+     * 잠금 상세에 쓸 제재. <b>정지 상태일 때만 읽는다</b> — 정상 사용자는 제재 테이블을 건드리지 않는다.
+     */
+    private com.ruleup.ruleup_backend.sanction.domain.Sanction lockOf(User user) {
+        return user.isSuspended() ? sanctionService.activeSanction(user.getId()).orElse(null) : null;
+    }
+
 
     /** 생일 파싱·검증. 누락/형식/미래 = BIRTHDATE_INVALID, 만 14세 미만 = BIRTHDATE_UNDERAGE. */
     private LocalDate parseBirthDate(String raw) {
