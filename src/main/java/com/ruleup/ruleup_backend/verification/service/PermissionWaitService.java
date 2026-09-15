@@ -2,6 +2,7 @@ package com.ruleup.ruleup_backend.verification.service;
 
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeCycle;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
+import com.ruleup.ruleup_backend.common.ClockSkew;
 import com.ruleup.ruleup_backend.common.UuidGenerator;
 import com.ruleup.ruleup_backend.common.event.PermissionGapDetected;
 import com.ruleup.ruleup_backend.common.outbox.OutboxDispatcher;
@@ -42,8 +43,9 @@ public class PermissionWaitService {
         var challenge = challenges.findById(event.challengeId()).orElse(null);
         if (challenge == null) return;
         // A previous membership's unresolved wait cannot be reused after rejoining.
+        // first_observed_at is app time and joined_at is DB time, so the boundary carries a skew tolerance.
         jdbc.update("UPDATE verification_permission_waits w SET resolved_at=UTC_TIMESTAMP(6) WHERE challenge_id=? AND user_id=? " +
-                "AND signal_type=? AND first_observed_at<(SELECT MAX(joined_at) FROM challenge_join_events e WHERE e.challenge_id=w.challenge_id AND e.user_id=w.user_id)",
+                "AND signal_type=? AND first_observed_at<DATE_SUB((SELECT MAX(joined_at) FROM challenge_join_events e WHERE e.challenge_id=w.challenge_id AND e.user_id=w.user_id), INTERVAL " + ClockSkew.TOLERANCE_SECONDS + " SECOND)",
                 bytes(event.challengeId()),bytes(event.userId()),event.signalType());
         // A partial current cycle is not a full waiting cycle.
         LocalDate from = ChallengeCycle.countFrom(challenge.getStartDate(), event.detectedAt().atZone(KST).toLocalDate());

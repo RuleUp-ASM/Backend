@@ -101,13 +101,6 @@ app:
     access-token-ttl: 1800        # 30분 (초)
     refresh-token-ttl: 604800    # 7일 (60*60*24*7)
     signup-token-ttl: 300         # 5분
-  challenge:
-    # 동시 참여 한도(가입·생성 공통). 운영 안전 규칙이므로 기본값은 항상 활성화한다.
-    # 특수 환경에서만 명시적으로 CHALLENGE_LIMIT_ENABLED=false 로 끈다.
-    concurrent-limit:
-      enabled: ${CHALLENGE_LIMIT_ENABLED:true}
-      max: ${CHALLENGE_LIMIT_MAX:3}
-
   # 인증 운영 상수. 반경은 유저가 정하는 값이 아니라 서버 단일값이라 요청에 없고 응답의 serverRadiusM으로만 내려간다.
   verification:
     geofence-radius-m: ${VERIFICATION_GEOFENCE_RADIUS_M:500}     # 잠정 500m — 성능 테스트 후 조정
@@ -256,6 +249,19 @@ app:
       endpoint: ${NOTIFICATION_QUEUE_ENDPOINT:}
       access-key: ${NOTIFICATION_QUEUE_ACCESS_KEY:}
       secret-key: ${NOTIFICATION_QUEUE_SECRET_KEY:}
+
+  # 스토어 심사 계정 — <b>자동 제재에서만</b> 뺀다(쉼표로 구분한 사용자 UUID).
+  #
+  # 심사자는 소셜 로그인만 쓸 수 있어 계정을 직접 만들 수 없다. 온보딩까지 끝낸 전용 계정을
+  # 넘겨야 하는데, 정책을 그대로 적용하면 연속 실패로 강퇴되고 30일이면 휴면으로 챌린지가
+  # 정리된다 — 다음 심사 때 보여 줄 것이 없어진다.
+  #
+  # 표도 열도 만들지 않는다. 어느 계정이 심사용인가는 사용자의 속성이 아니라 환경 설정이고,
+  # 심사 반려로 급히 바꿔야 할 때 코드 배포 없이 값만 바꿔 태스크를 새로 띄우면 된다.
+  # 비어 있으면 아무도 면제되지 않으므로 평소 동작은 그대로다.
+  #
+  # 심사가 끝나면 <b>값을 지워야 한다.</b> 만료가 없다.
+  review-accounts: ${REVIEW_ACCOUNT_IDS:}
 
   # 감시자(§11.4). 연락처 암호화 키는 prod 필수(Secrets Manager), 로컬은 미설정 시 임시 키로 동작.
   watcher:

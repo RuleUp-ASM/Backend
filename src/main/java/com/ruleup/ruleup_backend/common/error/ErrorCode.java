@@ -98,8 +98,6 @@ public enum ErrorCode {
     INVALID_REWARD(HttpStatus.BAD_REQUEST, "보상 설정이 올바르지 않습니다."),
     START_DATE_REQUIRED(HttpStatus.BAD_REQUEST, "시작일을 입력해주세요."),
     INVALID_MIN_MANNER_TEMPERATURE(HttpStatus.BAD_REQUEST, "참여 기준 매너 온도는 생성자 본인의 매너 온도보다 높을 수 없습니다."),
-    /** 동시 참여 한도 초과 — 생성 경로. 가입 경로는 JOIN_BLOCKED + reason=FREE_LIMIT 로 내려간다. */
-    CHALLENGE_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "함께 진행할 수 있는 챌린지 수를 넘었어요. 진행 중인 챌린지를 마치고 새로 만들어 주세요."),
     MAX_PARTICIPANTS_REQUIRED(HttpStatus.BAD_REQUEST, "그룹 챌린지는 최대 참여 인원을 지정해야 합니다."),
     MAX_PARTICIPANTS_BELOW_CURRENT(HttpStatus.BAD_REQUEST, "최대 참여 인원을 현재 참여 인원 미만으로 줄일 수 없습니다."),
 
@@ -116,7 +114,7 @@ public enum ErrorCode {
     // ===== 챌린지 - 참여/탈퇴/멤버 (§5·§6·§7) =====
     /**
      * 가입 거절 단일 코드. 어떤 게이트에 걸렸는지는 reason 으로 내려간다
-     * (PRIVATE_INVITE_ONLY / REJOIN_COOLDOWN / BANNED / FREE_LIMIT / FULL / TIER_GATE /
+     * (PRIVATE_INVITE_ONLY / REJOIN_COOLDOWN / BANNED / FULL / TIER_GATE /
      * ALREADY_JOINED / CHALLENGE_COMPLETED — {@code JoinBlockReason}).
      * REJOIN_COOLDOWN 이면 rejoinAvailableAt 이 함께 실린다.
      */

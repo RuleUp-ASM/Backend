@@ -47,7 +47,6 @@ public class ChallengeInvitationController {
                     - `FULL` — 정원 마감
                     - `TIER_GATE` — 표시 티어가 방의 최소 티어에 못 미침
                     - `REJOIN_COOLDOWN` — 이 방에서 나갔거나 강퇴돼 재입장 대기 중
-                    - `FREE_LIMIT` — 내가 동시에 참여할 수 있는 방 개수를 이미 채움
                     - `ALREADY_JOINED` — 이미 이 방의 멤버(수락할 필요가 없다)
                     - `CHALLENGE_COMPLETED` — 이미 종료된 방
 
@@ -73,7 +72,7 @@ public class ChallengeInvitationController {
             description = """
                     **초대 수락은 가입 그 자체다.** 초대장이 대신해주는 것은 "비공개 방이라 직접 가입할 수 없다"는
                     검증 하나뿐이고, 나머지 게이트는 일반 가입과 똑같이 걸린다 —
-                    영구 차단(`BANNED`) → 재입장 대기 → 동시 참여 개수 → 정원 → 최소 티어 순으로 판정한다.
+                    영구 차단(`BANNED`) → 재입장 대기 → 정원 → 최소 티어 순으로 판정한다.
                     초대장이 있어도 부정행위로 강퇴된 방에는 들어올 수 없다.
                     성공 응답도 `POST /api/v1/challenges/{challengeId}/members` 와 같은 스키마다.
 

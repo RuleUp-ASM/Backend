@@ -46,7 +46,6 @@ public class ChallengeMemberController {
                     4. `BANNED` — 부정행위 검출로 강퇴돼 이 방에 영구히 들어올 수 없다. 대기 시각이 없고
                        사유는 설명하지 않는다(`error.rejoinAvailableAt` 없음)
                     5. `REJOIN_COOLDOWN` — 나갔거나 강퇴돼 대기 중. `error.rejoinAvailableAt` 에 가능 시각이 실린다
-                    6. `FREE_LIMIT` — 동시에 참여할 수 있는 방 개수 초과
                     7. `FULL` — 정원 마감
                     8. `TIER_GATE` — 표시 티어가 방의 최소 티어 미만
 

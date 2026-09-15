@@ -21,8 +21,6 @@ public enum JoinBlockReason {
     PERMANENT_BAN,
     /** 자진 탈퇴 1주 / 강퇴 1주→2주→4주 배수 대기 중(연속 실패·권한 미허용 강퇴 — 정책 §10.2). */
     REJOIN_COOLDOWN,
-    /** 동시 참여 무료 3개 초과 (⚠️ BM 확정 대기). */
-    FREE_LIMIT,
     /** 정원 마감. */
     FULL,
     /** 표시 티어가 minTier 미만. */
