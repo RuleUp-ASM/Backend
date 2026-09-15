@@ -54,8 +54,15 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+      # 명령 타임아웃은 짧게 — 탐색 조회가 Redis 를 기다리며 늘어지면 그건 장애를 지연으로
+      # 바꾸는 것뿐이다. 느리면 빨리 포기하고 회로를 열어 503 으로 드러낸다.
       timeout: ${REDIS_TIMEOUT:500ms}
-      connect-timeout: ${REDIS_CONNECT_TIMEOUT:500ms}
+      # <b>연결</b> 타임아웃은 그럴 수 없다. 기동 직후 워밍업은 JVM 이 아직 차가운 상태에서
+      # DNS 조회·TCP·Lettuce 핸드셰이크를 한꺼번에 하는데, 500ms 로는 그 한 번을 못 넘긴다 —
+      # 실제로 배포할 때마다 워밍업이 여기서 실패해 회로가 열렸고, 5분 스윕이 다시 시도할
+      # 때까지 탐색이 503 이었다. 연결은 커넥션마다 한 번뿐이라 넉넉히 줘도 요청 지연에
+      # 더해지지 않는다 — 명령이 느려지는 것은 위의 timeout 이 따로 막는다.
+      connect-timeout: ${REDIS_CONNECT_TIMEOUT:3000ms}
 
   servlet:
     multipart:
