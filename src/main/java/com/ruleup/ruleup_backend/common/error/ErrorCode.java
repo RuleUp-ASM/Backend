@@ -68,7 +68,7 @@ public enum ErrorCode {
     AGREEMENT_VERSION_MISMATCH(HttpStatus.BAD_REQUEST, "약관이 새 버전으로 바뀌었어요. 다시 불러온 뒤 동의해주세요."),
     BIRTHDATE_INVALID(HttpStatus.BAD_REQUEST, "생년월일 형식이 올바르지 않습니다. (YYYY-MM-DD)"),
     BIRTHDATE_UNDERAGE(HttpStatus.BAD_REQUEST, "만 14세 미만은 가입할 수 없습니다."),
-    GENDER_REQUIRED(HttpStatus.BAD_REQUEST, "성별 값이 누락되었거나 올바르지 않습니다. (MALE/FEMALE/NON_BINARY)"),
+    GENDER_REQUIRED(HttpStatus.BAD_REQUEST, "성별을 선택해 주세요."),
     CONFIRM_PHRASE_MISMATCH(HttpStatus.BAD_REQUEST, "탈퇴 확인 문구가 일치하지 않습니다."),
 
     // ===== 앱 토큰 (4.4 refresh / 보호 API) =====

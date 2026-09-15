@@ -257,10 +257,10 @@ public class AuthService {
 
         // 생일: 필수·형식·미래 불가 → 만 14세 미만 차단(서버 재검증 — 가드레일 0건)
         LocalDate birthDate = parseBirthDate(req.birthDate());
-        // 성별: 필수 필드 — MALE/FEMALE/NON_BINARY (UI 건너뛰기 시 클라가 NON_BINARY 전송)
+        // 성별: 필수 — MALE/FEMALE 만 받는다.
         Gender gender = parseGender(req.gender());
 
-        // 약관 6종: 필수 3(이용약관·개인정보·위치기반) 모두 동의해야 가입 가능
+        // 약관 5종: 필수 3(이용약관·개인정보·위치기반) 모두 동의해야 가입 가능
         SignupRequest.Agreements ag = req.agreements();
         if (ag == null || !ag.requiredAllAgreed())
             throw new BusinessException(ErrorCode.REQUIRED_AGREEMENT_MISSING);
@@ -428,9 +428,11 @@ public class AuthService {
     }
 
     /**
-     * 성별 파싱 — 저장 필수 필드. 허용값 4종(MALE/FEMALE/NON_BINARY/PREFER_NOT_TO_SAY)을 모두 받는다.
-     * "미응답" 표현은 API 계약(NON_BINARY)과 DB 정리 문서(PREFER_NOT_TO_SAY)가 아직 상충 중이라
-     * 합의 전까지 둘 다 수용한다. 누락/허용 외 값은 GENDER_REQUIRED.
+     * 성별 파싱 — 저장 필수 필드. <b>MALE/FEMALE 만 받는다.</b>
+     *
+     * <p>{@code Gender} enum 에는 NON_BINARY·PREFER_NOT_TO_SAY 도 있지만 가입으로는 들어올 수 없다.
+     * 「미응답」을 어떻게 적을지 합의되기 전에 양쪽 표기가 들어온 흔적이고, 지금 정책은 성별을
+     * 건너뛸 수 없게 하므로 미응답 자체가 생기지 않는다. 누락·허용 외 값은 GENDER_REQUIRED 다.
      */
     private Gender parseGender(String raw) {
         if (raw == null || raw.isBlank())

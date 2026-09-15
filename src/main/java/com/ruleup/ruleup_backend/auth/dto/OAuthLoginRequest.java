@@ -9,7 +9,8 @@ import java.util.Map;
  * - installationId: 앱 설치 단위 UUID — 동일 설치 다계정 가입 차단 판정 키 (adId 대체)
  * - deviceId: 단일 활성 기기 판정 키
  * - deviceInfo: 매 로그인 갱신 저장 (기기 스펙 기반 flushIntervalSec 산정)
- * - permissions: 초기 권한 스냅샷(참고용) — OS 설정에서 언제든 바뀌므로 서버에 저장하지 않는다
+ * - permissions: 초기 권한 스냅샷(참고용) — OS 설정에서 언제든 바뀌므로 서버에 저장하지 않는다.
+ *   키 4종(postNotifications/location/camera/screenTime) · 값 3종(GRANTED/DENIED/NOT_DETERMINED)
  */
 @Schema(name = "OAuthLoginRequest", description = "소셜 로그인 요청")
 public record OAuthLoginRequest(
@@ -46,7 +47,11 @@ public record OAuthLoginRequest(
         DeviceInfoRequest deviceInfo,
 
         @Schema(description = """
-                초기 권한 스냅샷(선택, 참고용). OS 설정에서 언제든 바뀌므로 서버에 저장하지 않는다.
-                예: { "location": "GRANTED", "notification": "DENIED" }""",
-                example = "{\"location\":\"GRANTED\",\"notification\":\"DENIED\"}")
+                초기 권한 스냅샷(선택, 참고용). OS 설정에서 언제든 바뀌므로 **서버에 저장하지 않는다** —
+                권한의 정본은 항상 기기이고, 이 값은 로그인 시점의 사진일 뿐이다.
+
+                키는 `postNotifications` · `location` · `camera` · `screenTime` 4종이고
+                값은 `GRANTED` · `DENIED` · `NOT_DETERMINED` 3종이다. 키 이름은 안드로이드 권한 상수를
+                따른다 — 알림 권한은 `notification` 이 아니라 **`postNotifications`** 다.""",
+                example = "{\"postNotifications\":\"GRANTED\",\"location\":\"DENIED\",\"camera\":\"NOT_DETERMINED\",\"screenTime\":\"NOT_DETERMINED\"}")
         Map<String, String> permissions) {}

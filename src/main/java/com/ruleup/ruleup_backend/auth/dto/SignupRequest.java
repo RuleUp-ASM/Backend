@@ -10,7 +10,7 @@ import java.util.List;
  * (가입 후 accessToken 으로 별도 등록).
  *
  * - birthDate: 필수, YYYY-MM-DD, 만 14세 미만 400 (서버 재검증)
- * - gender: 필수 필드 — MALE/FEMALE/NON_BINARY (UI 건너뛰기 시 클라가 NON_BINARY 전송)
+ * - gender: 필수 — MALE/FEMALE 만 받는다. 건너뛰기가 없는 화면이라 미응답 표현도 없다
  * - agreements: 약관 5종 각 { agreed, version } (법정 개별 동의 2종은 인증 수단 최초 사용 시점에 별도로 받는다)
  * - installationId: 동일 설치 다계정 가입 차단 판정 키 (회원 정책 §1)
  * - deviceId/deviceInfo: 단일 활성 기기 판정 + 기기 스펙 기반 추천
@@ -45,8 +45,10 @@ public record SignupRequest(
                 example = "1998-03-21", requiredMode = Schema.RequiredMode.REQUIRED)
         String birthDate,
 
-        @Schema(description = "성별. 필수 필드이며 UI 에서 건너뛰더라도 클라이언트가 NON_BINARY 를 보낸다.",
-                example = "MALE", allowableValues = {"MALE", "FEMALE", "NON_BINARY", "PREFER_NOT_TO_SAY"},
+        @Schema(description = """
+                성별. **MALE / FEMALE 만 받는다** — 그 밖의 값은 400 `GENDER_REQUIRED` 다.
+                건너뛰기가 없는 화면이라 「미응답」에 해당하는 값도 두지 않는다.""",
+                example = "MALE", allowableValues = {"MALE", "FEMALE"},
                 requiredMode = Schema.RequiredMode.REQUIRED)
         String gender,
 

@@ -57,7 +57,7 @@ public class OpenApiConfig {
             accessToken 이 만료되면 `POST /api/v1/auth/refresh` 로 회전시킨다(refreshToken 도 함께 새로 발급된다).
 
             ### 로그인 ~ 온보딩 호출 순서
-            1. `GET /api/v1/intro` — 강제 업데이트 판정 + 현행 약관 버전 6종 수령 (로그인 전, 토큰 불필요)
+            1. `GET /api/v1/intro` — 강제 업데이트 판정 + 현행 동의 버전 7종 수령 (로그인 전, 토큰 불필요)
             2. `POST /api/v1/auth/oauth/{provider}` — 인가코드 검증
                · 기존 회원(`isNewUser=false`) → accessToken/refreshToken 수령, 여기서 끝
                · 신규(`isNewUser=true`) → `signupToken` + 프리필 힌트 수령, 3번으로
