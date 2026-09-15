@@ -30,6 +30,7 @@ import static com.ruleup.ruleup_backend.room.service.ChallengeRejoinPolicy.bytes
 /** Owns enforcement and preserved evidence; verification and scoring own the decisions. */
 @Service
 @RequiredArgsConstructor
+@lombok.extern.slf4j.Slf4j
 public class AutomaticKickService {
     public enum Reason { CHEAT_DETECTED, CONSECUTIVE_FAILURE, PERMISSION_MISSING }
     private static final JsonMapper JSON = JsonMapper.builder().build();
@@ -41,10 +42,20 @@ public class AutomaticKickService {
     private final ApplicationEventPublisher events;
     private final OutboxService outbox;
     private final OutboxDispatcher dispatcher;
+    private final com.ruleup.ruleup_backend.sanction.ReviewAccounts reviewAccounts;
 
     @Transactional
     public boolean enforce(UUID challengeId, UUID userId, Reason reason, UUID sourceEventId,
                            Instant effectiveAt, Map<String, Object> evidence) {
+        // 심사 계정은 <b>자동</b> 강퇴에서 뺀다. 심사자가 한 번 보고 나가면 아무도 인증하지 않아
+        // 연속 실패가 쌓이고, 3주 뒤 샘플 챌린지에서 전부 빠진다 — 다음 심사 때 보여 줄 것이 없다.
+        // 이 메서드로 오는 사유는 셋 다 정책이 스스로 내리는 판정이라(연속 실패·부정행위·권한 없음)
+        // 여기 한 곳이면 자동 경로 전체가 덮인다. 운영자가 직접 하는 조치는 이 길로 오지 않는다.
+        if (reviewAccounts.isExempt(userId)) {
+            log.info("review account exempt: userId={}, rule={}", userId, reason);
+            return false;
+        }
+
         var challenge = challenges.findByIdForUpdate(challengeId).orElse(null);
         boolean permanent = reason == Reason.CHEAT_DETECTED;
         if (challenge == null && (!permanent || jdbc.queryForObject(

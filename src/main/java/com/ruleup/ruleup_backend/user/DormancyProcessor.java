@@ -22,15 +22,26 @@ import java.util.UUID;
 /** One user per transaction. Notices must exist and their lead time must pass before any action. */
 @Service
 @RequiredArgsConstructor
+@lombok.extern.slf4j.Slf4j
 public class DormancyProcessor {
     private final JdbcTemplate jdbc;
     private final UserRepository users;
     private final NotificationPublisher notifications;
     private final ChallengeMemberService members;
     private final UserAccountService accounts;
+    private final com.ruleup.ruleup_backend.sanction.ReviewAccounts reviewAccounts;
 
     @Transactional
     public boolean advance(UUID id) {
+        // 심사 계정은 휴면 처리에서 뺀다. 심사자는 업데이트가 올라올 때만 들어오므로 30일을 쉽게
+        // 넘기는데, 그러면 챌린지가 전부 정리되고(D30) 1년이면 계정 자체가 사라진다 — 다음 심사
+        // 때 열어 보면 아무것도 없다. 통지 단계까지 포함해 <b>아예 진행시키지 않는다</b>:
+        // 심사자에게 「휴면 예정」 알림을 보내는 것도 앱을 잘못 설명하는 일이다.
+        if (reviewAccounts.isExempt(id)) {
+            log.info("review account exempt: userId={}, rule={}", id, "DORMANCY");
+            return false;
+        }
+
         var user = users.findByIdForUpdate(id).orElse(null);
         if (user == null || user.isWithdrawn()) return false;
         byte[] key = bytes(id);
