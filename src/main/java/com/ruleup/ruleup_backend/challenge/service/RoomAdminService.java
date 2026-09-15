@@ -13,7 +13,6 @@ import com.ruleup.ruleup_backend.challenge.dto.RoomAdminDtos;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeInvitationRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
-import com.ruleup.ruleup_backend.challenge.repository.UserChallengeCounterRepository;
 import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
@@ -38,7 +37,6 @@ public class RoomAdminService {
     private final ChallengeRepository challengeRepository;
     private final ChallengeMemberRepository memberRepository;
     private final ChallengeInvitationRepository invitationRepository;
-    private final UserChallengeCounterRepository counterRepository;
     private final NotificationPublisher notificationPublisher;
     private final NotificationMuteCleaner muteCleaner;
     private final ApplicationEventPublisher eventPublisher;

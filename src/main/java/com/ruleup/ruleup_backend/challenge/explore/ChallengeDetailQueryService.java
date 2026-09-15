@@ -1,6 +1,5 @@
 package com.ruleup.ruleup_backend.challenge.explore;
 
-import com.ruleup.ruleup_backend.challenge.counter.ConcurrentChallengeLimitPolicy;
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeCycle;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
@@ -11,7 +10,6 @@ import com.ruleup.ruleup_backend.challenge.domain.ParticipationType;
 import com.ruleup.ruleup_backend.challenge.dto.ChallengeDetailResponse;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
-import com.ruleup.ruleup_backend.challenge.repository.UserChallengeCounterRepository;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.routine.domain.RoutineTemplate;

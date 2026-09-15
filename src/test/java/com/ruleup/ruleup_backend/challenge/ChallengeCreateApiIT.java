@@ -459,11 +459,4 @@ class ChallengeCreateApiIT extends ChallengeApiSupport {
         }
     }
 
-    // =====================================================================
-    @Nested
-    @DisplayName("동시 참여 한도 — 생성 경로")
-    class ConcurrentLimit {
-
-
-    }
 }

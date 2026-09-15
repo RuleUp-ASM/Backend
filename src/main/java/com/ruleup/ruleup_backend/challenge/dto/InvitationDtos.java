@@ -24,7 +24,7 @@ public final class InvitationDtos {
             @Schema(description = "수락이 막힌 이유. 수락 API 의 error.reason 과 같은 enum 이다. 가능하면 null.",
                     example = "TIER_GATE",
                     allowableValues = {"ALREADY_JOINED", "CHALLENGE_COMPLETED", "PERMANENT_BAN", "REJOIN_COOLDOWN",
-                            "FREE_LIMIT", "FULL", "TIER_GATE"})
+                            "FULL", "TIER_GATE"})
             String blockReason,
 
             @Schema(description = "링크 만료 시각(발급 후 7일)", example = "2026-08-21T10:00:00Z")

@@ -101,13 +101,6 @@ app:
     access-token-ttl: 1800        # 30분 (초)
     refresh-token-ttl: 604800    # 7일 (60*60*24*7)
     signup-token-ttl: 300         # 5분
-  challenge:
-    # 동시 참여 한도(가입·생성 공통). 운영 안전 규칙이므로 기본값은 항상 활성화한다.
-    # 특수 환경에서만 명시적으로 CHALLENGE_LIMIT_ENABLED=false 로 끈다.
-    concurrent-limit:
-      enabled: ${CHALLENGE_LIMIT_ENABLED:true}
-      max: ${CHALLENGE_LIMIT_MAX:3}
-
   # 인증 운영 상수. 반경은 유저가 정하는 값이 아니라 서버 단일값이라 요청에 없고 응답의 serverRadiusM으로만 내려간다.
   verification:
     geofence-radius-m: ${VERIFICATION_GEOFENCE_RADIUS_M:500}     # 잠정 500m — 성능 테스트 후 조정
