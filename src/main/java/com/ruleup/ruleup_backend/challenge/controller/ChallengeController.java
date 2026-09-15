@@ -6,7 +6,6 @@ import com.ruleup.ruleup_backend.challenge.settings.ChallengeSettingsService;
 import com.ruleup.ruleup_backend.challenge.draft.ChallengeDraftService;
 import com.ruleup.ruleup_backend.challenge.explore.ChallengeCloneService;
 import com.ruleup.ruleup_backend.challenge.explore.ChallengeDetailQueryService;
-import com.ruleup.ruleup_backend.challenge.service.ChallengeService;
 import com.ruleup.ruleup_backend.challenge.service.MyChallengeQueryService;
 import com.ruleup.ruleup_backend.common.docs.ApiErrorCodes;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
@@ -27,7 +26,7 @@ import com.ruleup.ruleup_backend.challenge.recommendation.RecommendationRateLimi
 
 import java.util.UUID;
 
-@Tag(name = "Challenge", description = "챌린지 추천 · 생성 · 조회 · 수정 · 삭제")
+@Tag(name = "Challenge", description = "챌린지 추천 · 생성 · 조회 · 수정")
 @SecurityRequirement(name = "bearerAuth")
 @RestController
 @RequestMapping("/api/v1/challenges")
@@ -37,7 +36,6 @@ public class ChallengeController {
     private final ChallengeDraftService challengeDraftService;
     private final ChallengeCreationService challengeCreationService;
     private final ChallengeSettingsService challengeSettingsService;
-    private final ChallengeService challengeService;
     private final MyChallengeQueryService myChallengeQueryService;
     private final ChallengeDetailQueryService detailQueryService;
     private final ChallengeCloneService cloneService;
