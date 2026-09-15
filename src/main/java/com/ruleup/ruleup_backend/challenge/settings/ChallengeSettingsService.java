@@ -222,7 +222,13 @@ public class ChallengeSettingsService {
         moderation.put("image", "IN_REVIEW");
     }
 
-    /** 정원은 1~300 또는 null(무제한). 현재 ACTIVE 인원 미만으로 줄일 수 없다. */
+    /**
+     * 정원은 {@link com.ruleup.ruleup_backend.challenge.domain.ChallengeCapacity#CHOICES} 중 하나
+     * 또는 null(무제한)이다. 현재 ACTIVE 인원 미만으로 줄일 수 없다.
+     *
+     * <p>생성과 <b>같은 집합</b>을 쓴다. 수정만 사이 값을 받으면 생성으로 못 만드는 크기의 방을
+     * 수정으로 만들 수 있다.
+     */
     private void applyCapacity(Challenge c, JsonNode body, Map<String, Object> updated) {
         if (!body.has("capacity")) return;
         JsonNode node = body.get("capacity");
@@ -233,9 +239,8 @@ public class ChallengeSettingsService {
             return;
         }
         if (!node.isIntegralNumber() || !node.canConvertToInt()) throw new BusinessException(ErrorCode.INVALID_FIELD_VALUE);
-        int capacity = node.intValue();
-        if (capacity < 1 || capacity > 300)
-            throw new BusinessException(ErrorCode.CAPACITY_OUT_OF_RANGE);
+        int capacity = com.ruleup.ruleup_backend.challenge.domain.ChallengeCapacity
+                .validateGroup(node.intValue());
         // 비교 대상은 <b>원천</b>이다. 표시용 participant_count 는 커밋 뒤 비동기로 채워지므로
         // 그 값으로 판정하면 「방금 들어온 인원 아래로 정원을 줄이는」 요청이 통과할 수 있다.
         long active = memberRepository.countByChallengeIdAndStatus(

@@ -330,7 +330,7 @@ class ChallengeCreateApiIT extends ChallengeApiSupport {
             body.put("description", (String) read(draftRes, "$.data.draft.description"));
             body.put("category", "EXERCISE");
             body.put("mode", "SOLO");
-            body.put("capacity", 50);
+            body.put("capacity", 30);
             body.put("minTier", "BRONZE");
             body.put("period", Map.of(
                     "start", (String) read(draftRes, "$.data.draft.period.start"),
@@ -342,7 +342,7 @@ class ChallengeCreateApiIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("GROUP 생성: visibility 기본 PUBLIC + groupShare=ON, capacity 미지정은 무제한 / 9종 밖 400")
+        @DisplayName("GROUP 생성: visibility 기본 PUBLIC + groupShare=ON, capacity 미지정은 무제한 / 선택지 밖 400")
         void groupRules() throws Exception {
             String token = memberToken(uniq("cr-grp"));
 
@@ -350,6 +350,9 @@ class ChallengeCreateApiIT extends ChallengeApiSupport {
             ok.put("mode", "GROUP");
             ok.put("visibility", "PUBLIC");
             ok.put("rankingVisible", null);
+            // 템플릿 초안은 SOLO 라 정원이 1로 실려 온다. 확인 화면에서 GROUP 으로 바꾸면
+            // 1 은 선택지가 아니므로 고른 값을 함께 보내야 한다 — 서버가 임의로 메워 주지 않는다.
+            ok.put("capacity", 30);
             MvcResult res = create(token, UUID.randomUUID().toString(), ok);
             assertThat(res.getResponse().getStatus()).isEqualTo(201);
             String penalties = jdbcTemplate.queryForObject(
@@ -357,17 +360,32 @@ class ChallengeCreateApiIT extends ChallengeApiSupport {
                     String.class, (String) read(res, "$.data.challengeId"));
             assertThat(penalties.replace(" ", "")).contains("\"groupShare\":true");
 
-            // 비우면 무제한이다(탐색 공통 5-3). 300 초과를 표현할 길이 이것뿐이라 막으면 안 된다.
+            // 비우면 무제한이다. 300 초과를 표현할 길이 이것뿐이라 막으면 안 된다.
             Map<String, Object> noCapacity = createBodyFrom(templateDraft(token));
             noCapacity.put("mode", "GROUP");
             noCapacity.put("capacity", null);
             assertThat(create(token, UUID.randomUUID().toString(), noCapacity)
                     .getResponse().getStatus()).isEqualTo(201);
 
-            Map<String, Object> outOfRange = createBodyFrom(templateDraft(token));
-            outOfRange.put("mode", "GROUP");
-            outOfRange.put("capacity", 10001);
-            expectError(create(token, UUID.randomUUID().toString(), outOfRange), 400, "CAPACITY_OUT_OF_RANGE");
+            // 고를 수 있는 값은 네 개뿐이다. 넷 다 통과하는지 본다 — 하나라도 빠지면
+            // 화면이 주는 선택지 중 못 만드는 방이 생긴다.
+            for (int choice : new int[]{5, 30, 100, 300}) {
+                Map<String, Object> pick = createBodyFrom(templateDraft(token));
+                pick.put("mode", "GROUP");
+                pick.put("capacity", choice);
+                assertThat(create(token, UUID.randomUUID().toString(), pick)
+                        .getResponse().getStatus()).as("정원 %d", choice).isEqualTo(201);
+            }
+
+            // 선택지 밖은 범위 안이라도 거절한다. 사이값(47)이 통과하면 클라이언트를 거치지 않은
+            // 요청만 다른 크기의 방을 만들 수 있게 되어 선택지가 계약이 아니게 된다.
+            for (int rejected : new int[]{47, 50, 301, 0}) {
+                Map<String, Object> outOfSet = createBodyFrom(templateDraft(token));
+                outOfSet.put("mode", "GROUP");
+                outOfSet.put("capacity", rejected);
+                expectError(create(token, UUID.randomUUID().toString(), outOfSet),
+                        400, "CAPACITY_OUT_OF_RANGE");
+            }
         }
 
         @Test

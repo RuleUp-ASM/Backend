@@ -150,7 +150,7 @@ public enum ErrorCode {
     IDEMPOTENCY_KEY_REQUIRED(HttpStatus.BAD_REQUEST, "요청을 처리할 수 없어요. 앱을 최신 버전으로 업데이트한 뒤 다시 시도해주세요."),
     IDEMPOTENCY_CONFLICT(HttpStatus.CONFLICT, "이미 처리 중인 요청이 있어요. 잠시 후 다시 확인해주세요."),
     CAPACITY_REQUIRED(HttpStatus.BAD_REQUEST, "그룹 챌린지는 모집 인원을 정해야 해요."),
-    CAPACITY_OUT_OF_RANGE(HttpStatus.BAD_REQUEST, "모집 인원은 1명부터 10,000명까지 정할 수 있어요."),
+    CAPACITY_OUT_OF_RANGE(HttpStatus.BAD_REQUEST, "모집 인원은 5명·30명·100명·300명 중에서 고르거나, 제한 없이 둘 수 있어요."),
     MIN_TIER_EXCEEDS_OWNER(HttpStatus.BAD_REQUEST, "최소 입장 티어는 내 티어보다 높게 정할 수 없어요."),
     INVALID_PERIOD(HttpStatus.BAD_REQUEST, "챌린지 기간을 다시 확인해주세요."),
     INVALID_IMAGE_URL(HttpStatus.BAD_REQUEST, "사용할 수 없는 이미지예요. 이미지를 다시 업로드해주세요."),

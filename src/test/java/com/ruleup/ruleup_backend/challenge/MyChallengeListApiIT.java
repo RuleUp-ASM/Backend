@@ -98,7 +98,7 @@ class MyChallengeListApiIT extends ChallengeApiSupport {
             MvcResult res = list(me, null);
             assertThat((String) read(res, "$.data.challenges[0].challengeId")).isEqualTo(challengeId.toString());
             assertThat((String) read(res, "$.data.challenges[0].mode")).isEqualTo("GROUP");
-            assertThat((Integer) read(res, "$.data.challenges[0].capacity")).isEqualTo(50);
+            assertThat((Integer) read(res, "$.data.challenges[0].capacity")).isEqualTo(30);
             assertThat((Integer) read(res, "$.data.challenges[0].weeklyCount")).isEqualTo(7);
             assertThat((String) read(res, "$.data.challenges[0].ownerType")).isEqualTo("USER");
             assertThat((String) read(res, "$.data.challenges[0].myRole")).isEqualTo("OWNER");

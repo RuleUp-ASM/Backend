@@ -131,7 +131,7 @@ class RoomPhase1ContractIT extends ChallengeApiSupport {
         JsonNode data = data(getAuth("/api/v1/challenges/" + challengeId + "/members", viewer.token()));
         assertThat(data.path("challengeId").asText()).isEqualTo(challengeId.toString());
         assertThat(data.path("participantCount").asInt()).isEqualTo(2);
-        assertThat(data.path("capacity").asInt()).isEqualTo(50);
+        assertThat(data.path("capacity").asInt()).isEqualTo(30);
         JsonNode blockedRow = null;
         for (JsonNode member : data.path("members"))
             if (blocked.id().toString().equals(member.path("userId").asText())) blockedRow = member;

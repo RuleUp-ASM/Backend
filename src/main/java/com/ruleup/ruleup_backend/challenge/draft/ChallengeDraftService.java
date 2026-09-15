@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.challenge.draft;
 
+import com.ruleup.ruleup_backend.challenge.domain.ChallengeCapacity;
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus;
@@ -64,7 +65,8 @@ public class ChallengeDraftService {
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final int DESCRIPTION_MAX = 200;
     private static final int TITLE_MAX = 30;
-    private static final int DEFAULT_CAPACITY = 50;
+    /** 기본 정원은 고를 수 있는 값이어야 한다 — {@link ChallengeCapacity} 가 정본이다. */
+    private static final int DEFAULT_CAPACITY = ChallengeCapacity.DEFAULT;
     private static final int DEFAULT_WEEKLY_COUNT = 7;
     private static final int START_OFFSET_DAYS = 1;      // 시작일 = 생성일 + 1일
     private static final int PERIOD_DAYS = 14;           // 종료일 = 시작일 + 2주

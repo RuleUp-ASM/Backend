@@ -42,7 +42,9 @@ import java.util.UUID;
 public class ChallengeCloneService {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
-    private static final int DEFAULT_CAPACITY = 50;
+    /** 초안 생성과 같은 기본값을 쓴다 — 여기만 다르면 복제 초안을 그대로 확정할 때 400 이 된다. */
+    private static final int DEFAULT_CAPACITY =
+            com.ruleup.ruleup_backend.challenge.domain.ChallengeCapacity.DEFAULT;
     private static final int START_OFFSET_DAYS = 1;
 
     private final ChallengeRepository challengeRepository;
