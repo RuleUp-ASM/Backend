@@ -5,7 +5,7 @@ import com.ruleup.ruleup_backend.challenge.lifecycle.ChallengeArchiveService;
 import com.ruleup.ruleup_backend.challenge.moderation.*;
 import com.ruleup.ruleup_backend.moderation.ContentModerationClient;
 import com.ruleup.ruleup_backend.moderation.ModerationResult;
-import com.ruleup.ruleup_backend.notification.NotificationPublisher;
+import com.ruleup.ruleup_backend.notification.service.NotificationPublisher;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

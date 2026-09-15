@@ -1,5 +1,7 @@
 package com.ruleup.ruleup_backend.notification;
 
+import com.ruleup.ruleup_backend.notification.repository.NotificationMuteRepository;
+import com.ruleup.ruleup_backend.notification.service.NotificationMuteCleaner;
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
 import com.ruleup.ruleup_backend.notification.domain.NotificationMute;
 import com.ruleup.ruleup_backend.user.UserRepository;

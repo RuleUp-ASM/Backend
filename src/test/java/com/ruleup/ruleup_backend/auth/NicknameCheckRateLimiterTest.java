@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.auth;
 
+import com.ruleup.ruleup_backend.auth.service.NicknameCheckRateLimiter;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import org.junit.jupiter.api.DisplayName;

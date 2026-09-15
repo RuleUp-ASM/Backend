@@ -1,5 +1,7 @@
 package com.ruleup.ruleup_backend.push.config;
 
+import com.ruleup.ruleup_backend.push.service.PushSender;
+
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.firebase.FirebaseApp;
 import com.google.firebase.FirebaseOptions;
@@ -21,7 +23,7 @@ import java.nio.charset.StandardCharsets;
  * Firebase Admin 초기화 — 고스트(무음) 푸시 전송용 {@link FirebaseMessaging} 빈을 노출한다.
  *
  * <p>{@code app.fcm.enabled=true} 일 때만 활성화된다. 비활성(로컬/CI 기본값)이면 이 빈들이 뜨지 않고
- * {@link com.ruleup.ruleup_backend.push.LoggingPushSender} 스텁이 유일한 {@code PushSender} 로 남아
+ * {@link com.ruleup.ruleup_backend.push.service.LoggingPushSender} 스텁이 유일한 {@code PushSender} 로 남아
  * 기동/테스트에 영향이 없다.
  *
  * <p>자격증명(서비스 계정 JSON) 로딩 우선순위: {@code credentials-json}(원문, Secrets Manager 주입)

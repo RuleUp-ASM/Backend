@@ -10,7 +10,7 @@ import io.micrometer.core.instrument.Timer;
 import com.ruleup.ruleup_backend.challenge.dto.ExploreResponse;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
-import com.ruleup.ruleup_backend.score.UserScoreSummaryRepository;
+import com.ruleup.ruleup_backend.score.repository.UserScoreSummaryRepository;
 import com.ruleup.ruleup_backend.score.domain.Tier;
 import com.ruleup.ruleup_backend.user.domain.InterestCategory;
 import lombok.RequiredArgsConstructor;

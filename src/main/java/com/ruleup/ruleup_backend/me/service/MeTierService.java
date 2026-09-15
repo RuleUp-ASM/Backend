@@ -2,8 +2,8 @@ package com.ruleup.ruleup_backend.me.service;
 
 import com.ruleup.ruleup_backend.challenge.service.ChallengeTitleResolver;
 import com.ruleup.ruleup_backend.me.dto.MeTierResponse;
-import com.ruleup.ruleup_backend.score.ScoreTransactionRepository;
-import com.ruleup.ruleup_backend.score.UserScoreSummaryRepository;
+import com.ruleup.ruleup_backend.score.repository.ScoreTransactionRepository;
+import com.ruleup.ruleup_backend.score.repository.UserScoreSummaryRepository;
 import com.ruleup.ruleup_backend.score.domain.ScoreTransaction;
 import com.ruleup.ruleup_backend.score.domain.Tier;
 import com.ruleup.ruleup_backend.score.domain.TierBands;

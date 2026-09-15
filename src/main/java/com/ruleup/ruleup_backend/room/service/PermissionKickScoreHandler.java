@@ -2,7 +2,7 @@ package com.ruleup.ruleup_backend.room.service;
 
 import com.ruleup.ruleup_backend.common.outbox.OutboxHandler;
 import com.ruleup.ruleup_backend.common.outbox.OutboxService;
-import com.ruleup.ruleup_backend.score.ScoreService;
+import com.ruleup.ruleup_backend.score.service.ScoreService;
 import com.ruleup.ruleup_backend.score.domain.IncidentType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;

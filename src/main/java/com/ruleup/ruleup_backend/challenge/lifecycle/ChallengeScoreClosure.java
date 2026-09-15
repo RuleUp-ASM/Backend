@@ -1,6 +1,6 @@
 package com.ruleup.ruleup_backend.challenge.lifecycle;
 
-import com.ruleup.ruleup_backend.score.ScoreService;
+import com.ruleup.ruleup_backend.score.service.ScoreService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;

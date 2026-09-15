@@ -1,11 +1,13 @@
 package com.ruleup.ruleup_backend.auth;
 
+import com.ruleup.ruleup_backend.auth.service.TokenService;
+import com.ruleup.ruleup_backend.auth.service.RefreshTokenCleanupService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jayway.jsonpath.JsonPath;
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
 import com.ruleup.ruleup_backend.auth.domain.SocialToken;
-import com.ruleup.ruleup_backend.auth.SocialTokenRepository;
-import com.ruleup.ruleup_backend.notification.NotificationRepository;
+import com.ruleup.ruleup_backend.auth.repository.SocialTokenRepository;
+import com.ruleup.ruleup_backend.notification.repository.NotificationRepository;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import com.ruleup.ruleup_backend.user.domain.OAuthProvider;

@@ -5,7 +5,7 @@ import com.ruleup.ruleup_backend.admin.domain.AdminAction;
 import com.ruleup.ruleup_backend.admin.domain.AdminAuditLog;
 import com.ruleup.ruleup_backend.admin.repository.AdminAuditLogRepository;
 import com.ruleup.ruleup_backend.challenge.ChallengeApiSupport;
-import com.ruleup.ruleup_backend.notification.NotificationRepository;
+import com.ruleup.ruleup_backend.notification.repository.NotificationRepository;
 import com.ruleup.ruleup_backend.notification.announcement.AnnouncementFanoutJob;
 import com.ruleup.ruleup_backend.notification.domain.NotificationTab;
 import com.ruleup.ruleup_backend.notification.domain.NotificationToggleGroup;

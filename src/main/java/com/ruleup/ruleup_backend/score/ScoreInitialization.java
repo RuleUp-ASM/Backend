@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.score;
-import lombok.RequiredArgsConstructor;
+
+import com.ruleup.ruleup_backend.score.service.ScoreProcessor;import lombok.RequiredArgsConstructor;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.jdbc.core.JdbcTemplate;

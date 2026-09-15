@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.notification;
 
+import com.ruleup.ruleup_backend.notification.service.NotificationPublisher;
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
 import com.ruleup.ruleup_backend.auth.AuthApiSupport;
 import com.ruleup.ruleup_backend.notification.domain.NotificationParams;

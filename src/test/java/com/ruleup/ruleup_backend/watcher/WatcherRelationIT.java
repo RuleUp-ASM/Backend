@@ -2,7 +2,7 @@ package com.ruleup.ruleup_backend.watcher;
 
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
 import com.ruleup.ruleup_backend.challenge.ChallengeApiSupport;
-import com.ruleup.ruleup_backend.notification.NotificationRepository;
+import com.ruleup.ruleup_backend.notification.repository.NotificationRepository;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.watcher.domain.*;
 import com.ruleup.ruleup_backend.watcher.repository.*;

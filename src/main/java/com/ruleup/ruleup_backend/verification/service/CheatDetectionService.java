@@ -3,7 +3,7 @@ package com.ruleup.ruleup_backend.verification.service;
 import com.ruleup.ruleup_backend.challenge.service.CheatKickOutboxHandler;
 import com.ruleup.ruleup_backend.common.outbox.OutboxDispatcher;
 import com.ruleup.ruleup_backend.common.outbox.OutboxService;
-import com.ruleup.ruleup_backend.score.CheatScoreOutboxHandler;
+import com.ruleup.ruleup_backend.score.service.CheatScoreOutboxHandler;
 import com.ruleup.ruleup_backend.verification.domain.CheatDetection;
 import com.ruleup.ruleup_backend.verification.repository.CheatDetectionRepository;
 import lombok.RequiredArgsConstructor;

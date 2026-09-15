@@ -1,0 +1,58 @@
+package com.ruleup.ruleup_backend.score.repository;
+
+import com.ruleup.ruleup_backend.score.domain.ScoreTransaction;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
+
+/** 점수 변동 원장 읽기. 인덱스 (user_id, created_at DESC, id DESC) 를 그대로 탄다. */
+public interface ScoreTransactionRepository extends JpaRepository<ScoreTransaction, UUID> {
+
+    /**
+     * 최근 변동 — 실제로 점수가 움직인 행만. 한도나 0~2,000 경계에 걸려 반영량이 0이었던 행은
+     * 화면에 "0점 변동"으로 보이면 혼란만 주므로 뺀다(원장에는 그대로 남아 감사에 쓰인다).
+     */
+    @Query("""
+            SELECT t FROM ScoreTransaction t
+            WHERE t.userId = :userId AND t.entryKind <> 'COMMIT' AND t.reason <> com.ruleup.ruleup_backend.score.domain.ScoreLedgerReason.SIGNUP AND t.appliedDelta <> 0
+            ORDER BY t.createdAt DESC, t.id DESC""")
+    List<ScoreTransaction> findRecent(@Param("userId") UUID userId, Pageable pageable);
+
+    /** 같은 이벤트가 두 번 쌓이는 것을 막는 최종 방어선의 조회 짝. */
+    boolean existsByIdempotencyKey(String idempotencyKey);
+
+    /**
+     * 점수 변동 이력 한 페이지 — 최신순, (시각, id) 복합 커서.
+     *
+     * <p>시각만으로 커서를 잡으면 같은 밀리초에 쌓인 행이 페이지 경계에서 통째로 새거나 겹친다.
+     * 확정 배치가 여러 챌린지의 사이클 점수를 한 번에 쌓으므로 동시각 행은 드물지 않다.
+     *
+     * <p>{@code appliedDelta <> 0} 은 최근 변동과 같은 규칙이다 — 한도나 0~2,000 경계에 걸려
+     * 반영량이 0이었던 행이 화면에 「0점 변동」으로 뜨면 혼란만 준다(원장에는 그대로 남는다).
+     */
+    @Query("""
+            SELECT t FROM ScoreTransaction t
+            WHERE t.userId = :userId AND t.entryKind <> 'COMMIT' AND t.reason <> com.ruleup.ruleup_backend.score.domain.ScoreLedgerReason.SIGNUP AND t.appliedDelta <> 0 AND t.createdAt >= :since
+              AND (:cursorAt IS NULL
+                   OR t.createdAt < :cursorAt
+                   OR (t.createdAt = :cursorAt AND t.id < :cursorId))
+            ORDER BY t.createdAt DESC, t.id DESC""")
+    List<ScoreTransaction> findPage(@Param("userId") UUID userId,
+                                    @Param("since") Instant since,
+                                    @Param("cursorAt") Instant cursorAt,
+                                    @Param("cursorId") UUID cursorId,
+                                    Pageable pageable);
+
+    @Query("""
+            SELECT t FROM ScoreTransaction t WHERE t.userId=:userId AND t.entryKind='RESULT'
+             AND t.reason <> com.ruleup.ruleup_backend.score.domain.ScoreLedgerReason.SIGNUP
+             AND t.effectiveAt>=:since AND NOT EXISTS (SELECT r.id FROM ScoreTransaction r WHERE r.reversalOfId=t.id)
+             ORDER BY t.effectiveAt, t.effectiveOrder
+            """)
+    List<ScoreTransaction> findSince(@Param("userId") UUID userId, @Param("since") Instant since);
+}

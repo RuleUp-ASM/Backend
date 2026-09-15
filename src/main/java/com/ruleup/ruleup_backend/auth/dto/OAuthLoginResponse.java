@@ -1,6 +1,6 @@
 package com.ruleup.ruleup_backend.auth.dto;
 
-import com.ruleup.ruleup_backend.auth.TokenService;
+import com.ruleup.ruleup_backend.auth.service.TokenService;
 import com.ruleup.ruleup_backend.oauth.OAuthUserInfo;
 import com.ruleup.ruleup_backend.score.domain.UserScoreSummary;
 import com.ruleup.ruleup_backend.user.domain.User;

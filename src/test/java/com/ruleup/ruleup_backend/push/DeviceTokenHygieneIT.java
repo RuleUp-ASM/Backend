@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.push;
 
+import com.ruleup.ruleup_backend.push.service.DeviceTokenService;
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;

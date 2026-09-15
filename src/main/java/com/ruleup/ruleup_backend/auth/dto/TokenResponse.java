@@ -1,6 +1,6 @@
 package com.ruleup.ruleup_backend.auth.dto;
 
-import com.ruleup.ruleup_backend.auth.TokenService;
+import com.ruleup.ruleup_backend.auth.service.TokenService;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 @Schema(name = "TokenResponse", description = """

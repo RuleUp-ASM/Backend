@@ -3,7 +3,7 @@ package com.ruleup.ruleup_backend.me.service;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.me.dto.MeTierHistoryResponse;
-import com.ruleup.ruleup_backend.score.ScoreTransactionRepository;
+import com.ruleup.ruleup_backend.score.repository.ScoreTransactionRepository;
 import com.ruleup.ruleup_backend.score.domain.ScoreTransaction;
 import com.ruleup.ruleup_backend.score.domain.TierBands;
 import lombok.RequiredArgsConstructor;

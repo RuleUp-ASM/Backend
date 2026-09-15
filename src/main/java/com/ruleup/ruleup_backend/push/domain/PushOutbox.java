@@ -1,5 +1,7 @@
 package com.ruleup.ruleup_backend.push.domain;
 
+import com.ruleup.ruleup_backend.push.SilentPush;
+
 import com.ruleup.ruleup_backend.common.AssignedIdEntity;
 import com.ruleup.ruleup_backend.common.UuidGenerator;
 import jakarta.persistence.*;

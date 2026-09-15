@@ -13,7 +13,7 @@ import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.routine.domain.RoutineTemplate;
 import com.ruleup.ruleup_backend.routine.domain.SelectedMethod;
 import com.ruleup.ruleup_backend.routine.service.RoutineCatalog;
-import com.ruleup.ruleup_backend.score.UserScoreSummaryRepository;
+import com.ruleup.ruleup_backend.score.repository.UserScoreSummaryRepository;
 import com.ruleup.ruleup_backend.score.domain.Tier;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
