@@ -6,6 +6,12 @@ package com.ruleup.ruleup_backend.verification.dto;
  *
  * <p>{@code unacknowledgedResult}가 있으면 클라는 성공/실패 모달을 띄우고 ack를 호출한다.
  *
+ * @param verificationId       오늘 판정 행의 ID. <b>이의 신청 경로</b>
+ *                             {@code POST /api/v1/verifications/{verificationId}/appeals} 에 그대로 쓴다.
+ *                             행이 없으면(신호가 한 번도 없었던 진행중·비대상) null 이다.
+ *                             예전에는 {@code unacknowledgedResult} 안에만 있었는데, 그 값은 <b>이미 확인한
+ *                             판정에서는 사라진다</b> — 화면을 다시 열면 실패 예정이라 이의 버튼은 살아 있는데
+ *                             누를 대상 ID 가 없었다
  * @param date                 오늘 날짜(YYYY-MM-DD, KST)
  * @param status               IN_PROGRESS / FAIL_EXPECTED / DONE / FAILED / NOT_TARGET —
  *                             <b>상태값 4종</b>(진행중·실패 예정·완료·실패) + 비대상이다.
@@ -33,6 +39,7 @@ package com.ruleup.ruleup_backend.verification.dto;
  * @param appeal               이의 신청 가능 여부와 기한. FAILED · FAIL_EXPECTED 일 때
  */
 public record TodayVerificationResponse(
+        String verificationId,
         String date,
         String status,
         String window,
@@ -49,6 +56,8 @@ public record TodayVerificationResponse(
      * @param result         DONE / FAILED — 모달에 띄울 결과
      */
     public record UnacknowledgedResult(String verificationId, String result) {}
+    // 최상위 verificationId 와 같은 값이다. 함께 두는 이유는 구버전 앱이 이 자리를 읽기 때문이고,
+    // 이 안의 값이 있다는 것은 「모달을 띄워야 한다」는 뜻이라 의미가 다르다.
 
     /**
      * @param eligibleUntil 이의 신청 기한 — 확정 시각과 같은 귀속일 이틀 뒤 00:00 KST(ISO-8601).

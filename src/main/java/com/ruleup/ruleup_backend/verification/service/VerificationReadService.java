@@ -58,6 +58,7 @@ public class VerificationReadService {
     private final StreakService streakService;
 
     // ===== GET /api/v1/verifications/progress — 진행률 일괄 =====
+
     public List<ChallengeProgress> progress(UUID userId, String statusFilter) {
         List<ChallengeMember> members = "ALL".equalsIgnoreCase(statusFilter)
                 ? challengeQuery.findAllMemberships(userId)
@@ -100,6 +101,7 @@ public class VerificationReadService {
         Failure failure = (failing && daily != null) ? failureOf(daily, config) : Failure.NONE;
 
         return new TodayVerificationResponse(
+                (daily != null) ? daily.getId().toString() : null,
                 today.toString(),
                 status,
                 TodayStatusView.NOT_TARGET.equals(status) ? null : windowLabel(config),
