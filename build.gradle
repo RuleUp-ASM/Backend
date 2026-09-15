@@ -81,7 +81,14 @@ dependencies {
 
 	// Firebase Admin SDK — 고스트(무음) 푸시 전송(FCM). 자격증명(서비스 계정)이 있을 때만 활성화되며
 	// (app.fcm.enabled), 없으면 LoggingPushSender 스텁으로 폴백해 로컬/CI 기동에 영향 없음.
-	implementation 'com.google.firebase:firebase-admin:9.4.1'
+	//
+	// 9.4.1 로는 못 쓴다 — 기본 전송 계층(ApacheHttp2Transport)이 응답을 「이미 압축이 풀린 본문」과
+	// 「gzip 이라고 적힌 원본 헤더」로 짝지어 내놓아, 상위 google-http-client 가 평문을
+	// GZIPInputStream 으로 열다 터진다. stg 의 모든 푸시가
+	// 「Unknown error while making a remote service call: Not in GZIP format」 으로 실패한 원인이다.
+	// 9.8.0 이 인코딩을 엔티티에서 읽도록 고쳐 짝이 맞는다 — 그 버그를 고치는 가장 낮은 버전이라
+	// 여기에 맞춘다. 더 올리면 google-http-client·gax 계열이 통째로 따라 올라오므로 이유 없이 넓힌다.
+	implementation 'com.google.firebase:firebase-admin:9.8.0'
 
 	// JDK 25 대응: Lombok 1.18.40+ 필요 (그 이전 버전은 JDK25 bytecode 미지원)
 	compileOnly 'org.projectlombok:lombok:1.18.46'
