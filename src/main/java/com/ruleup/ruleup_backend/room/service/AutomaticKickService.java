@@ -5,6 +5,7 @@ import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.common.UuidGenerator;
+import com.ruleup.ruleup_backend.common.ClockSkew;
 import com.ruleup.ruleup_backend.common.outbox.OutboxDispatcher;
 import com.ruleup.ruleup_backend.common.outbox.OutboxService;
 import com.ruleup.ruleup_backend.notification.NotificationEvent;
@@ -62,7 +63,9 @@ public class AutomaticKickService {
                 "SELECT COUNT(*) FROM challenge_member_history WHERE challenge_id=? AND user_id=?",Integer.class,bytes(challengeId),bytes(userId))==0)) return false;
         var member = members.findForUpdate(challengeId, userId).orElse(null);
         if (!permanent && (member == null || !member.isActive())) return false;
-        if (!permanent && effectiveAt != null && latestJoin(challengeId, userId).isAfter(effectiveAt)) return false;
+        // effectiveAt is app time and joined_at is DB time; only a gap wider than clock skew means a rejoin.
+        if (!permanent && effectiveAt != null
+                && latestJoin(challengeId, userId).isAfter(effectiveAt.plus(ClockSkew.TOLERANCE))) return false;
         if (jdbc.queryForObject("SELECT COUNT(*) FROM challenge_kicks WHERE challenge_id=? AND user_id=? AND reason=? AND source_event_id=?",
                 Integer.class, bytes(challengeId), bytes(userId), reason.name(), bytes(sourceEventId)) > 0) return false;
 

@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.me.service;
 
+import com.ruleup.ruleup_backend.common.ClockSkew;
 import com.ruleup.ruleup_backend.me.dto.MeHomeResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -23,7 +24,7 @@ public class MePermissionWarnings {
         return jdbc.query("SELECT w.challenge_id,w.signal_type,w.waiting_from_on FROM verification_permission_waits w " +
                 "JOIN challenge_members m ON m.challenge_id=w.challenge_id AND m.user_id=w.user_id " +
                 "WHERE w.user_id=? AND w.resolved_at IS NULL AND m.status='ACTIVE' AND m.left_at IS NULL " +
-                "AND w.first_observed_at>=(SELECT MAX(joined_at) FROM challenge_join_events e WHERE e.challenge_id=w.challenge_id AND e.user_id=w.user_id)",
+                "AND w.first_observed_at>=DATE_SUB((SELECT MAX(joined_at) FROM challenge_join_events e WHERE e.challenge_id=w.challenge_id AND e.user_id=w.user_id), INTERVAL " + ClockSkew.TOLERANCE_SECONDS + " SECOND)",
                 (rs,n)->{
                     var b=ByteBuffer.wrap(rs.getBytes(1));
                     LocalDate until=rs.getDate(3).toLocalDate().plusDays(14);

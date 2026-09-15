@@ -145,4 +145,43 @@ class ProfileSpecAlignmentIT extends ChallengeApiSupport {
         assertThat(getAuth("/api/v1/me/invitation",me.token()).getResponse().getStatus()).isEqualTo(404);
     }
 
+    /**
+     * 앱 시계가 DB 시계보다 조금 뒤처져도 「이전 멤버십」으로 오해하지 않는다.
+     *
+     * <p>{@code first_observed_at} 은 앱이, {@code joined_at} 은 DB가 찍는다. 둘이 밀리초 단위로
+     * 어긋나면 방금 만든 대기가 가입보다 먼저 찍히는데, 엄격히 비교하면 그 순간 대기가 사라져
+     * 권한 경고가 뜨지 않고 강퇴 예약도 취소된다. 실제로 49ms 차이로 그렇게 됐었다.
+     *
+     * <p>진짜 경계는 재입장 대기 7일 뒤라 며칠씩 벌어져 있으므로, 초 단위 오차는 흡수해도 된다.
+     * 그래서 오차 안쪽은 같은 멤버십, 바깥쪽은 이전 멤버십으로 갈린다.
+     */
+    @Test void permissionWarningSurvivesClockSkewButNotAPreviousMembership() throws Exception {
+        Member me=member(uniq("profile-skew"));UUID id=insertChallenge(me.id(),"EXERCISE","ACTIVE","GROUP");
+        insertActiveMembership(id,me.id(),"OWNER");
+        var service=wac.getBean(com.ruleup.ruleup_backend.verification.service.PermissionWaitService.class);
+        var event=new com.ruleup.ruleup_backend.common.event.PermissionGapDetected(
+                me.id(),id,"HEALTH",LocalDate.now(ZoneId.of("Asia/Seoul")),Instant.now());
+        service.detected(event);
+        byte[] source=jdbc.queryForObject("SELECT source_event_id FROM verification_permission_waits WHERE challenge_id=?",byte[].class,bytes(id));
+
+        skewFirstObservedBehindJoin(id,1);
+        service.detected(event);
+        assertThat(jdbc.queryForObject("SELECT resolved_at FROM verification_permission_waits WHERE challenge_id=?",java.sql.Timestamp.class,bytes(id)))
+                .as("시계 오차 안쪽이면 같은 멤버십의 대기라 해소되지 않는다").isNull();
+        assertThat(jdbc.queryForObject("SELECT source_event_id FROM verification_permission_waits WHERE challenge_id=?",byte[].class,bytes(id)))
+                .as("대기가 이어지므로 원본 사건도 그대로다").isEqualTo(source);
+        assertThat((List<?>)read(getAuth("/api/v1/me/home",me.token()),"$.data.permissionWarnings"))
+                .as("경고도 계속 보인다").hasSize(1);
+
+        skewFirstObservedBehindJoin(id,3600);
+        assertThat((List<?>)read(getAuth("/api/v1/me/home",me.token()),"$.data.permissionWarnings"))
+                .as("오차로 설명되지 않게 벌어지면 이전 멤버십의 대기다").isEmpty();
+    }
+
+    /** 대기를 가입보다 {@code seconds} 초 앞서게 돌린다 — 앱 시계가 그만큼 뒤처진 상황. */
+    private void skewFirstObservedBehindJoin(UUID challengeId, int seconds) {
+        jdbc.update("UPDATE verification_permission_waits w SET first_observed_at=DATE_SUB(" +
+                "(SELECT MAX(joined_at) FROM challenge_join_events e WHERE e.challenge_id=w.challenge_id AND e.user_id=w.user_id)," +
+                " INTERVAL ? SECOND) WHERE w.challenge_id=?", seconds, bytes(challengeId));
+    }
 }
