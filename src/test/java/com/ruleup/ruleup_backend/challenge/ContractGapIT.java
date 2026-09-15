@@ -122,6 +122,33 @@ class ContractGapIT extends ChallengeApiSupport {
     }
 
     @Nested
+    @DisplayName("친구 초대")
+    class Invitation {
+
+        @Test
+        @DisplayName("내 초대 코드와 링크를 준다 — 링크는 앱링크 검사도 통과한다")
+        void invitationLinkIsAnAppLink() throws Exception {
+            Member me = member(uniq("gap-invite"));
+
+            var res = getAuth("/api/v1/me/invitation", me.token());
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+            String code = read(res, "$.data.inviteCode");
+            String url = read(res, "$.data.inviteUrl");
+            assertThat(code).isNotBlank();
+            assertThat(url).as("챌린지·감시자 초대와 같은 도메인이어야 앱이 열린다")
+                    .startsWith("https://android.ruleup.co.kr/inv/").endsWith(code);
+
+            assertThat((String) read(getAuth("/api/v1/me/invitation", me.token()), "$.data.inviteCode"))
+                    .as("다시 불러도 같은 코드다").isEqualTo(code);
+
+            var check = postJsonAuth("/api/v1/app-links/check", me.token(), Map.of("url", url));
+            assertThat((Boolean) read(check, "$.data.valid"))
+                    .as("앱이 링크를 받아 서버에 물어봤을 때 유효하다고 답해야 한다").isTrue();
+            assertThat((String) read(check, "$.data.linkType")).isEqualTo("FRIEND_INVITATION");
+        }
+    }
+
+    @Nested
     @DisplayName("증빙 사진 업로드")
     class AppealImage {
 

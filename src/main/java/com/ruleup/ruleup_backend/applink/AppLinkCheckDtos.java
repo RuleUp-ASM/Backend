@@ -21,7 +21,7 @@ public final class AppLinkCheckDtos {
             각 링크 타입의 조회 API 가 따로 판단한다 — 이 API 는 링크 자체의 유효성만 본다.""")
     public record Response(
             @Schema(description = "형식·존재·만료를 모두 통과했는지", example = "true") boolean valid,
-            @Schema(description = "CHALLENGE_INVITATION / WATCHER_INVITATION. 형식 불통과면 null")
+            @Schema(description = "CHALLENGE_INVITATION / WATCHER_INVITATION / FRIEND_INVITATION. 형식 불통과면 null")
             String linkType,
             @Schema(description = """
                     링크에서 추출한 토큰. 유효하면 각 타입의 조회 API 로 이어서 호출한다.

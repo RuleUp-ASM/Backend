@@ -50,6 +50,7 @@ public class MeController {
     private final MeTierService tierService;
     private final MeTierHistoryService tierHistoryService;
     private final MeTierChangesService tierChangesService;
+    private final InvitationService invitationService;
 
     @Operation(summary = "마이 홈 일괄 조회",
             description = """
@@ -63,6 +64,25 @@ public class MeController {
     @GetMapping("/home")
     public ApiResponse<MeHomeResponse> home(@AuthenticationPrincipal String userId) {
         return ApiResponse.ok(homeService.home(UUID.fromString(userId)));
+    }
+
+    @Operation(summary = "내 초대 코드·현황", description = """
+            친구 초대 코드와 공유 링크, 그리고 내 코드로 가입한 사람 목록을 준다.
+
+            **코드는 조회 시점에 없으면 만들어 준다** — 유저당 하나로 고정이고, 이 호출은 몇 번을
+            해도 같은 코드를 돌려준다. 코드 발급 전용 API 를 따로 두면 화면이 두 번 호출해야 하고
+            그 사이에 실패하면 코드 없는 화면이 뜬다.
+
+            `inviteUrl` 은 챌린지·감시자 초대와 **같은 앱링크 도메인**으로 만든다. 도메인이 다르면
+            안드로이드가 앱을 열지 못해 링크가 웹으로 새어나간다.
+
+            피초대자 닉네임은 검수 전이면 임시 닉네임으로 보인다. `status` 는 현재 `SIGNED_UP` 하나뿐이다 —
+            보상 지급은 아직 기록만 하고 있어 단계가 갈리지 않는다.
+            """)
+    @ApiErrorCodes({ErrorCode.LOGIN_REQUIRED})
+    @GetMapping("/invitation")
+    public ApiResponse<MeInvitationResponse> invitation(@AuthenticationPrincipal String userId) {
+        return ApiResponse.ok(invitationService.myInvitation(UUID.fromString(userId)));
     }
 
     @Operation(summary = "월 활동 캘린더",
