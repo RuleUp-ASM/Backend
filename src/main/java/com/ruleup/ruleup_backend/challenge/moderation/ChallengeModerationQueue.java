@@ -49,8 +49,15 @@ public class ChallengeModerationQueue {
             log.info("moderation_enqueued challengeId={} targets={}", id, snapshot.targets());
         } catch (Exception failure) {
             // No success marker: the five-minute recovery scan will retry after ten minutes.
-            log.error("moderation_enqueue_failed challengeId={} error={}", id, failure.getClass().getSimpleName());
+            // Keep the message, not just the type: "IllegalStateException" alone hid a missing
+            // MODERATION_QUEUE_URL behind a generic-looking error for days (QA 2026-09-16).
+            log.error("moderation_enqueue_failed challengeId={} error={}", id, failure.toString());
         }
+    }
+
+    /** Publishing is possible only in-process (local) or with a reachable queue client. */
+    public boolean configured() {
+        return local || (!queueUrl.isEmpty() && sqs.getIfAvailable() != null);
     }
 
     @Scheduled(fixedDelayString = "${app.moderation.queue.poll-delay-ms:5000}")

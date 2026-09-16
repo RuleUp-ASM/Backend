@@ -1,8 +1,11 @@
 package com.ruleup.ruleup_backend.me.service;
 
 import com.ruleup.ruleup_backend.me.dto.MeTierResponse;
+import com.ruleup.ruleup_backend.score.domain.ScoreLedgerReason;
 import com.ruleup.ruleup_backend.score.domain.ScoreReason;
 import com.ruleup.ruleup_backend.score.domain.ScoreTransaction;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
@@ -20,7 +23,30 @@ import java.util.UUID;
 @Component
 public class ScoreChangeView {
 
+    private static final Logger log = LoggerFactory.getLogger(ScoreChangeView.class);
+
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+
+    /**
+     * 그릴 수 있는 행인가. {@code INCIDENT} 인데 {@code incident_type} 이 비어 있으면 <b>무슨 사건인지
+     * 알 수 없어</b> 표기를 만들 수 없다 — 이런 행은 목록에서 뺀다.
+     *
+     * <p>정상 쓰기 경로로는 나올 수 없는 행이다({@code ScoreCalculator.validate} 가 AUTO 입력에
+     * incident_type 을 강제하고, MANUAL 입력은 애초에 원장에 남지 않는다). 그런데 손으로 만진 행이나
+     * 레거시 행이 하나만 섞여도 {@link #displayReason} 의 switch 가 NPE 로 터지면서 <b>내 티어 화면
+     * 전체가 500</b> 이 됐다(QA 2026-09-16). 한 행의 손상이 화면을 통째로 죽이지 않게 한다.
+     *
+     * <p>사유를 추측해 채우지는 않는다. 부정행위 감점을 「자진 탈퇴」로 보여주는 것은 빈칸보다 나쁘다.
+     * 대신 경고를 남겨 손상된 행을 운영이 찾아갈 수 있게 한다.
+     */
+    public boolean renderable(ScoreTransaction t) {
+        if (t.getReason() == ScoreLedgerReason.INCIDENT && t.getIncidentType() == null) {
+            log.warn("score_change_unrenderable transactionId={} userId={} reason=INCIDENT incidentType=null",
+                    t.getId(), t.getUserId());
+            return false;
+        }
+        return true;
+    }
 
     /**
      * 저장 사건 → 화면 표기. 두 축이 다르다 — 저장은 무엇이 일어났는지(일일 성공·확정 미달·보너스…),

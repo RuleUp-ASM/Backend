@@ -76,7 +76,10 @@ public class MeTierService {
                 transactionRepository.findRecent(userId, PageRequest.of(0, RECENT_CHANGES));
         Map<UUID, String> titles = challengeTitles.titlesOf(
                 transactions.stream().map(ScoreTransaction::getChallengeId).toList());
-        return transactions.stream().map(t -> changeView.toChange(t, titles)).toList();
+        return transactions.stream()
+                .filter(changeView::renderable)
+                .map(t -> changeView.toChange(t, titles))
+                .toList();
     }
 
 }
