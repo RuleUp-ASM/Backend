@@ -58,7 +58,10 @@ public class MeTierChangesService {
 
         Map<UUID, String> titles = challengeTitles.titlesOf(
                 page.stream().map(ScoreTransaction::getChallengeId).toList());
+        // 커서는 걸러내기 <b>전</b>의 마지막 행에서 뽑는다(아래) — 그래서 못 그리는 행을 빼도
+        // 페이지 경계가 밀리지 않는다.
         List<MeTierResponse.Change> items = page.stream()
+                .filter(changeView::renderable)
                 .map(t -> changeView.toChange(t, titles))
                 .toList();
 
