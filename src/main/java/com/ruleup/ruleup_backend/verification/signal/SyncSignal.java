@@ -34,5 +34,25 @@ public record SyncSignal(
         @JsonAlias("appEvents") List<UsageEvent> usageEvents,
         List<ScreenEvent> screenEvents,
         // SLEEP
-        List<SleepSegment> segments
-) {}
+        List<SleepSegment> segments,
+        /**
+         * <b>서버가 이 신호를 받은 시각.</b> 원본을 다시 읽을 때 서버가 행에서 읽어 채워 넣는다.
+         *
+         * <p>이 필드는 요청 본문으로도 들어올 수 있다 — 그래서 <b>읽는 쪽이 현재 시각으로 상한을
+         * 건다</b>(둘 중 이른 값). 클라이언트가 미래 시각을 적어 보내도 이득이 없고, 저장된 값은
+         * 항상 현재보다 과거라 그대로 쓰인다.
+         *
+         * <p>「그때 그 주장이 성립했는가」를 <b>지금</b>이 아니라 <b>받은 때</b>로 따져야 하는
+         * 판정이 있다. 수면은 아직 오지 않은 구간을 미리 올려 두면 즉시 평가에서는 걸리지만,
+         * 시간이 지난 뒤 마감 재평가가 같은 원본을 다시 읽으면 더 이상 미래가 아니라서
+         * 성공 근거로 되살아났다 — 새 기록이 하나도 오지 않았는데도 그렇다.
+         */
+        java.time.Instant receivedAt
+) {
+
+    /** 원본을 다시 읽을 때 서버가 수신 시각을 채워 넣는다. */
+    public SyncSignal withReceivedAt(java.time.Instant at) {
+        return new SyncSignal(type, recordId, observedAt, transitions, points, isMock, readings,
+                sessionStart, sessionEnd, detectedActivity, date, usageEvents, screenEvents, segments, at);
+    }
+}

@@ -84,7 +84,7 @@ class EvaluatorAccuracyTest {
     private static SyncSignal geofence(String transition, Instant when, Boolean isMock) {
         return new SyncSignal("GEOFENCE", null, when.toString(),
                 List.of(new GeofenceTransition(MEMBER, transition, when.toString(), isMock)),
-                null, null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null);
     }
 
     private static SyncSignal location(double lat, double lng, Double accuracy, Boolean isMock,
@@ -92,19 +92,19 @@ class EvaluatorAccuracyTest {
         List<GeoPoint> points = times.stream()
                 .map(t -> new GeoPoint(lat, lng, accuracy, t.toString(), isMock)).toList();
         return new SyncSignal("LOCATION", null, times.get(times.size() - 1).toString(),
-                null, points, isMock, null, null, null, null, null, null, null, null);
+                null, points, isMock, null, null, null, null, null, null, null, null, null);
     }
 
     private static SyncSignal screen(String event, Instant when) {
         return new SyncSignal("SCREEN_TIME", null, when.toString(), null, null, null, null,
                 null, null, null, TARGET.toString(), null,
-                List.of(new ScreenEvent(event, when.toString())), null);
+                List.of(new ScreenEvent(event, when.toString())), null, null);
     }
 
     private static SyncSignal sleep(Instant start, Instant end, HealthOrigin origin) {
         return new SyncSignal("SLEEP", null, end.toString(), null, null, null, null,
                 null, null, null, null, null, null,
-                List.of(new SleepSegment(start.toString(), end.toString(), "ASLEEP", origin)));
+                List.of(new SleepSegment(start.toString(), end.toString(), "ASLEEP", origin)), null);
     }
 
     @Nested

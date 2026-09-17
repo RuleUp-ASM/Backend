@@ -36,7 +36,7 @@ public class SleepEvaluator implements MethodEvaluator {
         if (cfg == null) return EvaluationOutcome.pending(null, null);
 
         ZoneId zone = ctx.zone();
-        List<SleepSegment> segs = nightSegments(ctx.signals(), ctx.targetDate(), zone);
+        List<NightSegment> segs = nightSegments(ctx.signals(), ctx.targetDate(), zone);
         Instant windowClose = TimeWindows.startOfDay(ctx.targetDate().plusDays(1), zone)
                 .plus(Duration.ofHours(6));   // 익일 06:00경 도착 기대
 
@@ -50,14 +50,17 @@ public class SleepEvaluator implements MethodEvaluator {
         int originMissing = 0;
         int future = 0;
 
-        for (SleepSegment s : segs) {
+        for (NightSegment night : segs) {
+            SleepSegment s = night.segment();
             Instant st = TimeWindows.parseInstant(s.startAt());
             Instant en = TimeWindows.parseInstant(s.endAt());
             if (st == null || en == null || !en.isAfter(st)) continue;
-            // <b>아직 오지 않은 잠은 잔 잠이 아니다.</b> 예전에는 01:05 에 「22:10~06:30」 세그먼트를
-            // 올리면 그대로 인정돼 그 자리에서 DONE 이 됐다(QA SIG-10). 기록 시각이 미래인 구간은
-            // 존재할 수 없는 관측이므로 근거에서 뺀다 — 실제로 자고 나면 같은 구간이 다시 올라온다.
-            if (en.isAfter(ctx.now().plus(CLOCK_SKEW))) { future++; continue; }
+            // <b>아직 오지 않은 잠은 잔 잠이 아니다.</b> 01:05 에 「22:10~06:30」 을 올리면 그 자리에서
+            // DONE 이 됐다(QA SIG-10). 기준 시각은 <b>지금이 아니라 그 기록을 받은 때</b>다 —
+            // 현재 시각으로 재면 즉시 평가에서만 걸리고, 시간이 지나 마감 배치가 같은 원본을 다시
+            // 읽을 때는 더 이상 미래가 아니라서 새 기록 없이도 성공 근거로 되살아난다.
+            // 실제로 자고 나면 같은 구간이 <b>나중 수신 시각</b>으로 다시 올라오므로 그때 인정된다.
+            if (en.isAfter(claimedAt(night.receivedAt(), ctx).plus(CLOCK_SKEW))) { future++; continue; }
             if (!seen.add(st.toString() + "|" + en.toString())) continue;   // 재전송 — 이미 반영했다
             if (s.origin() == null) originMissing++;
             if (!trusted(s, cfg)) { anyUntrusted = true; continue; }             // 손입력·비신뢰 출처는 제외
@@ -106,9 +109,16 @@ public class SleepEvaluator implements MethodEvaluator {
         return EvaluationOutcome.pending(ev, windowClose);
     }
 
+    /**
+     * 그 밤에 귀속되는 세그먼트와 <b>그것이 실린 신호의 수신 시각</b>.
+     *
+     * <p>세그먼트만 떼어 내면 「언제 받은 기록인가」를 잃는다 — 미래 구간 판정이 그 값을 쓴다.
+     */
+    private record NightSegment(SleepSegment segment, Instant receivedAt) {}
+
     /** targetDate의 "밤"에 귀속되는 세그먼트(§2.17 자정 넘김 규칙). */
-    private List<SleepSegment> nightSegments(List<SyncSignal> signals, LocalDate targetDate, ZoneId zone) {
-        List<SleepSegment> out = new ArrayList<>();
+    private List<NightSegment> nightSegments(List<SyncSignal> signals, LocalDate targetDate, ZoneId zone) {
+        List<NightSegment> out = new ArrayList<>();
         if (signals == null) return out;
         for (SyncSignal s : signals) {
             if (!SignalType.SLEEP.name().equals(s.type()) || s.segments() == null) continue;
@@ -119,7 +129,7 @@ public class SleepEvaluator implements MethodEvaluator {
                 LocalDate nightDate = (z.getHour() >= 18)
                         ? z.toLocalDate()                    // 저녁 → 그날
                         : z.toLocalDate().minusDays(1);      // 새벽(<18시) → 전날 밤
-                if (nightDate.equals(targetDate)) out.add(seg);
+                if (nightDate.equals(targetDate)) out.add(new NightSegment(seg, s.receivedAt()));
             }
         }
         return out;
@@ -148,6 +158,16 @@ public class SleepEvaluator implements MethodEvaluator {
         List<String> allow = (cfg != null) ? cfg.trustedOrigins() : null;
         if (allow == null || allow.isEmpty()) return true;
         return origin.dataOrigin() != null && allow.contains(origin.dataOrigin());
+    }
+
+    /**
+     * 이 기록이 <b>주장된 시각</b> — 수신 시각과 현재 중 이른 쪽.
+     *
+     * <p>수신 시각은 요청 본문으로도 들어올 수 있어 그대로 믿지 않는다. 현재로 상한을 걸면
+     * 미래 시각을 적어 보내도 이득이 없고, 저장된 값(항상 과거)은 그대로 쓰인다.
+     */
+    private static Instant claimedAt(Instant receivedAt, DayContext ctx) {
+        return (receivedAt == null || receivedAt.isAfter(ctx.now())) ? ctx.now() : receivedAt;
     }
 
     /** 기기 시계가 조금 빠른 경우까지 미래로 몰지 않기 위한 허용치. */

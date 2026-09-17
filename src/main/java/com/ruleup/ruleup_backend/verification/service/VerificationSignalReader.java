@@ -128,7 +128,7 @@ public class VerificationSignalReader {
         int read = 0;
         while (true) {
             List<Map<String, Object>> page = jdbc.queryForList(
-                    "SELECT id, payload FROM " + domain.table()
+                    "SELECT id, payload, receivedAt FROM " + domain.table()
                             + " WHERE observedDate = ? AND userId = ? AND excludeReason IS NULL AND id > ?"
                             + " ORDER BY id LIMIT " + PAGE_SIZE,
                     Date.valueOf(date), bytes(userId), cursor);
@@ -136,7 +136,8 @@ public class VerificationSignalReader {
 
             for (Map<String, Object> row : page) {
                 SyncSignal signal = parse((String) row.get("payload"));
-                if (signal != null) out.add(signal);
+                // 수신 시각은 payload 가 아니라 행에 있다 — 평가기가 「받은 때」로 따질 수 있게 채워 준다.
+                if (signal != null) out.add(signal.withReceivedAt(receivedAt(row.get("receivedAt"))));
                 cursor = (byte[]) row.get("id");
             }
             read += page.size();
@@ -163,6 +164,13 @@ public class VerificationSignalReader {
             log.warn("원본 신호를 해석하지 못했다 — 그 행만 건너뛴다. err={}", e.toString());
             return null;
         }
+    }
+
+    /** {@code datetime(3|6)} 는 드라이버에 따라 Timestamp 또는 LocalDateTime 으로 온다. 둘 다 UTC 로 읽는다. */
+    private static java.time.Instant receivedAt(Object raw) {
+        if (raw instanceof java.sql.Timestamp ts) return ts.toInstant();
+        if (raw instanceof java.time.LocalDateTime dt) return dt.toInstant(java.time.ZoneOffset.UTC);
+        return null;
     }
 
     private static byte[] bytes(UUID id) {
