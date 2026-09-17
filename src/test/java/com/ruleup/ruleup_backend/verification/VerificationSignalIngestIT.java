@@ -86,6 +86,12 @@ class VerificationSignalIngestIT extends VerificationApiSupport {
 
     private static String visitParams() { return "{\"duration_min\":30,\"radius_m\":100}"; }
 
+    private java.sql.Timestamp receivedAtOf(UUID userId) {
+        return jdbc().queryForObject(
+                "SELECT receivedAt FROM verification_location_signals WHERE userId = ?",
+                java.sql.Timestamp.class, bytes(userId));
+    }
+
     private int countIn(String table, UUID userId) {
         Integer n = jdbc().queryForObject(
                 "SELECT COUNT(*) FROM " + table + " WHERE userId = ?", Integer.class, bytes(userId));
@@ -192,6 +198,28 @@ class VerificationSignalIngestIT extends VerificationApiSupport {
             assertThat((Integer) read(again, "$.data.dedupDroppedCount"))
                     .as("몇 건이 중복으로 걸렸는지 회신한다(sync_result 로깅 입력)")
                     .isEqualTo(2);
+        }
+
+        @Test
+        @DisplayName("다시 보내오면 본문은 그대로 두고 수신 시각만 앞으로 민다")
+        void resendAdvancesReceivedAt() throws Exception {
+            // 「언제 다시 주장했는가」가 판정 입력인 신호가 있다(수면의 미래 구간 판정).
+            // 최초 수신 시각에 묶어 두면, 그때 유효하지 않았던 기록이 정상 재전송으로도 되살아나지 못한다.
+            Member me = member(uniq("ingest-resend"));
+            UUID challenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
+            UUID memberId = insertReadyMember(challenge, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+
+            Map<String, Object> enter = withRecordId(geofenceSignal(memberId, "ENTER", todayAt(9, 0)), "resend-1");
+            syncOk(me.token(), List.of(enter));
+            java.sql.Timestamp first = receivedAtOf(me.id());
+
+            // 같은 신호를 한 번 더 — 저장은 늘지 않아야 하고, 수신 시각은 뒤로 가지 않아야 한다.
+            syncOk(me.token(), List.of(enter));
+
+            assertThat(storedSignalsOf(me.id())).as("본문이 두 번 저장되지는 않는다").isEqualTo(1);
+            assertThat(receivedAtOf(me.id()))
+                    .as("다시 보내온 시각으로 갱신된다 — 최초 수신 시각에 묶이지 않는다")
+                    .isAfter(first);
         }
 
         @Test

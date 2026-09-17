@@ -165,9 +165,10 @@ public class VerificationSignalIngestService {
                         .collect(java.util.stream.Collectors.toSet()));
 
         List<Object[]> rows = new ArrayList<>(candidates.size());
+        List<String> resent = new ArrayList<>();
         int dropped = 0;
         for (Candidate c : candidates) {
-            if (known.contains(c.dedupKey())) { dropped++; continue; }
+            if (known.contains(c.dedupKey())) { dropped++; resent.add(c.dedupKey()); continue; }
             if (otherDate.contains(c.dedupKey())) {
                 // 같은 recordId 가 <b>다른 발생일</b>로 다시 왔다. 정상 재전송이 아니라 귀속일을 바꿔
                 // 판정을 다시 받으려는 요청이거나 클라 버그다 — 파티션 유일 키가 (발생일, 유저,
@@ -181,8 +182,36 @@ public class VerificationSignalIngestService {
             rows.add(row(userId, c, receivedAt, deviceId, domain, observedDate));
         }
         insertAll(domain, rows);
+        // <b>다시 보내온 것도 사건이다.</b> 본문은 이미 있으니 저장하지 않지만, 「언제 다시 주장했는가」는
+        // 갱신한다. 수면처럼 <b>받은 때</b>를 기준으로 판정하는 신호가 있어서, 최초 수신 시각에 묶어 두면
+        // 그때 유효하지 않았던 기록이 영영 되살아나지 못한다 — 아직 오지 않은 밤을 미리 올렸다가
+        // 실제로 자고 난 뒤 정상 재전송해도 계속 제외됐다.
+        //
+        // <p>시간이 흐르는 것만으로는 이 값이 움직이지 않는다. 새 전송이 와야 한다 — 미리 올려두고
+        // 기다리기만 하는 경로는 그대로 막힌다.
+        refreshReceivedAt(userId, domain, observedDate, resent, receivedAt);
         metrics.signalsStored(rows.size());
         return dropped;
+    }
+
+    /** 이미 저장된 원본의 수신 시각을 <b>앞으로만</b> 민다. 되돌아가는 갱신은 하지 않는다. */
+    private void refreshReceivedAt(UUID userId, SignalDomain domain, LocalDate observedDate,
+                                   List<String> dedupKeys, Instant receivedAt) {
+        if (dedupKeys.isEmpty()) return;
+        for (int from = 0; from < dedupKeys.size(); from += INSERT_BATCH) {
+            List<String> chunk = dedupKeys.subList(from, Math.min(from + INSERT_BATCH, dedupKeys.size()));
+            String placeholders = String.join(",", Collections.nCopies(chunk.size(), "?"));
+            List<Object> args = new ArrayList<>();
+            args.add(Timestamp.from(receivedAt));
+            args.add(Date.valueOf(observedDate));
+            args.add(bytes(userId));
+            args.addAll(chunk);
+            args.add(Timestamp.from(receivedAt));
+            jdbc.update("UPDATE " + domain.table() + " SET receivedAt = ?"
+                            + " WHERE observedDate = ? AND userId = ? AND dedupKey IN (" + placeholders + ")"
+                            + " AND receivedAt < ?",
+                    args.toArray());
+        }
     }
 
     /**

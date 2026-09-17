@@ -117,8 +117,16 @@ class SleepUnionTest {
             assertThat(outcome.evidence()).containsEntry("excludedFuture", 1);
         }
 
+        /**
+         * <b>평가기 계약만</b> 본다 — 신호가 여기까지 오는 과정은 보지 않는다.
+         *
+         * <p>실제로는 같은 내용이 다시 오면 적재가 중복으로 걸러 낸다. 그래서 「나중 수신 시각」이
+         * 생기려면 적재가 기존 행의 수신 시각을 밀어 줘야 하고, 그쪽은
+         * {@code VerificationSignalIngestIT.resendAdvancesReceivedAt} 이 지킨다. 둘이 합쳐져야
+         * 「미리 올렸다가 자고 난 뒤 다시 보내면 인정된다」가 성립한다.
+         */
         @Test
-        @DisplayName("실제로 자고 난 뒤 같은 구간이 다시 올라오면 그때는 인정된다")
+        @DisplayName("나중에 받은 같은 구간은 인정된다 — 적재가 수신 시각을 밀어 준 뒤의 모습이다")
         void sameSegmentIsAcceptedWhenReportedAfterwards() {
             EvaluationOutcome outcome = evaluate(BigDecimal.valueOf(7), at(18, 9, 0),
                     sleep(at(17, 22, 10), at(18, 6, 30), at(18, 1, 5)),      // 미리 올린 것 — 제외
