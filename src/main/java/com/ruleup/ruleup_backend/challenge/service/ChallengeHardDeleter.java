@@ -55,7 +55,15 @@ public class ChallengeHardDeleter {
         exec("DELETE FROM watcher_relations WHERE challenge_id = :cid", challengeId);
         exec("DELETE FROM watcher_invitations WHERE challenge_id = :cid", challengeId);
         exec("DELETE FROM challenge_delegations WHERE challenge_id = :cid", challengeId);
-        // 공지·댓글은 Phase 2 이관과 함께 테이블째 사라졌다(V16) — 여기서 지울 것이 없다.
+        // 공지·댓글 — <b>테이블이 아직 있다.</b> 「V16 에서 사라졌다」는 주석을 믿고 비워 뒀는데,
+        // 베이스라인 v2 의 V4__room.sql 이 Notice·NoticeRead·room_comments 를 그대로 만들고
+        // 둘 다 challenges 로 CASCADE 없는 외래키를 건다. 그래서 공지나 댓글이 하나라도 있는 방은
+        // 자동 삭제가 외래키 제약으로 통째로 실패해 영구히 남았다. 잎(읽음 표시)부터 지운다.
+        exec("DELETE FROM NoticeRead WHERE noticeId IN (SELECT id FROM (SELECT id FROM Notice WHERE challengeId = :cid) x)", challengeId);
+        exec("DELETE FROM Notice WHERE challengeId = :cid", challengeId);
+        // 대댓글이 부모를 참조하므로(fk_room_comments_parent) 자식을 먼저 지운다.
+        exec("DELETE FROM room_comments WHERE challenge_id = :cid AND parent_comment_id IS NOT NULL", challengeId);
+        exec("DELETE FROM room_comments WHERE challenge_id = :cid", challengeId);
         exec("DELETE FROM challenge_invitations WHERE challenge_id = :cid", challengeId);
         // 가입 사건은 방이 사라지면 함께 사라진다 — 인기 집계의 입력일 뿐 보존 대상이 아니다.
         // (이력 스냅샷은 challenge_member_history 가 따로 남긴다.)
