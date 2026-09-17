@@ -86,6 +86,21 @@ class VerificationSignalIngestIT extends VerificationApiSupport {
 
     private static String visitParams() { return "{\"duration_min\":30,\"radius_m\":100}"; }
 
+    private MvcResult syncFrom(String token, String deviceId, List<Map<String, Object>> signals)
+            throws Exception {
+        Map<String, Object> body = syncBody(signals);
+        body.put("deviceId", deviceId);
+        MvcResult res = postJsonAuth("/api/v1/verifications/sync", token, body);
+        assertThat(res.getResponse().getStatus()).isEqualTo(200);
+        return res;
+    }
+
+    private String excludeReasonOf(UUID userId) {
+        return jdbc().queryForObject(
+                "SELECT excludeReason FROM verification_location_signals WHERE userId = ?",
+                String.class, bytes(userId));
+    }
+
     private java.sql.Timestamp receivedAtOf(UUID userId) {
         return jdbc().queryForObject(
                 "SELECT receivedAt FROM verification_location_signals WHERE userId = ?",
@@ -220,6 +235,32 @@ class VerificationSignalIngestIT extends VerificationApiSupport {
             assertThat(receivedAtOf(me.id()))
                     .as("다시 보내온 시각으로 갱신된다 — 최초 수신 시각에 묶이지 않는다")
                     .isAfter(first);
+        }
+
+        @Test
+        @DisplayName("비활성 기기의 재전송은 기존 신호의 수신 시각을 밀지 못한다")
+        void resendFromInactiveDeviceDoesNotAdvanceReceivedAt() throws Exception {
+            // 수신 시각을 미는 것은 「지금 이 주장을 믿는다」는 뜻이다. 그 주장을 못 믿을 기기가
+            // 해도 밀린다면, 예전 기기가 같은 recordId 만 알면 새 기기의 판정을 움직일 수 있다 —
+            // 배제 사유를 행에 새겨 둔 의미가 사라진다.
+            Member me = member(uniq("ingest-inactive-resend"));
+            UUID challenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
+            UUID memberId = insertReadyMember(challenge, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+            jdbc().update("UPDATE users SET device_id = ? WHERE id = ?", "device-A", bytes(me.id()));
+
+            Map<String, Object> enter = withRecordId(
+                    geofenceSignal(memberId, "ENTER", todayAt(9, 0)), "inactive-resend-1");
+            syncFrom(me.token(), "device-A", List.of(enter));
+            java.sql.Timestamp first = receivedAtOf(me.id());
+
+            // 교체 전 기기가 같은 신호를 다시 올린다. 이 요청의 신호는 전부 UNTRUSTED_SOURCE 다.
+            syncFrom(me.token(), "old-device", List.of(enter));
+
+            assertThat(receivedAtOf(me.id()))
+                    .as("못 믿을 기기의 재전송이 「다시 주장한 시각」을 만들어 주면 안 된다")
+                    .isEqualTo(first);
+            assertThat(excludeReasonOf(me.id()))
+                    .as("기존 행은 믿을 수 있는 기기의 것 그대로다").isNull();
         }
 
         @Test

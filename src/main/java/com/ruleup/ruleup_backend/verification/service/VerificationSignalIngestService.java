@@ -168,7 +168,15 @@ public class VerificationSignalIngestService {
         List<String> resent = new ArrayList<>();
         int dropped = 0;
         for (Candidate c : candidates) {
-            if (known.contains(c.dedupKey())) { dropped++; resent.add(c.dedupKey()); continue; }
+            if (known.contains(c.dedupKey())) {
+                dropped++;
+                // 「다시 주장했다」로 쳐 주는 것은 <b>이번 요청이 게이트를 통과했을 때뿐</b>이다.
+                // 못 믿을 봉투(비활성 기기·VPN·무결성 실패)가 보낸 재전송까지 수신 시각을 밀면,
+                // 예전 기기가 recordId 만 알아도 새 기기의 판정을 움직인다 — 배제 사유를 행에
+                // 새겨 둔 의미가 사라진다.
+                if (c.excludeReason() == null) resent.add(c.dedupKey());
+                continue;
+            }
             if (otherDate.contains(c.dedupKey())) {
                 // 같은 recordId 가 <b>다른 발생일</b>로 다시 왔다. 정상 재전송이 아니라 귀속일을 바꿔
                 // 판정을 다시 받으려는 요청이거나 클라 버그다 — 파티션 유일 키가 (발생일, 유저,
