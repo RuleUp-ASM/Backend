@@ -42,6 +42,7 @@ public class ChallengeInvitationService {
     private final ChallengeRepository challengeRepository;
     private final ChallengeMemberService memberService;
     private final UserRepository userRepository;
+    private final com.ruleup.ruleup_backend.challenge.view.ChallengeMasking masking;
 
     @Transactional(readOnly = true)
     public InvitationDtos.PreviewResponse preview(UUID viewerId, String token) {
@@ -50,10 +51,16 @@ public class ChallengeInvitationService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
         JoinBlockReason blockReason = memberService.previewBlockReason(viewerId, challenge, true);
 
+        // 표시값은 <b>한 곳</b>에서 정한다. 여기만 getTitle()·getImageUrl() 원본을 쓰고 있어서,
+        // 심사에 걸려 다른 화면에서는 임시 제목으로 가려진 방이 초대 미리보기로는 원문 그대로 보였다.
+        // 신고해 차단한 방도 마찬가지였다 — 탐색·상세에서 가려 놓고 초대 링크로 다시 새는 셈이다.
+        var view = com.ruleup.ruleup_backend.challenge.view.ChallengeView.of(
+                challenge, challenge.isOwner(viewerId), masking.isMasked(viewerId, challenge.getId()));
+
         return new InvitationDtos.PreviewResponse(
                 invitation.getId().toString(),
                 new InvitationDtos.PreviewResponse.Challenge(
-                        challenge.getId().toString(), challenge.getTitle(), challenge.getImageUrl(),
+                        challenge.getId().toString(), view.title(), view.imageUrl(),
                         challenge.getCategory(), challenge.getParticipantCount(), challenge.getMaxParticipants(),
                         challenge.getMinTier() == null ? null : challenge.getMinTier().name(),
                         challenge.getStartDate().toString(), challenge.getEndDate() == null ? null : challenge.getEndDate().toString()),
