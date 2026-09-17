@@ -43,6 +43,7 @@ public class ChallengeInvitationService {
     private final ChallengeMemberService memberService;
     private final UserRepository userRepository;
     private final com.ruleup.ruleup_backend.challenge.view.ChallengeMasking masking;
+    private final com.ruleup.ruleup_backend.report.BlockService blocks;
 
     @Transactional(readOnly = true)
     public InvitationDtos.PreviewResponse preview(UUID viewerId, String token) {
@@ -94,9 +95,18 @@ public class ChallengeInvitationService {
         return invitation;
     }
 
+    /**
+     * 초대한 사람의 표시 이름.
+     *
+     * <p><b>차단한 사람이면 방 상세와 같은 임시 닉네임으로 가린다.</b> 제목·이미지는 이미
+     * 가리고 있었는데 닉네임만 빠져 있어, 방장을 신고해 차단해도 초대 링크를 열면 원래
+     * 닉네임이 그대로 보였다 — 상세에서 가려 놓고 다른 조회 경로로 다시 새는 셈이다(QA REP-04).
+     */
     private String inviterNickname(UUID inviterId, UUID viewerId) {
         return userRepository.findById(inviterId)
-                .map(inviter -> inviter.visibleNicknameTo(viewerId))
+                .map(inviter -> blocks.isUserBlocked(viewerId, inviterId)
+                        ? inviter.deriveTempNickname()
+                        : inviter.visibleNicknameTo(viewerId))
                 .orElse(null);   // 초대한 방장이 그사이 탈퇴 — 링크 자체는 여전히 유효하다
     }
 }
