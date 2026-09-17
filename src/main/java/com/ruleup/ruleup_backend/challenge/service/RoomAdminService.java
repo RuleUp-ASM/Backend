@@ -85,7 +85,8 @@ public class RoomAdminService {
         notificationPublisher.publish(NotificationEvent.forChallenge(targetUserId,
                 NotificationType.CHALLENGE_KICKED, challengeId,
                 // 사유는 방장이 직접 쓴 문장이라 본문이 통째로 값이다.
-                Map.of(NotificationParams.REASON, normalized,
+                Map.of(NotificationParams.VARIANT, "OWNER",
+                        NotificationParams.REASON, normalized,
                         NotificationParams.EVENT_KEY,
                         challengeId + ":" + rejoinAt.toEpochMilli())));
         return new RoomAdminDtos.KickResponse(true, targetUserId.toString(), rejoinAt.toString());

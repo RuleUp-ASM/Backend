@@ -150,7 +150,45 @@ class ChallengeInvitationFlowIT extends ChallengeApiSupport {
         assertThat((String) read(direct, "$.error.reason")).isEqualTo("PRIVATE_INVITE_ONLY");
     }
 
+    @Test
+    @DisplayName("차단한 방장의 닉네임은 초대 미리보기에서도 방 상세와 같이 가려진다")
+    void previewMasksTheNicknameOfABlockedInviter() throws Exception {
+        Member owner = member(uniq("inv-blocked-owner"));
+        Member guest = member(uniq("inv-blocked-guest"));
+        UUID challengeId = privateChallenge(owner);
+        String token = issueToken(owner, challengeId);
+
+        String beforeBlock = data(getAuth("/api/v1/challenges/invitations/" + token, guest.token()))
+                .path("inviterNickname").asText();
+
+        blockUser(guest, owner.id());
+
+        String preview = data(getAuth("/api/v1/challenges/invitations/" + token, guest.token()))
+                .path("inviterNickname").asText();
+
+        // 방 상세가 쓰는 것과 같은 임시 닉네임이다(사용자 id 끝 8자리).
+        String hex = owner.id().toString().replace("-", "");
+        assertThat(preview)
+                .as("상세에서 가려 놓고 초대 링크로 다시 새면 차단한 의미가 없다")
+                .isNotEqualTo(beforeBlock)
+                .isEqualTo(hex.substring(hex.length() - 8));
+    }
+
     // ===== 헬퍼 =====
+
+    /** 신고로 차단을 만든다 — 차단은 신고의 부수효과다(REP-04). */
+    private void blockUser(Member reporter, UUID targetUserId) throws Exception {
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("targetType", "USER");
+        body.put("targetUserId", targetUserId.toString());
+        body.put("contextType", "PROFILE");
+        body.put("reason", "INAPPROPRIATE");
+        MvcResult res = mvc.perform(post("/api/v1/reports")
+                .header("Authorization", "Bearer " + reporter.token())
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content(OM.writeValueAsString(body))).andReturn();
+        assertThat(res.getResponse().getStatus()).isEqualTo(201);
+    }
 
     private UUID privateChallenge(Member owner) {
         UUID challengeId = insertChallenge(owner.id(), "EXERCISE", "ACTIVE", "GROUP");

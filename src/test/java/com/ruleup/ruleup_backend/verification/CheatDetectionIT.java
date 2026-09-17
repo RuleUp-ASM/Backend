@@ -3,6 +3,7 @@ package com.ruleup.ruleup_backend.verification;
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
 import com.ruleup.ruleup_backend.common.outbox.OutboxDispatcher;
 import com.ruleup.ruleup_backend.score.repository.UserScoreSummaryRepository;
+import com.ruleup.ruleup_backend.score.service.ScoreSyncService;
 import com.ruleup.ruleup_backend.verification.domain.VerificationDaily;
 import com.ruleup.ruleup_backend.verification.repository.CheatDetectionRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
@@ -14,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
@@ -51,6 +53,15 @@ class CheatDetectionIT extends VerificationApiSupport {
     @Autowired VerificationDailyRepository dailyRepository;
     @Autowired UserScoreSummaryRepository scoreRepository;
     @Autowired OutboxDispatcher outboxDispatcher;
+    /**
+     * 1분마다 도는 확정 판정 정산 배치를 이 검사에서는 세워 둔다.
+     *
+     * <p>여기서 보는 것은 <b>검출 1건이 만드는 집행</b>이다. 배치가 같은 사용자의 판정을
+     * 사이클 단위로 다시 정산하면 감점 이후의 총점이 움직여, 「−50 이 반영됐는가」를 총점으로는
+     * 물을 수 없게 된다 — 전체 스위트처럼 실행이 1분을 넘기는 경우에만 끼어들어 무작위로
+     * 실패하는 모양이 된다. 배치 자체의 정합성은 점수 영역의 검사가 따로 본다.
+     */
+    @MockitoBean ScoreSyncService scoreSyncService;
 
     private MockMvc mvc;
 

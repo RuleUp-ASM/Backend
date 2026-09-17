@@ -86,6 +86,30 @@ class VerificationSignalIngestIT extends VerificationApiSupport {
 
     private static String visitParams() { return "{\"duration_min\":30,\"radius_m\":100}"; }
 
+    private MvcResult syncFrom(String token, String deviceId, List<Map<String, Object>> signals)
+            throws Exception {
+        Map<String, Object> body = syncBody(signals);
+        body.put("deviceId", deviceId);
+        MvcResult res = postJsonAuth("/api/v1/verifications/sync", token, body);
+        assertThat(res.getResponse().getStatus()).isEqualTo(200);
+        return res;
+    }
+
+    private String excludeReasonOf(UUID userId) {
+        return excludeReasonOf("verification_location_signals", userId);
+    }
+
+    private String excludeReasonOf(String table, UUID userId) {
+        return jdbc().queryForObject(
+                "SELECT excludeReason FROM " + table + " WHERE userId = ?", String.class, bytes(userId));
+    }
+
+    private java.sql.Timestamp receivedAtOf(UUID userId) {
+        return jdbc().queryForObject(
+                "SELECT receivedAt FROM verification_location_signals WHERE userId = ?",
+                java.sql.Timestamp.class, bytes(userId));
+    }
+
     private int countIn(String table, UUID userId) {
         Integer n = jdbc().queryForObject(
                 "SELECT COUNT(*) FROM " + table + " WHERE userId = ?", Integer.class, bytes(userId));
@@ -192,6 +216,102 @@ class VerificationSignalIngestIT extends VerificationApiSupport {
             assertThat((Integer) read(again, "$.data.dedupDroppedCount"))
                     .as("몇 건이 중복으로 걸렸는지 회신한다(sync_result 로깅 입력)")
                     .isEqualTo(2);
+        }
+
+        @Test
+        @DisplayName("다시 보내오면 본문은 그대로 두고 수신 시각만 앞으로 민다")
+        void resendAdvancesReceivedAt() throws Exception {
+            // 「언제 다시 주장했는가」가 판정 입력인 신호가 있다(수면의 미래 구간 판정).
+            // 최초 수신 시각에 묶어 두면, 그때 유효하지 않았던 기록이 정상 재전송으로도 되살아나지 못한다.
+            Member me = member(uniq("ingest-resend"));
+            UUID challenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
+            UUID memberId = insertReadyMember(challenge, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+
+            Map<String, Object> enter = withRecordId(geofenceSignal(memberId, "ENTER", todayAt(9, 0)), "resend-1");
+            syncOk(me.token(), List.of(enter));
+            java.sql.Timestamp first = receivedAtOf(me.id());
+
+            // 같은 신호를 한 번 더 — 저장은 늘지 않아야 하고, 수신 시각은 뒤로 가지 않아야 한다.
+            syncOk(me.token(), List.of(enter));
+
+            assertThat(storedSignalsOf(me.id())).as("본문이 두 번 저장되지는 않는다").isEqualTo(1);
+            assertThat(receivedAtOf(me.id()))
+                    .as("다시 보내온 시각으로 갱신된다 — 최초 수신 시각에 묶이지 않는다")
+                    .isAfter(first);
+        }
+
+        @Test
+        @DisplayName("비활성 기기의 재전송은 기존 신호의 수신 시각을 밀지 못한다")
+        void resendFromInactiveDeviceDoesNotAdvanceReceivedAt() throws Exception {
+            // 수신 시각을 미는 것은 「지금 이 주장을 믿는다」는 뜻이다. 그 주장을 못 믿을 기기가
+            // 해도 밀린다면, 예전 기기가 같은 recordId 만 알면 새 기기의 판정을 움직일 수 있다 —
+            // 배제 사유를 행에 새겨 둔 의미가 사라진다.
+            Member me = member(uniq("ingest-inactive-resend"));
+            UUID challenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
+            UUID memberId = insertReadyMember(challenge, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+            jdbc().update("UPDATE users SET device_id = ? WHERE id = ?", "device-A", bytes(me.id()));
+
+            Map<String, Object> enter = withRecordId(
+                    geofenceSignal(memberId, "ENTER", todayAt(9, 0)), "inactive-resend-1");
+            syncFrom(me.token(), "device-A", List.of(enter));
+            java.sql.Timestamp first = receivedAtOf(me.id());
+
+            // 교체 전 기기가 같은 신호를 다시 올린다. 이 요청의 신호는 전부 UNTRUSTED_SOURCE 다.
+            syncFrom(me.token(), "old-device", List.of(enter));
+
+            assertThat(receivedAtOf(me.id()))
+                    .as("못 믿을 기기의 재전송이 「다시 주장한 시각」을 만들어 주면 안 된다")
+                    .isEqualTo(first);
+            assertThat(excludeReasonOf(me.id()))
+                    .as("기존 행은 믿을 수 있는 기기의 것 그대로다").isNull();
+        }
+
+        @Test
+        @DisplayName("교체 전 기기가 먼저 올린 기록도 활성 기기가 다시 올리면 인정된다")
+        void trustedResendRevivesAnExcludedRecord() throws Exception {
+            // 배제는 기록이 아니라 봉투의 성질이다. 멱등은 기록 단위라, 교체 전 기기가 백로그를
+            // 먼저 흘려보내면 그 recordId 들이 배제된 채 자리를 차지하고 — 새 기기가 같은 기록을
+            // 올려도 중복으로 걸려 영영 판정에 쓰이지 않는다. 기기를 바꾼 사용자의 사용 시간이
+            // 조용히 통째로 사라지는 경로다.
+            Member me = member(uniq("ingest-revive"));
+            UUID challenge = insertAutoChallenge(me.id(), "SCREEN_TIME_MIN", "USAGE", "{\"duration_min\":30}");
+            UUID memberId = insertReadyMember(challenge, me.id(), null, screenApps("com.ridi.books"));
+            jdbc().update("UPDATE users SET device_id = ? WHERE id = ?", "device-A", bytes(me.id()));
+
+            Map<String, Object> usage = withRecordId(
+                    usageSignal("com.ridi.books", todayAt(9, 0), todayAt(10, 0)), "revive-1");
+
+            syncFrom(me.token(), "old-device", List.of(usage));
+            assertThat(todayStatusOf(memberId)).as("비활성 기기 신호는 판정에 쓰지 않는다").isEqualTo("PENDING");
+
+            syncFrom(me.token(), "device-A", List.of(usage));
+
+            assertThat(todayStatusOf(memberId))
+                    .as("믿을 수 있는 기기가 같은 기록을 올렸으면 그 주장은 인정돼야 한다")
+                    .isEqualTo("SUCCESS");
+            assertThat(excludeReasonOf("verification_device_usage_signals", me.id())).isNull();
+        }
+
+        @Test
+        @DisplayName("배제를 풀 때 인정되는 본문은 믿을 수 있는 기기가 보낸 쪽이다")
+        void revivedRecordKeepsTheTrustedPayload() throws Exception {
+            // 배제만 풀고 본문을 남기면, 못 믿을 기기가 recordId 를 선점해 유리한 본문을 심어 두고
+            // 깨끗한 기기의 정상 전송이 그것을 인정해 주는 꼴이 된다.
+            Member me = member(uniq("ingest-plant"));
+            UUID challenge = insertAutoChallenge(me.id(), "SCREEN_TIME_MIN", "USAGE", "{\"duration_min\":30}");
+            UUID memberId = insertReadyMember(challenge, me.id(), null, screenApps("com.ridi.books"));
+            jdbc().update("UPDATE users SET device_id = ? WHERE id = ?", "device-A", bytes(me.id()));
+
+            // 심는 쪽: 같은 recordId 에 60분짜리 본문.
+            syncFrom(me.token(), "old-device", List.of(withRecordId(
+                    usageSignal("com.ridi.books", todayAt(9, 0), todayAt(10, 0)), "plant-1")));
+            // 실제 기기가 보낸 같은 기록: 10분.
+            syncFrom(me.token(), "device-A", List.of(withRecordId(
+                    usageSignal("com.ridi.books", todayAt(9, 0), todayAt(9, 10)), "plant-1")));
+
+            assertThat(todayStatusOf(memberId))
+                    .as("심어 둔 60분이 아니라 실제로 보낸 10분이 인정돼야 한다")
+                    .isEqualTo("PENDING");
         }
 
         @Test

@@ -45,12 +45,19 @@ public class PermissionWaitService {
         // A previous membership's unresolved wait cannot be reused after rejoining.
         // first_observed_at is app time and joined_at is DB time, so the boundary carries a skew tolerance.
         jdbc.update("UPDATE verification_permission_waits w SET resolved_at=UTC_TIMESTAMP(6) WHERE challenge_id=? AND user_id=? " +
-                "AND signal_type=? AND first_observed_at<DATE_SUB((SELECT MAX(joined_at) FROM challenge_join_events e WHERE e.challenge_id=w.challenge_id AND e.user_id=w.user_id), INTERVAL " + ClockSkew.TOLERANCE_SECONDS + " SECOND)",
+                // 방장은 challenge_join_events 에 행이 없어 서브쿼리가 NULL 이 되고, 비교가 NULL 이라 행이 통째로 빠졌다(QA SAN-09).
+                "AND signal_type=? AND first_observed_at<DATE_SUB(COALESCE("
+                + "(SELECT MAX(joined_at) FROM challenge_join_events e WHERE e.challenge_id=w.challenge_id AND e.user_id=w.user_id),"
+                + "(SELECT m.joined_at FROM challenge_members m WHERE m.challenge_id=w.challenge_id AND m.user_id=w.user_id)"
+                + "), INTERVAL " + ClockSkew.TOLERANCE_SECONDS + " SECOND)",
                 bytes(event.challengeId()),bytes(event.userId()),event.signalType());
         // A partial current cycle is not a full waiting cycle.
         LocalDate from = ChallengeCycle.countFrom(challenge.getStartDate(), event.detectedAt().atZone(KST).toLocalDate());
         pushes.enqueuePermissionGap(event.userId(), event.challengeId(), event.targetDate(), event.signalType(), event.detectedAt());
-        notifications.publish(NotificationEvent.of(event.userId(), NotificationType.PERMISSION_REGRANT_REQUIRED,
+        // forChallenge 로 <b>방을 채워</b> 발행한다 — 음소거 판정이 notifications.challenge_id 로만 이뤄지므로
+        // of() 로 내면 방을 음소거해도 이 알림만 푸시를 뚫고 나간다(QA NOTI-04).
+        notifications.publish(NotificationEvent.forChallenge(event.userId(), NotificationType.PERMISSION_REGRANT_REQUIRED,
+                event.challengeId(),
                 Map.of(NotificationParams.EVENT_KEY, event.challengeId() + ":" + event.signalType() + ":" + event.targetDate(),
                         NotificationParams.CHALLENGE_ID, event.challengeId().toString(), NotificationParams.PERMISSION, event.signalType())));
         jdbc.update("INSERT INTO verification_permission_waits(challenge_id,user_id,signal_type,source_event_id,first_observed_at,waiting_from_on) " +

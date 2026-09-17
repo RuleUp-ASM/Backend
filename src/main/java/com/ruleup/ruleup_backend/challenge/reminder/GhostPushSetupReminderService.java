@@ -95,8 +95,10 @@ public class GhostPushSetupReminderService {
                 ? required.getFirst()
                 : String.valueOf(c.getVerificationConfig().signalSource());
 
-        notificationPublisher.publish(NotificationEvent.of(userId,
+        // 방 음소거는 notifications.challenge_id 로 판정한다 — 비워 두면 음소거를 뚫는다(QA NOTI-04).
+        notificationPublisher.publish(NotificationEvent.forChallenge(userId,
                 NotificationType.PERMISSION_REGRANT_REQUIRED,
+                c.getId(),
                 Map.of(NotificationParams.EVENT_KEY, c.getId() + ":" + permission,
                         NotificationParams.CHALLENGE_ID, c.getId().toString(),
                         NotificationParams.PERMISSION, permission)));

@@ -58,7 +58,17 @@ class VerificationFailureExplanationTest {
         void unknownReasonStillExplains() {
             FailureEvidence evidence = FailureEvidence.of("SOMETHING_NEW", Map.of());
 
-            assertThat(evidence.summary()).isNotBlank().contains("SOMETHING_NEW");
+            assertThat(evidence.summary()).isNotBlank();
+        }
+
+        @Test
+        @DisplayName("사유 코드는 문장에 섞이지 않는다 — 이 값은 화면에 그대로 나간다")
+        void summaryNeverLeaksTheReasonCode() {
+            assertThat(FailureEvidence.of("SOMETHING_NEW", Map.of()).summary())
+                    .doesNotContain("SOMETHING_NEW");
+            assertThat(FailureEvidence.of("GEOFENCE_NOT_CONFIGURED", Map.of()).summary())
+                    .doesNotContain("GEOFENCE_NOT_CONFIGURED")
+                    .contains("장소");
         }
 
         @Test

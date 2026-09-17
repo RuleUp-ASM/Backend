@@ -221,6 +221,7 @@ public enum ErrorCode {
 
     // ===== 수동 인증 제출 / 취소 =====
     NOT_MANUAL_CHALLENGE(HttpStatus.CONFLICT, "직접 체크로 인증하는 챌린지가 아니에요."),
+    NOTE_TOO_LONG(HttpStatus.BAD_REQUEST, "메모는 200자까지 쓸 수 있어요."),
     NOT_MANUAL_VERIFICATION(HttpStatus.CONFLICT, "자동으로 판정된 인증은 취소할 수 없어요."),
     CANCEL_WINDOW_CLOSED(HttpStatus.CONFLICT, "오늘이 지나서 취소할 수 없어요."),
 
@@ -272,6 +273,7 @@ public enum ErrorCode {
     INVITATION_INVALID(HttpStatus.BAD_REQUEST, "초대 링크가 올바르지 않아요."),
     INVITATION_EXPIRED(HttpStatus.GONE, "초대가 만료됐어요. 다시 요청해주세요."),
     ALREADY_WATCHER(HttpStatus.CONFLICT, "이미 이 챌린지의 감시자예요."),
+    INVITATION_ALREADY_ACCEPTED(HttpStatus.CONFLICT, "이미 사용된 초대예요. 초대한 분에게 새 링크를 요청해주세요."),
     WATCHER_BLOCKED(HttpStatus.CONFLICT, "차단한 사용자의 감시자가 될 수 없어요."),
     WATCHER_PENALTY_DISABLED(HttpStatus.CONFLICT, "감시자 패널티가 꺼져 있어요."),
     CANNOT_WATCH_SELF(HttpStatus.BAD_REQUEST, "본인은 감시자가 될 수 없어요."),

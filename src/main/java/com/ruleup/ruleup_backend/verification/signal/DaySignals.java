@@ -61,7 +61,7 @@ public final class DaySignals {
             if (!keepsAny) return null;
             return new SyncSignal(s.type(), s.recordId(), s.observedAt(), transitions, points, s.isMock(),
                     s.readings(), s.sessionStart(), s.sessionEnd(), s.detectedActivity(), s.date(),
-                    usageEvents, screenEvents, s.segments());
+                    usageEvents, screenEvents, s.segments(), s.receivedAt());
         }
 
         // 항목도 날짜 선언도 없는 신호(HEALTH readings 등)는 관측 시각으로 가른다.
