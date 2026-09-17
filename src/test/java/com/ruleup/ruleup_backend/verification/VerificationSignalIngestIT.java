@@ -96,9 +96,12 @@ class VerificationSignalIngestIT extends VerificationApiSupport {
     }
 
     private String excludeReasonOf(UUID userId) {
+        return excludeReasonOf("verification_location_signals", userId);
+    }
+
+    private String excludeReasonOf(String table, UUID userId) {
         return jdbc().queryForObject(
-                "SELECT excludeReason FROM verification_location_signals WHERE userId = ?",
-                String.class, bytes(userId));
+                "SELECT excludeReason FROM " + table + " WHERE userId = ?", String.class, bytes(userId));
     }
 
     private java.sql.Timestamp receivedAtOf(UUID userId) {
@@ -261,6 +264,54 @@ class VerificationSignalIngestIT extends VerificationApiSupport {
                     .isEqualTo(first);
             assertThat(excludeReasonOf(me.id()))
                     .as("기존 행은 믿을 수 있는 기기의 것 그대로다").isNull();
+        }
+
+        @Test
+        @DisplayName("교체 전 기기가 먼저 올린 기록도 활성 기기가 다시 올리면 인정된다")
+        void trustedResendRevivesAnExcludedRecord() throws Exception {
+            // 배제는 기록이 아니라 봉투의 성질이다. 멱등은 기록 단위라, 교체 전 기기가 백로그를
+            // 먼저 흘려보내면 그 recordId 들이 배제된 채 자리를 차지하고 — 새 기기가 같은 기록을
+            // 올려도 중복으로 걸려 영영 판정에 쓰이지 않는다. 기기를 바꾼 사용자의 사용 시간이
+            // 조용히 통째로 사라지는 경로다.
+            Member me = member(uniq("ingest-revive"));
+            UUID challenge = insertAutoChallenge(me.id(), "SCREEN_TIME_MIN", "USAGE", "{\"duration_min\":30}");
+            UUID memberId = insertReadyMember(challenge, me.id(), null, screenApps("com.ridi.books"));
+            jdbc().update("UPDATE users SET device_id = ? WHERE id = ?", "device-A", bytes(me.id()));
+
+            Map<String, Object> usage = withRecordId(
+                    usageSignal("com.ridi.books", todayAt(9, 0), todayAt(10, 0)), "revive-1");
+
+            syncFrom(me.token(), "old-device", List.of(usage));
+            assertThat(todayStatusOf(memberId)).as("비활성 기기 신호는 판정에 쓰지 않는다").isEqualTo("PENDING");
+
+            syncFrom(me.token(), "device-A", List.of(usage));
+
+            assertThat(todayStatusOf(memberId))
+                    .as("믿을 수 있는 기기가 같은 기록을 올렸으면 그 주장은 인정돼야 한다")
+                    .isEqualTo("SUCCESS");
+            assertThat(excludeReasonOf("verification_device_usage_signals", me.id())).isNull();
+        }
+
+        @Test
+        @DisplayName("배제를 풀 때 인정되는 본문은 믿을 수 있는 기기가 보낸 쪽이다")
+        void revivedRecordKeepsTheTrustedPayload() throws Exception {
+            // 배제만 풀고 본문을 남기면, 못 믿을 기기가 recordId 를 선점해 유리한 본문을 심어 두고
+            // 깨끗한 기기의 정상 전송이 그것을 인정해 주는 꼴이 된다.
+            Member me = member(uniq("ingest-plant"));
+            UUID challenge = insertAutoChallenge(me.id(), "SCREEN_TIME_MIN", "USAGE", "{\"duration_min\":30}");
+            UUID memberId = insertReadyMember(challenge, me.id(), null, screenApps("com.ridi.books"));
+            jdbc().update("UPDATE users SET device_id = ? WHERE id = ?", "device-A", bytes(me.id()));
+
+            // 심는 쪽: 같은 recordId 에 60분짜리 본문.
+            syncFrom(me.token(), "old-device", List.of(withRecordId(
+                    usageSignal("com.ridi.books", todayAt(9, 0), todayAt(10, 0)), "plant-1")));
+            // 실제 기기가 보낸 같은 기록: 10분.
+            syncFrom(me.token(), "device-A", List.of(withRecordId(
+                    usageSignal("com.ridi.books", todayAt(9, 0), todayAt(9, 10)), "plant-1")));
+
+            assertThat(todayStatusOf(memberId))
+                    .as("심어 둔 60분이 아니라 실제로 보낸 10분이 인정돼야 한다")
+                    .isEqualTo("PENDING");
         }
 
         @Test
