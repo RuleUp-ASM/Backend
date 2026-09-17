@@ -61,6 +61,13 @@ class VerificationPrivacyRetentionIT extends VerificationApiSupport {
         return postJsonAuth("/api/v1/verifications/sync", token, syncBody(signals));
     }
 
+    private void syncFrom(String token, String deviceId, List<Map<String, Object>> signals) throws Exception {
+        Map<String, Object> body = syncBody(signals);
+        body.put("deviceId", deviceId);
+        assertThat(postJsonAuth("/api/v1/verifications/sync", token, body)
+                .getResponse().getStatus()).isEqualTo(200);
+    }
+
     private void revokeConsents(UUID userId) {
         jdbc().update("UPDATE user_agreement_states SET agreed = 0 "
                 + "WHERE user_id = ? AND agreement_type IN ('LOCATION_INFO','HEALTH_INFO')", bytes(userId));
@@ -221,6 +228,41 @@ class VerificationPrivacyRetentionIT extends VerificationApiSupport {
                     .as("먼저 확정한 챌린지 기준으로 타이머를 잡으면, 아침에 성공한 하나가 "
                             + "그날 좌표 전부를 일찍 지워 D+2 에 확정될 다른 챌린지가 근거를 잃는다")
                     .isZero();
+        }
+
+        @Test
+        @DisplayName("[P1] 이미 파기된 좌표는 정상 기기가 다시 올려도 되살아나지 않는다")
+        void aPurgedCoordinateIsNotRestoredByALaterTrustedResend() throws Exception {
+            // 배제된 행을 정상 기기의 재전송으로 복구할 때, 위치 원본은 <b>이미 지워졌을 수</b> 있다.
+            // 본문을 그대로 덮어쓰면 좌표가 되살아나는데 purgedAt 은 그대로라, 파기 배치가
+            // 다시 집어 가지도 못한다 — 「지웠다」고 기록된 채 좌표가 남는다.
+            Member me = member(uniq("privacy-revive"));
+            jdbc().update("UPDATE users SET device_id = ? WHERE id = ?", "device-A", bytes(me.id()));
+
+            Map<String, Object> signal = locationSignal(GYM_LAT, GYM_LNG, List.of(todayAt(9, 0)));
+            signal.put("recordId", "purge-revive-1");
+
+            // 교체 전 기기가 먼저 올린다 — 배제 사유가 행에 새겨진다.
+            syncFrom(me.token(), "old-device", List.of(signal));
+            makeDue(me.id());
+            locationPurge.purgeDue();
+            assertThat(purgedRows(me.id())).as("파기 대상이 맞다").isEqualTo(1);
+
+            // 활성 기기가 같은 기록을 다시 올린다.
+            syncFrom(me.token(), "device-A", List.of(signal));
+
+            assertThat(coordinatesLeft(me.id()))
+                    .as("파기 완료로 기록된 행에 좌표가 다시 들어가면, 후속 파기가 집어 가지도 못한다")
+                    .isZero();
+        }
+
+        /** 좌표가 남아 있는 행 수 — 파기된 본문({"purged":true})에는 points 가 없다. */
+        private int coordinatesLeft(UUID userId) {
+            Integer n = jdbc().queryForObject(
+                    "SELECT COUNT(*) FROM verification_location_signals"
+                            + " WHERE userId = ? AND JSON_EXTRACT(payload, '$.points') IS NOT NULL",
+                    Integer.class, bytes(userId));
+            return (n != null) ? n : 0;
         }
 
         @Test

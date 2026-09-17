@@ -220,7 +220,9 @@ public class VerificationSignalIngestService {
      * 같아야 한다 — 믿을 수 있는 기기가 보낸 쪽으로 맞춘다.
      *
      * <p>배제된 적 없는 행은 건드리지 않는다({@code excludeReason IS NOT NULL}) — 평범한
-     * 재전송에서 <b>나중 본문이 먼저 본문을 덮는</b> 일은 그대로 막아 둔다.
+     * 재전송에서 <b>나중 본문이 먼저 본문을 덮는</b> 일은 그대로 막아 둔다. <b>이미 파기한
+     * 좌표</b>도 건드리지 않는다 — 보관 기간이 끝난 기록을 복구할 이유가 없고, 되살리면
+     * {@code purgedAt} 이 남아 있어 후속 파기가 집어 가지도 못한다.
      */
     private void rehabilitate(UUID userId, SignalDomain domain, LocalDate observedDate,
                               List<Candidate> resent, Instant receivedAt, String deviceId) {
@@ -235,7 +237,11 @@ public class VerificationSignalIngestService {
                 c.dedupKey()}).toList();
         String sql = "UPDATE " + domain.table()
                 + " SET excludeReason = NULL, deviceId = ?, occurredAt = ?, receivedAt = ?, payload = ?"
-                + " WHERE observedDate = ? AND userId = ? AND dedupKey = ? AND excludeReason IS NOT NULL";
+                + " WHERE observedDate = ? AND userId = ? AND dedupKey = ? AND excludeReason IS NOT NULL"
+                // 이미 파기한 좌표는 되살리지 않는다. 본문만 덮어쓰면 좌표가 돌아오는데 purgedAt 은
+                // 그대로라, 파기 배치가 다시 집어 가지도 못한다 — 「지웠다」고 기록된 채 좌표가 남는다.
+                // 보관 기간이 끝난 기록이라 복구할 이유도 없다.
+                + ((domain == SignalDomain.LOCATION) ? " AND purgedAt IS NULL" : "");
         for (int from = 0; from < args.size(); from += INSERT_BATCH) {
             jdbc.batchUpdate(sql, args.subList(from, Math.min(from + INSERT_BATCH, args.size())));
         }
