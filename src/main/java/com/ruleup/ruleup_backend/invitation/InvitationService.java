@@ -45,6 +45,7 @@ public class InvitationService {
     private final AppLinks appLinks;
 
     private final InviteCodeRepository inviteCodeRepository;
+    private final InviteCodeIssuer issuer;
     private final InvitationSignupRepository invitationSignupRepository;
     private final UserRepository userRepository;
 
@@ -74,15 +75,20 @@ public class InvitationService {
         return inviteCodeRepository.findByUserId(userId).orElseGet(() -> createCode(userId));
     }
 
+    /**
+     * 코드를 만든다. 쓰기는 {@link InviteCodeIssuer} 가 <b>자기 트랜잭션에서</b> 한다 —
+     * 실패하는 INSERT 를 이 트랜잭션 안에서 하면 유일 제약 위반이 rollback-only 를 새겨,
+     * 예외를 잡아 복구해도 커밋이 {@code UnexpectedRollbackException} 으로 끝난다.
+     */
     private InviteCode createCode(UUID userId) {
         for (int i = 0; i < MAX_GEN_ATTEMPTS; i++) {
             String code = randomCode();
-            if (inviteCodeRepository.existsByCode(code)) continue;
+            if (issuer.codeTaken(code)) continue;
             try {
-                return inviteCodeRepository.saveAndFlush(InviteCode.of(userId, code));
+                return issuer.issue(userId, code);
             } catch (DataIntegrityViolationException race) {
-                // 동시 생성 경합: 내 코드가 이미 만들어졌으면 그것을, 코드 충돌이면 재시도.
-                var existing = inviteCodeRepository.findByUserId(userId);
+                // 동시 생성 경합: 내 코드가 이미 만들어졌으면 그것을, 코드 문자열 충돌이면 재시도.
+                var existing = issuer.findFresh(userId);
                 if (existing.isPresent()) return existing.get();
             }
         }
