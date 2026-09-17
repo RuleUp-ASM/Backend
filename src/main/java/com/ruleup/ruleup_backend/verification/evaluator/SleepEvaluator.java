@@ -44,6 +44,8 @@ public class SleepEvaluator implements MethodEvaluator {
         // 그날 원본을 통째로 받아 매번 처음부터 합산하고, 같은 구간이 두 행으로 남아 있어도
         // (start|end) 키로 한 번만 센다.
         LinkedHashSet<String> seen = new LinkedHashSet<>();
+        // 합산 대상의 중복은 <b>따로</b> 건다 — 제외된 구간이 정상 구간의 자리를 막지 않게 한다.
+        LinkedHashSet<String> counted = new LinkedHashSet<>();
         // 잔 시간은 <b>구간의 합집합</b>이다. 길이를 그냥 더하면 겹친 시간이 두 번 세어져
         // 23:00~03:00 과 00:00~04:00 을 함께 올리면 실제 5시간이 8시간이 된다(QA SIG-10 확장).
         // Health Connect 는 같은 밤을 여러 조각으로 쪼개 보내고 조각이 겹치는 일이 흔하다.
@@ -64,9 +66,13 @@ public class SleepEvaluator implements MethodEvaluator {
             // 읽을 때는 더 이상 미래가 아니라서 새 기록 없이도 성공 근거로 되살아난다.
             // 실제로 자고 나면 같은 구간이 <b>나중 수신 시각</b>으로 다시 올라오므로 그때 인정된다.
             if (en.isAfter(claimedAt(night.receivedAt(), ctx).plus(CLOCK_SKEW))) { future++; continue; }
-            if (!seen.add(st.toString() + "|" + en.toString())) continue;   // 재전송 — 이미 반영했다
-            if (s.origin() == null) originMissing++;
+            boolean first = seen.add(st.toString() + "|" + en.toString());
+            if (first && s.origin() == null) originMissing++;
+            // <b>제외할 구간이 자리를 차지하면 안 된다.</b> 중복 판정을 출처 검증보다 먼저 걸면,
+            // 손입력 기록이 「이미 반영했다」로 등록돼 뒤따라 온 같은 구간의 정상 자동 기록이
+            // 재전송으로 걸러진다 — 손으로 적은 기록 하나가 그 밤의 인증을 통째로 막았다.
             if (!trusted(s, cfg)) { anyUntrusted = true; continue; }             // 손입력·비신뢰 출처는 제외
+            if (!counted.add(st.toString() + "|" + en.toString())) continue;     // 재전송 — 이미 반영했다
             intervals.add(new Instant[]{st, en});
             if (bedtime == null || st.isBefore(bedtime)) bedtime = st;
         }

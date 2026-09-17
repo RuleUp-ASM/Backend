@@ -46,10 +46,19 @@ class SleepUnionTest {
     }
 
     private static SyncSignal sleep(Instant start, Instant end, Instant receivedAt) {
+        return sleep(start, end, receivedAt, TRUSTED);
+    }
+
+    private static SyncSignal sleep(Instant start, Instant end, Instant receivedAt, HealthOrigin origin) {
         return new SyncSignal("SLEEP", null, end.toString(), null, null, null, null,
                 null, null, null, null, null, null,
-                List.of(new SleepSegment(start.toString(), end.toString(), "ASLEEP", TRUSTED)),
+                List.of(new SleepSegment(start.toString(), end.toString(), "ASLEEP", origin)),
                 receivedAt);
+    }
+
+    /** 손으로 적어 넣은 기록 — 출처는 같은 앱이지만 판정에는 쓰지 않는다. */
+    private static SyncSignal manualSleep(Instant start, Instant end) {
+        return sleep(start, end, at(18, 8, 0), new HealthOrigin(TRUSTED_ORIGIN, "MANUAL", "PHONE"));
     }
 
     private EvaluationOutcome evaluate(BigDecimal goalHours, Instant now, SyncSignal... signals) {
@@ -96,6 +105,45 @@ class SleepUnionTest {
                     sleep(at(17, 22, 0), at(18, 1, 0)));
 
             assertThat(outcome.evidence()).containsEntry("sleepHours", 6.0);
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
+        }
+    }
+
+    @Nested
+    @DisplayName("제외한 구간이 정상 구간의 자리를 막지 않는다")
+    class ExclusionOrder {
+
+        @Test
+        @DisplayName("손입력이 먼저 와 있어도 같은 구간의 자동 기록은 인정된다")
+        void manualFirstDoesNotSuppressTheLaterAutoRecord() {
+            // 중복 판정을 출처 검증보다 먼저 걸면, 손입력이 「이미 반영했다」로 등록돼
+            // 뒤따라 온 정상 기록이 재전송으로 걸러진다 — 그 밤의 인증이 통째로 막힌다.
+            EvaluationOutcome outcome = evaluate(BigDecimal.valueOf(7), at(18, 9, 0),
+                    manualSleep(at(17, 22, 0), at(18, 6, 0)),
+                    sleep(at(17, 22, 0), at(18, 6, 0)));
+
+            assertThat(outcome.evidence()).containsEntry("sleepHours", 8.0);
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
+        }
+
+        @Test
+        @DisplayName("손입력만 있으면 그대로 미인정이다")
+        void manualOnlyStillDoesNotCount() {
+            EvaluationOutcome outcome = evaluate(BigDecimal.valueOf(7), at(18, 9, 0),
+                    manualSleep(at(17, 22, 0), at(18, 6, 0)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.PENDING);
+            assertThat(outcome.evidence()).containsEntry("untrustedExcluded", true);
+        }
+
+        @Test
+        @DisplayName("자동 기록이 먼저 와도 결과는 같다 — 도착 순서가 판정을 바꾸지 않는다")
+        void autoFirstGivesTheSameAnswer() {
+            EvaluationOutcome outcome = evaluate(BigDecimal.valueOf(7), at(18, 9, 0),
+                    sleep(at(17, 22, 0), at(18, 6, 0)),
+                    manualSleep(at(17, 22, 0), at(18, 6, 0)));
+
+            assertThat(outcome.evidence()).containsEntry("sleepHours", 8.0);
             assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
         }
     }
