@@ -55,6 +55,7 @@ public class ChallengeDetailQueryService {
     private final com.ruleup.ruleup_backend.room.service.ChallengeRejoinPolicy rejoinPolicy;
     private final com.ruleup.ruleup_backend.challenge.lifecycle.ChallengeHistoryQueryService history;
     private final com.ruleup.ruleup_backend.challenge.view.ChallengeMasking masking;
+    private final com.ruleup.ruleup_backend.report.BlockService blocks;
 
     @Transactional(readOnly = true)
     public ChallengeDetailResponse detail(UUID viewerId, UUID challengeId) {
@@ -95,7 +96,7 @@ public class ChallengeDetailQueryService {
                 c.getParticipationType().name(),
                 c.getVisibility(),
                 c.getStatus().name(),
-                owner(c),
+                owner(c, viewerId),
                 c.getOwnerType().name(),
                 // isFull 을 실시간 COUNT 로 재면서 참여자 수만 비동기 표시값을 내리면
                 // 「0명인데 마감」 같은 카드가 나온다. 한 요청 안에서는 같은 원천을 본다.
@@ -154,11 +155,24 @@ public class ChallengeDetailQueryService {
         return null;
     }
 
-    private ChallengeDetailResponse.Owner owner(Challenge c) {
+    /**
+     * 방장 표시. <b>차단한 사람이면 멤버 목록과 같은 임시 닉네임으로 가린다.</b>
+     *
+     * <p>멤버 목록·랭킹·스레드는 이미 {@code blockedUsers} 로 가리고 있었는데 여기만 빠져 있어,
+     * 방장을 신고해 차단해도 정보 탭의 「방장 ○○○」에 실명이 그대로 남았다(QA REP-04).
+     * 한 화면 안에서 같은 사람이 목록에서는 가려지고 진행 정보에서는 보이는 상태였다.
+     *
+     * <p>또 {@code getNickname()} 이 아니라 {@code visibleNicknameTo} 를 쓴다 — 전자는 <b>심사 전
+     * 신청 닉네임</b>이라, 심사에 걸린 닉네임이 남의 화면에 그대로 나갔다.
+     */
+    private ChallengeDetailResponse.Owner owner(Challenge c, UUID viewerId) {
         if (c.isBotOwned() || c.getCreatorId() == null) return null;   // 봇방장이면 사람 방장이 없다
+        boolean blocked = blocks.isUserBlocked(viewerId, c.getCreatorId());
         return userRepository.findById(c.getCreatorId())
                 .map(u -> new ChallengeDetailResponse.Owner(
-                        c.getCreatorId().toString(), c.getAnonymity().maskNickname(u.getNickname())))
+                        c.getCreatorId().toString(),
+                        blocked ? u.deriveTempNickname()
+                                : c.getAnonymity().maskNickname(u.visibleNicknameTo(viewerId))))
                 .orElse(null);
     }
 
