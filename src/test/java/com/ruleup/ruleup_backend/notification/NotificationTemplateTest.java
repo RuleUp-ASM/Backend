@@ -127,7 +127,7 @@ class NotificationTemplateTest {
             String reason = "GPS {오류}로 강퇴";
 
             assertThat(NotificationTemplate.render(NotificationType.CHALLENGE_KICKED,
-                    Map.of(NotificationParams.REASON, reason)).body())
+                    Map.of(NotificationParams.VARIANT, "OWNER", NotificationParams.REASON, reason)).body())
                     .isEqualTo(reason);
         }
 
@@ -152,11 +152,24 @@ class NotificationTemplateTest {
         }
 
         @Test
-        @DisplayName("강퇴 본문은 방장이 쓴 사유가 통째로 들어간다")
+        @DisplayName("방장 강퇴 본문은 방장이 쓴 사유가 통째로 들어간다")
         void kickReason() {
             assertThat(NotificationTemplate.render(NotificationType.CHALLENGE_KICKED,
-                    Map.of(NotificationParams.REASON, "인증을 세 번 놓쳤어요")).body())
+                    Map.of(NotificationParams.VARIANT, "OWNER",
+                            NotificationParams.REASON, "인증을 세 번 놓쳤어요")).body())
                     .isEqualTo("인증을 세 번 놓쳤어요");
+        }
+
+        @Test
+        @DisplayName("자동 강퇴 본문에는 내부 사유 코드가 나오지 않는다 — 사유별 고정 문구다")
+        void automaticKickUsesFixedCopy() {
+            String body = NotificationTemplate.render(NotificationType.CHALLENGE_KICKED,
+                    Map.of(NotificationParams.VARIANT, "CONSECUTIVE_FAILURE",
+                            NotificationParams.REASON, "CONSECUTIVE_FAILURE")).body();
+
+            assertThat(body).doesNotContain("CONSECUTIVE_FAILURE");
+            assertThat(body).isEqualTo(
+                    "연속으로 인증을 놓쳐 이 챌린지에서 나가게 됐어요. 자세한 내용은 제재 이력에서 확인해주세요.");
         }
     }
 
