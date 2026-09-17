@@ -64,10 +64,20 @@ public record FailureEvidence(String summary,
             case "PERMISSION_MISSING" -> "인증에 필요한 권한이 꺼져 있어 측정하지 못했어요.";
             case "NO_SIGNAL_RECEIVED" -> "판정에 쓸 신호가 도착하지 않았어요.";
             case "UNTRUSTED_HEALTH_SOURCE" -> "직접 입력했거나 신뢰할 수 없는 출처의 기록만 있었어요.";
+            case "OUT_OF_GEOFENCE" -> "등록한 장소 안에서의 기록이 없어요.";
+            case "GEOFENCE_NOT_CONFIGURED" -> "인증 장소가 아직 등록되지 않았어요.";
+            case "PHONE_USED_IN_BLOCK_WINDOW" -> "사용을 멈추기로 한 시간에 휴대폰을 쓴 기록이 있어요.";
+            case "PERIOD_QUOTA_MISSED" -> "이번 주에 채우기로 한 횟수를 채우지 못했어요.";
+            case "METHOD_NOT_SUPPORTED_ON_PLATFORM" -> "이 기기에서는 이 인증 방식을 쓸 수 없어요.";
+            case "MANUAL_NOT_SUBMITTED" -> "직접 체크를 하지 않은 채로 그날이 지났어요.";
+            case "FALLBACK_LIMIT_EXCEEDED" -> "예비 인증을 쓸 수 있는 횟수를 모두 썼어요.";
             default -> null;
         };
         if (text == null || text.isBlank()) {
-            text = "이 날의 인증 조건을 충족하지 못했어요." + (reasonCode == null ? "" : " (" + reasonCode + ")");
+            // <b>사유 코드를 문장에 붙이지 않는다.</b> 이 값은 화면에 그대로 나가는 문장이라,
+            // 붙이면 사용자에게 「… (GEOFENCE_NOT_CONFIGURED)」처럼 내부 코드가 보인다(QA VER-16·VER-07).
+            // 코드가 필요한 쪽은 같은 응답의 failureReason 필드를 읽으면 된다 — 층이 다르다.
+            text = "이 날의 인증 조건을 충족하지 못했어요.";
         }
         return text.length() <= SUMMARY_MAX ? text : text.substring(0, SUMMARY_MAX);
     }
