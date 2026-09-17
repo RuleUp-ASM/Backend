@@ -24,7 +24,11 @@ public class MePermissionWarnings {
         return jdbc.query("SELECT w.challenge_id,w.signal_type,w.waiting_from_on FROM verification_permission_waits w " +
                 "JOIN challenge_members m ON m.challenge_id=w.challenge_id AND m.user_id=w.user_id " +
                 "WHERE w.user_id=? AND w.resolved_at IS NULL AND m.status='ACTIVE' AND m.left_at IS NULL " +
-                "AND w.first_observed_at>=DATE_SUB((SELECT MAX(joined_at) FROM challenge_join_events e WHERE e.challenge_id=w.challenge_id AND e.user_id=w.user_id), INTERVAL " + ClockSkew.TOLERANCE_SECONDS + " SECOND)",
+                // 방장은 가입 사건 행이 없어 서브쿼리가 NULL → 비교가 NULL → 경고가 안 보였다(QA SAN-09).
+                "AND w.first_observed_at>=DATE_SUB(COALESCE("
+                + "(SELECT MAX(joined_at) FROM challenge_join_events e WHERE e.challenge_id=w.challenge_id AND e.user_id=w.user_id),"
+                + "(SELECT m2.joined_at FROM challenge_members m2 WHERE m2.challenge_id=w.challenge_id AND m2.user_id=w.user_id)"
+                + "), INTERVAL " + ClockSkew.TOLERANCE_SECONDS + " SECOND)",
                 (rs,n)->{
                     var b=ByteBuffer.wrap(rs.getBytes(1));
                     LocalDate until=rs.getDate(3).toLocalDate().plusDays(14);

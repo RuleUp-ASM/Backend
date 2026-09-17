@@ -37,9 +37,22 @@ public enum NotificationTemplate {
 
     // ===== 계정 그룹 =====
 
-    /** 강퇴 사유는 방장이 직접 쓴 문장이라 본문이 통째로 값이다. */
-    CHALLENGE_KICKED(NotificationType.CHALLENGE_KICKED,
+    /**
+     * 강퇴 — <b>누가 내보냈는가</b>로 갈린다. 방장이 쓴 문장과 정책 판정은 같은 자리에 넣을 수 없다.
+     *
+     * <p>예전에는 본문이 {@code {reason}} 하나뿐이라, {@code AutomaticKickService} 가 싣는
+     * {@code reason.name()} 이 그대로 본문이 되어 사용자에게 「CONSECUTIVE_FAILURE」가 보였다(QA SAN-09).
+     * 변형 파라미터는 {@code variant} 로 통일한다 — 한 타입의 변형이 서로 다른 키로 갈리면
+     * 기동 검증이 막는다.
+     */
+    CHALLENGE_KICKED_OWNER(NotificationType.CHALLENGE_KICKED, VARIANT, "OWNER",
             "챌린지에서 내보내졌어요", "{reason}"),
+    CHALLENGE_KICKED_CONSECUTIVE_FAILURE(NotificationType.CHALLENGE_KICKED, VARIANT, "CONSECUTIVE_FAILURE",
+            "챌린지에서 내보내졌어요",
+            "연속으로 인증을 놓쳐 이 챌린지에서 나가게 됐어요. 자세한 내용은 제재 이력에서 확인해주세요."),
+    CHALLENGE_KICKED_PERMISSION_MISSING(NotificationType.CHALLENGE_KICKED, VARIANT, "PERMISSION_MISSING",
+            "챌린지에서 내보내졌어요",
+            "인증 권한이 없는 상태가 이어져 이 챌린지에서 나가게 됐어요. 자세한 내용은 제재 이력에서 확인해주세요."),
 
     /**
      * 제재 집행 — 수단 3종 × 기한 유무. 기한이 있으면 「해제 예정일」을 문장에 넣고, 날짜 자체는

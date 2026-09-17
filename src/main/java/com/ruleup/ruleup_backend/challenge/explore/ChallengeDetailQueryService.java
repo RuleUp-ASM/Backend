@@ -67,6 +67,12 @@ public class ChallengeDetailQueryService {
         boolean isActiveMember = myMembership != null && myMembership.isActive();
         boolean isOwner = c.isOwner(viewerId);
         requireVisible(c, isOwner, isActiveMember);
+        // 신고로 <b>숨긴</b> 방(미참여)은 상세로도 열리지 않는다. 가림이 목록 쿼리에만 걸려 있어
+        // 딥링크·알림·초대 링크로 그대로 다시 노출됐다(QA REP-05). 참여 중이면 나가는 것이 먼저라
+        // 방을 없애지 않고 표시값만 가린다 — 그건 아래 ChallengeView 가 한다.
+        if (!isActiveMember && !isOwner && masking.isMasked(viewerId, challengeId)) {
+            throw new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND);
+        }
 
         Tier myTier = displayTier(viewerId);
         boolean eligible = c.getMinTier() == null || myTier.ordinal() >= c.getMinTier().ordinal();

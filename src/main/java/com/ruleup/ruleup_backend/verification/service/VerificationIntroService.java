@@ -32,7 +32,7 @@ public class VerificationIntroService {
 
     public VerificationIntroResponse resolve(UUID userId, VerificationIntroRequest req) {
         Cadence on = new Cadence(true, null);
-        Collection collection = new Collection(on, on, on, on);
+        Collection collection = new Collection(on, on, on, on, on);
         int flushIntervalSec = syncPolicy.forUser(userRepository.findById(userId).orElse(null));
         Instant now = Instant.now();
         UUID sessionId = sessionStore.issue(userId,

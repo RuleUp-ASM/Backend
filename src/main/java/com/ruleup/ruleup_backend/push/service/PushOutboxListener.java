@@ -66,8 +66,10 @@ public class PushOutboxListener {
      */
     private void notifyRegrantRequired(PermissionGapDetected event) {
         String challengeId = event.challengeId().toString();
-        notificationPublisher.publish(NotificationEvent.of(event.userId(),
+        // 방 음소거는 notifications.challenge_id 로 판정한다 — 비워 두면 음소거를 뚫는다(QA NOTI-04).
+        notificationPublisher.publish(NotificationEvent.forChallenge(event.userId(),
                 NotificationType.PERMISSION_REGRANT_REQUIRED,
+                event.challengeId(),
                 Map.of(NotificationParams.EVENT_KEY,
                                 challengeId + ":" + event.signalType() + ":" + event.targetDate(),
                         NotificationParams.CHALLENGE_ID, challengeId,

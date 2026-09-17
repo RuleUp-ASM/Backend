@@ -77,10 +77,13 @@ public class WatcherReactionService {
         // 응원도 놀림도 의미가 없다.
         //
         audit.afterCommit("WATCHER_REACTED", relation.getId(), watcherUserId, null, reaction.name(), relation.getConsentVersion());
+        // 수신자는 <b>방 멤버인 피감시자</b>라 방 음소거가 적용돼야 한다. 감시자에게 가는
+        // PENALTY_FAILURE_SHARED 와 달리 여기는 of() 가 아니라 forChallenge 다(QA NOTI-04).
         if (!blocks.isUserBlocked(relation.getTargetUserId(), watcherUserId))
-        notificationPublisher.publish(NotificationEvent.of(
+        notificationPublisher.publish(NotificationEvent.forChallenge(
                 relation.getTargetUserId(),
                 NotificationType.WATCHER_REACTION,
+                relation.getChallengeId(),
                 // 응원과 놀림은 제목이 다르다 — 문구 선택은 레지스트리가 한다.
                 Map.of(NotificationParams.VARIANT, reaction.name(),
                         NotificationParams.ACTOR_NAME, reactorNickname,

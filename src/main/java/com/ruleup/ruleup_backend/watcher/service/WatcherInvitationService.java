@@ -48,7 +48,9 @@ public class WatcherInvitationService {
     public InvitationEntryResponse getByToken(String token) {
         WatcherInvitation i = invitation(token);
         Challenge c = challenges.findById(i.getChallengeId()).orElseThrow(() -> new BusinessException(ErrorCode.INVITATION_NOT_FOUND));
-        return new InvitationEntryResponse(i.getId().toString(), "INVITED", c.publicTitle(), nickname(i.getInviterUserId()),
+        // 상태는 <b>행에서</b> 읽는다. "INVITED" 를 박아 두면 이미 수락된 초대도 계속 수락 가능한 것처럼 보인다(QA WAT-06).
+        String status = (i.getAcceptedAt() != null) ? "ACCEPTED" : "INVITED";
+        return new InvitationEntryResponse(i.getId().toString(), status, c.publicTitle(), nickname(i.getInviterUserId()),
                 true, "ruleup://watchers/invitations/" + token + "/accept", i.getExpiresAt().toString(), WatcherRelation.CONSENT_VERSION);
     }
     @Transactional
@@ -63,10 +65,17 @@ public class WatcherInvitationService {
         if (blocks.isUserBlocked(watcherId, i.getInviterUserId())) throw new BusinessException(ErrorCode.WATCHER_BLOCKED);
         WatcherRelation r = relationRepository.findByChallengeIdAndTargetUserIdAndWatcherUserId(c.getId(), i.getInviterUserId(), watcherId).orElse(null);
         if (r != null && (r.isDispatchable() || r.getRemovedAt() != null)) throw new BusinessException(ErrorCode.ALREADY_WATCHER);
+        // 같은 사람의 재수락은 위에서 ALREADY_WATCHER 로 끝난다 — 여기 걸리는 건 <b>남의 초대장</b>이다.
+        requireUnused(i);
         Instant now = Instant.now();
+        // <b>초대장 하나는 한 사람만 쓴다.</b> 조건부 UPDATE(acceptedAt IS NULL)의 결과를 버리고 있어서,
+        // 카카오톡으로 전달된 링크를 여러 계정이 차례로 수락하면 전부 감시자가 됐다(QA WAT-06).
+        // 관계를 만들기 <b>전에</b> 선점해야 동시 요청에서도 한 명만 통과한다.
+        if (invitationRepository.acceptOnce(i.getId(), now) == 0) {
+            throw new BusinessException(ErrorCode.INVITATION_ALREADY_ACCEPTED);
+        }
         if (r == null) r = relationRepository.save(WatcherRelation.accepted(c.getId(), i.getInviterUserId(), watcherId, i.getExpiresAt().minus(WatcherInvitation.TTL), now));
         else r.accept(now);
-        invitationRepository.acceptOnce(i.getId(), now);
         audit.afterCommit("WATCHER_ACCEPTED", r.getId(), watcherId, "PENDING", "ACTIVE", r.getConsentVersion());
         return new WatcherAcceptResponse(r.getId().toString(), "ACTIVE", "IN_APP", now.toString());
     }
@@ -79,6 +88,10 @@ public class WatcherInvitationService {
         Instant now = Instant.now();
         if (!claims.expiresAt().isAfter(now) || i.isExpired(now)) throw new BusinessException(ErrorCode.INVITATION_EXPIRED);
         return i;
+    }
+    /** 이미 누군가 수락한 초대장인가 — 수락 경로에서만 막는다(조회는 상태를 보여 주는 것이 낫다). */
+    private static void requireUnused(WatcherInvitation i) {
+        if (i.getAcceptedAt() != null) throw new BusinessException(ErrorCode.INVITATION_ALREADY_ACCEPTED);
     }
     private Challenge liveChallenge(UUID id) {
         Challenge c = challenges.findByIdForUpdate(id).orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));

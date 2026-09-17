@@ -169,7 +169,7 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
                 continue;
             }
             for (GeofenceTransition t : s.transitions()) {
-                if (Boolean.TRUE.equals(t.isMock())) continue;   // 조작된 위치는 판정 근거가 아니다(§9.1)
+                if (untrustedLocation(t.isMock())) continue;   // 조작된 위치·출처 불명은 판정 근거가 아니다(§9.1)
                 if (memberId == null || memberId.equals(t.geofenceId())) out.add(t);
             }
         }
@@ -195,13 +195,13 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
             for (SyncSignal s : ctx.signals()) {
                 if (s.transitions() != null) {
                     for (GeofenceTransition t : s.transitions()) {
-                        if (t != null && Boolean.TRUE.equals(t.isMock())) mock++;
+                        if (t != null && untrustedLocation(t.isMock())) mock++;
                     }
                 }
                 if (s.points() == null) continue;
                 for (GeoPoint p : s.points()) {
                     if (p == null) continue;
-                    if (Boolean.TRUE.equals(p.isMock())) mock++;
+                    if (untrustedLocation(p.isMock())) mock++;
                     else if (maxAccuracy != null && p.accuracy() != null
                             && p.accuracy() > maxAccuracy) lowAccuracy++;
                 }
@@ -266,9 +266,21 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
      * 조작된 위치(mock)는 애초에 근거가 아니다. 둘 다 "제외"일 뿐 부정행위 확정과는 분리한다(§9.1).
      */
     private boolean usableForDwell(GeoPoint p, GpsConfig cfg) {
-        if (Boolean.TRUE.equals(p.isMock())) return false;
+        if (untrustedLocation(p.isMock())) return false;
         Integer maxAccuracy = cfg.accuracyMaxM();
         return maxAccuracy == null || p.accuracy() == null || p.accuracy() <= maxAccuracy;
+    }
+
+    /**
+     * 이 좌표를 판정 근거로 쓸 수 없는가 — <b>모름({@code null})도 쓸 수 없다</b>.
+     *
+     * <p>{@code isMock} 은 위치 신호의 필수 필드다(테크스펙 v2 §6.3). 예전에는 {@code TRUE} 만
+     * 걸러서 <b>필드를 아예 빼고 보내면 게이트가 그대로 열렸다</b> — 모의 위치를 막는 장치를
+     * 필드 하나 생략으로 우회할 수 있었다(QA SIG-02). 판정에서 빼는 것은 부정행위 확정과
+     * 분리된 층이라(§9.1), 모르는 출처는 조용히 근거에서 뺀다.
+     */
+    private static boolean untrustedLocation(Boolean isMock) {
+        return !Boolean.FALSE.equals(isMock);
     }
 
     private boolean insideAny(GeoPoint p, List<GeoAnchor> anchors) {

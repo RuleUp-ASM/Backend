@@ -50,6 +50,9 @@ public class VerificationManualService {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
+    /** 메모 상한. 앱 입력칸과 같은 값이며, 여기가 실제 계약이다. */
+    private static final int MAX_NOTE_LENGTH = 200;
+
     private final ChallengeQueryService challengeQuery;
     private final VerificationDailyRepository dailyRepo;
     private final VerificationMethodResultRepository methodResultRepo;
@@ -70,6 +73,12 @@ public class VerificationManualService {
         VerificationConfig config = configFactory.build(ch);
         if (!config.isManual()) {
             throw new BusinessException(ErrorCode.NOT_MANUAL_CHALLENGE);
+        }
+        // 메모 길이는 <b>서버가</b> 막는다. 앱 입력칸의 200자 제한은 그 앱에서만 유효해서,
+        // 다른 클라이언트가 임의 길이 텍스트를 근거 JSON 에 쌓을 수 있었다.
+        String note = (req != null) ? req.note() : null;
+        if (note != null && note.length() > MAX_NOTE_LENGTH) {
+            throw new BusinessException(ErrorCode.NOTE_TOO_LONG);
         }
 
         // 당일 마감 — targetDate 는 오늘만 허용한다(생략하면 오늘).
@@ -98,7 +107,7 @@ public class VerificationManualService {
                 .orElseGet(() -> VerificationMethodResult.create(daily.getId(), method, null, true));
         Map<String, Object> evidence = new HashMap<>();
         evidence.put("selfCheck", true);
-        if (req != null && req.note() != null && !req.note().isBlank()) evidence.put("note", req.note());
+        if (note != null && !note.isBlank()) evidence.put("note", note);
         mr.evaluate(VerificationStatus.SUCCESS, evidence, now);
         methodResultRepo.save(mr);
 

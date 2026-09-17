@@ -104,6 +104,31 @@ public record AppProperties(Jwt jwt, Oauth oauth, Llm llm, Client client, Securi
                 String healthInfo
         ) {
 
+            /**
+             * <b>비울 수 없는 값이다.</b> 빈 문자열이 들어오면 기동에서 막는다.
+             *
+             * <p>비워 두면 사용자가 빠져나올 수 없는 상태가 만들어진다 — 가입은 통과하는데
+             * ({@code AuthService.saveAgreement}) 저장 버전이 현행("")과 달라 즉시 재동의 대상이 되고,
+             * 재동의 제출은 {@code current.equals(version)} 때문에 400 AGREEMENT_VERSION_MISMATCH 로 막힌다.
+             * 운영이 이 값을 비울 이유가 없으므로 런타임에 사고로 겪기보다 기동에서 끊는 편이 싸다(QA ONB-12).
+             */
+            public TermsVersions {
+                require(termsOfService, "terms-of-service");
+                require(privacyPolicy, "privacy-policy");
+                require(locationService, "location-service");
+                require(marketing, "marketing");
+                require(event, "event");
+                require(locationInfo, "location-info");
+                require(healthInfo, "health-info");
+            }
+
+            private static void require(String value, String name) {
+                if (value == null || value.isBlank()) {
+                    throw new IllegalStateException(
+                            "app.client.terms-versions." + name + " 가 비어 있다 — 약관 버전은 비울 수 없다");
+                }
+            }
+
             /** 동의 항목별 현행 버전 — 제출 검증과 재동의 판정이 모두 이 값을 기준으로 한다. */
             public String of(com.ruleup.ruleup_backend.agreement.domain.AgreementType type) {
                 return switch (type) {

@@ -100,7 +100,9 @@ app:
     secret: ${JWT_SECRET}
     access-token-ttl: 1800        # 30분 (초)
     refresh-token-ttl: 604800    # 7일 (60*60*24*7)
-    signup-token-ttl: 300         # 5분
+    # 온보딩 6단계(약관 5종 열람 포함)를 보통 속도로 마치면 8분이 걸린다 — 5분이면 정상 사용자가
+    # 마지막 '시작하기'에서 400 INVALID_SIGNUP_TOKEN 을 맞고 닉네임·생일·성별·관심사·동의가 전부 날아간다(QA ONB-18).
+    signup-token-ttl: ${SIGNUP_TOKEN_TTL:1800}   # 30분
   # 인증 운영 상수. 반경은 유저가 정하는 값이 아니라 서버 단일값이라 요청에 없고 응답의 serverRadiusM으로만 내려간다.
   verification:
     geofence-radius-m: ${VERIFICATION_GEOFENCE_RADIUS_M:500}     # 잠정 500m — 성능 테스트 후 조정

@@ -95,7 +95,10 @@ public class AutomaticKickService {
         } else if (member != null && permanent) member.banFromRejoin();
         notifications.publish(NotificationEvent.of(userId,
                 permanent ? NotificationType.CHEAT_DETECTED : NotificationType.CHALLENGE_KICKED,
-                Map.of(NotificationParams.EVENT_KEY, sourceEventId.toString(), NotificationParams.REASON, reason.name())));
+                // variant 가 문구를 고른다 — reason 은 감사·분석용으로 그대로 둔다(본문에는 쓰지 않는다).
+                Map.of(NotificationParams.EVENT_KEY, sourceEventId.toString(),
+                        NotificationParams.VARIANT, reason.name(),
+                        NotificationParams.REASON, reason.name())));
         if (reason == Reason.PERMISSION_MISSING) {
             outbox.enqueue(PermissionKickScoreHandler.TYPE,
                     new PermissionKickScoreHandler.Payload(userId, challengeId, sourceEventId, now,
@@ -105,9 +108,21 @@ public class AutomaticKickService {
         return true;
     }
 
+    /**
+     * 이 사람이 이 방에 <b>마지막으로 들어온 시각</b>.
+     *
+     * <p>가입 사건({@code challenge_join_events})이 원본이지만 <b>방장에게는 그 행이 없다</b> —
+     * {@code recordJoinEvent} 는 참여 경로(ChallengeMemberService)에만 있고 방 생성은 멤버만 만든다.
+     * 그래서 예전에는 방장의 값이 {@code Instant.MIN} 이 되어 {@code RoomCycleResultHandler} 가
+     * 조용히 빠져나갔고, <b>방장은 3사이클 연속 실패해도 경고·자동 강퇴가 영원히 집행되지 않았다</b>
+     * (QA SAN-09). 점수만 멀쩡했던 것은 {@code ChallengeScoreInputs} 가 이미 같은 폴백을 갖고 있었기 때문이다 —
+     * 같은 질문을 두 곳이 다르게 읽고 있었다.
+     */
     public Instant latestJoin(UUID challengeId, UUID userId) {
-        return jdbc.query("SELECT MAX(joined_at) FROM challenge_join_events WHERE challenge_id=? AND user_id=?",
+        return jdbc.query("SELECT COALESCE("
+                        + "(SELECT MAX(joined_at) FROM challenge_join_events WHERE challenge_id=? AND user_id=?),"
+                        + "(SELECT joined_at FROM challenge_members WHERE challenge_id=? AND user_id=?))",
                 rs -> rs.next() && rs.getTimestamp(1) != null ? rs.getTimestamp(1).toInstant() : Instant.MIN,
-                bytes(challengeId), bytes(userId));
+                bytes(challengeId), bytes(userId), bytes(challengeId), bytes(userId));
     }
 }

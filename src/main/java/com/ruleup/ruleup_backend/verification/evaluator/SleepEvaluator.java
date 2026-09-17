@@ -48,11 +48,16 @@ public class SleepEvaluator implements MethodEvaluator {
         Instant bedtime = null;
         boolean anyUntrusted = false;
         int originMissing = 0;
+        int future = 0;
 
         for (SleepSegment s : segs) {
             Instant st = TimeWindows.parseInstant(s.startAt());
             Instant en = TimeWindows.parseInstant(s.endAt());
             if (st == null || en == null || !en.isAfter(st)) continue;
+            // <b>아직 오지 않은 잠은 잔 잠이 아니다.</b> 예전에는 01:05 에 「22:10~06:30」 세그먼트를
+            // 올리면 그대로 인정돼 그 자리에서 DONE 이 됐다(QA SIG-10). 기록 시각이 미래인 구간은
+            // 존재할 수 없는 관측이므로 근거에서 뺀다 — 실제로 자고 나면 같은 구간이 다시 올라온다.
+            if (en.isAfter(ctx.now().plus(CLOCK_SKEW))) { future++; continue; }
             if (!seen.add(st.toString() + "|" + en.toString())) continue;   // 재전송 — 이미 반영했다
             if (s.origin() == null) originMissing++;
             if (!trusted(s, cfg)) { anyUntrusted = true; continue; }             // 손입력·비신뢰 출처는 제외
@@ -66,6 +71,7 @@ public class SleepEvaluator implements MethodEvaluator {
             if (!seen.isEmpty()) empty.put("seenSegments", new ArrayList<>(seen));
             if (anyUntrusted) empty.put("untrustedExcluded", true);
             if (originMissing > 0) empty.put("originMissing", originMissing);
+            if (future > 0) empty.put("excludedFuture", future);
             return EvaluationOutcome.pending(empty, windowClose);
         }
 
@@ -79,6 +85,7 @@ public class SleepEvaluator implements MethodEvaluator {
         if (anyUntrusted) ev.put("untrustedExcluded", true);
         // 출처 없이 들어온 수면 기록 수. 엄격 모드를 켤 수 있는 시점을 이 값이 알려 준다.
         if (originMissing > 0) ev.put("originMissing", originMissing);
+        if (future > 0) ev.put("excludedFuture", future);
 
         // bedtimeBefore 판정(우선) → SLEPT_LATE
         if (cfg.bedtimeBefore() != null && bedtime != null) {
@@ -142,6 +149,10 @@ public class SleepEvaluator implements MethodEvaluator {
         if (allow == null || allow.isEmpty()) return true;
         return origin.dataOrigin() != null && allow.contains(origin.dataOrigin());
     }
+
+    /** 기기 시계가 조금 빠른 경우까지 미래로 몰지 않기 위한 허용치. */
+    private static final Duration CLOCK_SKEW =
+            Duration.ofSeconds(com.ruleup.ruleup_backend.common.ClockSkew.TOLERANCE_SECONDS);
 
     private Instant bedtimeThreshold(String hhmm, LocalDate targetDate, ZoneId zone) {
         LocalTime t = LocalTime.parse(hhmm);

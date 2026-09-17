@@ -7,6 +7,6 @@ package com.ruleup.ruleup_backend.verification.dto;
  * 별도 부정 방지 장치 없이 제출 즉시 인정된다(치팅 가능성은 정책적으로 수용).
  *
  * @param targetDate 귀속일(YYYY-MM-DD). 오늘만 허용 — 날짜가 지나면 체크 불가. 생략하면 오늘
- * @param note       메모(기록용, 검증 없음)
+ * @param note       메모(기록용). 200자까지 — 넘으면 400 NOTE_TOO_LONG
  */
 public record ManualVerificationRequest(String targetDate, String note) {}

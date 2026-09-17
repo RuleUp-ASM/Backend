@@ -144,6 +144,14 @@ public class VerificationConfigFactory {
 
     // ===== method 태그 결정 =====
     private String resolveTag(Challenge challenge, Object snapObj, Map<String, Object> params) {
+        // 방에 저장된 <b>수동 선택이 템플릿보다 앞선다.</b> 생성 계약이 AUTO→MANUAL 전환을 허용하므로
+        // (CreateChallengeRequest.verification), 자동 가능한 루틴으로 만든 방도 수동일 수 있다.
+        // 템플릿 컬럼을 먼저 보면 그 방은 읽기 API 에서만 MANUAL 이고 판정 엔진에서는 AUTO 로 분류돼,
+        // 수동 체크는 409 NOT_MANUAL_CHALLENGE 로 막히고 신호는 오지 않아 매일 실패가 쌓인다 — 인증 수단이 없어진다.
+        if (snapObj instanceof com.ruleup.ruleup_backend.routine.domain.VerificationConfig snap
+                && snap.selectedMethod() == SelectedMethod.MANUAL) {
+            return "SELF_CHECK";
+        }
         Long templateId = challenge.getTemplateId();
         if (templateId != null) {
             RoutineTemplate t = catalog.findById(templateId).orElse(null);
