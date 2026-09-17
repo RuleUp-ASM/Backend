@@ -44,9 +44,20 @@ public class RequestLogFilter extends OncePerRequestFilter {
             "/actuator", "/swagger-ui", "/v3/api-docs", "/swagger-resources", "/files", "/favicon.ico"
     };
 
-    /** 값이 그대로 콘솔에 남으면 곤란한 필드. 이름만 보이고 값은 가린다. */
+    /**
+     * 값이 그대로 콘솔에 남으면 곤란한 필드. 이름만 보이고 값은 가린다.
+     *
+     * <p>두 갈래인 것이 의도다. 앞은 <b>이름에 들어 있기만 하면</b> 가리고(refreshToken·clientSecret…),
+     * 뒤는 <b>이름이 정확히 그것일 때만</b> 가린다. {@code code} 를 앞쪽에 넣으면 errorCode·categoryCode
+     * 까지 전부 별표가 되어 로그가 쓸모없어진다.
+     *
+     * <p>{@code passcode} 가 빠져 있어 운영자 콘솔 로그인 본문의 비밀번호가 평문으로 남았다 —
+     * 이름에 password 가 없다는 이유만으로 전부 통과했다. 새 자격증명 필드를 만들 때 여기를
+     * 같이 보지 않으면 같은 일이 반복된다.
+     */
     private static final Pattern SECRET_FIELD = Pattern.compile(
-            "\"(\\w*(?i:password|secret|token|credential|authorization)\\w*)\"\\s*:\\s*\"[^\"]*\"");
+            "\"((?:\\w*(?i:password|passcode|secret|token|credential|authorization|verifier)\\w*)"
+                    + "|(?i:code))\"\\s*:\\s*\"[^\"]*\"");
 
     private static final AtomicLong SEQ = new AtomicLong();
 
