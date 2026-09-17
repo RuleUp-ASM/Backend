@@ -44,7 +44,10 @@ public class SleepEvaluator implements MethodEvaluator {
         // 그날 원본을 통째로 받아 매번 처음부터 합산하고, 같은 구간이 두 행으로 남아 있어도
         // (start|end) 키로 한 번만 센다.
         LinkedHashSet<String> seen = new LinkedHashSet<>();
-        long sleepSec = 0;
+        // 잔 시간은 <b>구간의 합집합</b>이다. 길이를 그냥 더하면 겹친 시간이 두 번 세어져
+        // 23:00~03:00 과 00:00~04:00 을 함께 올리면 실제 5시간이 8시간이 된다(QA SIG-10 확장).
+        // Health Connect 는 같은 밤을 여러 조각으로 쪼개 보내고 조각이 겹치는 일이 흔하다.
+        List<Instant[]> intervals = new ArrayList<>();
         Instant bedtime = null;
         boolean anyUntrusted = false;
         int originMissing = 0;
@@ -64,9 +67,10 @@ public class SleepEvaluator implements MethodEvaluator {
             if (!seen.add(st.toString() + "|" + en.toString())) continue;   // 재전송 — 이미 반영했다
             if (s.origin() == null) originMissing++;
             if (!trusted(s, cfg)) { anyUntrusted = true; continue; }             // 손입력·비신뢰 출처는 제외
-            sleepSec += en.getEpochSecond() - st.getEpochSecond();
+            intervals.add(new Instant[]{st, en});
             if (bedtime == null || st.isBefore(bedtime)) bedtime = st;
         }
+        long sleepSec = unionSeconds(intervals);
 
         if (sleepSec == 0 && bedtime == null) {
             Map<String, Object> empty = new HashMap<>();
@@ -158,6 +162,31 @@ public class SleepEvaluator implements MethodEvaluator {
         List<String> allow = (cfg != null) ? cfg.trustedOrigins() : null;
         if (allow == null || allow.isEmpty()) return true;
         return origin.dataOrigin() != null && allow.contains(origin.dataOrigin());
+    }
+
+    /**
+     * 겹치는 구간을 합쳐 실제로 잔 시간을 센다.
+     *
+     * <p>시작 시각으로 정렬한 뒤 이어지거나 겹치는 구간을 하나로 병합한다. 포함 관계
+     * (23:00~05:00 안에 00:00~02:00)도, 순서가 뒤바뀐 분할 전송도 같은 답을 낸다 —
+     * 정렬이 도착 순서를 지운다.
+     */
+    private static long unionSeconds(List<Instant[]> intervals) {
+        if (intervals.isEmpty()) return 0;
+        intervals.sort(java.util.Comparator.comparing(i -> i[0]));
+        long total = 0;
+        Instant start = intervals.getFirst()[0];
+        Instant end = intervals.getFirst()[1];
+        for (Instant[] next : intervals.subList(1, intervals.size())) {
+            if (next[0].isAfter(end)) {                 // 끊긴 구간 — 앞 묶음을 닫는다
+                total += end.getEpochSecond() - start.getEpochSecond();
+                start = next[0];
+                end = next[1];
+            } else if (next[1].isAfter(end)) {          // 겹치거나 맞닿음 — 끝만 늘린다
+                end = next[1];
+            }                                           // 완전히 포함되면 버릴 것이 없다
+        }
+        return total + (end.getEpochSecond() - start.getEpochSecond());
     }
 
     /**
