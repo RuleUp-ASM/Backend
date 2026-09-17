@@ -118,8 +118,11 @@ public class BlockService {
      */
     private UUID insert(UUID reporterId, String targetType, UUID targetId, String reason, String snapshot) {
         UUID reportId = UuidGenerator.generate();
-        jdbc.update("INSERT INTO reports (id, reporter_id, target_type, target_id, reason) "
-                + "VALUES (?, ?, ?, ?, ?)", bytes(reportId), bytes(reporterId), targetType,
+        // 시각은 <b>UTC 로 명시해 쓴다</b>. 컬럼 기본값 CURRENT_TIMESTAMP 는 DB 세션 시간대를 따라가서,
+        // 서버 시간대가 KST 면 벽시계 시각이 그대로 들어가고 JDBC 가 그걸 UTC 로 읽어 9시간 이른 값이 된다
+        // (QA REP-07 의 blockedAt 이 그 증상이었다). 나머지 표는 이미 UTC_TIMESTAMP 를 쓴다.
+        jdbc.update("INSERT INTO reports (id, reporter_id, target_type, target_id, reason, created_at) "
+                + "VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP(6))", bytes(reportId), bytes(reporterId), targetType,
                 bytes(targetId), reason);
         // 원본이 수정·삭제돼도 이 값으로 검토한다. 절대 갱신하지 않는다.
         jdbc.update("INSERT INTO report_snapshots (report_id, payload) VALUES (?, ?)",
@@ -129,7 +132,8 @@ public class BlockService {
 
     /** 차단은 재신고에도 멱등하다 — 이미 있으면 그대로 두고 건만 쌓는다. */
     private void block(UUID blockerId, String targetType, UUID targetId) {
-        jdbc.update("INSERT IGNORE INTO user_blocks (blocker_id, target_type, target_id) VALUES (?, ?, ?)",
+        jdbc.update("INSERT IGNORE INTO user_blocks (blocker_id, target_type, target_id, blocked_at) "
+                + "VALUES (?, ?, ?, UTC_TIMESTAMP(3))",
                 bytes(blockerId), targetType, bytes(targetId));
     }
 
