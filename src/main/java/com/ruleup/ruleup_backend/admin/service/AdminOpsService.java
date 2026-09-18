@@ -386,11 +386,11 @@ public class AdminOpsService {
      * 실제 적재는 {@link com.ruleup.ruleup_backend.notification.announcement.AnnouncementFanoutJob}
      * 이 청크 단위로 한다.
      *
-     * <p>운영 공지는 알림 센터의 <b>공지 탭에만</b> 쌓이고 푸시가 나가지 않는다
-     * ({@code pushable=false}). 그래서 응답에 푸시 통계 필드가 없다.
+     * <p>운영 공지는 <b>공지 탭 적재와 푸시 발송</b>을 함께 한다. 발송 시 읽음·마스터·야간
+     * 규칙을 평가한다. 이 응답은 접수 결과이므로 푸시 전달 통계를 포함하지 않는다.
      *
      * <p><b>{@code MARKETING} 만 다르다.</b> 광고성 정보는 수신 동의자에게만 보낼 수 있고
-     * (정보통신망법) 푸시도 나간다. 그래서 예상 수신자 수도 동의자 기준으로 센다 — 팬아웃과
+     * 푸시도 동의자에게만 나간다. 그래서 예상 수신자 수도 동의자 기준으로 센다 — 팬아웃과
      * 다른 집합을 세면 「광고가 덜 나갔다」는 오해가 매번 생긴다.
      */
     @Transactional

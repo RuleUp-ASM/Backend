@@ -18,7 +18,7 @@ public enum NotificationTab {
     /** 기본 탭. 파라미터를 주지 않으면 여기다 — 공지가 섞이지 않는다. */
     NOTIFICATION((byte) 0),
 
-    /** 운영자 공지. 푸시가 나가지 않고 알림 센터에만 남는다. */
+    /** 운영자 공지. 공지 탭에 적재하고 공통 발송 정책에 따라 푸시한다. */
     ANNOUNCEMENT((byte) 1);
 
     private final byte code;

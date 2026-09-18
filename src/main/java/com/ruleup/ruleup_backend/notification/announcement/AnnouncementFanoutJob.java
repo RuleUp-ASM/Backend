@@ -29,7 +29,7 @@ import java.util.UUID;
  * 재개 시 중복 적재를 막는다 — 그래서 진행 상황을 따로 기록할 필요가 없다. 키는 종류에 따라
  * {@code ANNOUNCEMENT:{user_id}:{announcement_id}} 또는 {@code MARKETING:{user_id}:{event_key}} 다.
  *
- * <p>운영 공지는 {@code pushable = false} 라 큐에 들어가지 않는다 — 알림 센터의 공지 탭에만 쌓인다.
+ * <p>운영 공지는 공지 탭에 적재하고 푸시 큐에도 넣는다. 마스터 토글·읽음·야간 보류는 발송 시 평가한다.
  *
  * <p><b>광고({@code MARKETING})만 성격이 다르다.</b> 수신자가 동의자로 한정되고, 알림 탭에 쌓이며,
  * 푸시도 나간다. 여기서 수신자를 거르지 않으면 <b>미동의자의 알림함에 광고가 적재</b>되는데,

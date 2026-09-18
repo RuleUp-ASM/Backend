@@ -371,15 +371,22 @@ class NotificationPublishIT {
     class Enqueue {
 
         @Test
-        @DisplayName("공지는 적재만 되고 큐에 들어가지 않는다 — pushable=false")
-        void announcementIsNeverQueued() {
+        @DisplayName("공지는 공지 탭과 푸시 큐에 한 번씩 들어간다")
+        void announcementIsQueuedOnce() {
             UUID userId = newUser();
-            txTemplate.executeWithoutResult(t -> publisher.publish(NotificationEvent.authored(
+            NotificationEvent event = NotificationEvent.authored(
                     userId, NotificationType.ANNOUNCEMENT, "점검 안내", "본문",
-                    Map.of(NotificationParams.ANNOUNCEMENT_ID, "an-2"))));
+                    Map.of(NotificationParams.ANNOUNCEMENT_ID, "an-2"));
+            txTemplate.executeWithoutResult(t -> publisher.publish(event));
+            txTemplate.executeWithoutResult(t -> publisher.publish(event));
 
             assertThat(inbox(userId)).hasSize(1);
-            assertThat(spy().sent).isEmpty();
+            assertThat(spy().sent).singleElement().satisfies(message -> {
+                assertThat(message.type()).isEqualTo("ANNOUNCEMENT");
+                assertThat(message.tab()).isEqualTo(NotificationTab.ANNOUNCEMENT);
+                assertThat(message.title()).isEqualTo("점검 안내");
+                assertThat(message.body()).isEqualTo("본문");
+            });
         }
 
         @Test

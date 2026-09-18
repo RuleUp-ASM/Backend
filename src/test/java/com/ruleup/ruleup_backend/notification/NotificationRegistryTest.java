@@ -130,11 +130,11 @@ class NotificationRegistryTest {
         }
 
         @Test
-        @DisplayName("공지만 푸시 대상이 아니다 — 켜면 2만 명에게 나가므로 운영 토글로 두지 않는다")
-        void announcementIsNotPushable() {
-            assertThat(NotificationType.ANNOUNCEMENT.isPushable()).isFalse();
+        @DisplayName("운영 공지도 푸시 대상이다 — 실제 발송은 공통 마스터·야간 정책을 따른다")
+        void announcementIsPushable() {
+            assertThat(NotificationType.ANNOUNCEMENT.isPushable()).isTrue();
             assertThat(Arrays.stream(NotificationType.values()).filter(t -> !t.isPushable()))
-                    .containsExactly(NotificationType.ANNOUNCEMENT);
+                    .isEmpty();
         }
     }
 
