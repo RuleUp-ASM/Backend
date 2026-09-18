@@ -89,6 +89,27 @@ class TierScoringIT extends ChallengeApiSupport {
         assertThat(ledger(me.id())).isEmpty();
     }
 
+    /**
+     * 종료일이 사이클 중간이면 마지막 주는 종료일에서 끊긴다(QA TIER-15 B2).
+     * 예전에는 종료일 뒤의 날을 「남은 날」로 세어 미달이 확정되지 않았고, 열리지 않을 인증 행을
+     * 기다리느라 마지막 사이클이 영영 닫히지 않았다.
+     */
+    @Test
+    void lastCycleIsCutAtTheChallengeEnd() throws Exception {
+        Member me = member(uniq("cut-week"));
+        UUID ch = challengeWith(me.id(), 5, 14);   // 주 5회
+        jdbc().update("UPDATE challenges SET end_date = DATE_ADD(start_date, INTERVAL 2 DAY) WHERE id = ?", bytes(ch));
+        for (int d = 0; d < 3; d++) judge(ch, me.id(), 1, d, "FAILED");   // 3일짜리 사이클을 전부 실패
+
+        scoreService.reconcileCycle(me.id(), ch, 1);
+        scoreService.closeCycle(me.id(), ch, 1);
+
+        // 남은 3일로 목표 5 는 불가능 → 목표가 3 으로 줄고, 3일 모두 미달로 확정된다.
+        assertThat(cycleState(me.id(), ch, 1)).containsEntry("target_count", 3).containsEntry("miss_count", 3)
+                .containsEntry("cycle_result", "FAILURE");
+        assertThat(scoreOf(me.id())).isLessThan(10);
+    }
+
     // ===== 픽스처 =====
 
     /**

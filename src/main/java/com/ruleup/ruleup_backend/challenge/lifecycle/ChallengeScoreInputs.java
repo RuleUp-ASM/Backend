@@ -42,10 +42,14 @@ public class ChallengeScoreInputs {
         if(start.isBefore(first))return Optional.empty();
         if(c.get("repeat_days")==null)throw new IllegalStateException("SCORE_ELIGIBLE_DATES_MISSING");
         Set<String> repeat=new HashSet<>();json.readTree(c.get("repeat_days").toString()).forEach(v->repeat.add(v.asText()));
+        // The last cycle is cut at the challenge end. Counting days past it as "remaining" kept misses from ever
+        // confirming, and closing waited for verification rows that are never opened (QA TIER-15 B2).
+        LocalDate lastDay=c.get("end_date")==null?end:((java.sql.Date)c.get("end_date")).toLocalDate();
         List<LocalDate> dates=new ArrayList<>();
-        for(LocalDate d=start;!d.isAfter(end);d=d.plusDays(1))if(repeat.contains(d.getDayOfWeek().name().substring(0,3)))dates.add(d);
+        for(LocalDate d=start;!d.isAfter(end)&&!d.isAfter(lastDay);d=d.plusDays(1))if(repeat.contains(d.getDayOfWeek().name().substring(0,3)))dates.add(d);
         if(dates.isEmpty())return Optional.empty();
-        int target=c.get("weekly_count")==null?dates.size():((Number)c.get("weekly_count")).intValue();
+        // A weekly goal larger than the days left in a cut-short week is unreachable; cap it at those days.
+        int target=c.get("weekly_count")==null?dates.size():Math.min(dates.size(),((Number)c.get("weekly_count")).intValue());
         return Optional.of(new ScoreInput.CycleSpec(challenge,cycleId(challenge,start),no,start,end,joined,first,target,List.copyOf(dates),ScoreInput.POLICY));
     }
 }
