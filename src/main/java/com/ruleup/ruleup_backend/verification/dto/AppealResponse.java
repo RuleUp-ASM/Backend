@@ -26,11 +26,11 @@ public record AppealResponse(
     /**
      * @param verification 정정된 인증 상태 — {@code DONE} 고정
      * @param streak       정정 반영 후 연속 성공 일수
-     * @param scoreDelta   정상 성공과 동일한 점수 증분
+     * @param scoreDelta   접수 트랜잭션에서 동기 지급한 점수(0). 최종 점수는 비동기 정산 후 티어 API로 조회
      */
     @Schema(name = "AppealRestored", description = "이의 인용에 따른 소급 정정 결과")
     public record Restored(
             @Schema(description = "정정된 인증 상태(DONE 고정)", example = "DONE") String verification,
             @Schema(description = "정정 반영 후 연속 성공 일수", example = "7") int streak,
-            @Schema(description = "정상 성공과 동일한 점수 증분", example = "0") int scoreDelta) {}
+            @Schema(description = "접수 시 동기 지급분(0). 점수는 커밋 이후 비동기로 정산되므로 최종 증분이 아니며 티어 API 재조회 필요", example = "0") int scoreDelta) {}
 }

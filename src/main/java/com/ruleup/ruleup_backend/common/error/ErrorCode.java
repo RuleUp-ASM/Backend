@@ -194,6 +194,7 @@ public enum ErrorCode {
     INVALID_REPORT_TARGET(HttpStatus.BAD_REQUEST, "신고 대상이 올바르지 않습니다."),
     INVALID_REPORT_REASON(HttpStatus.BAD_REQUEST, "신고 사유가 올바르지 않습니다."),
     CANNOT_REPORT_SELF(HttpStatus.BAD_REQUEST, "본인을 신고할 수 없습니다."),
+    ALREADY_REPORTED(HttpStatus.CONFLICT, "이미 신고한 대상이에요."),
     /**
      * 신고 기능 정지 — <b>자동 발동이 아니다</b>. 운영자가 남용으로 확정해 건 조치이며
      * {@code sanctions} 의 FEATURE_SUSPENSION(feature_code=REPORT)이 실체다.

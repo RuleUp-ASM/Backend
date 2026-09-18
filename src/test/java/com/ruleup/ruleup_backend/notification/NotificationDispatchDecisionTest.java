@@ -72,6 +72,24 @@ class NotificationDispatchDecisionTest {
         return allow().withSettings(s);
     }
 
+    @Test
+    @DisplayName("공지 푸시는 그룹·광고 동의와 무관하며 마스터·야간·읽음을 따른다")
+    void announcementHonorsDeliveryPolicy() {
+        NotificationMessage notice = message(NotificationType.ANNOUNCEMENT, NEWER, null);
+        UserNotificationSetting settings = UserNotificationSetting.defaults(USER, kst(12, 0));
+        settings.applyGroup(NotificationToggleGroup.ACCOUNT, false, kst(12, 0));
+        settings.applyGroup(NotificationToggleGroup.CHALLENGE, false, kst(12, 0));
+        settings.applyGroup(NotificationToggleGroup.MARKETING, false, kst(12, 0));
+        DispatchInputs inputs = new DispatchInputs(settings, Set.of(), Map.of(), true, false);
+        assertThat(DispatchDecision.decide(notice, inputs, kst(12, 0)).shouldSend()).isTrue();
+        assertThat(DispatchDecision.decide(notice, inputs, kst(21, 0)).deferred()).isTrue();
+        settings.applyMaster(false, kst(12, 0));
+        assertThat(DispatchDecision.decide(notice, inputs, kst(12, 0)).suppressedReason())
+                .isEqualTo(SuppressedReason.MASTER_OFF);
+        assertThat(DispatchDecision.decide(notice, readUpTo(NEWER), kst(12, 0)).suppressedReason())
+                .isEqualTo(SuppressedReason.ALREADY_READ);
+    }
+
     @Nested
     @DisplayName("순서")
     class Order {

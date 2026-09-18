@@ -574,7 +574,7 @@ class AdminBackofficeIT extends ChallengeApiSupport {
                     .filteredOn(n -> NotificationType.ANNOUNCEMENT.name().equals(n.getType()))
                     .singleElement()
                     .satisfies(n -> {
-                        // 공지는 공지 탭에만 쌓이고 푸시가 나가지 않는다.
+                        // 운영 공지는 공지 탭에 쌓이고 별도 그룹 토글 없이 푸시한다.
                         assertThat(n.tabEnum()).isEqualTo(NotificationTab.ANNOUNCEMENT);
                         assertThat(n.toggleGroupEnum()).isEqualTo(NotificationToggleGroup.NONE);
                         assertThat(n.getTitle()).isEqualTo("점검 안내");

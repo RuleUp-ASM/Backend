@@ -41,9 +41,10 @@ public class ReportController {
                     3. **전건 적재** — 임계값 없이 쌓는다. **적재 자체는 어떤 제재도 발동시키지 않는다.**
                        제재는 운영자가 검토해 계정 단위로만 내린다.
 
-                    **같은 대상 재신고는 구조적으로 불가능하다** — 접수 즉시 차단이 걸려 대상이 화면에서
-                    사라지므로 신고 버튼이 노출되지 않는다. 클라이언트 우회로 들어온 요청은 차단을 재적용하고
-                    건을 하나 더 적재한 뒤 **정상 201** 을 준다. 신고자에게는 정상 접수로 보여야 한다.
+                    **같은 신고자가 같은 대상을 중복 신고할 수 없다.** 접수 즉시 차단이 걸리며,
+                    버튼 재진입·재전송·동시 요청도 서버가 **409 `ALREADY_REPORTED`** 로 거부한다.
+                    사유나 발생 화면을 바꿔도 동일 대상이다. 차단 해제는 신고 취소가 아니므로
+                    기존 신고가 남아 있으면 다시 접수되지 않는다. 다른 신고자의 신고는 독립적이다.
 
                     접수 결과는 **완료 안내만** 한다 — 처리 경과·결과는 알리지 않는다(익명성·보복 방지).
 
@@ -52,7 +53,7 @@ public class ReportController {
                     """
     )
     @ApiErrorCodes({ErrorCode.INVALID_REPORT_TARGET, ErrorCode.INVALID_REPORT_REASON,
-            ErrorCode.CANNOT_REPORT_SELF, ErrorCode.REPORT_SUSPENDED, ErrorCode.ACCOUNT_LOCKED,
+            ErrorCode.CANNOT_REPORT_SELF, ErrorCode.ALREADY_REPORTED, ErrorCode.REPORT_SUSPENDED, ErrorCode.ACCOUNT_LOCKED,
             ErrorCode.USER_NOT_FOUND, ErrorCode.CHALLENGE_NOT_FOUND, ErrorCode.LOGIN_REQUIRED})
     @PostMapping("/api/v1/reports")
     @ResponseStatus(HttpStatus.CREATED)

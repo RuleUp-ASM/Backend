@@ -52,6 +52,8 @@ class VerificationAppealIT extends VerificationApiSupport {
     @Autowired WebApplicationContext wac;
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired VerificationFinalizeService finalizeService;
+    @Autowired com.ruleup.ruleup_backend.common.outbox.OutboxDispatcher outboxDispatcher;
+    @Autowired com.ruleup.ruleup_backend.score.service.ScoreProcessor scoreProcessor;
 
     private MockMvc mvc;
 
@@ -149,6 +151,48 @@ class VerificationAppealIT extends VerificationApiSupport {
     @Nested
     @DisplayName("자동 인용")
     class AutoAccept {
+
+        @Test
+        @DisplayName("APL-04: 이의 인용은 멤버·방 통계와 사이클 점수에 반영되고 재처리해도 중복 지급하지 않는다")
+        void acceptedAppealUpdatesStatsAndCycleScore() throws Exception {
+            FailedVerification f = failedVerification("appeal-stats-score");
+            // 어제 시작한 사이클에 시작 전 가입한 정상 점수 대상 멤버.
+            // 판정/원장/현재 점수는 직접 덮어쓰지 않고 실제 이의 API와 아웃박스로 만든다.
+            jdbc().update("UPDATE challenges SET start_date=? WHERE id=?",
+                    java.sql.Date.valueOf(appealableDate()), bytes(f.challengeId()));
+            jdbc().update("UPDATE challenge_members SET joined_at=? WHERE id=?",
+                    java.time.LocalDateTime.ofInstant(appealableDate().minusDays(1)
+                            .atStartOfDay(KST).toInstant(), java.time.ZoneOffset.UTC), bytes(f.memberId()));
+            assertThat(jdbc().queryForObject("SELECT total_score FROM user_score_summaries WHERE user_id=?",
+                    Integer.class, bytes(f.owner().id()))).isEqualTo(10);
+
+            MvcResult res = appeal(f.owner().token(), f.verificationId(), REASON, null);
+
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+            assertThat((Integer) read(res, "$.data.restored.streak")).isEqualTo(1);
+            assertThat((Integer) read(res, "$.data.restored.scoreDelta")).isZero();
+            var counts = jdbc().queryForMap("SELECT success_days, fail_days, progress_rate FROM challenge_members WHERE id=?",
+                    bytes(f.memberId()));
+            assertThat(((Number) counts.get("success_days")).intValue()).isEqualTo(1);
+            assertThat(((Number) counts.get("fail_days")).intValue()).isZero();
+            assertThat((java.math.BigDecimal) counts.get("progress_rate")).isEqualByComparingTo("7.14");
+            org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(10)).untilAsserted(() -> {
+                // 방 통계도 AFTER_COMMIT + @Async로 갱신되므로 행이 생기기까지 기다린다.
+                assertThat(jdbc().queryForList("SELECT total_progress_count FROM challenge_stats WHERE challenge_id=?",
+                        Integer.class, bytes(f.challengeId()))).containsExactly(1);
+                assertThat(jdbc().queryForObject("SELECT total_score FROM user_score_summaries WHERE user_id=?",
+                        Integer.class, bytes(f.owner().id()))).isEqualTo(11);
+                assertThat(jdbc().queryForList("SELECT success_count FROM cycle_score_states WHERE user_id=? AND challenge_id=?",
+                        Integer.class, bytes(f.owner().id()), bytes(f.challengeId()))).containsExactly(1);
+                assertThat(jdbc().queryForObject("SELECT COUNT(*) FROM outbox_messages WHERE dedup_key=? AND processed_at IS NOT NULL",
+                        Integer.class, "APPEAL_SCORE_CORRECTION:" + f.verificationId())).isEqualTo(1);
+            });
+            expectError(appeal(f.owner().token(), f.verificationId(), REASON, null), 409, "NOT_FAILED");
+            outboxDispatcher.flush();
+            assertThat(jdbc().queryForObject("SELECT total_score FROM user_score_summaries WHERE user_id=?",
+                    Integer.class, bytes(f.owner().id()))).isEqualTo(11);
+            assertThat(scoreProcessor.verifyUser(f.owner().id())).isEmpty();
+        }
 
         @Test
         @DisplayName("형식 요건을 통과하면 즉시 인용되고 인증이 완료로 정정된다")

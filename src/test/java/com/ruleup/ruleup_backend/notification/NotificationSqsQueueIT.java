@@ -177,13 +177,14 @@ class NotificationSqsQueueIT {
     }
 
     @Test
-    @DisplayName("공지는 큐에 들어가지 않는다 — pushable=false 라 적재만 된다")
-    void announcementNeverReachesTheQueue() {
+    @DisplayName("운영 공지도 실제 SQS 푸시 큐에 들어간다")
+    void announcementReachesTheQueue() {
         UUID userId = newUser();
         txTemplate.executeWithoutResult(t -> publisher.publish(NotificationEvent.authored(
                 userId, NotificationType.ANNOUNCEMENT, "점검 안내", "본문",
                 Map.of(NotificationParams.ANNOUNCEMENT_ID, "an-" + SEQ.incrementAndGet()))));
 
-        assertThat(receiveAll()).isEmpty();
+        assertThat(receiveAll()).singleElement().satisfies(message ->
+                assertThat(message.body()).contains("ANNOUNCEMENT", "점검 안내"));
     }
 }

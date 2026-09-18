@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.ruleup.android_ruleup",
+      "sha256_cert_fingerprints": [
+        "83:6C:EE:89:35:88:B1:8C:39:A3:C6:CF:80:EC:8F:63:36:75:19:9E:BB:D8:D5:B9:C2:1D:F0:55:14:36:33:B6"
+      ]
+    }
+  }
+]

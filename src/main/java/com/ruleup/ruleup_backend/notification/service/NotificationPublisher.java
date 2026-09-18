@@ -103,7 +103,7 @@ public class NotificationPublisher {
 
         List<NotificationMessage> messages = new ArrayList<>(stored.size());
         for (Notification row : stored) {
-            // 푸시 대상만 큐로. 공지는 pushable=false 라 적재만 되고 알림 센터에만 남는다.
+            // 푸시 대상만 큐로. 운영 공지도 포함하며, 실제 발송은 공통 설정·야간 게이트를 따른다.
             if (NotificationType.find(row.getType())
                     .map(NotificationType::isPushable).orElse(false)) {
                 messages.add(NotificationMessage.from(row, source.get(row.getId()).targetToken()));

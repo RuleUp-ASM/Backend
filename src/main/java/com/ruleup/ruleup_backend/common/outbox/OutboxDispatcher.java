@@ -181,38 +181,50 @@ public class OutboxDispatcher {
     }
 
     /**
-     * 한 건 처리. 다른 인스턴스가 같은 행을 동시에 집는 것은 비관 락으로 막고, 락을 얻은 뒤
-     * <b>다시 미처리인지 확인</b>한다 — 기다리는 동안 상대가 끝냈을 수 있다.
+     * 한 건 처리. 핸들러 트랜잭션이 롤백된 뒤 실패 기록을 별도 트랜잭션에 남긴다.
+     * REQUIRED 핸들러가 rollback-only로 표시한 트랜잭션에서 예외만 잡으면 attempts도
+     * 롤백되어 같은 불량 메시지가 영원히 첫 순서를 차지한다.
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public boolean processOne(java.util.UUID id) {
-        OutboxMessage message = repository.findByIdForUpdate(id).orElse(null);
-        if (message == null || !message.isPending()) return false;
-
-        Instant now = Instant.now();
-        OutboxHandler handler = handlers().get(message.getType());
-        if (handler == null) {
-            // 핸들러가 없는 타입은 재시도해도 달라지지 않는다 — 배포 롤백 같은 상황이므로 남겨만 둔다.
-            log.error("아웃박스 핸들러 없음 type={} id={}", message.getType(), id);
-            message.markFailed(now, "NO_HANDLER: " + message.getType());
+        try {
+            return self.deliver(id);
+        } catch (Exception e) {
+            self.recordFailure(id, e);
             return false;
         }
-        try {
-            handler.handle(message.getPayload());
-            message.markProcessed(now);
-            return true;
-        } catch (Exception e) {
-            message.markFailed(now, e.toString());
-            if (message.isDeadLettered()) {
-                deadLettered.increment();
-                // 여기서 멈춘 건 곧 <b>나가지 않은 통지·집행</b>이다. 경고로 묻으면 아무도 모른다.
-                log.error("아웃박스 발행 포기 — 이 사건은 수신측에 도달하지 않았다. type={} id={} err={}",
-                        message.getType(), id, e.toString(), e);
-            } else {
-                log.warn("아웃박스 처리 실패 type={} id={} attempts={}: {}",
-                        message.getType(), id, message.getAttempts(), e.toString());
-            }
-            return false;
+    }
+
+    /** 핸들러의 DB 변경과 처리 완료 표시는 같은 트랜잭션으로 커밋하거나 롤백한다. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean deliver(java.util.UUID id) {
+        OutboxMessage message = repository.findByIdForUpdate(id).orElse(null);
+        Instant now = Instant.now();
+        if (message == null || !message.isPending() || message.getAvailableAt().isAfter(now)) return false;
+
+        OutboxHandler handler = handlers().get(message.getType());
+        if (handler == null) {
+            throw new IllegalStateException("NO_HANDLER: " + message.getType());
+        }
+        handler.handle(message.getPayload());
+        message.markProcessed(now);
+        return true;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordFailure(java.util.UUID id, Exception error) {
+        OutboxMessage message = repository.findByIdForUpdate(id).orElse(null);
+        Instant now = Instant.now();
+        // 롤백과 기록 사이에 다른 소비자가 성공했거나 백오프를 기록했을 수 있다.
+        if (message == null || !message.isPending() || message.getAvailableAt().isAfter(now)) return;
+        message.markFailed(now, error.toString());
+        if (message.isDeadLettered()) {
+            deadLettered.increment();
+            log.error("아웃박스 발행 포기 — 이 사건은 수신측에 도달하지 않았다. type={} id={} err={}",
+                    message.getType(), id, error.toString(), error);
+        } else {
+            log.warn("아웃박스 처리 실패 type={} id={} attempts={}: {}",
+                    message.getType(), id, message.getAttempts(), error.toString());
         }
     }
 

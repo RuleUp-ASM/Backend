@@ -4,6 +4,8 @@ import com.ruleup.ruleup_backend.TestcontainersConfiguration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -44,6 +46,56 @@ class VerificationStrictDeviceIT extends VerificationApiSupport {
 
     @Override protected MockMvc mvc() { return mvc; }
     @Override protected JdbcTemplate jdbc() { return jdbcTemplate; }
+
+    @ParameterizedTest(name = "device={0}, isMock={1} → {2}")
+    @CsvSource(value = {
+            "active-device, false, SUCCESS",
+            "active-device, true, PENDING",
+            "active-device, null, PENDING",
+            "installation-id, false, PENDING",
+            "qa-emulator-name, false, PENDING"
+    }, nullValues = "null")
+    @DisplayName("SIG-02: 활성 deviceId의 실제 측위만 인정하고 설치 ID·모의 위치·출처 누락은 제외한다")
+    void gpsRequiresTheActiveDeviceAndExplicitNonMockPoints(
+            String deviceId, Boolean isMock, String expectedStatus) throws Exception {
+        Member me = member(uniq("gps-device"));
+        String activeDevice = "active-" + me.id();
+        String installation = UUID.randomUUID().toString();
+        jdbc().update("UPDATE users SET device_id = ?, installation_id = ? WHERE id = ?",
+                activeDevice, installation, bytes(me.id()));
+        UUID challenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE",
+                "{\"duration_min\":10,\"radius_m\":100}");
+        UUID memberId = insertReadyMember(challenge, me.id(),
+                anchor(37.5665, 126.978, 100, "테스트 장소"), null);
+        var times = java.util.stream.IntStream.rangeClosed(0, 6)
+                .mapToObj(n -> todayAt(0, n * 2)).toList();
+        Map<String, Object> signal = locationSignal(37.5665, 126.978, times);
+        @SuppressWarnings("unchecked")
+        var points = (List<Map<String, Object>>) signal.get("points");
+        points.forEach(point -> {
+            if (isMock == null) point.remove("isMock");
+            else point.put("isMock", isMock);
+        });
+        var body = syncBody(List.of(signal));
+        body.put("deviceId", switch (deviceId) {
+            case "active-device" -> activeDevice;
+            case "installation-id" -> installation;
+            default -> deviceId;
+        });
+
+        assertThat(postJsonAuth("/api/v1/verifications/sync", me.token(), body)
+                .getResponse().getStatus()).isEqualTo(200);
+        assertThat(todayStatusOf(memberId)).isEqualTo(expectedStatus);
+        assertThat(dwellMinutesOf(memberId)).isEqualTo("SUCCESS".equals(expectedStatus) ? 12L : 0L);
+        String excluded = jdbc().queryForObject(
+                "SELECT excludeReason FROM verification_location_signals WHERE userId = ?",
+                String.class, bytes(me.id()));
+        assertThat(excluded).isEqualTo("active-device".equals(deviceId) ? null : "UNTRUSTED_SOURCE");
+        if ("active-device".equals(deviceId) && !Boolean.FALSE.equals(isMock)) {
+            assertThat(tools.jackson.databind.json.JsonMapper.builder().build()
+                    .readTree(todayEvidenceOf(memberId)).path("excludedMock").asInt()).isEqualTo(7);
+        }
+    }
 
     @Test
     @DisplayName("[P1] 엄격 모드에서는 기기를 밝히지 않은 sync 를 받지 않는다")

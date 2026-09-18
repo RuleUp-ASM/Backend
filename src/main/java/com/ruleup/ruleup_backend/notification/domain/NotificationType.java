@@ -207,12 +207,10 @@ public enum NotificationType {
             new String[]{DATE, SLOT}),
 
     /**
-     * 운영자 공지 — <b>{@code pushable = false}</b>. 적재는 되지만 큐에 들어가지 않아
-     * 알림 센터에만 남는다.
-     *
-     * <p>이 속성을 운영 토글로 두지 않는 이유는 하나다: 누가 켜면 공지가 2만 명에게 푸시로 나간다.
+     * 운영자 공지 — 공지 탭에 적재하고 푸시도 발송한다(2026-09-18, QA NOTI-14).
+     * 별도 그룹 토글은 없으며 마스터 토글·읽음·야간 보류 규칙을 따른다.
      */
-    ANNOUNCEMENT(NotificationToggleGroup.NONE, NotificationTab.ANNOUNCEMENT, false, null,
+    ANNOUNCEMENT(NotificationToggleGroup.NONE, NotificationTab.ANNOUNCEMENT, true, null,
             new String[]{ANNOUNCEMENT_ID}, null, null),
 
     // ===== 마케팅 1종 =====

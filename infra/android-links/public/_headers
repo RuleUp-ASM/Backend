@@ -1,0 +1,4 @@
+/.well-known/assetlinks.json
+  Content-Type: application/json
+  Cache-Control: public, max-age=300
+  X-Content-Type-Options: nosniff
