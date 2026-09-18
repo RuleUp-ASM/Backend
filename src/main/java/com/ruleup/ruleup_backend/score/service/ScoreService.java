@@ -8,6 +8,7 @@ import com.ruleup.ruleup_backend.score.ScoreInput;
 
 import com.ruleup.ruleup_backend.challenge.lifecycle.*;
 import com.ruleup.ruleup_backend.score.domain.*;
+import com.ruleup.ruleup_backend.verification.config.VerificationProperties;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
 import com.ruleup.ruleup_backend.verification.domain.VerifiedVia;
 import jakarta.persistence.EntityManager;
@@ -25,6 +26,7 @@ public class ScoreService {
     private final VerificationDailyRepository daily;
     private final UserScoreSummaryRepository summaries;
     private final EntityManager em;
+    private final VerificationProperties verificationProperties;
     private static final ZoneId KST=ZoneId.of("Asia/Seoul");
     public UserScoreSummary initialize(UUID user) {
         em.flush();processor.process(user,"signup",processor.inputHash(List.of()),List.of(),false);
@@ -57,10 +59,33 @@ public class ScoreService {
         var spec=processor.cycleSnapshot(user,challenge,no).or(()->cycleInputs.cycle(user,challenge,no));
         if(spec.isEmpty())return;
         var c=spec.get();List<ScoreInput> inputs=dailyInputs(user,challenge,c);
+        inputs.addAll(absentDates(user,challenge,c));
         if(inputs.size()!=c.eligibleDates().size())throw new IllegalStateException("SCORE_DATES_NOT_FINAL");
         inputs.add(new ScoreInput(ScoreInput.Kind.CLOSE,c.cycleId().toString(),1,c.closesAt(),"AUTO",c,null,null,null,challenge,0,0,false));
         // The close source is stable; the complete input hash includes every finalized date.
         String hash=processor.inputHash(inputs);processor.process(user,"close:"+hash,hash,inputs,false);
+    }
+    /**
+     * Eligible dates that will never get a verification row, as INVALID (QA TIER-15 B3).
+     *
+     * <p>Rows are opened by sync or by the no-signal materializer, which only covers READY members and looks back a
+     * bounded number of days. A day outside that (setup never finished, left and rejoined mid-cycle) has no row,
+     * and closing used to wait for it forever — the cycle never closed and every later cycle failed with
+     * SCORE_PREVIOUS_CYCLE_OPEN. Once the materializer can no longer reach a date, it is final as "not judged",
+     * the same judgement NOT_TARGET days get. Dates with any row (even PENDING) are left to the verification flow.
+     */
+    private List<ScoreInput> absentDates(UUID user,UUID challenge,ScoreInput.CycleSpec spec) {
+        Set<LocalDate> judged=new HashSet<>();
+        for(var d:daily.findByUserIdAndChallengeIdAndTargetDateBetween(user,challenge,spec.startOn(),spec.endOn()))judged.add(d.getTargetDate());
+        // The materializer fills D-2 back through catch-up days; anything older is out of its reach.
+        LocalDate reachable=LocalDate.now(KST).minusDays(1L+verificationProperties.materializeCatchupDays());
+        List<ScoreInput> out=new ArrayList<>();
+        for(LocalDate date:spec.eligibleDates()) {
+            if(judged.contains(date) || !date.isBefore(reachable))continue;
+            out.add(new ScoreInput(ScoreInput.Kind.DAILY,"absent:"+challenge+":"+user+":"+date,1,date.atStartOfDay(KST).toInstant(),
+                    "AUTO",spec,date,"INVALID",null,challenge,0,0,false));
+        }
+        return out;
     }
     public void applyIncident(UUID user,UUID challenge,IncidentType type,String source,int weeks) {
         var old=processor.original(user,ScoreInput.Kind.INCIDENT,type+":"+source);
