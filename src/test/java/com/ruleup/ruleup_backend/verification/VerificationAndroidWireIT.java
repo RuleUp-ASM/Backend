@@ -143,6 +143,23 @@ class VerificationAndroidWireIT extends VerificationApiSupport {
     }
 
     @Test
+    @DisplayName("신호 단위 observedAt 이 없어도 받은 날이 아니라 일어난 날 파티션에 저장된다")
+    void storedUnderOccurrenceDateNotReceiptDate() throws Exception {
+        Member me = member(uniq("wire-partition"));
+        UUID ch = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", "{\"duration_min\":30,\"radius_m\":100}");
+        insertReadyMember(ch, me.id(), anchor(CAFE_LAT, CAFE_LNG, 100, "스터디카페"), null);
+        // 오프라인으로 이틀 밀렸다 올라온 기록 — 받은 날(오늘)로 저장하면 판정일 앞뒤 하루 조회에서 빠진다.
+        Instant twoDaysAgo = todayAt(13, 0).minus(java.time.Duration.ofDays(2));
+
+        sync(me.token(), List.of(androidGeofence(anchorId(me.id(), ch), "ENTER", twoDaysAgo)));
+
+        assertThat(jdbc().queryForList("SELECT observedDate FROM verification_location_signals WHERE userId = ?",
+                java.sql.Date.class, bytes(me.id())))
+                .extracting(java.sql.Date::toLocalDate)
+                .containsExactly(java.time.LocalDate.ofInstant(twoDaysAgo, KST));
+    }
+
+    @Test
     @DisplayName("건강 — 앱 형식(신호 단위 metric·평평한 출처·epoch millis) 걸음 수로 인증된다")
     void healthWithAndroidShape() throws Exception {
         Member me = member(uniq("wire-health"));
