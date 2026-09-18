@@ -35,7 +35,7 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
         if (cfg == null) return EvaluationOutcome.pending(null, null);
 
         Instant windowClose = TimeWindows.startOfDay(ctx.targetDate().plusDays(1), ctx.zone());
-        List<GeofenceTransition> trans = collectTransitions(ctx.signals(), ctx.memberId());
+        List<GeofenceTransition> trans = collectTransitions(ctx);
         trans.sort(Comparator.comparing(t -> nz(safe(t.at()))));
 
         // ===== AVOID(제약형): 유효한 진입만 위반. 허용 시간 안에 나왔으면 "스침"이다 =====
@@ -161,8 +161,10 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
      * 필터하지 않으면 다른 챌린지 지오펜스의 ENTER/DWELL이 이 챌린지를 인증(또는 AVOID 위반)시킨다(교차 인증 버그).
      * memberId가 없으면(레거시/단일 멤버 컨텍스트) 필터하지 않는다.
      */
-    private List<GeofenceTransition> collectTransitions(List<SyncSignal> signals, String memberId) {
+    private List<GeofenceTransition> collectTransitions(DayContext ctx) {
         List<GeofenceTransition> out = new ArrayList<>();
+        List<SyncSignal> signals = ctx.signals();
+        String memberId = ctx.memberId();
         if (signals == null) return out;
         for (SyncSignal s : signals) {
             if (!("GEOFENCE".equals(s.type()) || "GEOFENCE_TRANSITION".equals(s.type())) || s.transitions() == null) {
@@ -170,7 +172,7 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
             }
             for (GeofenceTransition t : s.transitions()) {
                 if (untrustedLocation(t.isMock())) continue;   // 조작된 위치·출처 불명은 판정 근거가 아니다(§9.1)
-                if (memberId == null || memberId.equals(t.geofenceId())) out.add(t);
+                if (memberId == null || t.belongsTo(memberId, ctx.userId(), ctx.challengeId())) out.add(t);
             }
         }
         return out;
