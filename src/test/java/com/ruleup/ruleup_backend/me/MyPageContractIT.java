@@ -440,6 +440,53 @@ class MyPageContractIT extends ChallengeApiSupport {
         }
 
         @Test
+        @DisplayName("유예 중인 어제 미달 건은 실패 예정이고 이의가 열린다 — 목표 달성형")
+        void achievement_grace_day_is_appealable() throws Exception {
+            Member me = member("cc-grace-achieve");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "SOLO");
+            insertDaily(ch, me.id(), 1, "PENDING", true);
+
+            assertThat(firstDay(me, ch)).containsEntry("status", "FAIL_EXPECTED")
+                    .containsEntry("appealable", true);
+        }
+
+        @Test
+        @DisplayName("규칙 지키기형은 위반 없이 끝난 어제가 실패 예정이 아니다 — 이의 접수와 같은 판단")
+        void constraint_grace_day_without_violation_is_not_appealable() throws Exception {
+            Member me = member("cc-grace-constraint");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "SOLO");
+            makeAvoidChallenge(ch);
+            UUID daily = insertDaily(ch, me.id(), 1, "PENDING", true);
+
+            assertThat(firstDay(me, ch)).containsEntry("status", "IN_PROGRESS")
+                    .containsEntry("appealable", false);
+            expectError(postJsonAuth("/api/v1/verifications/" + daily + "/appeals", me.token(),
+                    Map.of("reason", "위반한 적이 없는데 실패로 보여요")), 409, "NOT_FAILED");
+        }
+
+        @Test
+        @DisplayName("규칙 지키기형도 위반이 잡혔으면 실패 예정이고 이의가 열린다")
+        void constraint_violation_is_appealable() throws Exception {
+            Member me = member("cc-grace-violation");
+            UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "SOLO");
+            makeAvoidChallenge(ch);
+            UUID daily = insertDaily(ch, me.id(), 1, "PENDING", true);
+            jdbc().update("UPDATE VerificationDaily SET failureReason = 'ENTERED_AVOID_AREA' WHERE id = ?",
+                    bytes(daily));
+
+            assertThat(firstDay(me, ch)).containsEntry("status", "FAIL_EXPECTED")
+                    .containsEntry("appealable", true);
+        }
+
+        /** 장소 피하기(규칙 지키기형)로 바꾼다 — 템플릿 없이 신호원·파라미터로 판정 방향이 정해진다. */
+        private void makeAvoidChallenge(UUID challengeId) {
+            jdbc().update("UPDATE challenges SET verification_config = ?, params = ? WHERE id = ?",
+                    "{\"selectedMethod\":\"AUTO\",\"verificationType\":\"PHONE\",\"signalSource\":\"GEOFENCE\","
+                            + "\"wearableReq\":\"NONE\",\"requiredPermissions\":[]}",
+                    "{\"gps_presence\":\"AVOID\",\"radius_m\":100}", bytes(challengeId));
+        }
+
+        @Test
         @DisplayName("이탈한 방의 내 기록도 조회된다 — 완주·이탈 기록 열람이 보장돼야 한다")
         void left_member_can_still_read() throws Exception {
             Member me = member("cc-left");

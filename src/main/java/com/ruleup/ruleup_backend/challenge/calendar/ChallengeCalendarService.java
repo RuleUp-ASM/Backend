@@ -1,14 +1,19 @@
 package com.ruleup.ruleup_backend.challenge.calendar;
 
+import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
 import com.ruleup.ruleup_backend.recommendation.domain.RoutineOutcome;
 import com.ruleup.ruleup_backend.recommendation.repository.RoutineOutcomeRepository;
 import com.ruleup.ruleup_backend.verification.domain.Appeal;
+import com.ruleup.ruleup_backend.verification.domain.Polarity;
 import com.ruleup.ruleup_backend.verification.domain.VerificationDaily;
+import com.ruleup.ruleup_backend.verification.domain.VerificationPolarity;
 import com.ruleup.ruleup_backend.verification.repository.AppealRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
+import com.ruleup.ruleup_backend.verification.service.TodayStatusView;
+import com.ruleup.ruleup_backend.verification.service.VerificationConfigFactory;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -49,6 +54,8 @@ public class ChallengeCalendarService {
     private final VerificationDailyRepository dailyRepo;
     private final RoutineOutcomeRepository outcomeRepo;
     private final AppealRepository appealRepo;
+    private final ChallengeRepository challengeRepo;
+    private final VerificationConfigFactory configFactory;
     private final JdbcTemplate jdbc;
 
     public ChallengeCalendarResponse month(UUID userId, UUID challengeId, String month) {
@@ -69,15 +76,17 @@ public class ChallengeCalendarService {
                 .map(VerificationDaily::getTargetDate).collect(Collectors.toSet());
         Set<UUID> appealed = appealRepo.findByUserIdOrderByAcceptedAtDesc(userId).stream()
                 .map(Appeal::getVerificationDailyId).collect(Collectors.toSet());
+        Polarity polarity = polarityOf(challengeId);
 
         // 날짜순으로 세우는 것은 화면 요구가 아니라 계약이다 — 달력 칸을 채우는 쪽이 정렬을
         // 다시 하지 않아도 되게 서버가 순서를 보장한다.
         TreeMap<LocalDate, ChallengeCalendarResponse.Day> byDate = new TreeMap<>();
         for (VerificationDaily vd : dailies) {
-            String status = displayStatus(vd.getStatus(), vd.getTargetDate());
+            String status = TodayStatusView.of(vd.getStatus(), vd.getTargetDate(),
+                    vd.getFailureReason(), polarity, now);
             byDate.put(vd.getTargetDate(), new ChallengeCalendarResponse.Day(
                     vd.getTargetDate().toString(), status, vd.getId().toString(),
-                    appealable(status, vd, appealed.contains(vd.getId()), now)));
+                    !appealed.contains(vd.getId()) && vd.isAppealable(polarity, now)));
         }
         for (RoutineOutcome o : outcomeRepo
                 .findByUserIdAndChallengeIdAndTargetDateBetween(userId, challengeId, from, to)) {
@@ -92,32 +101,28 @@ public class ChallengeCalendarService {
     }
 
     /**
-     * 저장 상태 + 귀속일 → 화면 상태. {@code /me/calendar/{date}} 와 같은 어휘를 쓴다 —
-     * 같은 하루가 두 화면에서 다른 이름으로 보이면 안 된다.
-     *
-     * <p>귀속일이 끝났는데 아직 확정되지 않았다는 사실만으로 실패 예정이 성립한다. 유예 하루가
-     * 정확히 그 구간이다.
+     * 스냅샷만 남은 날(방이 하드 삭제됨)의 화면 상태. 인증 건이 없어 이의도 걸 수 없으므로
+     * 판정 방향 없이 날짜만으로 표시한다. 확정 전 PENDING 스냅샷은 사실상 없다.
      */
     private String displayStatus(VerificationStatus stored, LocalDate targetDate) {
         return switch (stored) {
             case SUCCESS -> "DONE";
             case FAILED -> "FAILED";
             case PENDING -> targetDate.isBefore(LocalDate.now(KST)) ? "FAIL_EXPECTED" : "IN_PROGRESS";
-            // 위에서 걸러지므로 도달하지 않는다. 판정 대상이 아닌 날은 배열에 넣지 않는다.
             case NOT_TARGET, NOT_REQUIRED -> "IN_PROGRESS";
         };
     }
 
     /**
-     * 이의 진입 가능 여부 — 마이페이지 §2-10 이 캘린더에서의 이의 진입을 요구한다.
-     *
-     * <p>대상은 실패했거나 실패 예정인 건뿐이다. 아직 채울 기회가 남은 건과 이미 완료된 건은
-     * 이의 대상이 아니다.
+     * 판정 방향 — 이의 접수({@code AppealService})·오늘 카드와 <b>같은 원천</b>을 쓴다.
+     * 캘린더만 방향을 무시하면 규칙 지키기형의 위반 없는 어제가 「실패 예정·이의 가능」으로 보이는데,
+     * 그 버튼을 누르면 서버가 NOT_FAILED 로 거절한다. 방이 없으면 달성형으로 본다(접수 쪽과 같다).
      */
-    private boolean appealable(String status, VerificationDaily vd, boolean alreadyAppealed, Instant now) {
-        if (!"FAILED".equals(status) && !"FAIL_EXPECTED".equals(status)) return false;
-        if (alreadyAppealed) return false;
-        return vd.getAppealClosesAt() != null && now.isBefore(vd.getAppealClosesAt());
+    private Polarity polarityOf(UUID challengeId) {
+        return challengeRepo.findById(challengeId)
+                .map(configFactory::build)
+                .map(VerificationPolarity::of)
+                .orElse(Polarity.ACHIEVEMENT);
     }
 
     /** 하드 삭제된 완료 방도 이력이 있으면 존재한다 — 완료 기록 열람이 보장돼야 한다. */
