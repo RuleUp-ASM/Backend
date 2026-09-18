@@ -137,9 +137,11 @@ public class ScoreProcessor {
         // Restore the prefix by reversing the affected suffix in reverse logical order.
         final Instant from=affected;
         List<Row> replaced=from==null?List.of():old.stream().filter(r->!r.input().effectiveAt().isBefore(from)).toList();
-        int undo=((Number)summary.get("total_score")).intValue();
+        // The reversal balance comes from the ledger row itself (balance just before it was applied), not the
+        // summary: a summary that drifted below the ledger made this negative and tripped ck_score_balance on
+        // every rewind, blocking the account's score inputs for good (QA TIER-15). The summary is re-set below.
         for(var r:replaced.reversed()) {
-            undo-=r.applied();
+            int undo=r.balance()-r.applied();
             append(user,"REVERSAL",ScoreLedgerReason.REVERSAL,r.input(),processing,hash("REVERSAL",processing,r.id()),
                     -r.raw(),-r.limited(),-r.applied(),undo,TierBands.of(undo),r.display(),r.id(),null,new Stored(r.input(),null,null,null));
         }
