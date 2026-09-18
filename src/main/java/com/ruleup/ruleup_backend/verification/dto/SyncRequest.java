@@ -11,6 +11,8 @@ import java.util.Map;
  *  - deviceTimeMillis / elapsedRealtimeMillis / bootSessionId : 시각 조작·미래 ts·부트 이전 ts 검증 입력.
  *  - deviceId     : 신호를 보낸 기기(단일 활성 기기 판정 키). 활성 기기가 아니면 신호는 <b>수신하되
  *    판정에 쓰지 않는다</b> — 예전 기기에 남아 있던 백로그가 새 기기의 인증을 통과시키면 안 된다.
+ *    로그인/기기 등록 때 보낸 deviceInfo.deviceId와 같은 값이다. installationId(설치 UUID)나
+ *    에뮬레이터 이름을 대신 보내면 UNTRUSTED_SOURCE로 제외된다.
  *  - sessionId    : 인트로가 발급한 수집 세션. 마지막 접촉 시각 갱신에 쓴다(신호 미수신 감지의 입력).
  *  - timeZone     : IANA — 참고용(판정은 KST 고정).
  *  - coveredFrom/coveredUntil : (필수) "이 구간의 신호를 빠짐없이 담았다"는 선언(epoch millis).
