@@ -61,6 +61,10 @@ public class BlockService {
         if (!CONTEXT_TYPES.contains(contextType))
             throw new BusinessException(ErrorCode.INVALID_REPORT_TARGET);
 
+        // 같은 신고자의 요청을 직렬화한다. 선조회만 하면 동시에 들어온 두 요청이 모두
+        // '아직 신고하지 않음'을 읽고 서로 다른 신고·스냅샷을 남길 수 있다(QA REP-09).
+        userRepository.findByIdForUpdate(reporterId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.LOGIN_REQUIRED));
         return TARGET_USER.equals(targetType)
                 ? reportUser(reporterId, request, contextType)
                 : reportChallenge(reporterId, request, contextType);
@@ -73,6 +77,7 @@ public class BlockService {
 
         UUID targetId = parseUuid(request.targetUserId(), ErrorCode.INVALID_REPORT_TARGET);
         if (targetId.equals(reporterId)) throw new BusinessException(ErrorCode.CANNOT_REPORT_SELF);
+        requireNotReported(reporterId, TARGET_USER, targetId);
         User target = userRepository.findById(targetId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
 
@@ -99,6 +104,7 @@ public class BlockService {
             throw new BusinessException(ErrorCode.INVALID_REPORT_REASON);
 
         UUID targetId = parseUuid(request.targetChallengeId(), ErrorCode.INVALID_REPORT_TARGET);
+        requireNotReported(reporterId, TARGET_CHALLENGE, targetId);
         Challenge challenge = challengeRepository.findById(targetId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
 
@@ -111,11 +117,15 @@ public class BlockService {
         return new ReportDtos.CreateResponse(reportId.toString(), true, effect);
     }
 
-    /**
-     * 전건 적재. 같은 대상을 다시 신고해도 <b>건은 하나 더 쌓이고 정상 201</b>이다 —
-     * 재신고는 접수 즉시 차단이 걸려 진입점이 사라지므로 구조적으로 불가능하고, 클라이언트 우회로
-     * 들어온 요청을 오류로 돌려주면 신고자에게는 접수가 실패한 것처럼 보인다.
-     */
+    /** 차단 해제도 신고 취소가 아니므로 원본 신고가 있으면 재접수하지 않는다. */
+    private void requireNotReported(UUID reporterId, String targetType, UUID targetId) {
+        Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM reports "
+                        + "WHERE reporter_id=? AND target_type=? AND target_id=?",
+                Integer.class, bytes(reporterId), targetType, bytes(targetId));
+        if (count != null && count > 0) throw new BusinessException(ErrorCode.ALREADY_REPORTED);
+    }
+
+    /** 최초 신고만 적재한다. 신고자 락과 중복 검사, 차단·스냅샷 저장은 한 트랜잭션이다. */
     private UUID insert(UUID reporterId, String targetType, UUID targetId, String reason, String snapshot) {
         UUID reportId = UuidGenerator.generate();
         // 시각은 <b>UTC 로 명시해 쓴다</b>. 컬럼 기본값 CURRENT_TIMESTAMP 는 DB 세션 시간대를 따라가서,
@@ -130,7 +140,7 @@ public class BlockService {
         return reportId;
     }
 
-    /** 차단은 재신고에도 멱등하다 — 이미 있으면 그대로 두고 건만 쌓는다. */
+    /** 신고와 같은 트랜잭션에서 차단을 적용한다. */
     private void block(UUID blockerId, String targetType, UUID targetId) {
         jdbc.update("INSERT IGNORE INTO user_blocks (blocker_id, target_type, target_id, blocked_at) "
                 + "VALUES (?, ?, ?, UTC_TIMESTAMP(3))",

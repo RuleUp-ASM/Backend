@@ -245,36 +245,88 @@ class ReportBlockContractIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("이미 차단한 대상을 다시 신고해도 정상 201 이다 — 오류로 응답하지 않는다")
-        void re_report_is_accepted_silently() throws Exception {
+        @DisplayName("이미 신고한 사용자는 다시 접수되지 않고 스냅샷도 하나만 남는다")
+        void duplicate_user_report_is_rejected() throws Exception {
             Member reporter = member(uniq("r"));
             Member target = member(uniq("t"));
-
-            postAuth("/api/v1/reports", reporter.token(), userReport(target.id(), null));
-            MvcResult second = postAuth("/api/v1/reports", reporter.token(), userReport(target.id(), null));
-
-            assertThat(second.getResponse().getStatus())
-                    .as("신고자에게는 정상 접수로 보여야 한다").isEqualTo(201);
-            assertThat((Boolean) read(second, "$.data.blocked")).isTrue();
-            // duplicate 플래그는 폐기됐다 — 재신고가 구조적으로 불가능해 내려줄 상태가 없다.
-            assertThat(second.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8))
-                    .doesNotContain("duplicate");
+            MvcResult first = postAuth("/api/v1/reports", reporter.token(), userReport(target.id(), null));
+            assertThat(first.getResponse().getStatus()).isEqualTo(201);
+            Map<String, Object> second = userReport(target.id(), null);
+            second.put("reason", "ETC");
+            expectError(postAuth("/api/v1/reports", reporter.token(), second), 409, "ALREADY_REPORTED");
+            assertSingleReport(reporter.id(), "USER", target.id());
         }
 
         @Test
-        @DisplayName("건은 하나 더 적재된다 — 차단은 재적용하고 기록은 쌓는다")
-        void re_report_still_records() throws Exception {
+        @DisplayName("참여 중인 챌린지도 사유를 바꿔 중복 신고할 수 없다")
+        void duplicate_challenge_report_is_rejected() throws Exception {
+            Member reporter = member(uniq("r"));
+            Member owner = member(uniq("o"));
+            UUID challenge = insertChallenge(owner.id(), "EXERCISE", "ACTIVE", "GROUP");
+            insertActiveMembership(challenge, reporter.id(), "MEMBER");
+            assertThat(postAuth("/api/v1/reports", reporter.token(), challengeReport(challenge))
+                    .getResponse().getStatus()).isEqualTo(201);
+            Map<String, Object> second = challengeReport(challenge);
+            second.put("reason", "ETC");
+            expectError(postAuth("/api/v1/reports", reporter.token(), second), 409, "ALREADY_REPORTED");
+            assertSingleReport(reporter.id(), "CHALLENGE", challenge);
+        }
+
+        @Test
+        @DisplayName("차단을 해제해도 기존 신고가 남아 있으면 중복 접수되지 않는다")
+        void unblocking_does_not_allow_duplicate_report() throws Exception {
             Member reporter = member(uniq("r"));
             Member target = member(uniq("t"));
-
             postAuth("/api/v1/reports", reporter.token(), userReport(target.id(), null));
-            postAuth("/api/v1/reports", reporter.token(), userReport(target.id(), null));
-
-            assertThat(jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM reports WHERE reporter_id=? AND target_type='USER' AND target_id=?",
-                    Integer.class, bytes(reporter.id()), bytes(target.id()))).isEqualTo(2);
-            assertThat(blockCount(reporter.id())).as("차단은 하나다").isEqualTo(1);
+            deleteAuth("/api/v1/users/me/blocks/users/" + target.id(), reporter.token());
+            expectError(postAuth("/api/v1/reports", reporter.token(), userReport(target.id(), null)),
+                    409, "ALREADY_REPORTED");
+            assertSingleReport(reporter.id(), "USER", target.id());
+            assertThat(blockCount(reporter.id())).isZero();
         }
+
+        @Test
+        @DisplayName("같은 신고를 동시에 보내도 한 건만 접수되고 나머지는 409다")
+        void simultaneous_reports_create_one_record() throws Exception {
+            Member reporter = member(uniq("r"));
+            Member target = member(uniq("t"));
+            var ready = new java.util.concurrent.CountDownLatch(4);
+            var start = new java.util.concurrent.CountDownLatch(1);
+            try (var executor = java.util.concurrent.Executors.newFixedThreadPool(4)) {
+                var calls = new java.util.ArrayList<java.util.concurrent.Future<MvcResult>>();
+                for (int i = 0; i < 4; i++) {
+                    calls.add(executor.submit(() -> {
+                        ready.countDown();
+                        if (!start.await(10, java.util.concurrent.TimeUnit.SECONDS))
+                            throw new IllegalStateException("start timeout");
+                        return postAuth("/api/v1/reports", reporter.token(), userReport(target.id(), null));
+                    }));
+                }
+                assertThat(ready.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                start.countDown();
+                var statuses = new java.util.ArrayList<Integer>();
+                for (var call : calls) {
+                    MvcResult result = call.get(20, java.util.concurrent.TimeUnit.SECONDS);
+                    statuses.add(result.getResponse().getStatus());
+                    if (result.getResponse().getStatus() != 201)
+                        expectError(result, 409, "ALREADY_REPORTED");
+                }
+                assertThat(statuses).containsExactlyInAnyOrder(201, 409, 409, 409);
+            } finally { start.countDown(); }
+            assertSingleReport(reporter.id(), "USER", target.id());
+            assertThat(blockCount(reporter.id())).isEqualTo(1);
+        }
+
+        private void assertSingleReport(UUID reporter, String type, UUID target) {
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM reports WHERE reporter_id=? AND target_type=? AND target_id=?",
+                    Integer.class, bytes(reporter), type, bytes(target))).isEqualTo(1);
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM report_snapshots s JOIN reports r ON r.id=s.report_id "
+                            + "WHERE r.reporter_id=? AND r.target_type=? AND r.target_id=?",
+                    Integer.class, bytes(reporter), type, bytes(target))).isEqualTo(1);
+        }
+
     }
 
     // =====================================================================
