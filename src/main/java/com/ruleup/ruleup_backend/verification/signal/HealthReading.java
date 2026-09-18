@@ -1,6 +1,8 @@
 package com.ruleup.ruleup_backend.verification.signal;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.math.BigDecimal;
 
@@ -20,6 +22,10 @@ import java.math.BigDecimal;
  *
  * <p>구간을 보내지 않는 클라가 아직 있어 <b>선택</b>이다. 구간 없는 레코드는 예전처럼
  * "그날 누적값"으로 다뤄 가장 큰 값을 쓴다.
+ *
+ * <p><b>Android 와이어</b>는 출처를 {@code recordingMethod}·{@code originPackage} 로 평평하게 싣고,
+ * 지표({@code metric})는 신호 단위에 한 번만 싣는다. 출처는 여기서 {@link HealthOrigin} 으로 조립하고,
+ * 지표는 {@link SyncSignal#fromWire} 가 채운다. 조립하지 않으면 출처 누락으로 신뢰 게이트가 전부 거부한다.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record HealthReading(
@@ -31,4 +37,20 @@ public record HealthReading(
         String endTime,
         String exerciseType,
         HealthOrigin origin
-) {}
+) {
+    @JsonCreator
+    public static HealthReading fromWire(
+            @JsonProperty("recordId") String recordId,
+            @JsonProperty("metric") String metric,
+            @JsonProperty("value") BigDecimal value,
+            @JsonProperty("unit") String unit,
+            @JsonProperty("startTime") String startTime,
+            @JsonProperty("endTime") String endTime,
+            @JsonProperty("exerciseType") String exerciseType,
+            @JsonProperty("origin") HealthOrigin origin,
+            @JsonProperty("recordingMethod") String recordingMethod,
+            @JsonProperty("originPackage") String originPackage) {
+        return new HealthReading(recordId, metric, value, unit, startTime, endTime, exerciseType,
+                HealthOrigin.orFlat(origin, originPackage, recordingMethod));
+    }
+}

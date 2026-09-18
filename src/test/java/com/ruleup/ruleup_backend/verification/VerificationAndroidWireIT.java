@@ -143,6 +143,49 @@ class VerificationAndroidWireIT extends VerificationApiSupport {
     }
 
     @Test
+    @DisplayName("건강 — 앱 형식(신호 단위 metric·평평한 출처·epoch millis) 걸음 수로 인증된다")
+    void healthWithAndroidShape() throws Exception {
+        Member me = member(uniq("wire-health"));
+        UUID ch = insertAutoChallenge(me.id(), "HEALTH", "HC_RECORD", "{\"metric\":\"STEPS\",\"steps\":8000}");
+        UUID memberId = insertReadyMember(ch, me.id(), null, null);
+
+        Map<String, Object> reading = new LinkedHashMap<>();
+        reading.put("recordId", "hc-1");
+        reading.put("value", 8200.0);
+        reading.put("startTime", todayAt(9, 0).toEpochMilli());
+        reading.put("endTime", todayAt(10, 0).toEpochMilli());
+        reading.put("recordingMethod", "AUTO");
+        reading.put("originPackage", "com.sec.android.app.shealth");
+        Map<String, Object> signal = new LinkedHashMap<>();
+        signal.put("type", "HEALTH");
+        signal.put("date", java.time.LocalDate.now(KST).toString());
+        signal.put("metric", "STEPS");
+        signal.put("readings", List.of(reading));
+
+        sync(me.token(), List.of(signal));
+
+        assertThat(todayStatusOf(memberId)).isEqualTo("SUCCESS");
+    }
+
+    @Test
+    @DisplayName("기상 — 앱 형식 firstUnlock(epoch millis)으로 인증된다")
+    void wakeWithAndroidShape() throws Exception {
+        Member me = member(uniq("wire-wake"));
+        UUID ch = insertAutoChallenge(me.id(), "WAKE", "USAGE", "{\"target_time\":\"07:00\"}");
+        UUID memberId = insertReadyMember(ch, me.id(), null, null);
+
+        Map<String, Object> signal = new LinkedHashMap<>();
+        signal.put("type", "WAKE");
+        signal.put("firstUnlock", todayAt(6, 30).toEpochMilli());
+        signal.put("firstScreenOn", todayAt(6, 28).toEpochMilli());
+        signal.put("deviceSecure", true);
+
+        sync(me.token(), List.of(signal));
+
+        assertThat(todayStatusOf(memberId)).isEqualTo("SUCCESS");
+    }
+
+    @Test
     @DisplayName("측위 fallback — 앱 형식(epoch millis) 좌표로 체류가 쌓여 인증된다")
     void locationFallbackWithEpochMillis() throws Exception {
         Member me = member(uniq("wire-loc"));
