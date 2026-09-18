@@ -139,7 +139,7 @@ public class AppealService {
                 new AppealResponse.Restored(
                         TodayStatusView.DONE,
                         streakService.around(daily.getChallengeMemberId(), daily.getTargetDate()).after(),
-                        scoreDeltaOf(daily)));
+                        0)); // 점수는 커밋 이후 아웃박스에서 반영한다. 이 응답의 동기 지급분은 없다.
     }
 
     /** 실패로 확정됐거나 이대로면 실패인지 — 기한과 무관하게 "이의 대상인 판정"인지만 본다. */
@@ -193,16 +193,6 @@ public class AppealService {
         } else {
             progressService.recount(member);
         }
-    }
-
-    /**
-     * 인용으로 되돌아온 점수. 정상 성공과 같은 값이어야 한다.
-     *
-     * <p>지금은 인증 1건 단위 점수 지급이 점수 도메인에 없어 0 이다(테크스펙 Non-Goals: 티어 점수 계산 없음).
-     * 사이클 결과에 따른 점수는 확정 인증 결과를 다시 읽어 계산되므로, 정정된 결과가 그대로 반영된다.
-     */
-    private int scoreDeltaOf(VerificationDaily daily) {
-        return 0;
     }
 
 }
