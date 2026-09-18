@@ -47,6 +47,8 @@ class VerificationDecisionTimingIT extends VerificationApiSupport {
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired VerificationFinalizeService finalizeService;
     @Autowired MutableClock clock;
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    com.ruleup.ruleup_backend.challenge.lifecycle.ChallengeScoreInputs scoreCycles;
 
     private MockMvc mvc;
 
@@ -265,6 +267,31 @@ class VerificationDecisionTimingIT extends VerificationApiSupport {
     @Nested
     @DisplayName("확정 배치")
     class Finalization {
+
+        @Test
+        @DisplayName("점수 사이클 입력을 만들 수 없어도 실패 확정은 커밋된다 — 점수는 보정 배치가 나중에 반영한다")
+        void finalizationCommitsEvenWhenScoreInputsAreMissing() throws Exception {
+            Member me = member(uniq("final-score-missing"));
+            UUID challenge = insertAutoChallenge(me.id(), "SCREEN_TIME_MAX", "USAGE", "{\"duration_min\":10}");
+            jdbc().update("UPDATE challenges SET penalties = '{\"score\":true,\"groupShare\":true,\"watcher\":false}' WHERE id = ?",
+                    bytes(challenge));
+            UUID memberId = insertReadyMember(challenge, me.id(), null, screenApps("com.instagram.android"));
+            sync(me.token(), List.of(usageSignal("com.instagram.android", todayAt(20, 0), todayAt(20, 40))));
+            // 멤버십 스냅샷이 없는 등으로 사이클 입력을 만들 수 없는 상황(QA TIER-15 B4).
+            org.mockito.Mockito.doThrow(new IllegalStateException("SCORE_MEMBERSHIP_INPUT_MISSING"))
+                    .when(scoreCycles).cycle(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.anyInt());
+            try {
+                makeDue(memberId);
+                finalizeService.finalizeDue();
+            } finally {
+                org.mockito.Mockito.reset(scoreCycles);
+            }
+
+            assertThat(todayStatusOf(memberId))
+                    .as("예전에는 확정 직전 예외로 확정 자체가 롤백돼 PENDING 에 머물렀다")
+                    .isEqualTo("FAILED");
+        }
 
         @Test
         @DisplayName("확정 시각이 지나면 위반이 남아 있는 건만 실패로 확정된다")
