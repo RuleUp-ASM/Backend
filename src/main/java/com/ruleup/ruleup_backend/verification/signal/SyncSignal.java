@@ -1,8 +1,11 @@
 package com.ruleup.ruleup_backend.verification.signal;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -12,6 +15,17 @@ import java.util.List;
  *
  *  <p>{@code recordId} 는 클라가 붙이는 신호 고유 식별자다(선택). 있으면 그 값으로, 없으면 신호 내용 전체로
  *  중복을 판정한다 — 오프라인 복구·구간 재전송·FCM 기동 후 일괄 전송이 같은 신호를 여러 번 실어 오기 때문이다.
+ *
+ * <h4>Android 와이어는 {@link #fromWire} 가 서버 모양으로 접는다</h4>
+ * 앱의 전송 스펙은 필드 배치가 다르다(QA SIG-19 후속). 받는 자리에서 한 번 접어 두면 평가기·저장·재평가가
+ * 모두 서버 모양 하나만 보면 된다 — 저장도 접힌 모양으로 되므로 다시 읽을 때 같은 변환이 또 필요 없다.
+ * <ul>
+ *   <li>GEOFENCE: {@code events} → {@code transitions}</li>
+ *   <li>SCREEN_TIME: {@code appEvents} → {@code usageEvents}</li>
+ *   <li>HEALTH: 신호 단위 {@code metric} → reading 마다. 서버는 reading 의 metric 으로 지표를 가른다</li>
+ *   <li>SLEEP: {@code sessions} → {@code segments}</li>
+ *   <li>WAKE: {@code firstUnlock}·{@code firstScreenOn}(epoch millis) → {@code screenEvents} 의 UNLOCK·SCREEN_ON</li>
+ * </ul>
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record SyncSignal(
@@ -19,7 +33,7 @@ public record SyncSignal(
         String recordId,                      // 신호 고유 식별자(선택). 있으면 멱등 판정의 1순위 키
         String observedAt,                    // 신호 관측 시각 ISO
         // GEOFENCE (Android 와이어: events)
-        @JsonAlias("events") List<GeofenceTransition> transitions,
+        List<GeofenceTransition> transitions,
         // LOCATION / RUNNING_SESSION
         List<GeoPoint> points,
         Boolean isMock,
@@ -31,7 +45,7 @@ public record SyncSignal(
         String detectedActivity,              // RUNNING / WALKING
         // SCREEN_TIME / HEALTH
         String date,                          // 대상 날짜 YYYY-MM-DD
-        @JsonAlias("appEvents") List<UsageEvent> usageEvents,
+        List<UsageEvent> usageEvents,
         List<ScreenEvent> screenEvents,
         // SLEEP
         List<SleepSegment> segments,
@@ -49,6 +63,59 @@ public record SyncSignal(
          */
         java.time.Instant receivedAt
 ) {
+
+    @JsonCreator
+    public static SyncSignal fromWire(
+            @JsonProperty("type") String type,
+            @JsonProperty("recordId") String recordId,
+            @JsonProperty("observedAt") String observedAt,
+            @JsonProperty("transitions") @JsonAlias("events") List<GeofenceTransition> transitions,
+            @JsonProperty("points") List<GeoPoint> points,
+            @JsonProperty("isMock") Boolean isMock,
+            @JsonProperty("readings") List<HealthReading> readings,
+            @JsonProperty("sessionStart") String sessionStart,
+            @JsonProperty("sessionEnd") String sessionEnd,
+            @JsonProperty("detectedActivity") String detectedActivity,
+            @JsonProperty("date") String date,
+            @JsonProperty("usageEvents") @JsonAlias("appEvents") List<UsageEvent> usageEvents,
+            @JsonProperty("screenEvents") List<ScreenEvent> screenEvents,
+            @JsonProperty("segments") @JsonAlias("sessions") List<SleepSegment> segments,
+            @JsonProperty("receivedAt") java.time.Instant receivedAt,
+            // ↓ Android 와이어에만 있는 필드. 위 필드로 접고 따로 저장하지 않는다.
+            @JsonProperty("metric") String metric,
+            @JsonProperty("firstUnlock") String firstUnlock,
+            @JsonProperty("firstScreenOn") String firstScreenOn) {
+        return new SyncSignal(type, recordId, observedAt, transitions, points, isMock,
+                withMetric(readings, metric), sessionStart, sessionEnd, detectedActivity, date,
+                usageEvents, withWakeEvents(screenEvents, firstUnlock, firstScreenOn), segments, receivedAt);
+    }
+
+    /** reading 에 지표가 없으면 신호 단위 지표를 채운다. 이미 있는 값은 건드리지 않는다. */
+    private static List<HealthReading> withMetric(List<HealthReading> readings, String metric) {
+        if (readings == null || metric == null || metric.isBlank()) return readings;
+        List<HealthReading> out = new ArrayList<>(readings.size());
+        for (HealthReading r : readings) {
+            out.add((r == null || r.metric() != null) ? r
+                    : new HealthReading(r.recordId(), metric, r.value(), r.unit(), r.startTime(), r.endTime(),
+                            r.exerciseType(), r.origin()));
+        }
+        return out;
+    }
+
+    /**
+     * 앱의 기상 신호는 「그날 첫 잠금 해제·첫 화면 켜짐」 시각 두 개다. 평가기는 화면 이벤트 목록에서
+     * 창 안의 첫 UNLOCK 을 찾으므로 같은 뜻의 이벤트로 옮긴다.
+     */
+    private static List<ScreenEvent> withWakeEvents(List<ScreenEvent> events, String firstUnlock,
+                                                    String firstScreenOn) {
+        boolean unlock = firstUnlock != null && !firstUnlock.isBlank();
+        boolean screenOn = firstScreenOn != null && !firstScreenOn.isBlank();
+        if (!unlock && !screenOn) return events;
+        List<ScreenEvent> out = (events != null) ? new ArrayList<>(events) : new ArrayList<>();
+        if (unlock) out.add(new ScreenEvent("UNLOCK", firstUnlock));
+        if (screenOn) out.add(new ScreenEvent("SCREEN_ON", firstScreenOn));
+        return out;
+    }
 
     /** 원본을 다시 읽을 때 서버가 수신 시각을 채워 넣는다. */
     public SyncSignal withReceivedAt(java.time.Instant at) {

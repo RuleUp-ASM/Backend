@@ -13,6 +13,7 @@ import java.time.*;
 import java.util.*;
 
 /** Capture eligibility at judgement time, before settings or membership can change. */
+@lombok.extern.slf4j.Slf4j
 @Component @RequiredArgsConstructor
 public class VerificationScoreEvents {
     public record Confirmed(VerificationDaily daily) {}
@@ -30,7 +31,16 @@ public class VerificationScoreEvents {
         var c=source.findById(d.getChallengeId());
         if(saved.isEmpty() && (c.isEmpty()||!c.get().automatic()))return;
         int no=saved.map(i->i.cycle().cycleNo()).orElseGet(()->(int)(java.time.temporal.ChronoUnit.DAYS.between(c.get().getStartDate(),d.getTargetDate())/7)+1);
-        var spec=saved.map(ScoreInput::cycle).or(()->processor.cycleSnapshot(d.getUserId(),d.getChallengeId(),no)).or(()->cycles.cycle(d.getUserId(),d.getChallengeId(),no));
+        Optional<ScoreInput.CycleSpec> spec;
+        try {
+            spec=saved.map(ScoreInput::cycle).or(()->processor.cycleSnapshot(d.getUserId(),d.getChallengeId(),no)).or(()->cycles.cycle(d.getUserId(),d.getChallengeId(),no));
+        } catch(RuntimeException e) {
+            // Missing cycle inputs (membership, eligible dates) must not undo the judgement itself: thrown here, before
+            // commit, it rolled the finalization back and the day stayed PENDING, retried forever (QA TIER-15 B4).
+            // The judgement commits; ScoreSyncService re-derives the score input once the inputs resolve.
+            log.warn("score_input_deferred dailyId={} userId={} cycleNo={} err={}",d.getId(),d.getUserId(),no,e.toString());
+            return;
+        }
         if(spec.isEmpty() || !spec.get().eligibleDates().contains(d.getTargetDate()))return;
         String status=d.getStatus().name();if(!Set.of("SUCCESS","FAILED").contains(status))status="INVALID";
         ScoreInput input=new ScoreInput(ScoreInput.Kind.DAILY,d.getId().toString(),Math.toIntExact(d.getVersion()),

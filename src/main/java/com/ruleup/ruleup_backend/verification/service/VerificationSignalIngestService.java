@@ -128,9 +128,8 @@ public class VerificationSignalIngestService {
             Optional<SignalDomain> domain = SignalDomain.of(signal.type());
             if (domain.isEmpty()) { unsupported.add(signal); continue; }
 
-            Instant occurredAt = TimeWindows.parseInstant(signal.observedAt());
-            LocalDate observedDate = LocalDate.ofInstant(
-                    (occurredAt != null) ? occurredAt : receivedAt, KST);
+            Instant occurredAt = occurredAt(signal);
+            LocalDate observedDate = observedDate(signal, occurredAt, receivedAt);
             grouped.computeIfAbsent(domain.get(), d -> new LinkedHashMap<>())
                     .computeIfAbsent(observedDate, d -> new ArrayList<>())
                     .add(new Candidate(domain.get(), observedDate, e.getKey(), signal, occurredAt,
@@ -151,6 +150,51 @@ public class VerificationSignalIngestService {
             }
         }
         return new Ingested(accepted, dropped);
+    }
+
+    /**
+     * 신호가 일어난 시각. 신호 단위 {@code observedAt} 이 있으면 그것을, 없으면 <b>담긴 항목 중 가장 이른 시각</b>을 쓴다.
+     *
+     * <p>Android 전송 스펙은 신호 단위 {@code observedAt} 을 싣지 않는다. 예전에는 그때 수신 시각으로
+     * 귀속일 파티션을 정해서, 오프라인으로 이틀 밀렸다 올라온 기록이 판정일 기준 앞뒤 하루 조회 범위
+     * 밖에 저장돼 판정에서 빠졌다. 같은 기록을 다른 날 재전송하면 다른 파티션에 저장돼 멱등도 깨졌다.
+     * 내용에서 시각을 뽑으면 같은 기록은 언제 받아도 같은 파티션에 간다.
+     */
+    private static Instant occurredAt(SyncSignal s) {
+        Instant declared = TimeWindows.parseInstant(s.observedAt());
+        if (declared != null) return declared;
+        Instant earliest = null;
+        if (s.transitions() != null) for (var t : s.transitions()) earliest = earlier(earliest, t.at());
+        if (s.points() != null) for (var p : s.points()) earliest = earlier(earliest, p.at());
+        if (s.readings() != null) for (var r : s.readings()) if (r != null) earliest = earlier(earliest, r.startTime());
+        if (s.segments() != null) for (var g : s.segments()) earliest = earlier(earliest, g.startAt());
+        if (s.usageEvents() != null) for (var e : s.usageEvents()) earliest = earlier(earliest, e.at());
+        if (s.screenEvents() != null) for (var e : s.screenEvents()) earliest = earlier(earliest, e.at());
+        return earlier(earliest, s.sessionStart());
+    }
+
+    private static Instant earlier(Instant current, String candidate) {
+        Instant at = TimeWindows.parseInstant(candidate);
+        return (at == null || (current != null && !at.isBefore(current))) ? current : at;
+    }
+
+    /**
+     * 귀속일 파티션. 일어난 시각 → 선언된 날짜({@code date}, HEALTH) → 수신 시각 순으로 정한다.
+     * 수신 시각보다 뒤인 날짜는 믿지 않는다 — 기기 시계가 앞서 있어도 미래 파티션에 쌓이지 않게 한다.
+     */
+    private static LocalDate observedDate(SyncSignal s, Instant occurredAt, Instant receivedAt) {
+        LocalDate received = LocalDate.ofInstant(receivedAt, KST);
+        LocalDate date = null;
+        if (occurredAt != null) {
+            date = LocalDate.ofInstant(occurredAt, KST);
+        } else if (s.date() != null && !s.date().isBlank()) {
+            try {
+                date = LocalDate.parse(s.date().trim());
+            } catch (java.time.format.DateTimeParseException ignored) {
+                // 형식이 틀린 날짜는 없는 것으로 본다
+            }
+        }
+        return (date == null || date.isAfter(received)) ? received : date;
     }
 
     /** 한 도메인·한 귀속일 묶음을 적재하고, 중복으로 걸러낸 수를 돌려준다. */

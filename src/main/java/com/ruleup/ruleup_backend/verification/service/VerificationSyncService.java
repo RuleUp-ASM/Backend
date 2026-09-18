@@ -470,7 +470,8 @@ public class VerificationSyncService {
         // 신호는 도착 시각이 아니라 발생 시각으로 귀속한다 — 한 배치에 어제치와 오늘치가 섞여 온다.
         List<SyncSignal> ofDay = DaySignals.forDate(signals, today, KST);
         DayContext ctx = new DayContext(today, KST, now, config, ofDay,
-                memberAnchors, memberScreenApps, member.getId().toString());
+                memberAnchors, memberScreenApps, member.getId().toString(),
+                member.getUserId(), member.getChallengeId());
         EvaluationOutcome outcome = evaluator.evaluate(ctx);
 
         // ③ 권한 공백(gaps) 반영: 신호 없이 PENDING이고 해당 신호타입에 비회복 권한 공백이 있으면

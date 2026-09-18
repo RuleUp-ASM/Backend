@@ -115,6 +115,27 @@ class ScoreReplayIT extends ChallengeApiSupport {
         assertThat(count(user,"entry_kind='RESULT' AND NOT EXISTS (SELECT 1 FROM score_transactions r WHERE r.reversal_of=score_transactions.id)")).isEqualTo(3);
     }
 
+    /**
+     * 요약이 원장과 어긋난 계정도 되감기가 막히지 않는다(QA TIER-15 B1).
+     *
+     * <p>되감기 행의 잔액을 요약에서 빼 가며 계산하면, 요약이 원장보다 작을 때 음수가 되어
+     * ck_score_balance 위반으로 트랜잭션이 통째로 롤백됐다 — 그 계정의 되감기가 필요한 모든 점수
+     * 입력이 영구히 막혔다. 원장 행이 기록한 잔액으로 되감고, 요약은 재생값으로 다시 맞춘다.
+     */
+    @Test void rewindUsesLedgerBalanceEvenWhenSummaryDrifted() throws Exception {
+        UUID user=member(uniq("replay-drift")).id();
+        var a=daily(cycle(UUID.randomUUID(),1),"SUCCESS",1);var b=daily(cycle(UUID.randomUUID(),1),"SUCCESS",1);
+        assertThat(run(user,"b",List.of(b),false).score()).isEqualTo(20);
+        db.update("UPDATE user_score_summaries SET total_score=0 WHERE user_id=?",bytes(user));   // 원장 20, 요약 0
+
+        assertThat(run(user,"a",List.of(a),false).score()).isEqualTo(30);   // b 를 되감고 a·b 를 재적재
+
+        assertThat(score(user)).isEqualTo(30);
+        assertThat(db.queryForObject("SELECT balance_after FROM score_transactions WHERE user_id=? AND entry_kind='REVERSAL'",
+                Integer.class,bytes(user))).isEqualTo(10);   // b 가 반영되기 직전 원장 잔액
+        assertThat(processor.verifyUser(user)).isEmpty();
+    }
+
     @Test void oneYearOfThreeChallengesRemainsReplayableWithinTransactionBudget() throws Exception {
         UUID user=member(uniq("replay-year")).id();
         List<ScoreInput> history=new ArrayList<>();

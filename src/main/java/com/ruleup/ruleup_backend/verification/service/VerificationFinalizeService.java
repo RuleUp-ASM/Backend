@@ -532,7 +532,8 @@ public class VerificationFinalizeService {
         List<String> screenApps = settingsResolver.screenAppPackagesOn(member, targetDate);
         List<GeoAnchor> anchors = settingsResolver.anchorsOn(member, targetDate);
         EvaluationOutcome outcome = evaluator.evaluate(new DayContext(
-                targetDate, KST, now, config, ofDay, anchors, screenApps, member.getId().toString()));
+                targetDate, KST, now, config, ofDay, anchors, screenApps, member.getId().toString(),
+                member.getUserId(), member.getChallengeId()));
 
         // 재평가 결과를 방식 행에 남긴다 — 실패 상세와 배제 로그가 이 근거를 읽는다.
         Map<String, Object> evidence = carryPendingReason(outcome.evidence(), stored);
