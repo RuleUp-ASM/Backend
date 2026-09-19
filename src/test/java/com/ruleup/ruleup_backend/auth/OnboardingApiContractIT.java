@@ -299,6 +299,21 @@ class OnboardingApiContractIT extends AuthApiSupport {
             assertThat(mvc.perform(get("/terms/unknown")).andReturn().getResponse().getStatus()).isEqualTo(404);
         }
 
+        @ParameterizedTest
+        @ValueSource(strings = {"termsOfService", "privacyPolicy", "locationService"})
+        @DisplayName("intro 가 광고하는 현행 약관 3종은 실제 원문으로 열리고 현행 URL 과 내용이 같다")
+        void current_terms_urls_open_real_documents(String kind) throws Exception {
+            String url = read(intro("ANDROID", 9999), "$.data.termsUrls." + kind);
+            String path = java.net.URI.create(url).getPath();
+            MvcResult versioned = mvc.perform(get(path)).andReturn();
+            MvcResult current = mvc.perform(get(path.substring(0, path.lastIndexOf('/')))).andReturn();
+            assertThat(versioned.getResponse().getStatus()).isEqualTo(200);
+            assertThat(current.getResponse().getStatus()).isEqualTo(200);
+            String body = versioned.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+            assertThat(body).contains("룰업(RuleUp)").hasSizeGreaterThan(3000);
+            assertThat(current.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8)).isEqualTo(body);
+        }
+
         @Test
         @DisplayName("최소 지원 버전 미만이면 forceUpdate=true (에러가 아니라 200 + 플래그)")
         void intro_force_update_flag() throws Exception {
