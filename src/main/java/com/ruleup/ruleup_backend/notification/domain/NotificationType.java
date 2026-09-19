@@ -9,7 +9,9 @@ import java.util.UUID;
 import static com.ruleup.ruleup_backend.notification.domain.NotificationParams.*;
 
 /**
- * 알림 타입 레지스트리 <b>23종</b> — 백엔드 테크 스펙 5절, 공통 8절.
+ * 알림 타입 레지스트리 <b>24종</b> — 백엔드 테크 스펙 5절, 공통 8절.
+ *
+ * <p>2026-09-19 {@link #VERIFICATION_FAIL_EXPECTED}(이의 필요) 가 추가돼 24종이다(QA NOTI-16).
  *
  * <h4>23종 — 문서와 맞다</h4>
  * 한동안 코드가 문서보다 한 종 앞서 있었다. {@code CS_ANSWERED} 가 앱 운영 정책 §5.5 에만 있고
@@ -138,10 +140,24 @@ public enum NotificationType {
     CS_ANSWERED(NotificationToggleGroup.ACCOUNT, "ruleup://me/inquiries/{inquiry_id}",
             new String[]{INQUIRY_ID}),
 
-    // ===== 챌린지 그룹 8종 =====
+    // ===== 챌린지 그룹 9종 =====
 
-    /** 인증 판정 결과 — 방 상세의 「오늘」 카드. 앱에 인증 상세 단독 화면이 없다. */
-    VERIFICATION_RESULT(NotificationToggleGroup.CHALLENGE, "ruleup://challenges/{challenge_id}",
+    /**
+     * 인증 판정 결과 — 방 상세의 「오늘」 카드. 앱에 인증 상세 단독 화면이 없다.
+     *
+     * <p>딥링크는 {@code ruleup://challenge/{id}} (단수) 다 — 2026-09-19 Android 와 합의한 계약값이다
+     * (QA NOTI-15). 다른 챌린지 그룹 타입의 {@code challenges/} 는 아직 정합 전이다.
+     */
+    VERIFICATION_RESULT(NotificationToggleGroup.CHALLENGE, "ruleup://challenge/{challenge_id}",
+            new String[]{VERIFICATION_ID}),
+
+    /**
+     * 실패 예정 진입 — 「이의제기가 필요해요」(QA NOTI-16). 탭하면 그 건의 이의 제출 화면으로 바로 간다.
+     *
+     * <p>{@link #VERIFICATION_RESULT} 의 변형으로 두지 않는다. 멱등 키가 {@code verification_id} 하나라
+     * 같은 건에 실패 예정 알림이 먼저 적재되면 이틀 뒤 「실패로 확정됐어요」가 UNIQUE 에 막혀 사라진다.
+     */
+    VERIFICATION_FAIL_EXPECTED(NotificationToggleGroup.CHALLENGE, "ruleup://appeal/{verification_id}",
             new String[]{VERIFICATION_ID}),
 
     /**

@@ -139,4 +139,13 @@ public interface VerificationDailyRepository extends JpaRepository<VerificationD
             """)
     List<VerificationDaily> findWatcherRecoveryPage(@Param("since") Instant since, @Param("now") Instant now,
                                                     @Param("cursor") UUID cursor, Pageable pageable);
+
+    /**
+     * 확정 전인 특정 귀속일의 건을 id 순으로 한 쪽씩 — 실패 예정 알림 배치용.
+     * {@code finalizeAfter} 가 귀속일로 정해지므로 (status, finalizeAfter) 인덱스를 탄다.
+     */
+    @Query(value = "SELECT * FROM VerificationDaily WHERE status = 'PENDING' AND finalizeAfter = :finalizeAfter "
+            + "AND id > :after ORDER BY id LIMIT :limit", nativeQuery = true)
+    List<VerificationDaily> findPendingByFinalizeAfterPage(@Param("finalizeAfter") Instant finalizeAfter,
+                                                          @Param("after") UUID after, @Param("limit") int limit);
 }

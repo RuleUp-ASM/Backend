@@ -544,6 +544,10 @@ public class VerificationSyncService {
             // 위반·미달이 확인됐어도 귀속일 중에는 실패로 저장하지 않는다(인증 정책 §2).
             // 늦게 도착하는 이탈·해제 신호로 확정 전까지 뒤집힐 수 있어서다. 최종 실패는 확정 배치가 만든다.
             daily.recordFailExpected(method.name(), outcome.failureReason());
+            // 위반이 잡힌 순간 알린다 — 이의는 확정(D+2 00:00) 전에 내야 하는데, 앱을 열지 않으면
+            // 실패 예정을 볼 자리가 없다(QA NOTI-16). 같은 건은 verification_id 멱등 키로 한 번만 쌓인다.
+            // 귀속일이 끝나 미달로 실패 예정이 되는 경우는 FailExpectedNoticeJob 이 맡는다.
+            notificationPublisher.publish(FailExpectedNoticeJob.event(daily));
         } else {
             String contributing = (outcome.status() == VerificationStatus.SUCCESS) ? method.name() : null;
             Instant verifiedAt = (outcome.status() == VerificationStatus.SUCCESS) ? now : null;

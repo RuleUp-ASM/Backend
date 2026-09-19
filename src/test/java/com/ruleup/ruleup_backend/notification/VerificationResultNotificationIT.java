@@ -46,6 +46,7 @@ class VerificationResultNotificationIT extends VerificationApiSupport {
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired NotificationRepository notificationRepository;
     @Autowired VerificationManualService manualService;
+    @Autowired com.ruleup.ruleup_backend.verification.service.FailExpectedNoticeJob failExpectedJob;
 
     private MockMvc mvc;
 
@@ -117,6 +118,98 @@ class VerificationResultNotificationIT extends VerificationApiSupport {
 
             assertThat(resultsOf(me.id())).singleElement().satisfies(n ->
                     assertThat(n.getChallengeId()).isEqualTo(challengeId));
+        }
+    }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("성공 알림 딥링크 — QA NOTI-15")
+    class SuccessDeeplink {
+
+        @Test
+        @DisplayName("성공 알림은 ruleup://challenge/{challengeId} 로 방 상세에 들어간다")
+        void successGoesToChallengeDetail() throws Exception {
+            Member me = member(uniq("vrd"));
+            UUID challengeId = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", VISIT_PARAMS);
+            UUID memberId = insertReadyMember(challengeId, me.id(),
+                    anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+
+            syncFullVisit(me, memberId);
+
+            assertThat(resultsOf(me.id())).singleElement().satisfies(n ->
+                    assertThat(n.getDeeplink()).isEqualTo("ruleup://challenge/" + challengeId));
+        }
+    }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("실패 예정 — 이의제기가 필요해요 (QA NOTI-16)")
+    class FailExpected {
+
+        private List<Notification> failExpectedOf(UUID userId) {
+            return notificationRepository.findByUserIdOrderByIdDesc(userId).stream()
+                    .filter(n -> "VERIFICATION_FAIL_EXPECTED".equals(n.getType()))
+                    .toList();
+        }
+
+        private UUID pendingYesterday(Member me, UUID challengeId, UUID memberId, String failureReason) {
+            java.time.LocalDate yesterday = java.time.LocalDate.now(KST).minusDays(1);
+            UUID id = UUID.randomUUID();
+            jdbc().update("INSERT INTO VerificationDaily " +
+                            "(id, challengeMemberId, challengeId, userId, targetDate, status, method, failureReason, " +
+                            " finalizeAfter, appealClosesAt) VALUES (?, ?, ?, ?, ?, 'PENDING', 'GPS_PRESENCE', ?, ?, ?)",
+                    bytes(id), bytes(memberId), bytes(challengeId), bytes(me.id()), yesterday, failureReason,
+                    java.sql.Timestamp.from(com.ruleup.ruleup_backend.verification.domain.VerificationDeadlines.finalizeAfter(yesterday)),
+                    java.sql.Timestamp.from(com.ruleup.ruleup_backend.verification.domain.VerificationDeadlines.appealClosesAt(yesterday)));
+            return id;
+        }
+
+        @Test
+        @DisplayName("귀속일이 끝났는데 목표 미달이면 자정 배치가 이의 제출 화면 딥링크로 알린다 — 다시 돌아도 한 번")
+        void unmetGoalAfterMidnight() throws Exception {
+            Member me = member(uniq("vfe"));
+            UUID challengeId = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", VISIT_PARAMS);
+            UUID memberId = insertReadyMember(challengeId, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+            UUID verificationId = pendingYesterday(me, challengeId, memberId, null);
+
+            failExpectedJob.notifyFor(java.time.LocalDate.now(KST).minusDays(1));
+            failExpectedJob.notifyFor(java.time.LocalDate.now(KST).minusDays(1));
+
+            assertThat(failExpectedOf(me.id())).singleElement().satisfies(n -> {
+                assertThat(n.getDeeplink()).isEqualTo("ruleup://appeal/" + verificationId);
+                assertThat(n.getTitle()).isEqualTo("이의제기가 필요해요");
+                assertThat(n.getChallengeId()).isEqualTo(challengeId);
+            });
+        }
+
+        @Test
+        @DisplayName("규칙 지키기형은 위반 없이 하루가 끝나면 실패 예정이 아니다 — 알리지 않는다")
+        void constraintWithoutViolationIsQuiet() throws Exception {
+            Member me = member(uniq("vfc"));
+            UUID challengeId = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE",
+                    "{\"duration_min\":30,\"radius_m\":100,\"gps_presence\":\"AVOID\"}");
+            UUID memberId = insertReadyMember(challengeId, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "편의점"), null);
+            pendingYesterday(me, challengeId, memberId, null);
+
+            failExpectedJob.notifyFor(java.time.LocalDate.now(KST).minusDays(1));
+
+            assertThat(failExpectedOf(me.id())).isEmpty();
+        }
+
+        @Test
+        @DisplayName("장소 피하기 위반이 잡힌 sync 에서 곧바로 알린다 — 확정 알림과 따로 쌓인다")
+        void violationDuringSync() throws Exception {
+            Member me = member(uniq("vfv"));
+            UUID challengeId = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE",
+                    "{\"duration_min\":30,\"radius_m\":100,\"gps_presence\":\"AVOID\"}");
+            UUID memberId = insertReadyMember(challengeId, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "편의점"), null);
+
+            postJsonAuth("/api/v1/verifications/sync", me.token(), syncBody(List.of(
+                    geofenceSignal(memberId, "ENTER", todayAt(0, 5)),
+                    geofenceSignal(memberId, "EXIT", todayAt(0, 45)))));
+
+            assertThat(failExpectedOf(me.id())).singleElement().satisfies(n ->
+                    assertThat(n.getDeeplink()).startsWith("ruleup://appeal/"));
         }
     }
 }
