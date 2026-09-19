@@ -1,0 +1,31 @@
+name: Deploy sync monitoring (stg)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ dev ]
+    paths:
+      - 'infra/monitoring/**'
+      - '.github/workflows/deploy-monitoring.yml'
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-stg-sync-monitoring
+  cancel-in-progress: false
+
+jobs:
+  monitoring:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::961178969292:role/ruleup-stg-gha-deploy
+          aws-region: ap-northeast-2
+      - name: Verify metric filter against real CloudWatch parser
+        run: python3 infra/monitoring/verify-sync-filter.py
+      - name: Apply metric filter and SNS alarm
+        run: bash infra/monitoring/apply-sync-alarm.sh

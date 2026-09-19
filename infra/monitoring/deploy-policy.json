@@ -1,0 +1,20 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "logs:PutMetricFilter",
+      "Resource": "arn:aws:logs:ap-northeast-2:961178969292:log-group:/ecs/ruleup-stg-api:*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "cloudwatch:PutMetricAlarm",
+      "Resource": "arn:aws:cloudwatch:ap-northeast-2:961178969292:alarm:ruleup-stg-sync-repeated-rejections"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "logs:TestMetricFilter",
+      "Resource": "*"
+    }
+  ]
+}

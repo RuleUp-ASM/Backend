@@ -272,6 +272,36 @@ class VerificationSignalContractIT extends VerificationApiSupport {
     @DisplayName("봉투 반려 사유 — 400 이 한 덩어리면 어느 필드가 빠졌는지 볼 수 없다")
     class EnvelopeRejection {
 
+        @Test
+        @DisplayName("연속 3회부터 경보용 WARN을 남기고 정상 sync 후 횟수를 초기화한다")
+        void repeatedRejectionsProduceAlarmLogAndResetAfterValidEnvelope() throws Exception {
+            Member me = member(uniq("contract-envelope-alarm"));
+            var logger = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(
+                    com.ruleup.ruleup_backend.verification.service.VerificationSyncService.class);
+            var appender = new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();
+            appender.start();
+            logger.addAppender(appender);
+            try {
+                reasonWithout(me.token(), "deviceTimeMillis");
+                reasonWithout(me.token(), "deviceTimeMillis");
+                reasonWithout(me.token(), "deviceTimeMillis");
+                syncOk(me.token(), List.of());
+                reasonWithout(me.token(), "deviceTimeMillis");
+                var rejections = appender.list.stream()
+                        .filter(e -> e.getFormattedMessage().startsWith("sync_envelope_rejected userId=" + me.id()))
+                        .toList();
+                assertThat(rejections).extracting(ch.qos.logback.classic.spi.ILoggingEvent::getLevel)
+                        .containsExactly(ch.qos.logback.classic.Level.INFO, ch.qos.logback.classic.Level.INFO,
+                                ch.qos.logback.classic.Level.WARN, ch.qos.logback.classic.Level.INFO);
+                assertThat(rejections.get(2).getFormattedMessage())
+                        .contains("reason=MISSING_DEVICE_TIME", "streak=3");
+                assertThat(rejections.get(3).getFormattedMessage()).contains("streak=1");
+            } finally {
+                logger.detachAppender(appender);
+                appender.stop();
+            }
+        }
+
         private String reasonWithout(String token, String field) throws Exception {
             Map<String, Object> body = syncBody(List.of());
             body.remove(field);
