@@ -38,6 +38,7 @@ public class VerificationMetrics {
     private static final LocalTime RECONCILIATION_AT = LocalTime.of(3, 30);
 
     private final Timer syncTimer;
+    private final MeterRegistry registry;
     private final Timer finalizeTimer;
     private final Counter signalsReceived;
     private final Counter signalsDeduped;
@@ -68,6 +69,7 @@ public class VerificationMetrics {
     private final AtomicLong lastFinalizeCompletedAt = new AtomicLong();
 
     public VerificationMetrics(MeterRegistry registry) {
+        this.registry = registry;
         this.syncTimer = Timer.builder("verification.sync")
                 .description("sync 처리 시간 — 목표 p95 1초")
                 .publishPercentiles(0.5, 0.95, 0.99)
@@ -177,6 +179,17 @@ public class VerificationMetrics {
     /** 본문 크기 상한을 넘겨 반려했다(413). */
     public void payloadRejected() {
         payloadRejected.increment();
+    }
+
+    /**
+     * 봉투 검증에서 400 으로 반려한 sync — 사유별로 센다. 사유가 하나로 뭉쳐 있으면
+     * 앱 계약 버그(필드 누락)와 일시적 이상을 구분할 수 없다. 사유는 고정 열거라 태그 폭발이 없다.
+     */
+    public void envelopeRejected(String reason) {
+        Counter.builder("verification.sync.envelope_rejected")
+                .description("봉투 검증 실패로 400 반려한 sync 수 — 사유별")
+                .tag("reason", reason)
+                .register(registry).increment();
     }
 
     /**

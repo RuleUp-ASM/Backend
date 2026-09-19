@@ -266,4 +266,34 @@ class VerificationSignalContractIT extends VerificationApiSupport {
                     .isEqualTo(1);
         }
     }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("봉투 반려 사유 — 400 이 한 덩어리면 어느 필드가 빠졌는지 볼 수 없다")
+    class EnvelopeRejection {
+
+        private String reasonWithout(String token, String field) throws Exception {
+            Map<String, Object> body = syncBody(List.of());
+            body.remove(field);
+            MvcResult res = sync(token, body);
+            assertThat(res.getResponse().getStatus()).isEqualTo(400);
+            assertThat((String) read(res, "$.error.code")).isEqualTo("INVALID_SIGNAL_PAYLOAD");
+            return read(res, "$.error.reason");
+        }
+
+        @Test
+        @DisplayName("빠진 필드마다 서로 다른 reason 을 준다 — code 는 그대로다")
+        void eachMissingFieldHasItsOwnReason() throws Exception {
+            Member me = member(uniq("contract-envelope"));
+            assertThat(reasonWithout(me.token(), "deviceTimeMillis")).isEqualTo("MISSING_DEVICE_TIME");
+            assertThat(reasonWithout(me.token(), "coveredFrom")).isEqualTo("MISSING_COVERED_FROM");
+            assertThat(reasonWithout(me.token(), "coveredUntil")).isEqualTo("MISSING_COVERED_UNTIL");
+
+            Map<String, Object> inverted = syncBody(List.of());
+            inverted.put("coveredFrom", (Long) inverted.get("coveredUntil") + 1);
+            assertThat((String) read(sync(me.token(), inverted), "$.error.reason")).isEqualTo("COVERED_RANGE_INVERTED");
+
+            syncOk(me.token(), List.of());
+        }
+    }
 }
