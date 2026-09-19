@@ -110,8 +110,14 @@ public class VerificationConfigFactory {
                 dbl(params, "lat"), dbl(params, "lng"),       // 레거시 단일앵커(보통 null) — 평가는 멤버 anchors[] 우선
                 intParam(params, "radius_m", 80), dwell, loitering,
                 null, timeWindow(params),
-                polarity, 1, 100, 50, List.of());
+                polarity, 1, GPS_ACCURACY_MAX_M, 50, List.of());
     }
+
+    /**
+     * 측위 정확도 허용치(m). 100 이었는데 앱의 BALANCED 측위는 실내에서 100m 를 흔히 넘겨 체류 근거에서
+     * 대부분 빠졌다(QA SIG-24). 1차로 앱 수집 방식에 맞춰 넓힌다 — 최종값은 운영 데이터 후 재합의.
+     */
+    static final int GPS_ACCURACY_MAX_M = 150;
 
     // ===== HEALTH (움직임) =====
     private HealthConfig buildHealth(Map<String, Object> params) {

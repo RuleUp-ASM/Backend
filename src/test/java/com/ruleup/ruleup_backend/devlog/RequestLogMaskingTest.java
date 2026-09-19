@@ -43,6 +43,25 @@ class RequestLogMaskingTest {
         }
 
         @Test
+        @DisplayName("값 안의 이스케이프된 따옴표 뒤쪽까지 가린다")
+        void escapedQuoteInsideValue() throws Exception {
+            assertThat(mask("{\"passcode\":\"ab\\\"cd\",\"x\":1}"))
+                    .isEqualTo("{\"passcode\":\"***\",\"x\":1}");
+        }
+
+        @Test
+        @DisplayName("상한에 걸려 잘린 본문이어도 비밀번호 앞부분이 남지 않는다")
+        void truncatedBody() throws Exception {
+            RequestLogFilter filter = new RequestLogFilter(null, true, 20);
+            Method m = RequestLogFilter.class.getDeclaredMethod("mask", String.class);
+            m.setAccessible(true);
+            String out = (String) m.invoke(filter, "{\"note\":\"aaaa\",\"passcode\":\"hunter2hunter2\"}");
+            assertThat(out).doesNotContain("hunter");
+            // 캐싱 래퍼가 이미 잘라 닫는 따옴표가 없는 본문
+            assertThat(mask("{\"passcode\":\"hunter2hun")).isEqualTo("{\"passcode\":\"***\"");
+        }
+
+        @Test
         @DisplayName("이름 안에 들어 있기만 해도 가린다")
         void substringMatch() throws Exception {
             assertThat(mask("{\"refreshToken\":\"x\",\"clientSecret\":\"y\"}"))

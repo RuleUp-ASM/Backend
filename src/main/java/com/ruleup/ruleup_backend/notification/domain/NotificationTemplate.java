@@ -158,6 +158,9 @@ public enum NotificationTemplate {
     VERIFICATION_RESULT_FAILED(NotificationType.VERIFICATION_RESULT, VARIANT, "CONFIRMED_FAILURE",
             "인증이 실패로 확정됐어요", "이의 기간이 지나 이 결과는 되돌릴 수 없어요."),
 
+    VERIFICATION_FAIL_EXPECTED(NotificationType.VERIFICATION_FAIL_EXPECTED,
+            "이의제기가 필요해요", "이대로면 인증이 실패로 확정돼요. 사정이 있었다면 이의를 신청해주세요."),
+
     CONSECUTIVE_FAILURE_WARNING(NotificationType.CONSECUTIVE_FAILURE_WARNING,
             "연속으로 인증을 놓치고 있어요",
             "한 번 더 놓치면 이 챌린지에서 나가게 돼요. 다음 사이클은 꼭 채워보세요."),

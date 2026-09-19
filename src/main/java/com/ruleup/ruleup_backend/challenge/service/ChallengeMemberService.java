@@ -247,8 +247,11 @@ public class ChallengeMemberService {
 
         // 중도 탈퇴 감점은 정액이 아니라 진행 기간에 반비례한다 — −⌈15 × (1 − 진행주간/52)⌉.
         // 오래 해온 방일수록 가볍고, 1년을 채웠으면 면제다(점수 및 티어 정책 §4.8).
+        // 시작 전에 나가는 건 "중도" 이탈이 아니다 — 감점도 점수 이력도 남기지 않는다(2026-09-19 정책 확정).
+        // 상태 전환 배치가 조금 늦어도 시작일 전이면 시작 전으로 본다.
         int scoreDelta = 0;
-        if (c.getPenalties().score()) {
+        boolean beforeStart = c.isUpcoming() || LocalDate.now(KST).isBefore(c.getStartDate());
+        if (c.getPenalties().score() && !beforeStart) {
             int completedWeeks = progressWeeks(me);
             scoreDelta = exemptReason == null ? IncidentType.VOLUNTARY_LEAVE.deduction(completedWeeks) : 0;
             String source = "leave:" + me.getId() + ":" + now;
@@ -257,8 +260,8 @@ public class ChallengeMemberService {
                             source, completedWeeks, "AUTO", scoreDelta, now), source);
             outboxDispatcher.requestFlush();
         }
-        log.info("challenge_leave challengeId={} userId={} penalty={} exempt={} botOwner={}",
-                challengeId, userId, scoreDelta, exemptReason, botOwnerActivated);
+        log.info("challenge_leave challengeId={} userId={} penalty={} exempt={} beforeStart={} botOwner={}",
+                challengeId, userId, scoreDelta, exemptReason, beforeStart, botOwnerActivated);
         return new LeaveResponse(true, scoreDelta, exemptReason, rejoinAt.toString(), botOwnerActivated);
     }
 

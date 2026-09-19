@@ -17,7 +17,7 @@ public class ScoreSyncService {
     public void syncConfirmedJudgements() {
         byte[] cursor=new byte[16];
         while(true) {
-            var page=jdbc.queryForList("SELECT d.id,d.userId,d.challengeId,d.targetDate FROM VerificationDaily d WHERE d.status IN ('SUCCESS','FAILED') AND d.id>? AND NOT EXISTS (SELECT 1 FROM score_transactions t WHERE t.user_id=d.userId AND t.source_event_key=SHA2(CONCAT(UNHEX('00000024'),LOWER(BIN_TO_UUID(d.userId)),UNHEX('00000005'),'DAILY',UNHEX('00000024'),LOWER(BIN_TO_UUID(d.id))),256) AND t.source_version>=d.version AND t.entry_kind='RESULT' AND NOT EXISTS (SELECT 1 FROM score_transactions r WHERE r.reversal_of=t.id)) ORDER BY d.id LIMIT 500",cursor);
+            var page=jdbc.queryForList("SELECT d.id,d.userId,d.challengeId,d.targetDate FROM VerificationDaily d WHERE d.status IN ('SUCCESS','FAILED') AND (d.status <> 'FAILED' OR (d.verifiedAt >= TIMESTAMP(DATE_ADD(d.targetDate, INTERVAL 1 DAY), '15:00:00') AND d.shareableAt >= d.verifiedAt)) AND d.id>? AND NOT EXISTS (SELECT 1 FROM score_transactions t WHERE t.user_id=d.userId AND t.source_event_key=SHA2(CONCAT(UNHEX('00000024'),LOWER(BIN_TO_UUID(d.userId)),UNHEX('00000005'),'DAILY',UNHEX('00000024'),LOWER(BIN_TO_UUID(d.id))),256) AND t.source_version>=d.version AND t.entry_kind='RESULT' AND NOT EXISTS (SELECT 1 FROM score_transactions r WHERE r.reversal_of=t.id)) ORDER BY d.id LIMIT 500",cursor);
             for(var row:page) {
                 UUID user=uuid((byte[])row.get("userId")),challenge=uuid((byte[])row.get("challengeId"));
                 var source=sources.findById(challenge);

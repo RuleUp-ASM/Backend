@@ -169,11 +169,12 @@ class TierScoringIT extends ChallengeApiSupport {
         UUID dailyId = UUID.randomUUID();
         int offset = (cycleNo - 1) * 7 + dayInCycle;
         jdbc().update("INSERT INTO VerificationDaily " +
-                        "(id, challengeMemberId, challengeId, userId, targetDate, status, verifiedVia, verifiedAt) " +
-                        "SELECT ?, ?, ?, ?, DATE_ADD(c.start_date, INTERVAL ? DAY), ?, ?, NOW(3) " +
+                        "(id, challengeMemberId, challengeId, userId, targetDate, status, verifiedVia, verifiedAt, shareableAt) " +
+                        "SELECT ?, ?, ?, ?, DATE_ADD(c.start_date, INTERVAL ? DAY), ?, ?, GREATEST(UTC_TIMESTAMP(3), TIMESTAMP(DATE_ADD(c.start_date, INTERVAL ? DAY), '15:00:00')), " +
+                        "GREATEST(UTC_TIMESTAMP(3), TIMESTAMP(DATE_ADD(c.start_date, INTERVAL ? DAY), '15:00:00')) " +
                         "FROM challenges c WHERE c.id = ?",
                 bytes(dailyId), bytes(memberIdOf(challengeId, userId)), bytes(challengeId), bytes(userId),
-                offset, status, verifiedVia, bytes(challengeId));
+                offset, status, verifiedVia, offset + 1, offset + 1, bytes(challengeId));
         return dailyId;
     }
 

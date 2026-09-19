@@ -112,14 +112,14 @@ class VerificationFinalizeIsolationIT extends VerificationApiSupport {
     /** 폴링 커서가 미래로 밀렸는지 — 비교는 DB 가 한다. */
     private boolean deferred(UUID verificationId) {
         Boolean v = jdbc().queryForObject(
-                "SELECT finalizeAfter > NOW(6) FROM VerificationDaily WHERE id = ?",
+                "SELECT finalizeRetryAt > NOW(6) FROM VerificationDaily WHERE id = ?",
                 Boolean.class, bytes(verificationId));
         return Boolean.TRUE.equals(v);
     }
 
     /** 밀린 시각 자체(문자열 비교용) — 두 번 돌아도 값이 그대로인지 보는 데 쓴다. */
     private String finalizeCursorOf(UUID verificationId) {
-        return jdbc().queryForObject("SELECT finalizeAfter FROM VerificationDaily WHERE id = ?",
+        return jdbc().queryForObject("SELECT finalizeRetryAt FROM VerificationDaily WHERE id = ?",
                 String.class, bytes(verificationId));
     }
 
@@ -263,6 +263,7 @@ class VerificationFinalizeIsolationIT extends VerificationApiSupport {
         finalizeService.finalizeDue();
         String firstDefer = finalizeCursorOf(broken);
         assertThat(deferred(broken)).isTrue();
+        assertThat(dailyRepository.findById(broken).orElseThrow().getVersion()).isPositive();
 
         // 같은 tick 이 다시 돌아도 이미 밀린 건은 대상이 아니다.
         finalizeService.finalizeDue();

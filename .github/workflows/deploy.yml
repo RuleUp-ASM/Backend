@@ -65,12 +65,31 @@ jobs:
             ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
             ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
 
+      # 새 태스크가 뜨지 못하면(마이그레이션 실패·스키마 누락으로 기동 중단) 회로차단기가 이전 태스크로
+      # 되돌린다. 그런데 되돌린 뒤에도 services-stable 은 「안정」이라 워크플로가 초록불로 끝난다 —
+      # 배포가 실제로 나갔는지는 이번에 만든 deployment 의 rolloutState 로 확인한다.
       - name: Deploy to ECS (rolling)
         run: |
-          aws ecs update-service \
+          DEPLOYMENT_ID=$(aws ecs update-service \
             --cluster ${{ env.ECS_CLUSTER }} \
             --service ${{ env.ECS_SERVICE }} \
-            --force-new-deployment >/dev/null
+            --force-new-deployment \
+            --query 'service.deployments[?status==`PRIMARY`].id | [0]' --output text)
+          echo "deployment=$DEPLOYMENT_ID"
           aws ecs wait services-stable \
             --cluster ${{ env.ECS_CLUSTER }} \
             --services ${{ env.ECS_SERVICE }}
+          STATE=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }} \
+            --query "services[0].deployments[?id=='$DEPLOYMENT_ID'].rolloutState | [0]" --output text)
+          echo "rolloutState=$STATE"
+          if [ "$STATE" != "COMPLETED" ]; then
+            echo "::error::새 태스크가 뜨지 못해 이전 버전으로 되돌려졌다(rolloutState=$STATE). CloudWatch /ecs/ruleup-stg-api 기동 로그를 확인한다."
+            exit 1
+          fi
+
+      # 기동 확인 — 헬스체크가 DB 연결까지 본다. 스키마 누락은 기동 단계(SchemaPresenceCheck)에서 이미 걸러진다.
+      - name: Smoke test
+        run: |
+          curl -fsS --retry 5 --retry-delay 10 --retry-all-errors https://staging-api.ruleup.co.kr/actuator/health | tee /dev/stderr | grep -q '"status":"UP"'

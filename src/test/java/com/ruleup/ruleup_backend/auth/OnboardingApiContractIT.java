@@ -276,6 +276,45 @@ class OnboardingApiContractIT extends AuthApiSupport {
         }
 
         @Test
+        @DisplayName("필수 약관 3종 원문 URL 을 현행 버전으로 내린다 — 앱이 주소를 하드코딩하지 않는다")
+        void intro_carries_terms_urls() throws Exception {
+            MvcResult res = intro("ANDROID", 9999);
+            String version = read(res, "$.data.termsVersions.privacyPolicy");
+            assertThat((String) read(res, "$.data.termsUrls.privacyPolicy"))
+                    .endsWith("/terms/privacy-policy/" + version);
+            assertThat((String) read(res, "$.data.termsUrls.termsOfService")).contains("/terms/terms-of-service/");
+            assertThat((String) read(res, "$.data.termsUrls.locationService")).contains("/terms/location-service/");
+        }
+
+        @Test
+        @DisplayName("약관 원문은 로그인 없이 열리고, 원문을 글자 그대로(이스케이프해) 보여 준다")
+        void terms_document_is_public() throws Exception {
+            MvcResult page = mvc.perform(get("/terms/privacy-policy/test-0")).andReturn();
+            assertThat(page.getResponse().getStatus()).isEqualTo(200);
+            assertThat(page.getResponse().getContentType()).startsWith("text/html");
+            String html = page.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+            assertThat(html).contains("개인정보 처리방침 (테스트 원문)").contains("&lt;script&gt;").doesNotContain("<script>");
+
+            assertThat(mvc.perform(get("/terms/privacy-policy/9.9")).andReturn().getResponse().getStatus()).isEqualTo(404);
+            assertThat(mvc.perform(get("/terms/unknown")).andReturn().getResponse().getStatus()).isEqualTo(404);
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"termsOfService", "privacyPolicy", "locationService"})
+        @DisplayName("intro 가 광고하는 현행 약관 3종은 실제 원문으로 열리고 현행 URL 과 내용이 같다")
+        void current_terms_urls_open_real_documents(String kind) throws Exception {
+            String url = read(intro("ANDROID", 9999), "$.data.termsUrls." + kind);
+            String path = java.net.URI.create(url).getPath();
+            MvcResult versioned = mvc.perform(get(path)).andReturn();
+            MvcResult current = mvc.perform(get(path.substring(0, path.lastIndexOf('/')))).andReturn();
+            assertThat(versioned.getResponse().getStatus()).isEqualTo(200);
+            assertThat(current.getResponse().getStatus()).isEqualTo(200);
+            String body = versioned.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+            assertThat(body).contains("룰업(RuleUp)").hasSizeGreaterThan(3000);
+            assertThat(current.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8)).isEqualTo(body);
+        }
+
+        @Test
         @DisplayName("최소 지원 버전 미만이면 forceUpdate=true (에러가 아니라 200 + 플래그)")
         void intro_force_update_flag() throws Exception {
             MvcResult res = intro("ANDROID", 0);

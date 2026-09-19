@@ -15,6 +15,7 @@ import org.hibernate.type.SqlTypes;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
+import java.util.Objects;
 
 /**
  * 하루 인증 판정 (VerificationDaily 테이블) — 그날 챌린지 단위 판정 [부모].
@@ -87,6 +88,10 @@ public class VerificationDaily extends AssignedIdEntity {
     @Column(name = "finalizeAfter")
     private Instant finalizeAfter;
 
+    /** 일시적 처리 실패의 재시도 시각. 정책상 확정 기한과 별도로 관리한다. */
+    @Column(name = "finalizeRetryAt")
+    private Instant finalizeRetryAt;
+
     @Column(name = "verifiedAt")
     private Instant verifiedAt;          // 확정 시각(미확정이면 null)
 
@@ -123,7 +128,7 @@ public class VerificationDaily extends AssignedIdEntity {
     @Column(name = "updatedAt", nullable = false)
     private Instant updatedAt;
 
-    /** 그날 인증 행 개시 (PENDING). 창/확정 시각은 applyWindow로 별도 세팅. */
+    /** 그날 인증 행 개시 (PENDING). 정책 기한은 즉시 세우고 인증 창만 평가 후 보강한다. */
     public static VerificationDaily open(UUID challengeMemberId, UUID challengeId, UUID userId, LocalDate targetDate) {
         VerificationDaily v = new VerificationDaily();
         v.id = UuidGenerator.generate();
@@ -132,6 +137,7 @@ public class VerificationDaily extends AssignedIdEntity {
         v.userId = userId;
         v.targetDate = targetDate;
         v.status = VerificationStatus.PENDING;
+        v.applyWindow(null);
         return v;
     }
 
@@ -161,6 +167,7 @@ public class VerificationDaily extends AssignedIdEntity {
         this.method = method;
         this.failureReason = failureReason;
         this.verifiedAt = verifiedAt;
+        if (status != VerificationStatus.PENDING) this.finalizeRetryAt = null;
         if (status == VerificationStatus.SUCCESS) {
             if (this.verifiedVia == null) this.verifiedVia = VerifiedVia.AUTO;
             this.appealClosesAt = null;      // 성공은 이의 대상이 아니다
@@ -192,6 +199,10 @@ public class VerificationDaily extends AssignedIdEntity {
      * 여기까지 온 실패는 인용될 여지가 없어 바로 피드에 공유해도 된다.
      */
     public void confirmFailure(Instant confirmedAt, String method, String failureReason) {
+        Objects.requireNonNull(confirmedAt, "실패 확정 시각이 필요하다");
+        if (!VerificationDeadlines.finalizeDue(targetDate, confirmedAt)) {
+            throw new IllegalArgumentException("유예 기간이 끝나기 전에는 실패로 확정할 수 없다");
+        }
         this.status = VerificationStatus.FAILED;
         this.method = method;
         this.failureReason = failureReason;
@@ -199,6 +210,27 @@ public class VerificationDaily extends AssignedIdEntity {
         this.verifiedAt = confirmedAt;
         this.verifiedVia = null;
         this.shareableAt = confirmedAt;
+        this.finalizeRetryAt = null;
+    }
+
+    /** 우회 쓰기나 새 코드 경로도 불완전한 실패/기한을 JPA로 저장할 수 없다. */
+    @PrePersist
+    @PreUpdate
+    private void validateIntegrity() {
+        Instant deadline = VerificationDeadlines.finalizeAfter(targetDate);
+        if (!deadline.equals(finalizeAfter)
+                || (appealClosesAt != null && !deadline.equals(appealClosesAt))) {
+            throw new IllegalStateException("인증 기한은 귀속일 D+2 00:00 KST여야 한다");
+        }
+        if (hasInvalidFailure()) {
+            throw new IllegalStateException("실패 판정에는 유예 종료 이후의 확정·공유 시각이 필요하다");
+        }
+    }
+
+    public boolean hasInvalidFailure() {
+        return status == VerificationStatus.FAILED && (verifiedAt == null || shareableAt == null
+                || verifiedAt.isBefore(VerificationDeadlines.finalizeAfter(targetDate))
+                || shareableAt.isBefore(verifiedAt));
     }
 
     /** 수동 인증 챌린지의 당일 체크 — 즉시 SUCCESS. */

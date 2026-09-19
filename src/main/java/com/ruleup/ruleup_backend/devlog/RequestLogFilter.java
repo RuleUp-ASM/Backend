@@ -54,10 +54,13 @@ public class RequestLogFilter extends OncePerRequestFilter {
      * <p>{@code passcode} 가 빠져 있어 운영자 콘솔 로그인 본문의 비밀번호가 평문으로 남았다 —
      * 이름에 password 가 없다는 이유만으로 전부 통과했다. 새 자격증명 필드를 만들 때 여기를
      * 같이 보지 않으면 같은 일이 반복된다.
+     *
+     * <p>값은 JSON 이스케이프({@code \"})를 건너뛰며 읽고, 닫는 따옴표가 없으면(잘린 본문) 끝까지 가린다.
+     * {@code [^"]*} 로 읽으면 {@code "pass\"word"} 의 뒤쪽 절반이 평문으로 남는다.
      */
     private static final Pattern SECRET_FIELD = Pattern.compile(
             "\"((?:\\w*(?i:password|passcode|secret|token|credential|authorization|verifier)\\w*)"
-                    + "|(?i:code))\"\\s*:\\s*\"[^\"]*\"");
+                    + "|(?i:code))\"\\s*:\\s*\"(?:[^\"\\\\]|\\\\.)*(?:\"|\\\\?$)");
 
     private static final AtomicLong SEQ = new AtomicLong();
 
@@ -158,8 +161,12 @@ public class RequestLogFilter extends OncePerRequestFilter {
         }
     }
 
+    /**
+     * 가린 <b>다음에</b> 자른다. 먼저 자르면 상한에 걸려 닫는 따옴표를 잃은 값이 패턴에 걸리지 않아
+     * 평문으로 남는다.
+     */
     private String mask(String raw) {
-        String body = raw.length() > maxBody ? raw.substring(0, maxBody) + "…(생략)" : raw;
-        return SECRET_FIELD.matcher(body).replaceAll("\"$1\":\"***\"").replaceAll("\\s*\\n\\s*", " ");
+        String masked = SECRET_FIELD.matcher(raw).replaceAll("\"$1\":\"***\"").replaceAll("\\s*\\n\\s*", " ");
+        return masked.length() > maxBody ? masked.substring(0, maxBody) + "…(생략)" : masked;
     }
 }

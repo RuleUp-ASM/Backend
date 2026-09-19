@@ -104,6 +104,7 @@ public interface VerificationDailyRepository extends JpaRepository<VerificationD
      */
     @Query(value = "SELECT * FROM VerificationDaily " +
             "WHERE status = 'PENDING' AND finalizeAfter IS NOT NULL AND finalizeAfter <= :now " +
+            "  AND (finalizeRetryAt IS NULL OR finalizeRetryAt <= :now) " +
             "  AND targetDate <= :maxTargetDate " +
             "ORDER BY finalizeAfter LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
     List<VerificationDaily> findDuePendingForUpdate(@Param("now") Instant now,
@@ -114,13 +115,24 @@ public interface VerificationDailyRepository extends JpaRepository<VerificationD
     /**
      * 확정에 실패한 한 건을 뒤로 미룬다.
      *
-     * <p>{@code finalizeAfter} 는 <b>확정 배치의 폴링 커서</b>다(사용자에게 보여 주는 값이 아니다 —
-     * 이의 기한은 {@code appealClosesAt} 이 따로 들고 있다). 실패한 행을 그대로 두면 폴러가 매번
+     * <p>정책 기한 {@code finalizeAfter} 는 유지하고 {@code finalizeRetryAt} 만 변경한다.
+     * 실패한 행을 그대로 두면 폴러가 매번
      * 같은 행을 먼저 집어 <b>뒤에 쌓인 정상 건이 통째로 굶는다</b>. 잠깐 미뤄 두면 나머지가 흐르고,
      * 그 사이 원인이 해소되면 다음 차례에 스스로 확정된다.
      */
+    /**
+     * 결과 모달 확인 시각만 기록한다 — 판정 필드를 건드리지 않는 표시 상태라 엔티티 저장 가드
+     * ({@code VerificationDaily#validateIntegrity}) 를 거치지 않는다. 가드를 타면 복구 전의 이상 행에서
+     * 확인이 500 이 되어 모달이 영영 닫히지 않는다. 멱등: 이미 확인했으면 첫 시각을 유지한다.
+     */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query("UPDATE VerificationDaily d SET d.finalizeAfter = :next WHERE d.id = :id")
+    @Query("UPDATE VerificationDaily d SET d.acknowledgedAt = :at, d.version = d.version + 1 "
+            + "WHERE d.id = :id AND d.acknowledgedAt IS NULL")
+    int acknowledge(@Param("id") UUID id, @Param("at") Instant at);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE VerificationDaily d SET d.finalizeRetryAt = :next, d.version = d.version + 1 "
+            + "WHERE d.id = :id AND d.status = com.ruleup.ruleup_backend.common.verification.VerificationStatus.PENDING")
     int deferFinalize(@Param("id") UUID id, @Param("next") Instant next);
 
     /**
@@ -139,4 +151,13 @@ public interface VerificationDailyRepository extends JpaRepository<VerificationD
             """)
     List<VerificationDaily> findWatcherRecoveryPage(@Param("since") Instant since, @Param("now") Instant now,
                                                     @Param("cursor") UUID cursor, Pageable pageable);
+
+    /**
+     * 확정 전인 특정 귀속일의 건을 id 순으로 한 쪽씩 — 실패 예정 알림 배치용.
+     * {@code finalizeAfter} 가 귀속일로 정해지므로 (status, finalizeAfter) 인덱스를 탄다.
+     */
+    @Query(value = "SELECT * FROM VerificationDaily WHERE status = 'PENDING' AND finalizeAfter = :finalizeAfter "
+            + "AND id > :after ORDER BY id LIMIT :limit", nativeQuery = true)
+    List<VerificationDaily> findPendingByFinalizeAfterPage(@Param("finalizeAfter") Instant finalizeAfter,
+                                                          @Param("after") UUID after, @Param("limit") int limit);
 }

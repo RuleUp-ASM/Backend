@@ -7,7 +7,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
  *
  * <p>구 명세의 "탈퇴 시 재참여 영구 불가"·"방장은 탈퇴 불가"는 둘 다 폐기됐다.
  *
- * @param scoreDelta 확정 중도 이탈 감점. AUTO 방에만 적용하며 동일 트랜잭션 outbox로 전달한다.
+ * @param scoreDelta 확정 중도 이탈 감점. AUTO 방·시작 후에만 적용하며 동일 트랜잭션 outbox로 전달한다.
  * @param exemptReason {@code LONG_SUCCESS}(1년 이상 성공) / null
  * @param botOwnerActivated 내가 방장이었고 봇방장 체제로 전환됐으면 true
  */
@@ -15,7 +15,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 public record LeaveResponse(
         @Schema(example = "true") boolean left,
 
-        @Schema(description = "중도 이탈 감점. 면제되면 0.", example = "-15") int scoreDelta,
+        @Schema(description = "중도 이탈 감점. 면제되거나 챌린지 시작 전이면 0.", example = "-15") int scoreDelta,
 
         @Schema(description = "감점 면제 사유. 없으면 null.", example = "LONG_SUCCESS",
                 allowableValues = {"LONG_SUCCESS"})

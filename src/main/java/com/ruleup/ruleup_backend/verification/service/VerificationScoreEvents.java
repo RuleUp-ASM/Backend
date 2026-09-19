@@ -25,7 +25,7 @@ public class VerificationScoreEvents {
     private final OutboxDispatcher dispatcher;
     @TransactionalEventListener(phase=TransactionPhase.BEFORE_COMMIT)
     public void record(Confirmed event) {
-        var d=event.daily();if(d.isPending() || d.getVerifiedVia()==com.ruleup.ruleup_backend.verification.domain.VerifiedVia.MANUAL)return;
+        var d=event.daily();if(d.isPending() || d.hasInvalidFailure() || d.getVerifiedVia()==com.ruleup.ruleup_backend.verification.domain.VerifiedVia.MANUAL)return;
         em.flush();
         var saved=processor.original(d.getUserId(),ScoreInput.Kind.DAILY,d.getId().toString());
         var c=source.findById(d.getChallengeId());

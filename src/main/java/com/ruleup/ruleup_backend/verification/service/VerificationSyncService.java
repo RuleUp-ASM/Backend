@@ -150,14 +150,14 @@ public class VerificationSyncService {
     @Transactional
     public SyncResponse sync(UUID userId, SyncRequest req) {
         long startedAt = System.nanoTime();
-        if (req == null) throw new BusinessException(ErrorCode.INVALID_SIGNAL_PAYLOAD);
+        if (req == null) throw rejectEnvelope(userId, null, EnvelopeRejection.MISSING_BODY);
         // 복구 전송(backlog)은 별도 허용치 — 평상시 간격을 그대로 적용하면 밀린 구간을 올릴 수가 없다.
         boolean backlog = Boolean.TRUE.equals(req.backlog());
         // 복구 전송은 레이트리밋 허용치가 다르다. 「구간당 요청 수」를 볼 때 이 값이 분자다 —
         // 세지 않으면 복구가 정상 주기 전송을 밀어내고 있는지 밖에서 알 수 없다.
         if (backlog) metrics.backlogRequest();
         rateLimiter.check(userId.toString(), backlog);
-        validateEnvelope(req);
+        validateEnvelope(userId, req);
         List<SyncSignal> signals = (req.signals() != null) ? req.signals() : List.of();
         if (signals.size() > MAX_SIGNALS_PER_SYNC) {
             throw new BusinessException(ErrorCode.SYNC_PAYLOAD_TOO_LARGE);   // 413 — 클라는 분할 재전송
@@ -315,18 +315,53 @@ public class VerificationSyncService {
      * <p>{@code coveredFrom}/{@code coveredUntil}은 "이 구간의 신호를 빠짐없이 담았다"는 <b>선언</b>이라 필수다.
      * 이게 없으면 서버는 "신호가 없다"와 "아직 안 왔다"를 구분할 수 없어 판정을 확정할 시점을 잡지 못한다.
      */
-    private void validateEnvelope(SyncRequest req) {
-        if (req.deviceTimeMillis() == null
-                || req.coveredFrom() == null || req.coveredUntil() == null
-                || req.coveredUntil() < req.coveredFrom()) {
-            throw new BusinessException(ErrorCode.INVALID_SIGNAL_PAYLOAD);
-        }
+    private void validateEnvelope(UUID userId, SyncRequest req) {
+        EnvelopeRejection reason = null;
+        if (req.deviceTimeMillis() == null) reason = EnvelopeRejection.MISSING_DEVICE_TIME;
+        else if (req.coveredFrom() == null) reason = EnvelopeRejection.MISSING_COVERED_FROM;
+        else if (req.coveredUntil() == null) reason = EnvelopeRejection.MISSING_COVERED_UNTIL;
+        else if (req.coveredUntil() < req.coveredFrom()) reason = EnvelopeRejection.COVERED_RANGE_INVERTED;
         // 「AT + 활성 기기 검증」을 엄격히 적용하는 모드. 기기를 밝히지 않으면 <b>어느 기기 신호인지
         // 알 수 없어</b> 활성 여부를 물을 수조차 없으므로 받지 않는다. 기본값은 꺼짐 —
         // 계약에 기기가 없던 시절의 앱을 한 번에 인증 불가로 만들지 않기 위해서다.
-        if (properties.requireActiveDevice() && blank(req.deviceId())) {
-            throw new BusinessException(ErrorCode.INVALID_SIGNAL_PAYLOAD);
+        else if (properties.requireActiveDevice() && blank(req.deviceId())) reason = EnvelopeRejection.MISSING_DEVICE_ID;
+        if (reason != null) throw rejectEnvelope(userId, req, reason);
+        consecutiveRejections.remove(userId);
+    }
+
+    /**
+     * 봉투 반려 사유. 응답 {@code reason} 으로도 내려간다 — code 는 그대로라 클라 분기는 바뀌지 않고,
+     * 앱 개발자가 로그 없이도 어느 필드가 빠졌는지 안다.
+     */
+    enum EnvelopeRejection {
+        MISSING_BODY, MISSING_DEVICE_TIME, MISSING_COVERED_FROM, MISSING_COVERED_UNTIL,
+        COVERED_RANGE_INVERTED, MISSING_DEVICE_ID
+    }
+
+    /** 이 횟수만큼 연달아 반려되면 WARN 으로 올린다 — 한 계정이 계약 버그로 계속 튕기고 있다는 뜻이다. */
+    static final int CONSECUTIVE_REJECTION_ALERT = 3;
+    /** 반려 연속 횟수(계정별). 인스턴스마다 따로 세는 근사치다 — 알람 트리거용이지 정확한 집계가 아니다. */
+    private final java.util.concurrent.ConcurrentHashMap<UUID, Integer> consecutiveRejections =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * 반려를 사유별로 남긴다. 신호 내용(좌표·건강 수치)은 기록하지 않는다 — 어느 필드가 비었는지만 남긴다.
+     */
+    private BusinessException rejectEnvelope(UUID userId, SyncRequest req, EnvelopeRejection reason) {
+        metrics.envelopeRejected(reason.name());
+        if (consecutiveRejections.size() > 10_000) consecutiveRejections.clear();   // 무한 증가 방지
+        int streak = consecutiveRejections.merge(userId, 1, Integer::sum);
+        String fields = req == null ? "-" : "deviceTime=" + (req.deviceTimeMillis() != null)
+                + ",coveredFrom=" + (req.coveredFrom() != null) + ",coveredUntil=" + (req.coveredUntil() != null)
+                + ",deviceId=" + !blank(req.deviceId())
+                + ",signals=" + (req.signals() == null ? 0 : req.signals().size())
+                + ",backlog=" + Boolean.TRUE.equals(req.backlog());
+        if (streak >= CONSECUTIVE_REJECTION_ALERT) {
+            log.warn("sync_envelope_rejected userId={} reason={} streak={} present=[{}]", userId, reason, streak, fields);
+        } else {
+            log.info("sync_envelope_rejected userId={} reason={} streak={} present=[{}]", userId, reason, streak, fields);
         }
+        return new BusinessException(ErrorCode.INVALID_SIGNAL_PAYLOAD, reason.name());
     }
 
     private static boolean blank(String value) {
@@ -539,6 +574,11 @@ public class VerificationSyncService {
                                 NotificationParams.CHALLENGE_ID,
                                 member.getChallengeId().toString())));
             }
+        }
+        // 자정 배치가 돈 뒤 첫 sync 로 어제 행이 열릴 수도 있다. 평가기가 위반 사유를 내지 않아도
+        // 귀속일이 끝난 목표 미달은 실패 예정이다. 화면과 같은 판정으로 알리고, 재전송은 멱등 키로 막는다.
+        if (daily.isFailExpected(VerificationPolarity.of(config), now)) {
+            notificationPublisher.publish(FailExpectedNoticeJob.event(daily));
         }
         return daily.getStatus();
     }

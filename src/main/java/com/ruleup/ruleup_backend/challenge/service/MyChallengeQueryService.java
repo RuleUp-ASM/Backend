@@ -136,7 +136,8 @@ public class MyChallengeQueryService {
         return new ChallengeListResponse.Item(
                 r.challengeId.toString(),
                 // 심사 중·거부면 AI 임시 제목 / 빈 설명 / 기본 이미지로 대체 표시한다.
-                (hidden || !publicVisible(r.moderationTitle)) ? r.aiTitle : r.title,
+                hidden ? com.ruleup.ruleup_backend.challenge.view.ChallengeView.REPORTED_TITLE
+                        : !publicVisible(r.moderationTitle) ? r.aiTitle : r.title,
                 (hidden || !publicVisible(r.moderationDescription)) ? null : r.description,
                 (hidden || !publicVisible(r.moderationImage)) ? null : r.imageUrl,
                 r.category,

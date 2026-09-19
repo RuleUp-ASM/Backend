@@ -29,7 +29,8 @@ public class VerificationAckService {
         if (!daily.getUserId().equals(userId)) {
             throw new BusinessException(ErrorCode.VERIFICATION_NOT_FOUND);   // 본인 건이 아님 — 존재를 알리지 않는다
         }
-        daily.acknowledge(Instant.now());
+        // 엔티티를 고쳐 저장하지 않는다 — 저장 가드는 판정 무결성용이라, 복구 전 이상 행에서 확인까지 막는다.
+        dailyRepo.acknowledge(verificationId, Instant.now());
         return new VerificationAckResponse(true);
     }
 }

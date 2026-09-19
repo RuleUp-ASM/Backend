@@ -177,4 +177,24 @@ class ChallengeLifecycleSpecIT extends ChallengeApiSupport {
                 "AND JSON_UNQUOTE(JSON_EXTRACT(payload,'$.challengeId'))=?", Integer.class, id.toString())).isZero();
     }
 
+
+    /** 시작 전 탈퇴는 "중도" 이탈이 아니다 — 감점 0, 점수 이력도 남기지 않는다(2026-09-19 정책 확정). */
+    @Test void leavingBeforeStartCostsNothing() throws Exception {
+        Member owner = member(uniq("leave-upcoming"));
+        Member other = member(uniq("leave-upcoming-m"));
+        UUID id = insertChallenge(owner.id(), "EXERCISE", "UPCOMING", "GROUP");
+        insertActiveMembership(id, owner.id(), "OWNER");
+        insertActiveMembership(id, other.id(), "MEMBER");
+        jdbc.update("UPDATE challenges SET start_date=DATE_ADD(start_date, INTERVAL 3 DAY), " +
+                "verification_config=JSON_SET(verification_config,'$.selectedMethod','AUTO') WHERE id=?", bytes(id));
+
+        assertThat(members.leave(other.id(), id).scoreDelta()).isZero();
+
+        // 상태 전환 배치가 아직 안 돌아 ACTIVE 인데 시작일이 미래인 경우도 시작 전이다
+        jdbc.update("UPDATE challenges SET status='ACTIVE' WHERE id=?", bytes(id));
+        assertThat(members.leave(owner.id(), id).scoreDelta()).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM outbox_messages WHERE type='CHALLENGE_LEAVE_SCORE' " +
+                "AND JSON_UNQUOTE(JSON_EXTRACT(payload,'$.challengeId'))=?", Integer.class, id.toString())).isZero();
+    }
+
 }

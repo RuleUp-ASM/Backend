@@ -56,7 +56,7 @@ public final class ReportDtos {
                     내 화면 즉시 효과 —
                     `USER_CONTENT_MASKED`(임시 닉네임·기본 이미지·글 미노출) /
                     `CHALLENGE_HIDDEN`(미참여 — 탐색 미노출) /
-                    `CHALLENGE_MASKED`(참여 중 — 기본 이미지·AI 임시 제목·설명 빈칸)""",
+                    `CHALLENGE_MASKED`(참여 중 — 기본 이미지·제목 "숨김 처리된 챌린지"·설명 빈칸)""",
                     example = "USER_CONTENT_MASKED")
             String hiddenEffect) {}
 

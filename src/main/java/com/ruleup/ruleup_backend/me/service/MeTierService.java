@@ -74,7 +74,7 @@ public class MeTierService {
     private List<MeTierResponse.Change> recentChanges(UUID userId) {
         List<ScoreTransaction> transactions =
                 transactionRepository.findRecent(userId, PageRequest.of(0, RECENT_CHANGES));
-        Map<UUID, String> titles = challengeTitles.titlesOf(
+        Map<UUID, String> titles = challengeTitles.titlesOf(userId,
                 transactions.stream().map(ScoreTransaction::getChallengeId).toList());
         return transactions.stream()
                 .filter(changeView::renderable)

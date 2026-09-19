@@ -116,9 +116,17 @@ public class ExploreCircuitBreaker {
         }
     }
 
-    /** 워밍업이 끝나기 전에는 조회를 보내지 않기 위해 강제로 연다. */
+    /**
+     * 워밍업이 끝나기 전에는 조회를 보내지 않기 위해 강제로 연다.
+     *
+     * <p>실패 횟수도 문턱까지 올려 둔다. 예전에는 시각만 걸어서, {@code openDurationMs} 뒤 회로가
+     * 닫히고 다음 호출이 성공해도 「복귀」 로그가 나오지 않았다 — 로그에는 기동 때의 「강제 진입」만
+     * 남아 스테이징이 계속 폴백 중인 것처럼 보였다(QA 서버 로그 점검 2026-09-19). 실제로는 5분
+     * 보정이 다시 워밍업해 살아나고 있었다.
+     */
     public void openManually(String reason) {
+        consecutiveFailures.accumulateAndGet(FAILURE_THRESHOLD, Math::max);
         openUntil.set(Instant.now().plus(Duration.ofMillis(openDurationMs)));
-        log.warn("탐색 Redis 폴백 강제 진입 — {}", reason);
+        log.warn("탐색 Redis 폴백 강제 진입 — {}ms 뒤 다시 시도한다. {}", openDurationMs, reason);
     }
 }
