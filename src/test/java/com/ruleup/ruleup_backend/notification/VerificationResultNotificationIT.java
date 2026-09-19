@@ -183,6 +183,42 @@ class VerificationResultNotificationIT extends VerificationApiSupport {
         }
 
         @Test
+        @DisplayName("자정 배치 뒤 첫 sync 로 열린 어제 목표 미달도 즉시 알리고, 재전송해도 한 번만 알린다")
+        void lateGraceDayAfterDailyScanNotifies() throws Exception {
+            failExpectedJob.runIfNeeded();
+            Member me = member(uniq("vfl"));
+            UUID challengeId = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", VISIT_PARAMS);
+            UUID memberId = insertReadyMember(challengeId, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+            java.time.LocalDate yesterday = java.time.LocalDate.now(KST).minusDays(1);
+            jdbc().update("UPDATE challenges SET start_date=? WHERE id=?", yesterday, bytes(challengeId));
+
+            var synced = postJsonAuth("/api/v1/verifications/sync", me.token(), syncBody(List.of()));
+            assertThat(synced.getResponse().getStatus()).isEqualTo(200);
+            String verificationId = jdbc().queryForObject(
+                    "SELECT BIN_TO_UUID(id) FROM VerificationDaily WHERE challengeMemberId=? AND targetDate=? AND status='PENDING'",
+                    String.class, bytes(memberId), yesterday);
+            assertThat(failExpectedOf(me.id())).singleElement().satisfies(n ->
+                    assertThat(n.getDeeplink()).isEqualTo("ruleup://appeal/" + verificationId));
+
+            postJsonAuth("/api/v1/verifications/sync", me.token(), syncBody(List.of()));
+            failExpectedJob.notifyFor(yesterday);
+            assertThat(failExpectedOf(me.id())).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("귀속일 중 목표 미달은 아직 진행중이므로 이의 필요 알림을 보내지 않는다")
+        void unmetGoalDuringTargetDayDoesNotNotify() throws Exception {
+            Member me = member(uniq("vft"));
+            UUID challengeId = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", VISIT_PARAMS);
+            insertReadyMember(challengeId, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+
+            var synced = postJsonAuth("/api/v1/verifications/sync", me.token(), syncBody(List.of()));
+
+            assertThat(synced.getResponse().getStatus()).isEqualTo(200);
+            assertThat(failExpectedOf(me.id())).isEmpty();
+        }
+
+        @Test
         @DisplayName("규칙 지키기형은 위반 없이 하루가 끝나면 실패 예정이 아니다 — 알리지 않는다")
         void constraintWithoutViolationIsQuiet() throws Exception {
             Member me = member(uniq("vfc"));
