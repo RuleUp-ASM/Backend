@@ -262,22 +262,29 @@ class VerificationAppealIT extends VerificationApiSupport {
         void noQuota() throws Exception {
             FailedVerification f = failedVerification("appeal-quota");
 
-            // 과거 실패 2건을 더 심는다(같은 멤버, 다른 날짜).
-            // 어제는 픽스처가 이미 쓰고 있다 — uq(challengeMemberId, targetDate) 와 부딪히지 않게 비킨다.
+            // 지난 날짜에는 각자의 유예 기간에 이미 인용된 이력이 있다.
+            // 과거 FAILED의 기한을 임의로 내일까지 늘리면 실제로 불가능한 상태가 된다.
             for (int daysAgo = 2; daysAgo <= 3; daysAgo++) {
                 UUID id = UUID.randomUUID();
                 jdbc().update("INSERT INTO VerificationDaily " +
                                 "(id, challengeMemberId, challengeId, userId, targetDate, status, method, " +
-                                " failureReason, verifiedAt, appealClosesAt, shareableAt) " +
-                                "VALUES (?, ?, ?, ?, DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL ? DAY), 'FAILED', 'GPS_PRESENCE', " +
-                                " 'INSUFFICIENT_DWELL', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6) + INTERVAL 1 DAY, " +
-                                " UTC_TIMESTAMP(6) + INTERVAL 1 DAY)",
+                                " verifiedVia, finalizeAfter, verifiedAt, shareableAt) " +
+                                "SELECT ?, ?, ?, ?, d, 'SUCCESS', 'GPS_PRESENCE', 'APPEAL', " +
+                                " TIMESTAMP(DATE_ADD(d, INTERVAL 1 DAY), '15:00:00'), " +
+                                " TIMESTAMP(DATE_ADD(d, INTERVAL 1 DAY), '14:00:00'), " +
+                                " TIMESTAMP(DATE_ADD(d, INTERVAL 1 DAY), '14:00:00') " +
+                                "FROM (SELECT DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL ? DAY) d) dates",
                         bytes(id), bytes(f.memberId()), bytes(f.challengeId()), bytes(f.owner().id()), daysAgo);
-                assertThat(appeal(f.owner().token(), id, REASON, null).getResponse().getStatus())
-                        .as("%d일 전 실패".formatted(daysAgo)).isEqualTo(200);
+                jdbc().update("INSERT INTO verification_appeals " +
+                                "(id, verificationDailyId, challengeId, challengeMemberId, userId, targetDate, reason, acceptedAt) " +
+                                "SELECT ?, id, challengeId, challengeMemberId, userId, targetDate, ?, verifiedAt " +
+                                "FROM VerificationDaily WHERE id=?",
+                        bytes(UUID.randomUUID()), REASON, bytes(id));
             }
             assertThat(appeal(f.owner().token(), f.verificationId(), REASON, null)
                     .getResponse().getStatus()).isEqualTo(200);
+            assertThat(jdbc().queryForObject("SELECT COUNT(*) FROM verification_appeals WHERE userId=?",
+                    Integer.class, bytes(f.owner().id()))).isEqualTo(3);
         }
     }
 
@@ -292,7 +299,8 @@ class VerificationAppealIT extends VerificationApiSupport {
                             "(id, challengeMemberId, challengeId, userId, targetDate, status, method, " +
                             " finalizeAfter, appealClosesAt) " +
                             "VALUES (?, ?, ?, ?, DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 1 DAY), 'PENDING', 'GPS_PRESENCE', " +
-                            " UTC_TIMESTAMP(6) + INTERVAL 1 DAY, UTC_TIMESTAMP(6) + INTERVAL 1 DAY)",
+                            " TIMESTAMP(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), '15:00:00'), " +
+                            " TIMESTAMP(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), '15:00:00'))",
                     bytes(verificationId), bytes(memberId), bytes(challengeId), bytes(me.id()));
             return verificationId;
         }

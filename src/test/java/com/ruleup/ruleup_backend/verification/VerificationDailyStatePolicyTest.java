@@ -15,6 +15,7 @@ import java.time.LocalDate;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * 하루 판정 행의 상태 정책 가드 (인증 정책 §2.1 · 테크스펙 §5-1).
@@ -98,6 +99,18 @@ class VerificationDailyStatePolicyTest {
     @Nested
     @DisplayName("확정")
     class Confirmation {
+
+        @Test
+        @DisplayName("시각 없는 실패와 유예 기간 중 실패를 상태 변경 전에 거부한다")
+        void rejectsIncompleteOrEarlyFailure() {
+            VerificationDaily daily = open();
+            assertThatThrownBy(() -> daily.confirmFailure(null, "GPS_PRESENCE", "NO_SIGNAL"))
+                    .isInstanceOf(NullPointerException.class);
+            assertThatThrownBy(() -> daily.confirmFailure(DURING_GRACE, "GPS_PRESENCE", "NO_SIGNAL"))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThat(daily.isPending()).isTrue();
+            assertThat(daily.getVerifiedAt()).isNull();
+        }
 
         @Test
         @DisplayName("성공은 즉시 확정되고 즉시 공유 가능하다")

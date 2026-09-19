@@ -398,6 +398,7 @@ public class VerificationFinalizeService {
             metrics.duplicateConfirm();   // 다른 인스턴스가 먼저 확정 — 중복 확정 금지
             return false;
         }
+        if (daily.getFinalizeRetryAt() != null && now.isBefore(daily.getFinalizeRetryAt())) return false;
         // ① 그 행에 적힌 확정 시각 전에는 <b>확정하지 않는다.</b> 폴링 질의가 이미 거르지만,
         //    격리 경로는 id 로 다시 읽어 이 메서드를 부르므로(사이에 백오프로 밀렸을 수 있다)
         //    한 겹이 더 필요하다. 이른 확정은 <b>이의 창이 열린 건을 실패로 굳히는</b> 일이다.
@@ -417,6 +418,8 @@ public class VerificationFinalizeService {
                     daily.getId(), daily.getTargetDate(), now);
             return false;
         }
+        // 이전 버전이 재시도 커서로 변경한 기한도 실제 확정 시에는 정책 기한으로 복구한다.
+        daily.applyWindow(daily.getWindowClosesAt());
 
         Challenge challenge = challengeQuery.findChallenge(daily.getChallengeId()).orElse(null);
         if (challenge == null) {
@@ -438,6 +441,7 @@ public class VerificationFinalizeService {
 
         // 원본으로 최종 재평가. 평가기가 없거나 멤버가 사라졌으면 저장된 요약으로 물러선다.
         EvaluationOutcome outcome = reevaluate(daily, config, method, member, now);
+        if (outcome != null) daily.applyWindow(outcome.windowClosesAt());
         Map<String, Object> evidence = (outcome != null) ? outcome.evidence() : evidenceOf(daily, method);
         String failureReason = (outcome != null) ? outcome.failureReason() : daily.getFailureReason();
         boolean succeeded = (outcome != null) && outcome.status() == VerificationStatus.SUCCESS;

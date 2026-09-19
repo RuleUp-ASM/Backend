@@ -17,9 +17,9 @@ import java.util.Map;
  * 기한은 귀속일로만 계산하고({@code VerificationDeadlines}), FAILED 는 두 시각을 함께 세우는
  * {@code confirmFailure} 로만 들어온다. 남은 원천은 과거 코드와 DB 직접 조작(QA 시간 조작)이다.
  *
- * <p>그래서 자동 보수는 하지 않는다. 원인을 모르는 채 고치면 조작으로 만든 QA 행과 실제 결함을
- * 구분할 기회가 사라진다. 대신 매일 한 번 건수를 남겨, 0 이 아니게 되는 날을 로그로 잡는다 —
- * 새 행이 계속 생기면 아직 모르는 쓰기 경로가 있다는 뜻이다.
+ * <p>원본을 잃지 않도록 자동 보수하지 않는다. 복구는 tools/maintenance/repair-verification-daily.sql로
+ * 지정한 ID·버전 한 건을 보관한 후 정상 확정 배치에 재투입한다. JPA 저장 가드가 재발을 막는다.
+ * 재시도는 finalizeRetryAt에 저장하므로 정책 기한 검사와 충돌하지 않는다.
  */
 @Service
 @RequiredArgsConstructor
@@ -29,11 +29,13 @@ public class VerificationIntegrityCheck {
 
     /** D+2 00:00 KST = 귀속일+1일 15:00 UTC. datetime 컬럼은 UTC 로 저장된다. */
     static final String SQL = "SELECT "
-            + "COALESCE(SUM(status='FAILED' AND (verifiedAt IS NULL OR shareableAt IS NULL)),0) AS failed_unconfirmed, "
+            + "COALESCE(SUM(status='FAILED' AND (verifiedAt IS NULL OR shareableAt IS NULL "
+            + "  OR verifiedAt < TIMESTAMP(DATE_ADD(targetDate, INTERVAL 1 DAY), '15:00:00') "
+            + "  OR shareableAt < verifiedAt)),0) AS failed_unconfirmed, "
             + "COALESCE(SUM(appealClosesAt IS NOT NULL "
             + "  AND appealClosesAt <> TIMESTAMP(DATE_ADD(targetDate, INTERVAL 1 DAY), '15:00:00')),0) AS appeal_deadline_off, "
-            + "COALESCE(SUM(finalizeAfter IS NOT NULL "
-            + "  AND finalizeAfter <> TIMESTAMP(DATE_ADD(targetDate, INTERVAL 1 DAY), '15:00:00')),0) AS finalize_off "
+            + "COALESCE(SUM(finalizeAfter IS NULL "
+            + "  OR finalizeAfter <> TIMESTAMP(DATE_ADD(targetDate, INTERVAL 1 DAY), '15:00:00')),0) AS finalize_off "
             + "FROM VerificationDaily";
 
     private final JdbcTemplate jdbc;

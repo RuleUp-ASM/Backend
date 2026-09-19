@@ -45,7 +45,7 @@ public class ScoreService {
     private List<ScoreInput> dailyInputs(UUID user,UUID challenge,ScoreInput.CycleSpec spec) {
         List<ScoreInput> inputs=new ArrayList<>();
         for(var d:daily.findByUserIdAndChallengeIdAndTargetDateBetween(user,challenge,spec.startOn(),spec.endOn())) {
-            if(d.isPending() || !spec.eligibleDates().contains(d.getTargetDate()) || d.getVerifiedVia()==VerifiedVia.MANUAL)continue;
+            if(d.isPending() || d.hasInvalidFailure() || !spec.eligibleDates().contains(d.getTargetDate()) || d.getVerifiedVia()==VerifiedVia.MANUAL)continue;
             String result=d.getStatus().name();
             if(!Set.of("SUCCESS","FAILED").contains(result))result="INVALID";
             var old=processor.original(user,ScoreInput.Kind.DAILY,d.getId().toString());
