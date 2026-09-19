@@ -217,6 +217,44 @@ class EvaluatorAccuracyTest {
         }
 
         @Test
+        @DisplayName("앱 수집 주기(약 30분)로 한 번씩 찍힌 측위도 체류로 이어진다 — QA SIG-24")
+        void thirtyMinuteSamplingCounts() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(
+                    gpsConfig(GpsPresence.VISIT, 60, 60, 150),
+                    List.of(location(37.4979, 127.0276, 120.0, false, List.of(at(9, 0))),
+                            location(37.4979, 127.0276, 90.0, false, List.of(at(9, 32))),
+                            location(37.4979, 127.0276, 110.0, false, List.of(at(10, 1)))),
+                    anchors, at(10, 5)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
+        }
+
+        @Test
+        @DisplayName("사이에 반경 밖 측위가 끼면 그 구간은 체류가 아니다")
+        void leavingBreaksContinuity() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(
+                    gpsConfig(GpsPresence.VISIT, 30, 30, 150),
+                    List.of(location(37.4979, 127.0276, 20.0, false, List.of(at(9, 0))),
+                            location(37.5200, 127.0600, 20.0, false, List.of(at(9, 15))),
+                            location(37.4979, 127.0276, 20.0, false, List.of(at(9, 40)))),
+                    anchors, at(10, 0)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.PENDING);
+            assertThat(outcome.evidence().get("dwellSeconds")).isEqualTo(0L);
+        }
+
+        @Test
+        @DisplayName("45분을 넘는 공백은 잇지 않는다")
+        void longGapIsNotBridged() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(
+                    gpsConfig(GpsPresence.VISIT, 30, 30, 150),
+                    List.of(location(37.4979, 127.0276, 20.0, false, List.of(at(9, 0), at(9, 50)))),
+                    anchors, at(10, 0)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.PENDING);
+        }
+
+        @Test
         @DisplayName("조작된 측위는 체류 계산에서 빠진다")
         void mockPointsAreExcluded() {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(

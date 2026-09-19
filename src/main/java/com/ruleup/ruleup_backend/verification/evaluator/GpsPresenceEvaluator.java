@@ -21,8 +21,15 @@ import java.util.*;
 @Component
 public class GpsPresenceEvaluator implements MethodEvaluator {
 
-    /** LOCATION fallback 연속 체류 판정: 반경 내 연속 두 포인트 간 이 값 이하 간격이면 체류로 이어붙인다(초). */
-    private static final long LOCATION_CONTINUITY_GAP_SECONDS = 600;
+    /**
+     * LOCATION fallback 연속 체류 판정: 반경 내 연속 두 포인트 간 이 값 이하 간격이면 체류로 이어붙인다(초).
+     *
+     * <p>600초였다. 앱은 sync 한 번(약 30분)에 BALANCED 측위를 한 번 찍으므로 포인트 간격이 늘 600초를
+     * 넘어 체류가 거의 쌓이지 않았다(QA SIG-24). 1차로 서버가 앱 수집 주기를 받아 주기로 했다(2026-09-19) —
+     * 30분 주기에 WorkManager 지연을 얹어 45분까지 잇는다. 최종 기준은 오탐률·배터리 데이터를 보고
+     * Android 와 다시 정한다.
+     */
+    static final long LOCATION_CONTINUITY_GAP_SECONDS = 45 * 60;
     /** evidence 에 남길 처리 트랜지션 키 상한(설명용, 방어적 캡). */
     private static final int SEEN_TRANSITIONS_CAP = 500;
 
@@ -220,6 +227,9 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
      * 멤버 앵커(OR) 반경 내 LOCATION 포인트로 체류시간을 sync 간 연속 누적한다(테크스펙 v2 §7.2 fallback).
      *  - 반경 내 연속 포인트 간 간격이 LOCATION_CONTINUITY_GAP_SECONDS 이하일 때만 그 간격을
      *    체류로 이어붙인다(공백·이탈은 미가산).
+     *  - 사이에 <b>반경 밖</b> 포인트가 끼면 연속이 끊긴다. 간격 허용치가 짧을 때는 드러나지 않았지만,
+     *    45분으로 넓히면 "안→밖→안" 이 통째로 체류로 잡힌다. 저정확도·조작 포인트는 안인지 밖인지
+     *    모르는 값이라 연속을 끊지도 잇지도 않는다.
      *  - 직전 반영 시각 이하의 포인트는 무시 → 같은 좌표가 두 행으로 남아 있어도 이중 누적하지 않는다.
      * 앵커가 없으면 config 레거시 단일앵커(lat/lng/radiusM)로 폴백.
      */
@@ -238,16 +248,18 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
         }
         pts.sort(Comparator.comparing(p -> nz(safe(p.at()))));
 
+        boolean leftSince = false;   // 마지막 반경 내 포인트 이후 반경 밖 포인트가 있었는가
         for (GeoPoint p : pts) {
             Instant at = safe(p.at());
             if (lastInside != null && !at.isAfter(lastInside)) continue;   // 멱등 워터마크(이미 반영된 시각)
             if (!usableForDwell(p, cfg)) continue;                         // 조작·저정확도는 판정 근거가 아니다
-            if (!insideAny(p, use)) continue;                              // 반경 밖은 체류 아님
-            if (lastInside != null) {
+            if (!insideAny(p, use)) { leftSince = true; continue; }        // 반경 밖 → 체류 아님, 연속도 끊긴다
+            if (lastInside != null && !leftSince) {
                 long delta = at.getEpochSecond() - lastInside.getEpochSecond();
                 if (delta > 0 && delta <= LOCATION_CONTINUITY_GAP_SECONDS) { dwellSec += delta; added += delta; }
             }
             lastInside = at;
+            leftSince = false;
         }
         return new LocationDwell(dwellSec, added, lastInside);
     }
