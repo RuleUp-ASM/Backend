@@ -120,6 +120,16 @@ public interface VerificationDailyRepository extends JpaRepository<VerificationD
      * 같은 행을 먼저 집어 <b>뒤에 쌓인 정상 건이 통째로 굶는다</b>. 잠깐 미뤄 두면 나머지가 흐르고,
      * 그 사이 원인이 해소되면 다음 차례에 스스로 확정된다.
      */
+    /**
+     * 결과 모달 확인 시각만 기록한다 — 판정 필드를 건드리지 않는 표시 상태라 엔티티 저장 가드
+     * ({@code VerificationDaily#validateIntegrity}) 를 거치지 않는다. 가드를 타면 복구 전의 이상 행에서
+     * 확인이 500 이 되어 모달이 영영 닫히지 않는다. 멱등: 이미 확인했으면 첫 시각을 유지한다.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE VerificationDaily d SET d.acknowledgedAt = :at, d.version = d.version + 1 "
+            + "WHERE d.id = :id AND d.acknowledgedAt IS NULL")
+    int acknowledge(@Param("id") UUID id, @Param("at") Instant at);
+
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("UPDATE VerificationDaily d SET d.finalizeRetryAt = :next, d.version = d.version + 1 "
             + "WHERE d.id = :id AND d.status = com.ruleup.ruleup_backend.common.verification.VerificationStatus.PENDING")
