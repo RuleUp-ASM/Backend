@@ -65,25 +65,33 @@ public class ChallengeModerationQueue {
         if (local || queueUrl.isEmpty()) return;
         try {
             for (Message message : sqs.getObject().receiveMessage(ReceiveMessageRequest.builder()
-                    .queueUrl(queueUrl).maxNumberOfMessages(1).waitTimeSeconds(1).visibilityTimeout(120).build()).messages()) {
+                    .queueUrl(queueUrl).maxNumberOfMessages(1).waitTimeSeconds(1).visibilityTimeout(120)
+                    .messageSystemAttributeNames(MessageSystemAttributeName.APPROXIMATE_RECEIVE_COUNT).build()).messages()) {
                 handle(message);
             }
         } catch (RuntimeException failure) {
-            log.error("moderation_receive_failed error={}", failure.getClass().getSimpleName());
+            // 클래스 이름만 남기면 enqueue 때처럼 원인이 가려진다 — 메시지까지 남긴다.
+            log.error("moderation_receive_failed error={}", failure.toString());
         }
     }
 
     public void handle(Message message) {
+        UUID challengeId = null;
         try {
             MessageBody body = OM.readValue(message.body(), MessageBody.class);
+            challengeId = body.challengeId();
             if (body.challengeId() == null || body.targets() == null || body.targets().isEmpty()
                     || body.targets().contains(null)) throw new IllegalArgumentException("Invalid moderation message");
             service.moderate(body.challengeId(), body.targets());
             sqs.getObject().deleteMessage(DeleteMessageRequest.builder().queueUrl(queueUrl)
                     .receiptHandle(message.receiptHandle()).build());
         } catch (Exception failure) {
-            log.warn("moderation_consume_failed messageId={} error={}", message.messageId(),
-                    failure.getClass().getSimpleName());
+            // 지우지 않은 메시지는 가시성 타임아웃 뒤 다시 오고, 5회째에 DLQ 로 간다(maxReceiveCount=5).
+            // 몇 번째 시도인지와 원인·스택을 남겨야 같은 방이 반복 실패할 때 근본 원인을 볼 수 있다.
+            log.warn("moderation_consume_failed messageId={} challengeId={} receiveCount={} error={}",
+                    message.messageId(), challengeId,
+                    message.attributes().get(MessageSystemAttributeName.APPROXIMATE_RECEIVE_COUNT),
+                    failure.toString(), failure);
         }
     }
 }
