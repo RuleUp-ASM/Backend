@@ -37,6 +37,20 @@ public class ChallengeTitleResolver {
 
     private final ChallengeRepository challengeRepository;
     private final JdbcTemplate jdbc;
+    private final com.ruleup.ruleup_backend.challenge.view.ChallengeMasking masking;
+
+    /**
+     * 보는 사람 기준 이름. 신고해 가린 방은 {@link com.ruleup.ruleup_backend.challenge.view.ChallengeView#REPORTED_TITLE}
+     * 로 내린다 — 내 화면(이의 내역·점수 이력)도 방 상세와 같은 규칙이어야 한다(REP-06).
+     */
+    @Transactional(readOnly = true)
+    public Map<UUID, String> titlesOf(UUID viewerId, Collection<UUID> challengeIds) {
+        Map<UUID, String> titles = new HashMap<>(titlesOf(challengeIds));
+        for (UUID id : masking.maskedFor(viewerId)) {
+            if (titles.containsKey(id)) titles.put(id, com.ruleup.ruleup_backend.challenge.view.ChallengeView.REPORTED_TITLE);
+        }
+        return titles;
+    }
 
     /** null id 는 조용히 버린다 — 계정 단위 변동처럼 챌린지가 없는 항목이 섞여 들어온다. */
     @Transactional(readOnly = true)

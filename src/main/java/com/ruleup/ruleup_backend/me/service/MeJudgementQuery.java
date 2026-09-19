@@ -22,6 +22,7 @@ public class MeJudgementQuery {
     private final JdbcTemplate jdbc;
     private final ChallengeRepository challenges;
     private final VerificationConfigFactory configs;
+    private final com.ruleup.ruleup_backend.challenge.view.ChallengeMasking masking;
 
     public record Row(UUID id,UUID challengeId,LocalDate date,VerificationStatus status,String failureReason,
                       String verifiedVia,Instant verifiedAt,Instant appealClosesAt,boolean appealed,
@@ -45,6 +46,11 @@ public class MeJudgementQuery {
         List<Row> rows=jdbc.query(sql,(rs,n)->new Row(uuid(rs.getBytes(1)),uuid(rs.getBytes(2)),rs.getDate(3).toLocalDate(),
                 VerificationStatus.valueOf(rs.getString(4)),rs.getString(5),rs.getString(6),instant(rs,7),instant(rs,8),
                 rs.getBoolean(9),rs.getString(10),rs.getString(11),rs.getString(12)==null ? null : Polarity.valueOf(rs.getString(12))),args);
+        // 신고해 가린 방은 캘린더에서도 이름을 내리지 않는다 — 표시 규칙은 ChallengeView 하나다(REP-06).
+        java.util.Set<UUID> masked=masking.maskedFor(userId);
+        if(!masked.isEmpty()) rows=rows.stream().map(r->!masked.contains(r.challengeId()) ? r : new Row(r.id(),r.challengeId(),r.date(),r.status(),
+                r.failureReason(),r.verifiedVia(),r.verifiedAt(),r.appealClosesAt(),r.appealed(),
+                com.ruleup.ruleup_backend.challenge.view.ChallengeView.REPORTED_TITLE,r.category(),r.polarity())).toList();
         Map<UUID,Polarity> missing=new HashMap<>();
         challenges.findAllById(rows.stream().filter(r->r.status()==VerificationStatus.PENDING && r.polarity()==null).map(Row::challengeId).distinct().toList())
                 .forEach(c->missing.put(c.getId(),VerificationPolarity.of(configs.build(c))));

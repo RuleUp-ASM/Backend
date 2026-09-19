@@ -18,7 +18,7 @@ public class MyAppealsService {
     private final ChallengeTitleResolver titles;
     public MyAppealsResponse history(UUID userId) {
         var history=appeals.findByUserIdOrderByAcceptedAtDesc(userId);
-        var names=titles.titlesOf(history.stream().map(Appeal::getChallengeId).toList());
+        var names=titles.titlesOf(userId,history.stream().map(Appeal::getChallengeId).toList());
         return new MyAppealsResponse(history.stream().map(a->new MyAppealsResponse.Item(a.getId().toString(),a.getAcceptedAt().toString(),
                 a.getTargetDate().toString(),a.getChallengeId().toString(),names.get(a.getChallengeId()),a.getReason())).toList());
     }

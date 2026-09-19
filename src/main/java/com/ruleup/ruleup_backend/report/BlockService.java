@@ -217,7 +217,7 @@ public class BlockService {
                         + "FROM user_blocks b WHERE b.blocker_id = ? AND b.target_type = 'CHALLENGE' "
                         + "ORDER BY b.blocked_at DESC",
                 (rs, row) -> new ReportDtos.ChallengeItem(uuid(rs.getBytes(1)).toString(),
-                        "숨김 처리된 챌린지", rs.getBoolean(3), rs.getTimestamp(2).toInstant().toString()),
+                        com.ruleup.ruleup_backend.challenge.view.ChallengeView.REPORTED_TITLE, rs.getBoolean(3), rs.getTimestamp(2).toInstant().toString()),
                 bytes(blockerId));
 
         return new ReportDtos.BlockListResponse(userItems, challengeItems);

@@ -1,6 +1,7 @@
 package com.ruleup.ruleup_backend.challenge;
 
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
+import com.ruleup.ruleup_backend.challenge.view.ChallengeView;
 import com.ruleup.ruleup_backend.moderation.ContentModerationClient;
 import com.ruleup.ruleup_backend.moderation.ModerationResult;
 import org.junit.jupiter.api.BeforeEach;
@@ -90,7 +91,8 @@ class ContractGapIT extends ChallengeApiSupport {
             Member me = member(uniq("gap-mask"));
             UUID id = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
             insertActiveMembership(id, me.id(), "OWNER");
-            jdbc.update("UPDATE challenges SET title='원래 제목', ai_title='AI 임시 제목', " +
+            // AI 제목을 그대로 받아 만든 방은 ai_title == title 이다 — AI 제목으로 가리면 원문이 그대로 보인다(REP-06).
+            jdbc.update("UPDATE challenges SET title='원래 제목', ai_title='원래 제목', " +
                     "description='원래 설명', image_url='https://cdn.example/a.png' WHERE id=?", bytes(id));
 
             assertThat((String) read(getAuth("/api/v1/challenges/" + id, me.token()), "$.data.title"))
@@ -103,21 +105,22 @@ class ContractGapIT extends ChallengeApiSupport {
                     .as("참여 중이라 숨기지 않고 가린다").isEqualTo("CHALLENGE_MASKED");
 
             var detail = getAuth("/api/v1/challenges/" + id, me.token());
-            assertThat((String) read(detail, "$.data.title")).isEqualTo("AI 임시 제목");
+            assertThat((String) read(detail, "$.data.title")).isEqualTo(ChallengeView.REPORTED_TITLE);
+            assertThat(detail.getResponse().getContentAsString()).doesNotContain("원래 제목");
             assertThat((String) read(detail, "$.data.description")).isNull();
             assertThat((String) read(detail, "$.data.imageUrl")).isNull();
 
             assertThat((String) read(getAuth("/api/v1/challenges/" + id + "/room", me.token()),
                     "$.data.summary.title"))
-                    .as("방 안에서도 같은 값이어야 한다").isEqualTo("AI 임시 제목");
+                    .as("방 안에서도 같은 값이어야 한다").isEqualTo(ChallengeView.REPORTED_TITLE);
 
             assertThat((String) read(getAuth("/api/v1/challenges", me.token()),
                     "$.data.challenges[0].title"))
-                    .as("내 챌린지 목록도 같다").isEqualTo("AI 임시 제목");
+                    .as("내 챌린지 목록도 같다").isEqualTo(ChallengeView.REPORTED_TITLE);
 
             assertThat((String) read(getAuth("/api/v1/verifications/progress", me.token()),
                     "$.data.challenges[0].title"))
-                    .as("진행률 목록도 같다").isEqualTo("AI 임시 제목");
+                    .as("진행률 목록도 같다").isEqualTo(ChallengeView.REPORTED_TITLE);
         }
     }
 
