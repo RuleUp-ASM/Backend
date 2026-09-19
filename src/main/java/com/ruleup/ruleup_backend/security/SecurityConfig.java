@@ -39,6 +39,7 @@ public class SecurityConfig {
             "/api/v1/dev/tokens",            // 개발용 토큰 발급(비-prod 전용). 시크릿 헤더로 따로 막는다
             "/api/v1/admin/auth/login",      // 운영자 콘솔 진입 — 토큰을 받으러 오는 경로라 토큰이 없다
             "/files/**",                     // 정적 이미지 서빙
+            "/terms/**",                     // 약관 원문 — 개인정보 처리방침은 상시 공개 의무가 있다
             "/actuator/health"
     };
 

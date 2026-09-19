@@ -20,7 +20,8 @@ public class IntroService {
 
     private final AppProperties appProperties;
 
-    public IntroResponse resolve(Platform platform, int appVersionCode) {
+    /** @param baseUrl 이 요청이 들어온 공개 주소(프록시 헤더 반영) — 약관 원문 URL 의 앞부분 */
+    public IntroResponse resolve(Platform platform, int appVersionCode, String baseUrl) {
         AppProperties.Client client = appProperties.client();
         AppProperties.Client.Version version = client.versionOf(platform);
 
@@ -30,7 +31,8 @@ public class IntroService {
                 forceUpdate,
                 client.devTestMsg(),
                 version.minAppVersion(),
-                client.termsVersions()
+                client.termsVersions(),
+                baseUrl
         );
     }
 }

@@ -69,7 +69,8 @@ public class IntroController {
             throw new BusinessException(ErrorCode.INVALID_REQUEST);
         }
         // platform 없이는 플랫폼별 최소 버전을 고를 수 없어 강제 업데이트 판정 자체가 불가하다.
-        return ApiResponse.ok(introService.resolve(parsePlatform(platform), appVersionCode));
+        return ApiResponse.ok(introService.resolve(parsePlatform(platform), appVersionCode,
+                org.springframework.web.servlet.support.ServletUriComponentsBuilder.fromCurrentContextPath().toUriString()));
     }
 
     private Platform parsePlatform(String platform) {
