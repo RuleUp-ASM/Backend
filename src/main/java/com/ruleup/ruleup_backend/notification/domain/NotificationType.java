@@ -152,12 +152,21 @@ public enum NotificationType {
             new String[]{VERIFICATION_ID}),
 
     /**
-     * 실패 예정 진입 — 「이의제기가 필요해요」(QA NOTI-16). 탭하면 그 건의 이의 제출 화면으로 바로 간다.
+     * 실패 예정 진입 — 「이의제기가 필요해요」(QA NOTI-16). 탭하면 <b>이의를 낼 수 있는 화면</b>으로 간다.
+     *
+     * <p>목적지는 <b>캘린더 일자 상세</b>다(2026-09-21 변경). 이의 버튼이 실재하는 화면이 거기뿐이라서다 —
+     * {@code GET /me/calendar/{date}} 가 그날 건마다 {@code appeal.eligible}·기한을 함께 내리고
+     * (마이프로필·캘린더 스펙 6.4) 화면이 그 값으로 버튼을 그린다. 직전 값 {@code ruleup://appeal/...} 은
+     * 서버가 혼자 정한 경로라 앱에 받는 자리가 없었고, 탭하면 이의 <b>내역</b>으로 떨어졌다.
+     * 내역은 이미 낸 이의를 보는 곳이지 낼 수 있는 곳이 아니다.
+     *
+     * <p>그래서 {@code date}(귀속일) 가 파라미터에 들어간다. 멱등 키는 {@code verification_id} 그대로다 —
+     * 키에 날짜를 더하면 같은 건에 두 번 적재될 길이 열린다.
      *
      * <p>{@link #VERIFICATION_RESULT} 의 변형으로 두지 않는다. 멱등 키가 {@code verification_id} 하나라
      * 같은 건에 실패 예정 알림이 먼저 적재되면 이틀 뒤 「실패로 확정됐어요」가 UNIQUE 에 막혀 사라진다.
      */
-    VERIFICATION_FAIL_EXPECTED(NotificationToggleGroup.CHALLENGE, "ruleup://appeal/{verification_id}",
+    VERIFICATION_FAIL_EXPECTED(NotificationToggleGroup.CHALLENGE, "ruleup://me/calendar/{date}",
             new String[]{VERIFICATION_ID}),
 
     /**

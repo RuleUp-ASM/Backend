@@ -170,13 +170,15 @@ class VerificationResultNotificationIT extends VerificationApiSupport {
             Member me = member(uniq("vfe"));
             UUID challengeId = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", VISIT_PARAMS);
             UUID memberId = insertReadyMember(challengeId, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
-            UUID verificationId = pendingYesterday(me, challengeId, memberId, null);
+            java.time.LocalDate yesterday = java.time.LocalDate.now(KST).minusDays(1);
+            pendingYesterday(me, challengeId, memberId, null);
 
             failExpectedJob.notifyFor(java.time.LocalDate.now(KST).minusDays(1));
             failExpectedJob.notifyFor(java.time.LocalDate.now(KST).minusDays(1));
 
             assertThat(failExpectedOf(me.id())).singleElement().satisfies(n -> {
-                assertThat(n.getDeeplink()).isEqualTo("ruleup://appeal/" + verificationId);
+                // 이의 버튼이 있는 화면은 캘린더 일자 상세다 — 이의 내역이 아니다.
+                assertThat(n.getDeeplink()).isEqualTo("ruleup://me/calendar/" + yesterday);
                 assertThat(n.getTitle()).isEqualTo("이의제기가 필요해요");
                 assertThat(n.getChallengeId()).isEqualTo(challengeId);
             });
@@ -194,11 +196,8 @@ class VerificationResultNotificationIT extends VerificationApiSupport {
 
             var synced = postJsonAuth("/api/v1/verifications/sync", me.token(), syncBody(List.of()));
             assertThat(synced.getResponse().getStatus()).isEqualTo(200);
-            String verificationId = jdbc().queryForObject(
-                    "SELECT BIN_TO_UUID(id) FROM VerificationDaily WHERE challengeMemberId=? AND targetDate=? AND status='PENDING'",
-                    String.class, bytes(memberId), yesterday);
             assertThat(failExpectedOf(me.id())).singleElement().satisfies(n ->
-                    assertThat(n.getDeeplink()).isEqualTo("ruleup://appeal/" + verificationId));
+                    assertThat(n.getDeeplink()).isEqualTo("ruleup://me/calendar/" + yesterday));
 
             postJsonAuth("/api/v1/verifications/sync", me.token(), syncBody(List.of()));
             failExpectedJob.notifyFor(yesterday);
@@ -245,7 +244,8 @@ class VerificationResultNotificationIT extends VerificationApiSupport {
                     geofenceSignal(memberId, "EXIT", todayAt(0, 45)))));
 
             assertThat(failExpectedOf(me.id())).singleElement().satisfies(n ->
-                    assertThat(n.getDeeplink()).startsWith("ruleup://appeal/"));
+                    assertThat(n.getDeeplink())
+                            .isEqualTo("ruleup://me/calendar/" + java.time.LocalDate.now(KST)));
         }
     }
 }
