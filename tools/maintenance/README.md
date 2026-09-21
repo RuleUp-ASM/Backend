@@ -21,3 +21,18 @@ DROP PROCEDURE repair_verification_daily;
 - `VerificationIntegrityCheck.check()`의 세 카운트, 해당 판정의 최종 시각, `score-input:<UUID>:<version>` 및 `ROUTINE_FAILURE_CONFIRMED:<UUID>` outbox 처리를 확인한다. 성공으로 재판정되면 실패 감시자 outbox는 생성되지 않는다.
 
 이 도구는 신규 배포 시 기존 행을 자동으로 바꾸지 않는다. 원인 조사를 위해 보관한 스냅샷은 복구 확인 전 삭제하지 않는다.
+
+# sync 진단
+
+`diagnose-sync.sql` 은 **읽기 전용**이다. 「신호가 안 들어온 것」과 「들어왔는데 판정에 안 쓰인 것」을 가른다. 위에서 아래로 여섯 단계이고, 앞 단계가 0을 내면 그 자리가 끊긴 자리라 뒤는 볼 필요가 없다.
+
+```sql
+SET time_zone = '+00:00';
+SET @user := UUID_TO_BIN('유저 UUID');
+SOURCE tools/maintenance/diagnose-sync.sql;
+```
+
+- 요청이 닿는지(`verification_sync_sessions.lastSeenAt`) → 동의가 있는지(`user_agreement_states`) → 신호가 쌓이는지(`verification_*_signals`) → 배제됐는지(`excludeReason`) → 멤버가 평가 대상인지(`setup_status`) → 판정이 움직였는지(`VerificationDaily` · `VerificationMethodResult.evidence`) 순이다.
+- 위치·건강은 **개별 동의가 없으면 적재 이전에 버린다**. 응답 `consentRequired` 에 그 사실이 실려 내려가므로, 동의가 비어 있으면 서버가 아니라 동의 흐름을 먼저 본다.
+- `excludeReason` 이 `UNTRUSTED_SOURCE` 로 차 있으면 `users.device_id` 와 요청의 `deviceId` 를 대조한다. 기기를 바꾼 뒤 예전 기기가 백로그를 흘린 경우가 여기 걸린다.
+- 신호는 쌓였는데 `VerificationMethodResult.evidence` 가 비어 있으면 원본이 평가기에 닿지 않은 것이다 — 귀속일(`observedDate`)과 판정일(`targetDate`)이 어긋났는지부터 본다.
