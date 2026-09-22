@@ -12,7 +12,13 @@
 --   5) 멤버가 평가 대상인가 challenge_members.setup_status / status
 --   6) 판정이 움직이는가    VerificationDaily / VerificationMethodResult.evidence
 --
--- 시각 컬럼은 UTC 로 저장돼 있고 observedDate·targetDate 는 KST 날짜다.
+-- ⚠️ 두 무리의 시각이 <b>9시간 어긋나 보인다</b>. JPA 가 쓰는 표(VerificationDaily ·
+-- VerificationMethodResult …)는 UTC 로, JdbcTemplate 가 쓰는 표(verification_*_signals ·
+-- verification_sync_sessions · signal_exclusions)는 <b>KST 로</b> 저장된다. 같은 sync 요청의
+-- receivedAt 이 11:25:18, lastEvaluatedAt 이 02:25:18 로 찍히는 것이 그 때문이다(실제 UTC 는
+-- 02:25:18 — 서버 로그와 맞다). 두 무리의 시각을 SQL 안에서 직접 빼지 말 것.
+-- observedDate·targetDate 는 양쪽 다 KST 날짜다.
+--
 -- 세션을 UTC 로 고정하고 읽는다 — 클라이언트 타임존에 따라 값이 달리 보이지 않게.
 -- ======================================================================
 

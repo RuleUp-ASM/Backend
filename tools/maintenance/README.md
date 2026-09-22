@@ -36,3 +36,4 @@ SOURCE tools/maintenance/diagnose-sync.sql;
 - 위치·건강은 **개별 동의가 없으면 적재 이전에 버린다**. 응답 `consentRequired` 에 그 사실이 실려 내려가므로, 동의가 비어 있으면 서버가 아니라 동의 흐름을 먼저 본다.
 - `excludeReason` 이 `UNTRUSTED_SOURCE` 로 차 있으면 `users.device_id` 와 요청의 `deviceId` 를 대조한다. 기기를 바꾼 뒤 예전 기기가 백로그를 흘린 경우가 여기 걸린다.
 - 신호는 쌓였는데 `VerificationMethodResult.evidence` 가 비어 있으면 원본이 평가기에 닿지 않은 것이다 — 귀속일(`observedDate`)과 판정일(`targetDate`)이 어긋났는지부터 본다.
+- **시각이 두 무리로 갈린다.** JPA 가 쓰는 표는 UTC, `JdbcTemplate` 가 쓰는 표(`verification_*_signals` · `verification_sync_sessions` · `signal_exclusions`)는 KST 로 저장된다. 같은 sync 요청의 `receivedAt`(11:25:18)과 `lastEvaluatedAt`(02:25:18)이 9시간 차이로 보이는 이유이고, 실제 UTC 는 뒤쪽이다(서버 로그와 일치). 애플리케이션은 같은 드라이버로 되읽어 판정이 어긋나지 않지만, **SQL 안에서 두 무리의 시각을 직접 빼면 9시간이 틀린다.**
