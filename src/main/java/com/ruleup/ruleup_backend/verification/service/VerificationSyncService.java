@@ -12,6 +12,7 @@ import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.service.NotificationPublisher;
 import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
+import com.ruleup.ruleup_backend.agreement.domain.AgreementType;
 import com.ruleup.ruleup_backend.verification.domain.*;
 import com.ruleup.ruleup_backend.verification.config.VerificationProperties;
 import com.ruleup.ruleup_backend.verification.config.SyncPayloadSizeFilter;
@@ -179,6 +180,16 @@ public class VerificationSyncService {
         SignalConsentGate.Decision consent = consentGate.apply(userId, signals);
         List<SyncSignal> collectible = consent.accepted();
 
+        // 동의가 없으면 그 방식의 신호는 <b>앞으로도</b> 들어올 수 없다 — 권한이 꺼진 것과 같은
+        // 상태다. 이번 요청에 그 신호가 실려 왔는지와 무관하게 물어야, 「보내지도 못하는」
+        // 사용자가 매일 조용히 실패하지 않는다. 방마다 다시 묻지 않도록 요청 안에서 기억한다.
+        java.util.Map<AgreementType, Boolean> consentMemo = new java.util.EnumMap<>(AgreementType.class);
+        java.util.function.Predicate<VerificationMethod> consentGapOf = method -> {
+            AgreementType required = SignalConsentGate.requiredFor(method);
+            return required != null
+                    && consentMemo.computeIfAbsent(required, t -> !consentGate.hasConsent(userId, t));
+        };
+
         // 원본 저장 + 영속 멱등. 못 믿을 봉투(VPN·무결성 실패·비활성 기기)의 신호는 저장하되
         // 배제 사유를 행에 새긴다 — 제외와 제재는 분리하고, 원본은 이상탐지 자료로 남긴다.
         VerificationSignalIngestService.Ingested ingested = signalIngest.ingest(userId, collectible, now,
@@ -212,7 +223,8 @@ public class VerificationSyncService {
 
             // 유예 구간(어제 귀속·미확정)에 늦게 도착한 신호를 먼저 반영한다.
             // 귀속일이 끝났어도 확정 전이면 발생 시각이 맞는 신호는 그대로 인정한다(인증 정책 §2 지연 데이터).
-            boolean graceChanged = evaluateGraceDay(member, challenge, config, daySignals, gaps, today, now);
+            boolean graceChanged = evaluateGraceDay(member, challenge, config, daySignals, gaps,
+                    consentGapOf, today, now);
 
             if (graceOnly) {
                 // 방이 끝났으니 오늘은 인증 대상일이 아니다. 열지도 않은 오늘 행을 NOT_TARGET 으로
@@ -227,7 +239,7 @@ public class VerificationSyncService {
             VerificationDaily daily = loadOrCreateDaily(member, challenge, today);
             VerificationStatus before = daily.getStatus();
             VerificationStatus todayStatus = processMember(member, challenge, config, daily,
-                    daySignals.get(today), gaps, today, now);
+                    daySignals.get(today), gaps, consentGapOf, today, now);
 
             progressService.updateAfterSync(member, todayStatus, now);
             if (becameFinal(before, todayStatus) || graceChanged) {
@@ -418,7 +430,9 @@ public class VerificationSyncService {
      */
     private boolean evaluateGraceDay(ChallengeMember member, Challenge challenge, VerificationConfig config,
                                      Map<LocalDate, VerificationSignalReader.DaySignalSet> daySignals,
-                                     List<SyncRequest.Gap> gaps, LocalDate today, Instant now) {
+                                     List<SyncRequest.Gap> gaps,
+                                     java.util.function.Predicate<VerificationMethod> consentGapOf,
+                                     LocalDate today, Instant now) {
         LocalDate yesterday = today.minusDays(1);
         if (VerificationDeadlines.finalizeDue(yesterday, now)) return false;   // 확정 배치 몫
         if (VerificationTargetDays.of(config, challenge, member, yesterday)
@@ -431,7 +445,7 @@ public class VerificationSyncService {
 
         VerificationStatus before = daily.getStatus();
         VerificationStatus after = processMember(member, challenge, config, daily,
-                daySignals.get(yesterday), gaps, yesterday, now);
+                daySignals.get(yesterday), gaps, consentGapOf, yesterday, now);
         if (!becameFinal(before, after)) return false;
         progressService.recount(member);
         return true;
@@ -452,7 +466,9 @@ public class VerificationSyncService {
     private VerificationStatus processMember(ChallengeMember member, Challenge challenge, VerificationConfig config,
                                              VerificationDaily daily,
                                              VerificationSignalReader.DaySignalSet daySignals,
-                                             List<SyncRequest.Gap> gaps, LocalDate today, Instant now) {
+                                             List<SyncRequest.Gap> gaps,
+                                             java.util.function.Predicate<VerificationMethod> consentGapOf,
+                                             LocalDate today, Instant now) {
         // 확정 이후 도착분은 저장만 하고 판정에 쓰지 않는다(인증 정책 §2 지연 데이터). 구제는 이의제기로만.
         // 여기 닿는 것은 <b>정상</b>이다 — 오프라인 복구·재전송이 확정된 날짜로 계속 들어온다.
         // 스펙 7절의 「확정 후 자동 정정 0건」은 이 early-return 이 구조적으로 보장하므로 따로
@@ -481,12 +497,14 @@ public class VerificationSyncService {
             eventPublisher.publishEvent(new VerificationScoreEvents.Confirmed(daily));
             return VerificationStatus.NOT_REQUIRED;
         }
-        return evaluateAndApply(member, challenge, config, daily, signals, gaps, today, now);
+        return evaluateAndApply(member, challenge, config, daily, signals, gaps, consentGapOf, today, now);
     }
 
     private VerificationStatus evaluateAndApply(ChallengeMember member, Challenge challenge, VerificationConfig config,
                                                 VerificationDaily daily, List<SyncSignal> signals,
-                                                List<SyncRequest.Gap> gaps, LocalDate today, Instant now) {
+                                                List<SyncRequest.Gap> gaps,
+                                                java.util.function.Predicate<VerificationMethod> consentGapOf,
+                                                LocalDate today, Instant now) {
         VerificationMethod method = config.primaryMethod();
         MethodEvaluator evaluator = evaluators.get(method);
         if (evaluator == null) {
@@ -499,11 +517,27 @@ public class VerificationSyncService {
         VerificationMethodResult mr = methodResultRepo
                 .findByVerificationDailyIdAndMethod(daily.getId(), method.name()).orElse(null);
 
+        // 신호는 도착 시각이 아니라 발생 시각으로 귀속한다 — 한 배치에 어제치와 오늘치가 섞여 온다.
+        List<SyncSignal> ofDay = DaySignals.forDate(signals, today, KST);
+
+        /*
+         * 판정을 막고 있는 것이 「사용자가 덜 한 것」이 아니라 「서버가 잴 수 없는 것」인가.
+         * 권한 공백(클라가 신고한 gaps)과 동의 공백(우리가 신호를 받지 않기로 한 상태)은 층이 같다 —
+         * 둘 다 사용자가 설정을 고쳐야 풀리고, 고치라고 알려 주지 않으면 매일 조용히 실패한다.
+         */
+        boolean gap = permissionGap(gaps, method, today) || consentGapOf.test(method);
+
+        if (!MethodSignalTypes.anyFor(method, ofDay)) {
+            // 그 방식이 읽을 신호가 하루치에 하나도 없다. 평가기를 돌리면 「체류 0분」 같은 근거가
+            // 만들어지고, 확정 배치가 그 근거를 믿어 <b>무신호를 목표 미달로 확정한다</b> —
+            // 유저에게는 「체류 시간이 부족했어요」로 보이지만 실제로는 잰 적이 없다.
+            // 확정 배치의 재평가가 이미 같은 규칙을 쓰고 있다(VerificationFinalizeService#reevaluate).
+            return skipWithoutSignals(member, config, daily, mr, method, gap, today, now);
+        }
+
         // 과거 날짜는 그 날 적용되던 설정으로 평가한다 — 유예 구간에 장소를 바꿔도 어제 판정이 흔들리지 않게.
         List<String> memberScreenApps = settingsResolver.screenAppPackagesOn(member, today);
         List<GeoAnchor> memberAnchors = settingsResolver.anchorsOn(member, today);
-        // 신호는 도착 시각이 아니라 발생 시각으로 귀속한다 — 한 배치에 어제치와 오늘치가 섞여 온다.
-        List<SyncSignal> ofDay = DaySignals.forDate(signals, today, KST);
         DayContext ctx = new DayContext(today, KST, now, config, ofDay,
                 memberAnchors, memberScreenApps, member.getId().toString(),
                 member.getUserId(), member.getChallengeId());
@@ -512,7 +546,7 @@ public class VerificationSyncService {
         // ③ 권한 공백(gaps) 반영: 신호 없이 PENDING이고 해당 신호타입에 비회복 권한 공백이 있으면
         //    마감 배치가 NO_SIGNAL_RECEIVED 대신 PERMISSION_MISSING으로 확정하도록 힌트를 남긴다(§8.5).
         Map<String, Object> evidence = outcome.evidence();
-        if (outcome.status() == VerificationStatus.PENDING && permissionGap(gaps, method, today)) {
+        if (outcome.status() == VerificationStatus.PENDING && gap) {
             evidence = (evidence != null) ? new HashMap<>(evidence) : new HashMap<>();
             evidence.putIfAbsent("pendingReason", "PERMISSION_MISSING");
             // 실시간 권한공백 → 리스너 트리거(§8.5). 리스너는 같은 트랜잭션에서 둘을 적재한다 —
@@ -522,7 +556,7 @@ public class VerificationSyncService {
                     member.getUserId(), member.getChallengeId(), method.name(), today, now));
         }
 
-        if (!permissionGap(gaps, method, today)) {
+        if (!gap) {
             ofDay.stream().filter(signal -> MethodSignalTypes.anyFor(method, List.of(signal)))
                     .map(SyncSignal::observedAt).filter(Objects::nonNull).map(value -> {
                         try { return Instant.parse(value); } catch (RuntimeException invalid) { return Instant.MIN; }
@@ -577,6 +611,40 @@ public class VerificationSyncService {
         }
         // 자정 배치가 돈 뒤 첫 sync 로 어제 행이 열릴 수도 있다. 평가기가 위반 사유를 내지 않아도
         // 귀속일이 끝난 목표 미달은 실패 예정이다. 화면과 같은 판정으로 알리고, 재전송은 멱등 키로 막는다.
+        if (daily.isFailExpected(VerificationPolarity.of(config), now)) {
+            notificationPublisher.publish(FailExpectedNoticeJob.event(daily));
+        }
+        return daily.getStatus();
+    }
+
+    /**
+     * 그 방식의 신호가 하루치에 없을 때 — <b>평가하지 않고</b> 판정을 그대로 둔다.
+     *
+     * <p>남기는 것은 「왜 못 쟀는가」 하나뿐이다. 권한·동의 공백이면 힌트를 새겨 확정 배치가
+     * 무신호(NO_SIGNAL_RECEIVED) 대신 PERMISSION_MISSING 으로 확정하게 하고, 공백이 없으면
+     * 근거를 <b>비워 둔 채</b> 둔다 — 비어 있어야 확정 배치가 무신호로 확정한다.
+     *
+     * <p>실패 예정 고지는 여기서도 해야 한다. 신호가 한 번도 안 온 날이야말로 이의가 필요한
+     * 날이고, 그 고지가 빠지면 사용자는 아무 안내 없이 실패만 확정받는다.
+     */
+    private VerificationStatus skipWithoutSignals(ChallengeMember member, VerificationConfig config,
+                                                  VerificationDaily daily, VerificationMethodResult mr,
+                                                  VerificationMethod method, boolean gap,
+                                                  LocalDate today, Instant now) {
+        if (gap) {
+            Map<String, Object> evidence = (mr != null && mr.getEvidence() != null)
+                    ? new HashMap<>(mr.getEvidence()) : new HashMap<>();
+            evidence.putIfAbsent("pendingReason", "PERMISSION_MISSING");
+            if (mr == null) {
+                mr = VerificationMethodResult.create(daily.getId(), method.name(),
+                        VerificationPolarity.of(config), true);
+            }
+            mr.evaluate(VerificationStatus.PENDING, evidence, now);
+            methodResultRepo.save(mr);
+            // 권한 재허용 고지와 고스트 푸시는 리스너가 같은 트랜잭션에서 적재한다(§8.5).
+            eventPublisher.publishEvent(new PermissionGapDetected(
+                    member.getUserId(), member.getChallengeId(), method.name(), today, now));
+        }
         if (daily.isFailExpected(VerificationPolarity.of(config), now)) {
             notificationPublisher.publish(FailExpectedNoticeJob.event(daily));
         }

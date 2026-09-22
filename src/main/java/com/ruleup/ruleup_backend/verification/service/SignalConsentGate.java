@@ -2,6 +2,7 @@ package com.ruleup.ruleup_backend.verification.service;
 
 import com.ruleup.ruleup_backend.agreement.AgreementService;
 import com.ruleup.ruleup_backend.agreement.domain.AgreementType;
+import com.ruleup.ruleup_backend.verification.domain.VerificationMethod;
 import com.ruleup.ruleup_backend.verification.signal.SignalDomain;
 import com.ruleup.ruleup_backend.verification.signal.SyncSignal;
 import lombok.RequiredArgsConstructor;
@@ -54,6 +55,26 @@ public class SignalConsentGate {
      */
     public record Decision(List<SyncSignal> accepted, List<String> rejectedTypes,
                            List<String> consentRequired) {}
+
+    /**
+     * 이 판정 방식이 요구하는 개별 동의 — 없으면 {@code null}(앱 사용·기상은 대상이 아니다).
+     *
+     * <p>신호가 한 건도 오지 않아도 물을 수 있어야 한다. 동의가 없으면 그 방은 <b>앞으로도</b>
+     * 자동 인증이 불가능한 상태이고, 그건 권한이 꺼진 것과 같은 사건이다 — 신호가 실려 온
+     * 요청에서만 알 수 있다면 「보내지도 못하는」 사용자는 영영 고지를 못 받는다.
+     */
+    public static AgreementType requiredFor(VerificationMethod method) {
+        for (String signalType : MethodSignalTypes.of(method)) {
+            AgreementType required = SignalDomain.of(signalType).map(REQUIRED::get).orElse(null);
+            if (required != null) return required;
+        }
+        return null;
+    }
+
+    /** 그 개별 동의가 있는지. 없으면 그 종류의 신호는 받지 않는다. */
+    public boolean hasConsent(UUID userId, AgreementType type) {
+        return agreementService.hasIndividualConsent(userId, type);
+    }
 
     public Decision apply(UUID userId, List<SyncSignal> signals) {
         if (signals == null || signals.isEmpty()) return new Decision(List.of(), List.of(), List.of());

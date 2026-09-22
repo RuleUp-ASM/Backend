@@ -66,13 +66,18 @@ public class FailExpectedNoticeJob {
     /** 이 인스턴스가 마지막으로 끝낸 기준일(=오늘). 재기동하면 비어 한 번 더 돌지만 멱등이다. */
     private final AtomicReference<LocalDate> doneFor = new AtomicReference<>();
 
-    /** 발행 이벤트 — sync 의 위반 경로와 이 배치가 같은 모양을 쓴다. */
+    /**
+     * 발행 이벤트 — sync 의 위반 경로와 이 배치가 같은 모양을 쓴다.
+     *
+     * <p>{@code date} 는 딥링크가 쓴다(캘린더 일자 상세). 멱등 키에는 들어가지 않는다.
+     */
     public static NotificationEvent event(VerificationDaily daily) {
         return NotificationEvent.forChallenge(daily.getUserId(),
                 NotificationType.VERIFICATION_FAIL_EXPECTED,
                 daily.getChallengeId(),
                 Map.of(NotificationParams.VERIFICATION_ID, daily.getId().toString(),
-                        NotificationParams.CHALLENGE_ID, daily.getChallengeId().toString()));
+                        NotificationParams.CHALLENGE_ID, daily.getChallengeId().toString(),
+                        NotificationParams.DATE, daily.getTargetDate().toString()));
     }
 
     @Scheduled(fixedDelay = 60_000)

@@ -86,7 +86,17 @@ class VerificationStrictDeviceIT extends VerificationApiSupport {
         assertThat(postJsonAuth("/api/v1/verifications/sync", me.token(), body)
                 .getResponse().getStatus()).isEqualTo(200);
         assertThat(todayStatusOf(memberId)).isEqualTo(expectedStatus);
-        assertThat(dwellMinutesOf(memberId)).isEqualTo("SUCCESS".equals(expectedStatus) ? 12L : 0L);
+        if ("active-device".equals(deviceId)) {
+            // 신호는 판정까지 닿았다. 모의 위치·출처 누락은 평가기의 위생 층에서 빠지므로
+            // 「쟀는데 0분」이 근거로 남는다.
+            assertThat(dwellMinutesOf(memberId)).isEqualTo("SUCCESS".equals(expectedStatus) ? 12L : 0L);
+        } else {
+            // 봉투 게이트가 전부 걷어내 평가기에 닿은 신호가 없다 — 그런 날은 평가하지 않는다.
+            // 근거를 만들면 확정 배치가 무신호를 「체류 부족」으로 확정한다.
+            assertThat(dwellMinutesOf(memberId))
+                    .as("게이트에서 전부 빠진 날은 잰 적이 없다 — 근거를 만들지 않는다")
+                    .isNull();
+        }
         String excluded = jdbc().queryForObject(
                 "SELECT excludeReason FROM verification_location_signals WHERE userId = ?",
                 String.class, bytes(me.id()));
