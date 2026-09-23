@@ -24,6 +24,28 @@ class RecommendationRateLimiterTest {
         assertThat(metrics.find("challenge.draft.rate_limiter.fallback").counter()).isNull();
     }
 
+    /** 남은 대기 초는 숫자 자리에 싣는다 — reason 에 넣으면 클라가 문자열을 파싱해야 한다(QA CRE-04). */
+    @Test void limitedResponseCarriesRemainingSecondsAsNumber() {
+        StringRedisTemplate redis=mock(StringRedisTemplate.class);
+        when(redis.execute(any(),anyList())).thenReturn(List.of(11L,42L));
+        var limiter=new RecommendationRateLimiter(redis,new SimpleMeterRegistry());
+        assertThatThrownBy(()->limiter.check("user"))
+                .isInstanceOfSatisfying(BusinessException.class,limited->{
+                    assertThat(limited.getRetryAfterSeconds()).isEqualTo(42);
+                    assertThat(limited.getDetail()).isNull();
+                });
+    }
+
+    /** TTL 이 0 이나 음수로 와도 "지금 바로 다시" 라고 말하지 않는다. */
+    @Test void remainingSecondsIsAtLeastOne() {
+        StringRedisTemplate redis=mock(StringRedisTemplate.class);
+        when(redis.execute(any(),anyList())).thenReturn(List.of(11L,-1L));
+        var limiter=new RecommendationRateLimiter(redis,new SimpleMeterRegistry());
+        assertThatThrownBy(()->limiter.check("user"))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        limited->assertThat(limited.getRetryAfterSeconds()).isEqualTo(1));
+    }
+
     @Test void fallbackAllowsExactlyTenConcurrentRequestsPerUser() throws Exception {
         StringRedisTemplate redis=mock(StringRedisTemplate.class);
         when(redis.execute(any(),anyList())).thenThrow(new IllegalStateException("offline"));

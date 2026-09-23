@@ -31,6 +31,8 @@ public class BusinessException extends RuntimeException {
      */
     private final String userMessage;
     private String profileLockedUntil;
+    /** 선택: 429 일 때 다시 시도할 수 있을 때까지 남은 초. 없으면 null. */
+    private Integer retryAfterSeconds;
 
     public BusinessException(ErrorCode errorCode) {
         this(errorCode, null);
@@ -99,5 +101,16 @@ public class BusinessException extends RuntimeException {
      */
     public static BusinessException settingChangeLimit(String nextChangeAvailableAt) {
         return new BusinessException(ErrorCode.SETTING_CHANGE_LIMIT, null, null, nextChangeAvailableAt);
+    }
+
+    /**
+     * 분당 한도 소진 — 남은 대기 초를 본문에 함께 실어 보낸다.
+     * 초 값은 숫자 자리(retryAfterSeconds)에 싣는다. reason 은 같은 코드 안에서 원인을 가르는 분기 키라
+     * 거기에 숫자를 넣으면 클라가 문자열을 파싱해야 하고 분기 계약과도 뜻이 섞인다.
+     */
+    public static BusinessException rateLimited(ErrorCode errorCode, long retryAfterSeconds) {
+        BusinessException exception = new BusinessException(errorCode);
+        exception.retryAfterSeconds = (int) Math.max(1, retryAfterSeconds);
+        return exception;
     }
 }

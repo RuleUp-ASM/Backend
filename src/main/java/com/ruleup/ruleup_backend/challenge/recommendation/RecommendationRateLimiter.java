@@ -61,8 +61,7 @@ public class RecommendationRateLimiter {
     }
 
     private static void rejectIfLimited(long count, long ttl) {
-        if (count > 10) throw new BusinessException(ErrorCode.RECOMMENDATION_RATE_LIMITED,
-                String.valueOf(Math.max(1, ttl)));
+        if (count > 10) throw BusinessException.rateLimited(ErrorCode.RECOMMENDATION_RATE_LIMITED, ttl);
     }
 
     private static class Window {
