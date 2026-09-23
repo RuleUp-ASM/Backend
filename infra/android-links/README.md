@@ -27,15 +27,38 @@ Install Referrer 소비 구현이 추가되어야 한다. 현재 앱에는 그 �
 
 ## 앱 연결 인증서
 
-`public/.well-known/assetlinks.json`의 지문은 2026-09-18 확인한 개발 APK
-`app/build/outputs/apk/debug/app-debug.apk`의 실제 서명 인증서 SHA-256이다.
-패키지명과 함께 `apksigner verify --print-certs`로 확인했다. 개인 키는 포함하지 않는다.
-이 설정은 **그 인증서로 서명한 QA 앱**에 적용된다. 다른 개발자의 debug 인증서와
-Google Play 배포 서명은 자동으로 신뢰되지 않는다.
+`public/.well-known/assetlinks.json`은 패키지 `com.ruleup.android_ruleup`에 대해
+다음 두 개발 인증서의 SHA-256을 등록한다. 개인 키는 포함하지 않는다.
+
+| 용도·출처 | SHA-256 |
+|---|---|
+| 2026-09-18 QA APK (`app/build/outputs/apk/debug/app-debug.apk`)에서 `apksigner verify --print-certs`로 확인 | `83:6C:EE:89:35:88:B1:8C:39:A3:C6:CF:80:EC:8F:63:36:75:19:9E:BB:D8:D5:B9:C2:1D:F0:55:14:36:33:B6` |
+| 2026-09-23 사용자 제공 진단 화면의 Android debug 인증서 (해당 APK 직접 검증은 별도 필요) | `C6:C7:4F:C8:EF:37:58:26:A9:A4:68:62:7E:A8:C7:6D:CD:3C:7F:2D:2A:30:41:AC:68:87:C9:80:17:BB:73:EE` |
+
+이 설정은 **위 인증서로 서명한 개발·QA 앱**에 적용된다. 다른 개발자의 debug 인증서와
+Google Play 배포 서명은 자동으로 신뢰되지 않는다. 기존 QA 인증서도 유지해 이전
+QA 앱의 링크 검증이 끊기지 않도록 한다.
 
 Play 출시 전 Play Console의 **앱 서명 키 인증서** SHA-256을 추가하고 배포한다.
 업로드 키와 앱 서명 키를 혼동하지 않는다. 알 수 없는 release 지문을 임의로 넣지 않는다.
 QA가 끝나면 운영 도메인에서 debug 지문을 제거한다.
+
+## 카카오톡 공유에서 앱 실행
+
+`assetlinks.json`은 HTTPS App Links 검증용이다. 카카오톡 공유 카드에서 앱을 직접
+실행하려면 Android 앱에도 아래 처리가 필요하다.
+
+- `FriendInviteSharer`, `MemberInviteSharer`, `WatcherInviteSharer`의 `Link`에
+  `androidExecutionParams`를 설정한다. 친구·챌린지·감시자를 구분할 수 있도록
+  초대 종류와 코드·토큰 또는 원래 초대 URL을 전달한다. 토큰만 전달하면 `/c`와 `/w`를
+  구분할 수 없으므로 수신 측 파서와 형식을 맞춘다.
+- 앱의 초대 진입 Activity에 `kakao${KAKAO_NATIVE_APP_KEY}://kakaolink`를 받는
+  `VIEW`/`DEFAULT`/`BROWSABLE` intent-filter를 추가한다. 로그인용 `://oauth`와는 별도다.
+- 콜드 스타트와 `onNewIntent` 모두에서 전달값을 검증하고 기존 초대 경로로 연결한다.
+  로그인 후 이어지는 챌린지·감시자 수락 흐름도 유지한다.
+
+상세 규약은 [카카오톡 공유 Android 문서](https://developers.kakao.com/docs/ko/kakaotalk-share/android-link)를
+따른다. 이 서버 설정만 배포해서 카카오톡의 웹 링크가 앱 실행 링크로 바뀌지는 않는다.
 
 ## 검증·배포
 
