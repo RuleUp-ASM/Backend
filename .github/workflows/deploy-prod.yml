@@ -1,0 +1,99 @@
+name: Deploy to ECS (prod)
+
+# main 브랜치 push 시 운영 배포. dev → main 머지가 곧 릴리스다. (테스트는 ci.yml이 병렬로 검증)
+# 스테이징(deploy.yml)과 같은 절차를 쓰되, AWS 역할이 main 브랜치에서만 assume 되도록 묶여 있어
+# 다른 브랜치에서 이 워크플로를 돌려도 운영에 닿지 못한다.
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:   # 같은 커밋을 다시 배포할 때(태스크 재기동·시크릿 교체 반영)
+
+concurrency:
+  group: deploy-prod
+  # 운영 배포는 중간에 끊지 않는다 — 취소되면 이미지 태그만 바뀌고 서비스는 옛 버전인 채로 남는다.
+  cancel-in-progress: false
+
+permissions:
+  id-token: write   # GitHub OIDC로 AWS 역할 assume (저장된 키 불필요)
+  contents: read
+
+env:
+  AWS_REGION: ap-northeast-2
+  ECR_REPOSITORY: ruleup-api
+  ECS_CLUSTER: ruleup-prod-cluster
+  ECS_SERVICE: ruleup-prod-api
+  IMAGE_TAG: prod
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # jar는 러너에서 네이티브로 빌드(빠름). 테스트는 ci.yml이 담당하므로 여기선 -x test.
+      - name: Set up JDK 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: gradle
+
+      - name: Build bootJar
+        run: |
+          chmod +x ./gradlew
+          ./gradlew bootJar -x test
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::961178969292:role/ruleup-prod-gha-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # 미리 빌드한 jar만 arm64 런타임 이미지에 복사 → 에뮬레이션 없이 빠름.
+      - name: Build & push image (arm64)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.deploy
+          platforms: linux/arm64
+          provenance: false          # ECS Fargate가 단일 아키 이미지를 받도록(매니페스트 리스트 방지)
+          push: true
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+
+      # 새 태스크가 뜨지 못하면(마이그레이션 실패·스키마 누락으로 기동 중단) 회로차단기가 이전 태스크로
+      # 되돌린다. 그런데 되돌린 뒤에도 services-stable 은 「안정」이라 워크플로가 초록불로 끝난다 —
+      # 배포가 실제로 나갔는지는 이번에 만든 deployment 의 rolloutState 로 확인한다.
+      - name: Deploy to ECS (rolling)
+        run: |
+          DEPLOYMENT_ID=$(aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service ${{ env.ECS_SERVICE }} \
+            --force-new-deployment \
+            --query 'service.deployments[?status==`PRIMARY`].id | [0]' --output text)
+          echo "deployment=$DEPLOYMENT_ID"
+          aws ecs wait services-stable \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }}
+          STATE=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }} \
+            --query "services[0].deployments[?id=='$DEPLOYMENT_ID'].rolloutState | [0]" --output text)
+          echo "rolloutState=$STATE"
+          if [ "$STATE" != "COMPLETED" ]; then
+            echo "::error::새 태스크가 뜨지 못해 이전 버전으로 되돌려졌다(rolloutState=$STATE). CloudWatch /ecs/ruleup-prod-api 기동 로그를 확인한다."
+            exit 1
+          fi
+
+      # 기동 확인 — 헬스체크가 DB 연결까지 본다. 스키마 누락은 기동 단계(SchemaPresenceCheck)에서 이미 걸러진다.
+      - name: Smoke test
+        run: |
+          curl -fsS --retry 5 --retry-delay 10 --retry-all-errors https://prod.ruleup.co.kr/actuator/health | tee /dev/stderr | grep -q '"status":"UP"'
