@@ -59,7 +59,10 @@ public class ScoreChangeView {
         return switch (t.getReason()) {
             case SIGNUP, CYCLE_CLOSED, PROCESSING_COMMIT, CORRECTION_COMMIT, DAILY_SUCCESS, STREAK_BONUS -> ScoreReason.CYCLE_SUCCESS;
             case CONFIRMED_MISS, STREAK_PENALTY -> ScoreReason.CYCLE_FAIL;
-            case REVERSAL -> ScoreReason.APPEAL_RESTORE;
+            // 되감기는 방향을 봐야 한다. 점수를 되돌려 준 되감기(감점 취소)만 「이의 복원」이고,
+            // 성공을 거둬들인 되감기는 사용자에게 점수가 깎인 일이다 — 전부 APPEAL_RESTORE 로
+            // 부르면 화면에 「이의 복원 -1」 같은 문장이 나온다(QA TIER-05).
+            case REVERSAL -> t.getAppliedDelta() < 0 ? ScoreReason.CYCLE_FAIL : ScoreReason.APPEAL_RESTORE;
             case INCIDENT -> switch (t.getIncidentType()) {
                 case CHEAT_DETECTED -> ScoreReason.CHEAT;
                 case PERMISSION_KICK -> ScoreReason.KICK_PERMISSION;

@@ -120,6 +120,20 @@ public class VerificationDaily extends AssignedIdEntity {
     @Column(name = "version", nullable = false)
     private long version;
 
+    /**
+     * <b>판정이 바뀐 횟수.</b> 점수 도메인이 「이 판정을 이미 반영했는가」를 묻는 기준이다.
+     *
+     * <p>{@link #version} 을 쓰면 안 된다. 그 값은 낙관적 락의 것이라 판정과 무관한 갱신에도
+     * 오른다 — 사용자가 결과 모달을 확인하기만 해도({@code acknowledge}) 올라간다. 그러면 점수
+     * 동기화가 「새 판정이 왔다」로 읽고 그 시각 이후 원장을 통째로 되감았다가 <b>똑같은 값</b>으로
+     * 다시 쌓는다. 화면에는 CYCLE_FAIL -1 과 APPEAL_RESTORE +1 이 짝을 지어 늘어난다(QA TIER-05 · TIER-15).
+     *
+     * <p>그래서 상태를 바꾸는 자리에서만 올린다. 모달 확인·확정 연기처럼 판정을 건드리지 않는
+     * 갱신은 이 값을 움직이지 않는다.
+     */
+    @Column(name = "scoreVersion", nullable = false)
+    private long scoreVersion;
+
     @Generated(event = EventType.INSERT)
     @Column(name = "createdAt", nullable = false, updatable = false)
     private Instant createdAt;
@@ -164,6 +178,7 @@ public class VerificationDaily extends AssignedIdEntity {
             throw new IllegalArgumentException("실패 확정은 confirmFailure 로만 만든다");
         }
         this.status = status;
+        this.scoreVersion++;
         this.method = method;
         this.failureReason = failureReason;
         this.verifiedAt = verifiedAt;
@@ -181,6 +196,7 @@ public class VerificationDaily extends AssignedIdEntity {
      */
     public void recordFailExpected(String method, String failureReason) {
         this.status = VerificationStatus.PENDING;
+        this.scoreVersion++;
         this.method = method;
         this.failureReason = failureReason;
         this.verifiedAt = null;
@@ -204,6 +220,7 @@ public class VerificationDaily extends AssignedIdEntity {
             throw new IllegalArgumentException("유예 기간이 끝나기 전에는 실패로 확정할 수 없다");
         }
         this.status = VerificationStatus.FAILED;
+        this.scoreVersion++;
         this.method = method;
         this.failureReason = failureReason;
         this.gapReason = GapReason.of(failureReason);
@@ -236,6 +253,7 @@ public class VerificationDaily extends AssignedIdEntity {
     /** 수동 인증 챌린지의 당일 체크 — 즉시 SUCCESS. */
     public void recordManual(String method, Instant verifiedAt) {
         this.status = VerificationStatus.SUCCESS;
+        this.scoreVersion++;
         this.method = method;
         this.failureReason = null;
         this.verifiedAt = verifiedAt;
@@ -250,6 +268,7 @@ public class VerificationDaily extends AssignedIdEntity {
      */
     public void correctByAppeal(Instant acceptedAt) {
         this.status = VerificationStatus.SUCCESS;
+        this.scoreVersion++;
         this.failureReason = null;
         this.verifiedVia = VerifiedVia.APPEAL;
         this.verifiedAt = acceptedAt;
@@ -300,6 +319,7 @@ public class VerificationDaily extends AssignedIdEntity {
      */
     public void cancelManual() {
         this.status = VerificationStatus.PENDING;
+        this.scoreVersion++;
         this.method = null;
         this.failureReason = null;
         this.verifiedAt = null;

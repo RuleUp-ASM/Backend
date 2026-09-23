@@ -49,7 +49,7 @@ public class ScoreService {
             String result=d.getStatus().name();
             if(!Set.of("SUCCESS","FAILED").contains(result))result="INVALID";
             var old=processor.original(user,ScoreInput.Kind.DAILY,d.getId().toString());
-            var input=new ScoreInput(ScoreInput.Kind.DAILY,d.getId().toString(),Math.toIntExact(d.getVersion()),
+            var input=new ScoreInput(ScoreInput.Kind.DAILY,d.getId().toString(),Math.toIntExact(d.getScoreVersion()),
                     old.map(ScoreInput::effectiveAt).orElse(d.getTargetDate().atStartOfDay(KST).toInstant()),"AUTO",spec,d.getTargetDate(),result,null,challenge,0,0,false);
             inputs.add(input);
         }

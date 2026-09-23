@@ -43,9 +43,9 @@ public class VerificationScoreEvents {
         }
         if(spec.isEmpty() || !spec.get().eligibleDates().contains(d.getTargetDate()))return;
         String status=d.getStatus().name();if(!Set.of("SUCCESS","FAILED").contains(status))status="INVALID";
-        ScoreInput input=new ScoreInput(ScoreInput.Kind.DAILY,d.getId().toString(),Math.toIntExact(d.getVersion()),
+        ScoreInput input=new ScoreInput(ScoreInput.Kind.DAILY,d.getId().toString(),Math.toIntExact(d.getScoreVersion()),
                 saved.map(ScoreInput::effectiveAt).orElse(d.getTargetDate().atStartOfDay(ZoneId.of("Asia/Seoul")).toInstant()),"AUTO",spec.get(),d.getTargetDate(),status,null,d.getChallengeId(),0,0,false);
-        outbox.enqueue(ScoreInputOutboxHandler.TYPE,new ScoreInputOutboxHandler.Payload(d.getUserId(),input),"score-input:"+d.getId()+":"+d.getVersion());
+        outbox.enqueue(ScoreInputOutboxHandler.TYPE,new ScoreInputOutboxHandler.Payload(d.getUserId(),input),"score-input:"+d.getId()+":"+d.getScoreVersion());
         dispatcher.requestFlush();
     }
 }
