@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -15,6 +16,7 @@ public class ChallengeModerationRetryService {
     private final JdbcTemplate jdbc;
     private final ChallengeModerationQueue queue;
 
+    @SchedulerLock(name = "ChallengeModerationRetryService.retryStalledModeration", lockAtMostFor = "PT15M", lockAtLeastFor = "PT2M")
     @Scheduled(fixedDelay = 300_000)
     public void retryStalledModeration() {
         // An unconfigured queue fails every row the same way. Retrying 100 of them each cycle

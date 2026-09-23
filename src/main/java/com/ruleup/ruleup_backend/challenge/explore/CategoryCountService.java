@@ -5,6 +5,7 @@ import com.ruleup.ruleup_backend.user.domain.InterestCategory;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -68,6 +69,7 @@ public class CategoryCountService {
     }
 
     /** 10분마다 — 모든 인스턴스가 같은 수를 보도록 공유 저장소에 새겨 둔다. */
+    @SchedulerLock(name = "CategoryCountService.refreshCounts", lockAtMostFor = "PT10M", lockAtLeastFor = "PT1M")
     @Scheduled(cron = "0 */10 * * * *", zone = "Asia/Seoul")
     public void refreshCounts() {
         try {

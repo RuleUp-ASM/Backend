@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -133,6 +134,7 @@ public class ExploreIndexJobs {
      * <p>여러 인스턴스가 같은 일을 겹쳐 하지 않도록 잠금을 잡는다. 못 잡으면 그 회차는 건너뛴다 —
      * 다음 5분에 다시 온다.
      */
+    @SchedulerLock(name = "ExploreIndexJobs.sweepPopularityDecay", lockAtMostFor = "PT10M", lockAtLeastFor = "PT1M")
     @Scheduled(cron = "0 */5 * * * *", zone = "Asia/Seoul")
     public void sweepPopularityDecay() {
         if (circuit.isOpen()) return;
@@ -229,6 +231,7 @@ public class ExploreIndexJobs {
      * 매일 03:30 대조 — 점검 창(02:00~03:00)과 00시 판정 배치를 피한다.
      * 유령 제거는 이 배치만 할 수 있다(증분 갱신은 "원천에 없는 행"을 발견하지 못한다).
      */
+    @SchedulerLock(name = "ExploreIndexJobs.reconcile", lockAtMostFor = "PT1H", lockAtLeastFor = "PT1M")
     @Scheduled(cron = "0 30 3 * * *", zone = "Asia/Seoul")
     public void reconcile() {
         if (circuit.isOpen()) return;

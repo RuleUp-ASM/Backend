@@ -11,6 +11,7 @@ import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Limit;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -48,6 +49,7 @@ public class TermsUpdateNoticeBatch {
     private final AppProperties props;
 
     /** 매일 03:50 KST. 03:40 미접속 고지 다음 자리다. */
+    @SchedulerLock(name = "TermsUpdateNoticeBatch.notifyOutdated", lockAtMostFor = "PT1H", lockAtLeastFor = "PT1M")
     @Scheduled(cron = "0 50 3 * * *", zone = "Asia/Seoul")
     @Transactional
     public int notifyOutdated() {

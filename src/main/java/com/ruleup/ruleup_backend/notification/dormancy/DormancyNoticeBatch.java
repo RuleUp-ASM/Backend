@@ -4,6 +4,7 @@ import com.ruleup.ruleup_backend.user.DormancyProcessor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -20,6 +21,7 @@ public class DormancyNoticeBatch {
     private final JdbcTemplate jdbc;
     private final DormancyProcessor processor;
 
+    @SchedulerLock(name = "DormancyNoticeBatch.notifyInactive", lockAtMostFor = "PT1H", lockAtLeastFor = "PT1M")
     @Scheduled(cron = "0 40 3 * * *", zone = "Asia/Seoul")
     public int notifyInactive() {
         byte[] after = new byte[16];

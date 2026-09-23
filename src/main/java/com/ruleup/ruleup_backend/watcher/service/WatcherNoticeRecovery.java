@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import java.time.Instant;
@@ -19,6 +20,7 @@ public class WatcherNoticeRecovery {
     private final VerificationDailyRepository verifications;
     private final WatcherNoticeService notices;
     @Value("${app.watcher.recovery-max-age:PT24H}") private Duration maxAge;
+    @SchedulerLock(name = "WatcherNoticeRecovery.recover", lockAtMostFor = "PT1H", lockAtLeastFor = "PT1M")
     @Scheduled(cron = "0 35 * * * *", zone = "Asia/Seoul")
     public void recover() {
         Instant now = Instant.now();

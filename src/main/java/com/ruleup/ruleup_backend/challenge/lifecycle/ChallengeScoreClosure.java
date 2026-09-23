@@ -4,6 +4,7 @@ import com.ruleup.ruleup_backend.score.service.ScoreService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import java.time.*;
@@ -17,6 +18,7 @@ public class ChallengeScoreClosure {
     private final ChallengeScoreSource sources;
     private final ScoreService scores;
 
+    @SchedulerLock(name = "ChallengeScoreClosure.closeFinishedCycles", lockAtMostFor = "PT10M", lockAtLeastFor = "PT30S")
     @Scheduled(fixedDelay=60000,initialDelay=60000)
     public void closeFinishedCycles() {
         var rows=jdbc.queryForList("SELECT user_id,challenge_id,cycle_start_on FROM cycle_score_states WHERE closed_at IS NULL AND cycle_end_on<? ORDER BY cycle_start_on",LocalDate.now(ZoneId.of("Asia/Seoul")).minusDays(1));

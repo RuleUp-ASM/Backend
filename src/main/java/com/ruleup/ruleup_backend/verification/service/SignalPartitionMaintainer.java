@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -58,6 +59,7 @@ public class SignalPartitionMaintainer {
      * 매일 03:20 KST. 03:10 알림 파기와 03:30 탐색 reconciliation 사이다 —
      * 00시 확정 배치가 D-2 귀속 건을 끝낸 뒤라야 그 날짜 파티션을 떨어뜨릴 수 있다.
      */
+    @SchedulerLock(name = "SignalPartitionMaintainer.maintain", lockAtMostFor = "PT1H", lockAtLeastFor = "PT1M")
     @Scheduled(cron = "0 20 3 * * *", zone = "Asia/Seoul")
     public void maintain() {
         LocalDate today = LocalDate.now(KST);

@@ -3,6 +3,7 @@ import com.ruleup.ruleup_backend.challenge.lifecycle.ChallengeScoreSource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import java.time.*;
@@ -13,6 +14,7 @@ public class ScoreSyncService {
     private final JdbcTemplate jdbc;
     private final ChallengeScoreSource sources;
     private final ScoreService scores;
+    @SchedulerLock(name = "ScoreSyncService.syncConfirmedJudgements", lockAtMostFor = "PT10M", lockAtLeastFor = "PT30S")
     @Scheduled(fixedDelay=60000,initialDelay=60000)
     public void syncConfirmedJudgements() {
         byte[] cursor=new byte[16];

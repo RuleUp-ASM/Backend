@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -105,6 +106,7 @@ public class LocationPurgeService {
      * <p>대상이 남아 있는 동안 이어 돌린다. 한 번에 5,000행만 지우고 끝내면 목표 트래픽에서
      * 적체가 쌓이고, 밀린 행은 파기 기록 없이 파티션과 함께 사라진다.
      */
+    @SchedulerLock(name = "LocationPurgeService.purgeDue", lockAtMostFor = "PT1H", lockAtLeastFor = "PT1M")
     @Scheduled(cron = "0 5 3 * * *", zone = "Asia/Seoul")
     public void purgeDue() {
         Instant deadline = Instant.now().plus(DRAIN_BUDGET);

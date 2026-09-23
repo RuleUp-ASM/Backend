@@ -5,6 +5,7 @@ import com.ruleup.ruleup_backend.score.ScoreKeys;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import java.util.concurrent.atomic.AtomicLong;
@@ -21,6 +22,7 @@ public class ScoreHealth {
         metrics.gauge("score.integrity.mismatched.users",mismatchedUsers);
         metrics.gauge("score.integrity.failed.checks",failedChecks);
     }
+    @SchedulerLock(name = "ScoreHealth.audit", lockAtMostFor = "PT1H", lockAtLeastFor = "PT1M")
     @Scheduled(cron="0 0 5 * * *",zone="Asia/Seoul")
     public void audit() {
         byte[] cursor=new byte[16];long mismatched=0,failed=0;
