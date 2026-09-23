@@ -32,6 +32,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 
 /**
  * 적재 계약 — <b>적재가 곧 고지 성립이고, 도메인 커밋과 원자적이다</b>(백엔드 4-1).
@@ -102,6 +103,41 @@ class NotificationPublishIT {
     private List<Notification> inbox(UUID userId) {
         return notificationRepository.findAll().stream()
                 .filter(n -> n.getUserId().equals(userId)).toList();
+    }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("고지 성립 시각")
+    class CreatedAt {
+
+        /**
+         * created_at 은 JdbcTemplate 이 적고 JPA 가 읽는 유일한 사용자 노출 시각이다.
+         * 적는 쪽이 접속 타임존을 타면 읽는 쪽(UTC 해석)과 어긋나 알림함이 9시간 미래를
+         * 가리킨다(QA NOTI-13·NOTI-14·WAT-11). 그래서 DB 안에서 UTC 와 직접 견준다 —
+         * 같은 접속으로 되읽으면 어긋남이 상쇄돼 드러나지 않는다.
+         */
+        @Test
+        @DisplayName("DB 에 UTC 벽시계로 적힌다 — 접속 타임존을 타지 않는다")
+        void storedAsUtcWallClock() {
+            UUID userId = newUser();
+            publisher.publish(event(userId, NotificationType.ACCOUNT_SANCTION));
+
+            Notification row = inbox(userId).getFirst();
+            Long skewSeconds = jdbc.queryForObject(
+                    "SELECT TIMESTAMPDIFF(SECOND, created_at, UTC_TIMESTAMP()) FROM notifications WHERE id = ?",
+                    Long.class, uuidBytes(row.getId()));
+
+            assertThat(skewSeconds).as("적힌 값과 UTC 현재 시각의 차이").isBetween(-60L, 60L);
+            assertThat(row.getCreatedAt()).isCloseTo(Instant.now(),
+                    within(1, java.time.temporal.ChronoUnit.MINUTES));
+        }
+    }
+
+    private static byte[] uuidBytes(UUID id) {
+        java.nio.ByteBuffer bb = java.nio.ByteBuffer.allocate(16);
+        bb.putLong(id.getMostSignificantBits());
+        bb.putLong(id.getLeastSignificantBits());
+        return bb.array();
     }
 
     // =====================================================================
