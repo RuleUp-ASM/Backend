@@ -90,6 +90,11 @@ dependencies {
 	// 여기에 맞춘다. 더 올리면 google-http-client·gax 계열이 통째로 따라 올라오므로 이유 없이 넓힌다.
 	implementation 'com.google.firebase:firebase-admin:9.8.0'
 
+	// 배치 분산 락. 태스크가 둘 이상이면 @Scheduled 가 태스크마다 돌아 정산·알림이 중복된다.
+	// 락 저장소는 이미 있는 MySQL(shedlock 테이블) — 새 인프라를 늘리지 않는다.
+	implementation 'net.javacrumbs.shedlock:shedlock-spring:7.10.1'
+	implementation 'net.javacrumbs.shedlock:shedlock-provider-jdbc-template:7.10.1'
+
 	// JDK 25 대응: Lombok 1.18.40+ 필요 (그 이전 버전은 JDK25 bytecode 미지원)
 	compileOnly 'org.projectlombok:lombok:1.18.46'
 	annotationProcessor 'org.projectlombok:lombok:1.18.46'

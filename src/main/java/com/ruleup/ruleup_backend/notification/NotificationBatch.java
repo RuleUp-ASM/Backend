@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.Limit;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
@@ -69,6 +70,7 @@ public class NotificationBatch {
      * <p>발송 기록이 FK 로 매달려 있던 {@code notification_deliveries} 가 사라져 선행 삭제가
      * 필요 없어졌다.
      */
+    @SchedulerLock(name = "NotificationBatch.purgeExpired", lockAtMostFor = "PT1H", lockAtLeastFor = "PT1M")
     @Scheduled(cron = "0 10 3 * * *", zone = "Asia/Seoul")
     public int purgeExpired() {
         // 기준 시각은 시작 시점에 한 번 고정한다 — 청크마다 다시 계산하면 실행 중 경계를 넘는

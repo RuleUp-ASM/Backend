@@ -7,6 +7,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.services.sqs.SqsClient;
@@ -34,6 +35,7 @@ public class UserModerationQueue {
         this.jdbc = jdbc; this.moderation = moderation; this.clients = clients; this.url = url; this.local = local;
     }
 
+    @SchedulerLock(name = "UserModerationQueue.retryPending", lockAtMostFor = "PT1H", lockAtLeastFor = "PT1M")
     @Scheduled(cron = "0 0 5 * * *", zone = "Asia/Seoul")
     public void retryPending() {
         // Keyset pages prevent one permanently pending user from starving later users.

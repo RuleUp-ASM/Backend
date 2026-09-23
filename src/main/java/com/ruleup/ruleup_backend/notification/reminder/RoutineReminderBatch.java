@@ -15,6 +15,7 @@ import com.ruleup.ruleup_backend.verification.repository.VerificationDailyReposi
 import com.ruleup.ruleup_backend.verification.service.VerificationConfigFactory;
 import com.ruleup.ruleup_backend.verification.service.VerificationTargetDays;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
@@ -86,6 +87,7 @@ public class RoutineReminderBatch {
         this.self = self;
     }
 
+    @SchedulerLock(name = "RoutineReminderBatch.sendScheduled", lockAtMostFor = "PT1H", lockAtLeastFor = "PT1M")
     @Scheduled(cron = "0 0 8,12,19 * * *", zone = "Asia/Seoul")
     public int sendScheduled() {
         return send(Instant.now());

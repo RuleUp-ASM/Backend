@@ -25,6 +25,7 @@ import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -172,6 +173,7 @@ public class VerificationFinalizeService {
      *
      * <p>대상 아닌 날(요일 밖·기간 밖·빈도 몫 충족)은 열지 않는다 — 확정되지 않을 행을 만들 이유가 없다.
      */
+    @SchedulerLock(name = "VerificationFinalizeService.materializeIfNeeded", lockAtMostFor = "PT10M", lockAtLeastFor = "PT30S")
     @Scheduled(fixedDelay = 60_000)
     public void materializeIfNeeded() {
         if (batchCompletion.needsMaterialization(LocalDate.now(clock.withZone(KST)))) materializeDueTargets();
@@ -263,6 +265,7 @@ public class VerificationFinalizeService {
      * 나머지는 그대로 확정된다 — 스펙의 「한 건의 판정 실패 때문에 전체 일 배치가 롤백되지
      * 않도록」이 이 모양이다.
      */
+    @SchedulerLock(name = "VerificationFinalizeService.finalizeDue", lockAtMostFor = "PT10M", lockAtLeastFor = "PT30S")
     @Scheduled(fixedDelay = 60_000)
     public void finalizeDue() {
         long startedAt = System.nanoTime();
@@ -608,6 +611,7 @@ public class VerificationFinalizeService {
     }
 
     /** 매일 00:05 KST: 종료된 빈도형 주기 정산 + 롤오버. */
+    @SchedulerLock(name = "VerificationFinalizeService.rolloverFrequencyPeriods", lockAtMostFor = "PT1H", lockAtLeastFor = "PT1M")
     @Scheduled(cron = "0 5 0 * * *", zone = "Asia/Seoul")
     @Transactional
     public void rolloverFrequencyPeriods() {

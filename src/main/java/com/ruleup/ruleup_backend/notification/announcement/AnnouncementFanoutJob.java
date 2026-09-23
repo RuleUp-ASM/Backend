@@ -7,6 +7,7 @@ import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Limit;
 import org.springframework.jdbc.core.JdbcTemplate;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
@@ -63,6 +64,7 @@ public class AnnouncementFanoutJob {
      * 대기 중인 공지를 편다. 요청 직후 바로 흐르도록 주기를 짧게 두되, 잡이 하는 일은
      * 대기 행이 없으면 인덱스 조회 한 번이라 비용이 없다.
      */
+    @SchedulerLock(name = "AnnouncementFanoutJob.fanOutPending", lockAtMostFor = "PT5M", lockAtLeastFor = "PT5S")
     @Scheduled(fixedDelay = 10_000L)
     public int fanOutPending() {
         List<Announcement> pending = announcementRepository

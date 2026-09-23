@@ -3,6 +3,7 @@ package com.ruleup.ruleup_backend.common.outbox;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.domain.Limit;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
@@ -149,6 +150,7 @@ public class OutboxDispatcher {
     }
 
     /** 주기 스윕 — 유실을 막는 쪽. 즉시 경로가 죽어도 여기서 반드시 복구된다. */
+    @SchedulerLock(name = "OutboxDispatcher.sweep", lockAtMostFor = "PT5M", lockAtLeastFor = "PT10S")
     @Scheduled(fixedDelayString = "${app.outbox.sweep-interval-ms:30000}")
     public void sweep() {
         safeFlush();
@@ -241,6 +243,7 @@ public class OutboxDispatcher {
      * 무시할 만하고, 그렇게 계속 죽는 건은 {@code outbox.dead_lettered.oldest_age_seconds} 가
      * 자라는 것으로 드러난다 — 목록이 비지 않는다는 사실 자체가 신호다.
      */
+    @SchedulerLock(name = "OutboxDispatcher.redriveRecentDeadLettered", lockAtMostFor = "PT1H", lockAtLeastFor = "PT1M")
     @Scheduled(cron = "0 40 4 * * *", zone = "Asia/Seoul")
     public int redriveRecentDeadLettered() {
         Instant since = Instant.EPOCH;
@@ -282,6 +285,7 @@ public class OutboxDispatcher {
     }
 
     /** 보관 기간 경과분 정리. 점검 창(02:00~03:00)과 아침 요약(08:00)을 피한다. */
+    @SchedulerLock(name = "OutboxDispatcher.purgeProcessed", lockAtMostFor = "PT1H", lockAtLeastFor = "PT1M")
     @Scheduled(cron = "0 50 3 * * *", zone = "Asia/Seoul")
     @Transactional
     public int purgeProcessed() {

@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -54,6 +55,7 @@ public class PopularityRefreshJob {
     }
 
     /** 5분마다 KST. Redis 인덱스 투영은 {@code ExploreIndexJobs} 가 같은 주기로 따로 돈다. */
+    @SchedulerLock(name = "PopularityRefreshJob.runEveryFiveMinutes", lockAtMostFor = "PT10M", lockAtLeastFor = "PT1M")
     @Scheduled(cron = "0 */5 * * * *", zone = "Asia/Seoul")
     public void runEveryFiveMinutes() {
         runOnce();

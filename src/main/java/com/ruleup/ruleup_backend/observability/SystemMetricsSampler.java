@@ -8,6 +8,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -105,6 +106,7 @@ public class SystemMetricsSampler {
     }
 
     /** 매일 04:15 KST: 보관기간 초과 스냅샷 정리(무한 증가 방지). */
+    @SchedulerLock(name = "SystemMetricsSampler.cleanupOld", lockAtMostFor = "PT1H", lockAtLeastFor = "PT1M")
     @Scheduled(cron = "0 15 4 * * *", zone = "Asia/Seoul")
     @Transactional
     public void cleanupOld() {

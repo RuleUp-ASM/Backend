@@ -13,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -74,6 +75,7 @@ public class SegmentScoreService {
     private int windowDays;
 
     /** 매일 04:00 KST: 최근 windowDays일 챌린지로 세그먼트 점수 전면 재집계. */
+    @SchedulerLock(name = "SegmentScoreService.rebuild", lockAtMostFor = "PT1H", lockAtLeastFor = "PT1M")
     @Scheduled(cron = "0 0 4 * * *", zone = "Asia/Seoul")
     @Transactional
     public void rebuild() {
@@ -118,6 +120,19 @@ public class SegmentScoreService {
                 segmentTypeWeightReader.evictAll();
             }
         });
+    }
+
+    /**
+     * 04:30 KST: <b>모든 태스크</b>가 자기 캐시를 비운다(락 없음).
+     *
+     * <p>재집계는 분산 락으로 한 태스크에서만 돌아, 위의 afterCommit 무효화도 그 태스크의
+     * Caffeine 만 비운다. 나머지 태스크는 TTL(6시간)이 지날 때까지 어제 점수를 내보낸다.
+     * 재집계는 수 초짜리라 30분 뒤면 커밋이 끝나 있다 — 더 늦어지면 TTL 이 받친다.
+     */
+    @Scheduled(cron = "0 30 4 * * *", zone = "Asia/Seoul")
+    public void evictLocalCaches() {
+        segmentScoreReader.evictAll();
+        segmentTypeWeightReader.evictAll();
     }
 
     // ===== §8.1 특성 가중치 학습 =====

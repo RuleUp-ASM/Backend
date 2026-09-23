@@ -14,6 +14,7 @@ import com.ruleup.ruleup_backend.routine.domain.SelectedMethod;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -52,6 +53,7 @@ public class GhostPushSetupReminderService {
     private final NotificationPublisher notificationPublisher;
 
     /** 1시간마다: 셋업 미완료(권한 없음) AUTO 멤버를 깨우는 무음 푸시를 보낸다. */
+    @SchedulerLock(name = "GhostPushSetupReminderService.nudgeSetupPendingMembers", lockAtMostFor = "PT30M", lockAtLeastFor = "PT30M")
     @Scheduled(fixedDelay = 3_600_000L)
     @Transactional
     public void nudgeSetupPendingMembers() {

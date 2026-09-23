@@ -4,6 +4,7 @@ import com.ruleup.ruleup_backend.challenge.repository.ChallengeDelegationReposit
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,6 +24,7 @@ public class ChallengeDelegationExpiryService {
     private final ChallengeDelegationRepository delegationRepository;
 
     /** 1분마다: 만료 시각이 지난 PENDING 위임 요청을 EXPIRED 로 전환. */
+    @SchedulerLock(name = "ChallengeDelegationExpiryService.expireDueDelegations", lockAtMostFor = "PT10M", lockAtLeastFor = "PT30S")
     @Scheduled(fixedDelay = 60_000)
     @Transactional
     public void expireDueDelegations() {

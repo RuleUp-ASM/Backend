@@ -7,6 +7,7 @@ import com.ruleup.ruleup_backend.push.repository.PushOutboxRepository;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +32,7 @@ public class PushOutboxDispatcher {
     private final PushOutboxRepository pushOutboxRepository;
     private final PushSender pushSender;
 
+    @SchedulerLock(name = "PushOutboxDispatcher.dispatchDue", lockAtMostFor = "PT10M", lockAtLeastFor = "PT30S")
     @Scheduled(fixedDelay = 60_000)
     @Transactional
     public void dispatchDue() {
