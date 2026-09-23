@@ -2,6 +2,7 @@ package com.ruleup.ruleup_backend.auth.service;
 
 import com.ruleup.ruleup_backend.config.AppProperties;
 import org.springframework.jdbc.core.JdbcTemplate;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
@@ -31,6 +32,7 @@ public class SignupTokenStore {
         return jdbc.queryForObject("SELECT COUNT(*) FROM signup_token_consumptions WHERE jti=?", Integer.class, jti) > 0;
     }
 
+    @SchedulerLock(name = "SignupTokenStore.cleanup", lockAtMostFor = "PT1H", lockAtLeastFor = "PT1M")
     @Scheduled(cron = "0 30 4 * * *", zone = "Asia/Seoul")
     public void cleanup() {
         jdbc.update("DELETE FROM signup_token_consumptions WHERE expires_at<?", Timestamp.from(Instant.now()));

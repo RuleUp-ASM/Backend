@@ -9,6 +9,7 @@ import org.springframework.transaction.event.TransactionPhase;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import org.springframework.context.event.EventListener;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -77,6 +78,7 @@ public class CrossRankingSnapshotService {
     }
 
     /** Multiple application instances observe the same completion marker and job lock. */
+    @SchedulerLock(name = "CrossRankingSnapshotService.refreshAfterVerification", lockAtMostFor = "PT10M", lockAtLeastFor = "PT30S")
     @Scheduled(fixedDelay = 60_000)
     @Transactional
     public void refreshAfterVerification() {

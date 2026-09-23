@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -40,6 +41,7 @@ public class VerificationIntegrityCheck {
 
     private final JdbcTemplate jdbc;
 
+    @SchedulerLock(name = "VerificationIntegrityCheck.report", lockAtMostFor = "PT1H", lockAtLeastFor = "PT1M")
     @Scheduled(cron = "0 40 3 * * *", zone = "Asia/Seoul")
     public void report() {
         try {

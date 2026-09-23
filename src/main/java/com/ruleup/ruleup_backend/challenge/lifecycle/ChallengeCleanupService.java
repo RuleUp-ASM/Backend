@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,6 +31,7 @@ public class ChallengeCleanupService {
     private final JdbcTemplate jdbc;
     private final ImageStorageService imageStorage;
 
+    @SchedulerLock(name = "ChallengeCleanupService.runDaily", lockAtMostFor = "PT1H", lockAtLeastFor = "PT1M")
     @Scheduled(cron = "0 40 3 * * *", zone = "Asia/Seoul")
     public void runDaily() {
         cleanupExpiredDrafts();

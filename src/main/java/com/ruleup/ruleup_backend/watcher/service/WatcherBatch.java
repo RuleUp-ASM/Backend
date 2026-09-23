@@ -14,6 +14,7 @@ import com.ruleup.ruleup_backend.watcher.repository.WatcherRelationRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Limit;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -46,6 +47,7 @@ public class WatcherBatch {
      *
      * <p>02:00~03:00 점검 창과 00시 판정 배치를 피해 04:10 에 돈다.
      */
+    @SchedulerLock(name = "WatcherBatch.removeFinishedRelations", lockAtMostFor = "PT1H", lockAtLeastFor = "PT1M")
     @Scheduled(cron = "0 10 4 * * *", zone = "Asia/Seoul")
     @Transactional
     public int removeFinishedRelations() {
@@ -65,6 +67,7 @@ public class WatcherBatch {
      * <p>감시자 후보에게는 어떤 알림도 보내지 않는다 — 아직 동의하지 않은 외부인이고,
      * "당신을 초대한 링크가 만료됐다"는 연락 자체가 무동의 접촉이다.
      */
+    @SchedulerLock(name = "WatcherBatch.notifyExpiredInvitations", lockAtMostFor = "PT1H", lockAtLeastFor = "PT1M")
     @Scheduled(cron = "0 20 4 * * *", zone = "Asia/Seoul")
     @Transactional
     public int notifyExpiredInvitations() {

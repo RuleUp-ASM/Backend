@@ -12,6 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -61,6 +62,7 @@ public class RoutineOutcomeCollector {
     private int lookbackDays;
 
     /** 매일 03:30 KST: 전날까지 확정된 종결행을 아웃컴 이력으로 수집(세그먼트 재집계 04:00 직전). */
+    @SchedulerLock(name = "RoutineOutcomeCollector.collect", lockAtMostFor = "PT1H", lockAtLeastFor = "PT1M")
     @Scheduled(cron = "0 30 3 * * *", zone = "Asia/Seoul")
     @Transactional
     public void collect() {

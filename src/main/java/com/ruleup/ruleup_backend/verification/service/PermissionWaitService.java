@@ -16,6 +16,7 @@ import com.ruleup.ruleup_backend.room.service.PermissionKickHandler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -79,6 +80,7 @@ public class PermissionWaitService {
                 bytes(event.challengeId()),bytes(event.userId()),event.method(),Timestamp.from(event.measuredAt()));
     }
 
+    @SchedulerLock(name = "PermissionWaitService.publishDue", lockAtMostFor = "PT10M", lockAtLeastFor = "PT30S")
     @Scheduled(fixedDelay = 60_000)
     @Transactional
     public void publishDue() {
