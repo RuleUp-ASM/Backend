@@ -1,0 +1,82 @@
+# 테스트 전용 오버라이드. 운영 application.yaml의 ${ENV} 자리들을 더미 값으로 채워
+# 로컬에서 환경변수 없이도 컨텍스트가 뜨게 한다.
+#  · DataSource 접속 정보는 Testcontainers(@ServiceConnection)가 런타임에 덮어쓰므로
+#    아래 username/password는 플레이스홀더 해소용 더미일 뿐 실제로는 쓰이지 않는다.
+app:
+  # 배치 자동 발화를 끈다. 컨텍스트가 설정별로 열넷 넘게 뜨고 그 하나하나가 스케줄러를 돌리면,
+  # 시험과 무관한 배치가 끼어들고 종료 때 이미 닫힌 풀을 건드려 스위트 종료가 늘어진다.
+  # 배치의 동작은 각 IT 가 해당 메서드를 <b>직접 불러</b> 검증한다.
+  scheduling:
+    enabled: false
+  jwt:
+    # HS256 키는 32바이트 이상이어야 함 (테스트 전용, 운영 비밀과 무관)
+    secret: test-only-secret-please-change-this-must-be-at-least-32-bytes-long-0123456789
+  nickname-check:
+    # 통합 테스트는 전부 127.0.0.1 로 잡혀 한 윈도우를 공유한다 → 운영 한도(60/분)면
+    # 테스트 개수에 따라 429가 터진다. 한도 자체는 NicknameCheckRateLimiterTest 가 검증한다.
+    max-per-minute: 100000
+  recommendation:
+    # 짧은 테스트 동안 추천 재계산 배치가 끼어들지 않도록 첫 실행을 멀리 민다.
+    rebuild-initial-delay-ms: 3600000
+  verification:
+    # 통합 테스트는 한 유저가 시나리오 안에서 sync 를 연속으로 친다 → 최소 간격을 끈다.
+    # 간격 자체의 동작(429 SYNC_TOO_FREQUENT)은 프로퍼티를 덮어쓰는 테스트가 따로 검증한다.
+    sync-min-interval-sec: 0
+    sync-backlog-min-interval-sec: 0
+
+  explore:
+    # Redis 없이 도는 것이 기본이다. 켜진 경로는 ExploreRedisFallbackIT 가 프로퍼티를 덮어써서 검증한다.
+    redis:
+      enabled: false
+
+  # 인트로 버전 게이트: 플랫폼별 최소 버전을 다르게 둬서 "platform 에 따라 판정이 갈리는지"를 검증한다.
+  client:
+    android:
+      min-version-code: 100
+      min-app-version: 1.0.0
+    ios:
+      min-version-code: 200
+      min-app-version: 2.0.0
+  oauth:
+    kakao:
+      client-id: dummy
+      client-secret: dummy
+      redirect-uri: ruleup://login/callback
+    google:
+      client-id: dummy
+      client-secret: dummy
+      redirect-uri: ruleup://login/callback
+
+spring:
+  datasource:
+    username: test
+    password: test
+    # 스위트 전체가 MySQL 컨테이너 <b>하나</b>를 공유하는데, 스프링 테스트 컨텍스트는 설정이
+    # 다르면 따로 캐시된다 — 지금 `@SpringBootTest(properties = ...)` 를 쓰는 클래스가 열넷이라
+    # 그만큼 풀이 동시에 살아 있다. 운영 기본값(20)이면 280 커넥션을 요구하는 셈이고, MySQL 의
+    # 기본 상한(151)을 넘긴다 — 스위트 후반의 "Pool is empty"·"Communications link failure" 가
+    # 그 모습이다. 작게 잡고 놀면 반납하게 해서 열넷이 함께 떠 있어도 상한 아래에 둔다.
+    hikari:
+      maximum-pool-size: 4
+      minimum-idle: 0
+      idle-timeout: 10000
+  task:
+    scheduling:
+      # 스케줄러 자체를 끄지만(app.scheduling.enabled=false), 남는 스레드풀이 있더라도
+      # 컨텍스트가 닫힐 때 짧게 기다렸다 내린다.
+      shutdown:
+        await-termination: true
+        await-termination-period: 2s
+  # 테스트는 인메모리(ConcurrentMap) 캐시를 쓴다.
+  # (CacheConfig의 CaffeineCacheManager 빈은 @Profile("!test")로 빠진다.)
+  cache:
+    type: simple
+  # 테스트에는 Redis 컨테이너를 띄우지 않는다 — 대부분의 IT 는 탐색과 무관하고,
+  # 컨테이너를 하나 더 띄우면 전체 스위트가 느려진다. 탐색은 회로가 열린 채 MySQL 경로로 돈다.
+  # Redis 경로와 두 경로의 순서 동일성은 ExploreRedisFallbackIT 가 실제 Redis 로 따로 검증한다.
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 16379
+      timeout: 100ms
+      connect-timeout: 100ms

@@ -1,0 +1,340 @@
+package com.ruleup.ruleup_backend.common.error;
+
+import lombok.Getter;
+import org.springframework.http.HttpStatus;
+
+/**
+ * 서비스 전역 에러 코드.
+ * enum 상수의 "이름"이 그대로 응답 JSON의 error.code 문자열이 된다.
+ * (ErrorResponse.of()가 errorCode.name()을 쓰기 때문)
+ * => 따라서 상수 이름은 반드시 "API 명세서의 에러 코드"와 1:1로 똑같아야 한다.
+ */
+@Getter
+public enum ErrorCode {
+
+    // ===== 로그인 (4.1 / 4.2) =====
+    /**
+     * 소셜 로그인 실패의 공통 코드. 원인이 여러 개라 {@code error.reason} 으로 갈라 내려주고,
+     * {@code error.message} 에는 그 원인에 맞는 문구가 실린다(BusinessException.withMessage).
+     * reason: MISSING_CODE / MISSING_CODE_VERIFIER / UNSUPPORTED_PROVIDER / IDP_REJECTED / ACCOUNT_NOT_FOUND
+     * 문구에 카카오·구글 같은 소셜 이름은 넣지 않는다.
+     */
+    LOGIN_FAILED(HttpStatus.BAD_REQUEST, "소셜 로그인에 실패했어요. 다시 시도해주세요."),
+    /** reason: IDP_ERROR / IDP_UNREACHABLE / IDP_BAD_RESPONSE / PROVIDER_NOT_SUPPORTED */
+    LOGIN_PROVIDER_UNAVAILABLE(HttpStatus.BAD_GATEWAY, "소셜 로그인 서버에 연결하지 못했어요. 잠시 후 다시 시도해주세요."),
+    INVALID_REDIRECT_URI(HttpStatus.BAD_REQUEST, "로그인 설정이 맞지 않아요. 앱을 최신 버전으로 업데이트한 뒤 다시 시도해주세요."),
+    ACCOUNT_BANNED(HttpStatus.FORBIDDEN, "영구 정지된 계정입니다."),
+    ACCOUNT_LOCKED(HttpStatus.FORBIDDEN, "지금은 둘러보기만 할 수 있어요. 마이페이지에서 사유와 해제일을 확인해주세요."),
+    /** 기능 정지 — 해당 기능만 막히고 나머지는 정상 동작한다(sanctions.feature_code). */
+    ACCOUNT_SUSPENDED(HttpStatus.FORBIDDEN, "이 기능은 지금 사용할 수 없어요. 마이페이지에서 해제일을 확인해주세요."),
+    /**
+     * reason 에 그 계정의 소셜 제공자(KAKAO/GOOGLE)를 실어 보낸다 — 클라이언트 분기용이다.
+     * 사용자 문구에는 소셜 이름을 넣지 않는다: "다른 계정으로 가입한 이력이 있다"까지만 알리고
+     * 그게 카카오인지 구글인지는 화면에 드러내지 않는다(어느 소셜을 쓰는지도 계정 정보다).
+     */
+    INSTALLATION_ALREADY_REGISTERED(HttpStatus.FORBIDDEN,
+            "이 기기는 다른 계정으로 가입한 이력이 있어요. 처음 가입할 때 쓰신 계정으로 로그인해주세요."),
+
+    // ===== 가입 세션 토큰 (signupToken) (4.3) =====
+    // 계약: 만료/위조 모두 400 INVALID_SIGNUP_TOKEN 로 단일화.
+    INVALID_SIGNUP_TOKEN(HttpStatus.BAD_REQUEST, "유효하지 않거나 만료된 가입 세션입니다. 처음부터 다시 진행해주세요."),
+
+    // ===== 기기 정보 (deviceInfo) (4.1 / 4.3) =====
+    /** reason 으로 MISSING_DEVICE_ID / MISSING_DEVICE_INFO / MALFORMED_DEVICE_INFO 를 구분해 내려준다. */
+    INVALID_DEVICE_INFO(HttpStatus.BAD_REQUEST, "기기 정보를 확인하지 못했어요. 앱을 다시 실행한 뒤 시도해주세요."),
+    /**
+     * FCM 등록 토큰이 형식에 맞지 않는다 — 알림 공통 스펙이 정의한 코드다.
+     *
+     * <p>공백만 막으면 개행이 섞였거나 컬럼(512)을 넘는 값이 그대로 저장되고, 그 토큰은 발송
+     * 단계에서야 조용히 실패한다. 등록 시점에 거절하는 편이 원인을 훨씬 빨리 드러낸다.
+     */
+    INVALID_DEVICE_TOKEN(HttpStatus.BAD_REQUEST, "기기 알림 설정을 확인하지 못했어요. 앱을 다시 실행한 뒤 시도해주세요."),
+
+    // ===== 닉네임 / 카테고리 / 약관 / 온보딩 (4.3 / 4.6 / 4.9) =====
+    NICKNAME_FORMAT_INVALID(HttpStatus.BAD_REQUEST, "닉네임 형식이 올바르지 않습니다."),
+    NICKNAME_DUPLICATED(HttpStatus.CONFLICT, "이미 사용 중인 닉네임입니다."),
+    // 닉네임·사진 통합 잠금. 재시도로 풀리는 게 아니라 상태 충돌이라 409 다(마이페이지 오픈 이슈 #9 — 온보딩 문서와 통일).
+    PROFILE_CHANGE_LOCKED(HttpStatus.CONFLICT, "닉네임과 프로필 사진은 한 달에 한 번만 바꿀 수 있어요."),
+    CATEGORY_INVALID(HttpStatus.BAD_REQUEST, "유효하지 않은 관심 카테고리입니다."),
+    CATEGORY_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "관심 카테고리는 최대 6개까지 선택할 수 있습니다."),
+    INTEREST_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "관심 카테고리는 0~6개까지 선택할 수 있습니다."),
+    REQUIRED_AGREEMENT_MISSING(HttpStatus.BAD_REQUEST, "필수 약관(이용약관·개인정보·위치기반)에 모두 동의해야 합니다."),
+    /** 개인위치정보·건강정보 개별 동의가 없는 상태로 해당 인증 수단을 쓰려 함 — 온보딩 5-7.
+     *  해소 경로는 POST /api/v1/users/me/agreements 하나뿐이다. */
+    AGREEMENT_REQUIRED(HttpStatus.FORBIDDEN, "이 인증 방법을 쓰려면 먼저 동의가 필요해요."),
+    /** 필수 약관 3종은 철회할 수 없다 — 철회하려면 탈퇴해야 한다. */
+    AGREEMENT_REVOKE_FORBIDDEN(HttpStatus.BAD_REQUEST, "필수 약관은 철회할 수 없어요. 탈퇴를 원하시면 회원 탈퇴를 진행해주세요."),
+    /** 구 버전을 동의본으로 남기면 입증이 깨지므로 현행 버전만 받는다. */
+    AGREEMENT_VERSION_MISMATCH(HttpStatus.BAD_REQUEST, "약관이 새 버전으로 바뀌었어요. 다시 불러온 뒤 동의해주세요."),
+    BIRTHDATE_INVALID(HttpStatus.BAD_REQUEST, "생년월일 형식이 올바르지 않습니다. (YYYY-MM-DD)"),
+    BIRTHDATE_UNDERAGE(HttpStatus.BAD_REQUEST, "만 14세 미만은 가입할 수 없습니다."),
+    GENDER_REQUIRED(HttpStatus.BAD_REQUEST, "성별을 선택해 주세요."),
+    CONFIRM_PHRASE_MISMATCH(HttpStatus.BAD_REQUEST, "탈퇴 확인 문구가 일치하지 않습니다."),
+
+    // ===== 앱 토큰 (4.4 refresh / 보호 API) =====
+    SESSION_EXPIRED(HttpStatus.UNAUTHORIZED, "세션이 만료되었습니다. 다시 로그인해주세요."),
+    LOGIN_REQUIRED(HttpStatus.UNAUTHORIZED, "로그인이 필요합니다."),
+
+    // ===== 이미지 업로드 (4.10) =====
+    IMAGE_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "이미지 크기는 10MB를 초과할 수 없습니다."),
+    IMAGE_INVALID_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "jpg 또는 png 이미지만 업로드할 수 있습니다."),
+    IMAGE_CORRUPTED(HttpStatus.BAD_REQUEST, "이미지 파일이 손상되었습니다."),
+    IMAGE_REJECTED(HttpStatus.UNPROCESSABLE_ENTITY, "부적절한 이미지로 업로드가 차단되었습니다."),
+
+    // ===== 챌린지 - 추천/생성 입력 검증 (3.1 / 3.2) =====
+    TITLE_REQUIRED(HttpStatus.BAD_REQUEST, "챌린지 이름을 입력해주세요."),
+    TITLE_TOO_LONG(HttpStatus.BAD_REQUEST, "챌린지 이름은 30자를 초과할 수 없습니다."),
+    DESCRIPTION_TOO_LONG(HttpStatus.BAD_REQUEST, "설명은 200자를 초과할 수 없습니다."),
+    AI_RECOMMENDATION_FAILED(HttpStatus.SERVICE_UNAVAILABLE, "AI 추천에 실패했습니다. 직접 입력해주세요."),
+    INVALID_CATEGORY(HttpStatus.BAD_REQUEST, "유효하지 않은 카테고리입니다."),
+    INVALID_PARTICIPATION_TYPE(HttpStatus.BAD_REQUEST, "유효하지 않은 참여 방식입니다."),
+    INVALID_ANONYMITY(HttpStatus.BAD_REQUEST, "유효하지 않은 공개 설정입니다."),
+    VERIFICATION_METHOD_REQUIRED(HttpStatus.BAD_REQUEST, "인증 방식을 1개 이상 선택해야 합니다."),
+    INVALID_VERIFICATION_METHOD(HttpStatus.BAD_REQUEST, "유효하지 않은 인증 방식입니다."),
+    INVALID_REPEAT_DAY(HttpStatus.BAD_REQUEST, "유효하지 않은 반복 요일입니다."),
+    INVALID_WEEKLY_COUNT(HttpStatus.BAD_REQUEST, "주간 수행 횟수는 1~7이어야 합니다."),
+    INVALID_DURATION(HttpStatus.BAD_REQUEST, "기간(일)은 1 이상이어야 합니다."),
+    INVALID_PENALTY(HttpStatus.BAD_REQUEST, "패널티 설정이 올바르지 않습니다."),
+    INVALID_REWARD(HttpStatus.BAD_REQUEST, "보상 설정이 올바르지 않습니다."),
+    START_DATE_REQUIRED(HttpStatus.BAD_REQUEST, "시작일을 입력해주세요."),
+    INVALID_MIN_MANNER_TEMPERATURE(HttpStatus.BAD_REQUEST, "참여 기준 매너 온도는 생성자 본인의 매너 온도보다 높을 수 없습니다."),
+    MAX_PARTICIPANTS_REQUIRED(HttpStatus.BAD_REQUEST, "그룹 챌린지는 최대 참여 인원을 지정해야 합니다."),
+    MAX_PARTICIPANTS_BELOW_CURRENT(HttpStatus.BAD_REQUEST, "최대 참여 인원을 현재 참여 인원 미만으로 줄일 수 없습니다."),
+
+    // ===== 챌린지 - 조회/수정/삭제 (3.3 / 3.4 / 3.5) =====
+    CHALLENGE_NOT_FOUND(HttpStatus.NOT_FOUND, "챌린지를 찾을 수 없습니다."),
+    NOT_CHALLENGE_OWNER(HttpStatus.FORBIDDEN, "챌린지 생성자만 수행할 수 있습니다."),
+    CHALLENGE_NOT_EDITABLE(HttpStatus.CONFLICT, "시작된 챌린지는 수정/삭제할 수 없습니다."),
+    // 모더레이션 게이트(§5.1) / 삭제 정책(§5.8)
+    CHALLENGE_UNDER_REVIEW(HttpStatus.CONFLICT, "검수 중인 챌린지에는 참여할 수 없습니다."),
+    CHALLENGE_HAS_MEMBERS(HttpStatus.CONFLICT, "다른 참여자가 있는 챌린지는 삭제할 수 없습니다."),
+    DELETE_LOCKED(HttpStatus.CONFLICT, "생성 후 7일 이내이거나 계획 기간이 7일 미만이면 삭제할 수 없습니다."),
+    CHALLENGE_NAME_REJECTED(HttpStatus.UNPROCESSABLE_ENTITY, "사용할 수 없는 챌린지 이름입니다."),
+
+    // ===== 챌린지 - 참여/탈퇴/멤버 (§5·§6·§7) =====
+    /**
+     * 가입 거절 단일 코드. 어떤 게이트에 걸렸는지는 reason 으로 내려간다
+     * (PRIVATE_INVITE_ONLY / REJOIN_COOLDOWN / BANNED / FULL / TIER_GATE /
+     * ALREADY_JOINED / CHALLENGE_COMPLETED — {@code JoinBlockReason}).
+     * REJOIN_COOLDOWN 이면 rejoinAvailableAt 이 함께 실린다.
+     */
+    JOIN_BLOCKED(HttpStatus.CONFLICT, "지금은 이 챌린지에 들어갈 수 없어요."),
+    MANNER_TEMPERATURE_BELOW_MINIMUM(HttpStatus.FORBIDDEN, "참여 기준 매너 온도를 충족하지 못했습니다."),
+    ALREADY_JOINED(HttpStatus.CONFLICT, "이미 참여한 챌린지입니다."),
+    REJOIN_FORBIDDEN(HttpStatus.CONFLICT, "탈퇴한 챌린지에는 다시 참여할 수 없습니다."),
+    REJOIN_NOT_AVAILABLE(HttpStatus.CONFLICT, "강퇴 후 재참여 대기 기간이 아직 끝나지 않았습니다."),
+    CHALLENGE_FULL(HttpStatus.CONFLICT, "정원이 가득 찼습니다."),
+    CHALLENGE_COMPLETED(HttpStatus.CONFLICT, "종료된 챌린지입니다."),
+    MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "멤버를 찾을 수 없습니다."),
+    OWNER_CANNOT_LEAVE(HttpStatus.FORBIDDEN, "방장은 탈퇴할 수 없습니다. 참여자가 있으면 위임 후, 없으면 삭제로 진행하세요."),
+    // 역할 임명/해제(§7-1)
+    CANNOT_CHANGE_OWNER_ROLE(HttpStatus.BAD_REQUEST, "OWNER 역할은 이 API로 변경할 수 없습니다. 위임을 사용하세요."),
+    ALREADY_IN_ROLE(HttpStatus.CONFLICT, "이미 해당 역할입니다."),
+    INVALID_MEMBER_ACTION(HttpStatus.BAD_REQUEST, "유효하지 않은 처리 동작입니다."),
+    // 방장 위임(§7-2)
+    TARGET_NOT_MANAGER(HttpStatus.BAD_REQUEST, "위임 대상은 공동 관리자여야 합니다."),
+    DELEGATION_ALREADY_PENDING(HttpStatus.CONFLICT, "이미 진행 중인 위임 요청이 있습니다."),
+    DELEGATION_NOT_FOUND(HttpStatus.NOT_FOUND, "위임 요청을 찾을 수 없습니다."),
+    DELEGATION_EXPIRED(HttpStatus.GONE, "만료된 위임 요청입니다."),
+    DELEGATION_ALREADY_RESOLVED(HttpStatus.CONFLICT, "이미 처리된 위임 요청입니다."),
+    NOT_DELEGATION_TARGET(HttpStatus.FORBIDDEN, "위임 대상자만 수행할 수 있습니다."),
+    INVALID_DELEGATION_ACTION(HttpStatus.BAD_REQUEST, "유효하지 않은 위임 동작입니다. (ACCEPT / REJECT / CANCEL)"),
+
+    // ===== 루틴 - 추천/생성 (제목→템플릿 매칭→인증방식 선택) =====
+    RECOMMENDATION_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "추천 요청이 너무 잦습니다. 잠시 후 다시 시도해주세요."),
+    ROUTINE_TITLE_REQUIRED(HttpStatus.BAD_REQUEST, "루틴 제목을 입력해주세요."),
+    ROUTINE_TITLE_TOO_LONG(HttpStatus.BAD_REQUEST, "루틴 제목은 100자를 초과할 수 없습니다."),
+    ROUTINE_DESCRIPTION_REQUIRED(HttpStatus.BAD_REQUEST, "루틴 설명을 입력해주세요."),
+    DRAFT_NOT_FOUND(HttpStatus.BAD_REQUEST, "챌린지 초안 정보를 찾을 수 없어요. 처음부터 다시 만들어주세요."),
+    DRAFT_EXPIRED(HttpStatus.BAD_REQUEST, "챌린지 초안이 오래되어 사용할 수 없어요. 처음부터 다시 만들어주세요."),
+    IDEMPOTENCY_KEY_REQUIRED(HttpStatus.BAD_REQUEST, "요청을 처리할 수 없어요. 앱을 최신 버전으로 업데이트한 뒤 다시 시도해주세요."),
+    IDEMPOTENCY_CONFLICT(HttpStatus.CONFLICT, "이미 처리 중인 요청이 있어요. 잠시 후 다시 확인해주세요."),
+    CAPACITY_REQUIRED(HttpStatus.BAD_REQUEST, "그룹 챌린지는 모집 인원을 정해야 해요."),
+    CAPACITY_OUT_OF_RANGE(HttpStatus.BAD_REQUEST, "모집 인원은 5명·30명·100명·300명 중에서 고르거나, 제한 없이 둘 수 있어요."),
+    MIN_TIER_EXCEEDS_OWNER(HttpStatus.BAD_REQUEST, "최소 입장 티어는 내 티어보다 높게 정할 수 없어요."),
+    INVALID_PERIOD(HttpStatus.BAD_REQUEST, "챌린지 기간을 다시 확인해주세요."),
+    INVALID_IMAGE_URL(HttpStatus.BAD_REQUEST, "사용할 수 없는 이미지예요. 이미지를 다시 업로드해주세요."),
+    IMAGE_NOT_OWNED(HttpStatus.FORBIDDEN, "내가 업로드한 이미지만 사용할 수 있어요."),
+    VERSION_CONFLICT(HttpStatus.CONFLICT, "다른 곳에서 챌린지 정보가 바뀌었어요. 새로고침 후 다시 시도해주세요."),
+    INVALID_FIELD_VALUE(HttpStatus.BAD_REQUEST, "입력값을 다시 확인해주세요."),
+    CAPACITY_BELOW_CURRENT(HttpStatus.BAD_REQUEST, "모집 인원은 현재 참여 인원보다 적게 줄일 수 없어요."),
+    ROUTINE_DESCRIPTION_TOO_LONG(HttpStatus.BAD_REQUEST, "루틴 설명은 200자를 초과할 수 없습니다."),
+    TEMPLATE_ID_REQUIRED(HttpStatus.BAD_REQUEST, "추천 루틴을 선택해주세요."),
+    TEMPLATE_NOT_FOUND(HttpStatus.NOT_FOUND, "선택한 루틴을 찾을 수 없어요. 다른 루틴을 골라주세요."),
+    ROUTINE_TEMPLATE_NOT_FOUND(HttpStatus.BAD_REQUEST, "선택한 루틴 템플릿을 찾을 수 없습니다."),
+    ROUTINE_METHOD_REQUIRED(HttpStatus.BAD_REQUEST, "인증 방식(AUTO/MANUAL)을 선택해주세요."),
+    ROUTINE_AUTO_NOT_SUPPORTED(HttpStatus.BAD_REQUEST, "이 루틴은 자동 인증을 지원하지 않습니다."),
+    ROUTINE_PERMISSION_REQUIRED(HttpStatus.BAD_REQUEST, "자동 인증에 필요한 권한이 모두 허용되지 않았습니다."),
+    INVALID_ROUTINE_PARAM(HttpStatus.BAD_REQUEST, "목표값이 올바르지 않습니다."),
+
+    // ===== 마이프로필 (마이 홈·캘린더·통계·평판·초대) =====
+    INVALID_CALENDAR_MONTH(HttpStatus.BAD_REQUEST, "월 형식이 올바르지 않습니다. (YYYY-MM)"),
+    INVALID_CALENDAR_DATE(HttpStatus.BAD_REQUEST, "날짜 형식이 올바르지 않습니다. (YYYY-MM-DD)"),
+    // 챌린지 콘텐츠 반복 거부 잠금(챌린지 설정 모듈). 프로필 편집에서는 폐기됐다 — 마이페이지 오픈 이슈 #8.
+    MODERATION_LOCKED(HttpStatus.TOO_MANY_REQUESTS, "수정이 잠시 제한되었어요. 1시간 뒤에 다시 시도해주세요."),
+    APP_LINK_URL_REQUIRED(HttpStatus.BAD_REQUEST, "확인할 링크가 필요해요."),
+    INVALID_HISTORY_MONTHS(HttpStatus.BAD_REQUEST, "조회 기간은 1개월부터 12개월까지 고를 수 있어요."),
+    // 타인의 제재·검출 이력 조회 시도. 애초에 타인 조회 경로를 만들지 않는 것이 1차 방어이고, 이건 2차다.
+    SANCTION_HISTORY_FORBIDDEN(HttpStatus.FORBIDDEN, "제재 이력은 본인만 확인할 수 있어요."),
+
+    // ===== 방 내부(스레드·랭킹·방 홈) =====
+    // 공지·댓글 코드(NOTICE_*/COMMENT_*/REPLY_DEPTH_EXCEEDED)는 Phase 2 이관과 함께 제거했다.
+    NOT_A_MEMBER(HttpStatus.FORBIDDEN, "챌린지 멤버만 접근할 수 있습니다."),
+    INVALID_RANKING_MODE(HttpStatus.BAD_REQUEST, "랭킹 모드가 올바르지 않습니다."),
+
+    // ===== 챌린지 방 운영 =====
+    NOT_PRIVATE_CHALLENGE(HttpStatus.CONFLICT, "비공개 그룹 챌린지만 초대 링크를 만들 수 있습니다."),
+    KICK_REASON_REQUIRED(HttpStatus.BAD_REQUEST, "강퇴 사유를 10자 이상 500자 이하로 입력해주세요."),
+    CANNOT_KICK_SELF(HttpStatus.BAD_REQUEST, "방장은 본인을 강퇴할 수 없습니다."),
+    TARGET_NOT_MEMBER(HttpStatus.NOT_FOUND, "대상 사용자는 현재 챌린지 멤버가 아닙니다."),
+    CANNOT_TRANSFER_TO_SELF(HttpStatus.BAD_REQUEST, "본인에게 방장 권한을 이전할 수 없습니다."),
+    OWNER_ALREADY_EXISTS(HttpStatus.CONFLICT, "이미 사용자 방장이 존재합니다."),
+
+    // ===== 신고·차단·다른 사용자 프로필 =====
+    INVALID_REPORT_TARGET(HttpStatus.BAD_REQUEST, "신고 대상이 올바르지 않습니다."),
+    INVALID_REPORT_REASON(HttpStatus.BAD_REQUEST, "신고 사유가 올바르지 않습니다."),
+    CANNOT_REPORT_SELF(HttpStatus.BAD_REQUEST, "본인을 신고할 수 없습니다."),
+    ALREADY_REPORTED(HttpStatus.CONFLICT, "이미 신고한 대상이에요."),
+    /**
+     * 신고 기능 정지 — <b>자동 발동이 아니다</b>. 운영자가 남용으로 확정해 건 조치이며
+     * {@code sanctions} 의 FEATURE_SUSPENSION(feature_code=REPORT)이 실체다.
+     * 해제 예정 시각을 {@code error.reason} 에 함께 싣는다.
+     */
+    REPORT_SUSPENDED(HttpStatus.FORBIDDEN, "지금은 신고 기능을 사용할 수 없어요."),
+    USER_NOT_FOUND(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."),
+    BLOCK_ENTRY_NOT_FOUND(HttpStatus.NOT_FOUND, "차단 내역을 찾을 수 없어요."),
+
+    // ===== 알림 =====
+    /** 필수(A) 타입의 토글을 끄려 함 — 토글 자체가 미노출이므로 발생하면 클라이언트 버그다. */
+    // 설정 모델이 마스터 + 그룹 3종으로 바뀌면서 「끌 수 없는 알림」이라는 상태가 사라졌다.
+    NOTIFICATION_GROUP_INVALID(HttpStatus.BAD_REQUEST, "바꿀 수 없는 설정이에요."),
+    NOTIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "알림을 찾을 수 없습니다."),
+    CHALLENGE_NOT_JOINED(HttpStatus.BAD_REQUEST, "참여 중인 챌린지만 설정할 수 있어요."),
+    INVALID_SETTING_KEY(HttpStatus.BAD_REQUEST, "알림 설정 항목이 올바르지 않습니다."),
+
+    // ===== 인증 sync (§3.1) =====
+    SYNC_TOO_FREQUENT(HttpStatus.TOO_MANY_REQUESTS, "sync 요청 간격이 너무 짧습니다."),
+    INVALID_SIGNAL_PAYLOAD(HttpStatus.BAD_REQUEST, "인증 신호 페이로드가 올바르지 않습니다."),
+    SYNC_PAYLOAD_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "sync 누적 일괄 상한을 초과했습니다. 분할 재전송하세요."),
+
+    NOT_CHALLENGE_MEMBER(HttpStatus.FORBIDDEN, "챌린지 참여자만 접근할 수 있습니다."),
+    ALREADY_VERIFIED(HttpStatus.CONFLICT, "이미 인증된 날짜입니다."),
+
+    // ===== 수동 인증 제출 / 취소 =====
+    NOT_MANUAL_CHALLENGE(HttpStatus.CONFLICT, "직접 체크로 인증하는 챌린지가 아니에요."),
+    // 날짜 형식이 틀린 것(INVALID_TARGET_DATE)과 다르다 — 날짜는 멀쩡하고 그날 할 게 없는 것이다.
+    NOT_TARGET_DATE(HttpStatus.CONFLICT, "오늘은 인증하는 날이 아니에요."),
+    NOTE_TOO_LONG(HttpStatus.BAD_REQUEST, "메모는 200자까지 쓸 수 있어요."),
+    NOT_MANUAL_VERIFICATION(HttpStatus.CONFLICT, "자동으로 판정된 인증은 취소할 수 없어요."),
+    CANCEL_WINDOW_CLOSED(HttpStatus.CONFLICT, "오늘이 지나서 취소할 수 없어요."),
+
+    // ===== 이의 제기 처리 (OWNER/MANAGER) =====
+    VERIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "인증 제출을 찾을 수 없습니다."),
+
+    // ===== 인증 이의(자동 인용) =====
+    INVALID_REASON(HttpStatus.BAD_REQUEST, "이의 사유를 10자 이상 적어주세요."),
+    NOT_FAILED(HttpStatus.CONFLICT, "실패했거나 실패가 예상되는 인증에만 이의를 신청할 수 있어요."),
+    APPEAL_WINDOW_CLOSED(HttpStatus.CONFLICT, "이의를 신청할 수 있는 기간이 지났어요."),
+    ALREADY_DECIDED(HttpStatus.CONFLICT, "이미 승인/거절된 제출입니다."),
+    INVALID_TARGET_DATE(HttpStatus.BAD_REQUEST, "유효하지 않은 대상 날짜입니다."),
+    CONTENT_REQUIRED(HttpStatus.BAD_REQUEST, "글 내용을 입력해주세요."),
+    NOT_CHALLENGE_ADMIN(HttpStatus.FORBIDDEN, "방장 또는 공동 관리자만 처리할 수 있습니다."),
+    INVALID_DECISION(HttpStatus.BAD_REQUEST, "유효하지 않은 처리 동작입니다. (APPROVE / REJECT)"),
+    // 이의 제기(§8.7)
+    OBJECTION_NOT_FOUND(HttpStatus.NOT_FOUND, "이의 제기를 찾을 수 없습니다."),
+    OBJECTION_WINDOW_CLOSED(HttpStatus.CONFLICT, "이의를 신청할 수 있는 기간이 지났어요."),
+    NOT_OBJECTIONABLE(HttpStatus.CONFLICT, "실패로 확정된 인증에만 이의를 신청할 수 있어요."),
+    ALREADY_OBJECTED(HttpStatus.CONFLICT, "이미 이의 제기한 날짜입니다."),
+    UNSUPPORTED_OBJECTION_TYPE(HttpStatus.BAD_REQUEST, "지원하지 않는 이의 제기 유형입니다. (FAILURE만 지원)"),
+
+    // ===== 인증 셋업 — 내 인증 장소 / 측정 대상 앱 =====
+    GEOFENCE_NOT_CONFIGURED(HttpStatus.BAD_REQUEST, "인증 장소가 아직 설정되지 않았어요."),
+    LOCATION_LOCKED_IN_WINDOW(HttpStatus.CONFLICT, "인증 시간 중에는 장소를 바꿀 수 없어요. 내일 다시 시도해 주세요."),
+    INVALID_ANCHOR(HttpStatus.BAD_REQUEST, "인증 장소가 올바르지 않아요. 지도에서 다시 선택해 주세요."),
+    ANCHOR_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "인증 장소는 최대 3개까지 등록할 수 있어요."),
+    SCREENTIME_NOT_CONFIGURED(HttpStatus.BAD_REQUEST, "측정할 앱이 아직 설정되지 않았어요."),
+    INVALID_APP(HttpStatus.BAD_REQUEST, "선택한 앱이 올바르지 않아요. 최대 10개까지, 같은 앱은 한 번만 고를 수 있어요."),
+    /** 앵커·대상 앱 변경은 월 1회(매월 1일 00:00 KST 리셋). 응답에 nextChangeAvailableAt 을 함께 내려준다. */
+    SETTING_CHANGE_LIMIT(HttpStatus.TOO_MANY_REQUESTS, "이 설정은 한 달에 한 번만 바꿀 수 있어요."),
+
+    // ===== 챌린지 탐색 (search 스펙) =====
+    INVALID_SORT_TYPE(HttpStatus.BAD_REQUEST, "지원하지 않는 정렬이에요."),
+    INVALID_FILTER_VALUE(HttpStatus.BAD_REQUEST, "선택할 수 없는 필터 값이에요."),
+    CURSOR_INVALID(HttpStatus.BAD_REQUEST, "목록을 처음부터 다시 불러와 주세요."),
+    // 탐색 목록·인기는 파생 인덱스가 준비돼야 순위가 서버마다 같다. 다른 저장소로 대신 내리면
+    // 순위가 갈리고 장애가 조용히 덮이므로, 준비되지 않은 구간은 드러내고 잠시 뒤 다시 받게 한다.
+    EXPLORE_TEMPORARILY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE,
+            "잠시 후 다시 시도해 주세요. 목록을 준비하고 있어요."),
+    NOT_CLONEABLE(HttpStatus.FORBIDDEN, "이 챌린지는 템플릿으로 가져올 수 없어요."),
+    INVALID_QUERY(HttpStatus.BAD_REQUEST, "검색어가 올바르지 않습니다."),
+    PLACE_SEARCH_RATE_LIMIT(HttpStatus.TOO_MANY_REQUESTS, "장소 검색 요청이 너무 많습니다."),
+
+    // ===== 감시자(watcher) =====
+    // 구 OTP·SMS·수신거부·재초대 차단 코드는 전부 삭제했다 — SMS·이메일 채널과 비유저 감시자
+    // 개념이 정책상 폐지되면서 그 상황 자체가 발생할 수 없다.
+    WATCHER_NOT_FOUND(HttpStatus.NOT_FOUND, "감시 항목을 찾을 수 없어요."),
+    INVITATION_INVALID(HttpStatus.BAD_REQUEST, "초대 링크가 올바르지 않아요."),
+    INVITATION_EXPIRED(HttpStatus.GONE, "초대가 만료됐어요. 다시 요청해주세요."),
+    ALREADY_WATCHER(HttpStatus.CONFLICT, "이미 이 챌린지의 감시자예요."),
+    INVITATION_ALREADY_ACCEPTED(HttpStatus.CONFLICT, "이미 사용된 초대예요. 초대한 분에게 새 링크를 요청해주세요."),
+    WATCHER_BLOCKED(HttpStatus.CONFLICT, "차단한 사용자의 감시자가 될 수 없어요."),
+    WATCHER_PENALTY_DISABLED(HttpStatus.CONFLICT, "감시자 패널티가 꺼져 있어요."),
+    CANNOT_WATCH_SELF(HttpStatus.BAD_REQUEST, "본인은 감시자가 될 수 없어요."),
+    NOT_WATCHER(HttpStatus.FORBIDDEN, "이 알림을 받은 감시자만 반응할 수 있어요."),
+    NOTICE_NOT_FOUND(HttpStatus.NOT_FOUND, "알림을 찾을 수 없어요."),
+    REACTION_ALREADY_SENT(HttpStatus.CONFLICT, "이미 반응을 보냈어요."),
+
+    /** 챌린지(방) 초대 — 감시자 초대와 별개 도메인이다. */
+    INVITATION_NOT_FOUND(HttpStatus.NOT_FOUND, "초대를 찾을 수 없습니다."),
+
+    // ===== 운영자 백오피스 =====
+    ADMIN_FORBIDDEN(HttpStatus.FORBIDDEN, "접근 권한이 없어요."),
+    REPORT_NOT_FOUND(HttpStatus.NOT_FOUND, "신고 내역을 찾을 수 없어요."),
+    /** 2단계 확인 없이 집행 시도 — 428 은 "선행 조건이 필요하다"는 뜻이라 이 상황에 맞는다. */
+    CONFIRMATION_REQUIRED(HttpStatus.PRECONDITION_REQUIRED, "실행 전에 내용을 한 번 더 확인해주세요."),
+    SANCTION_ALREADY_ACTIVE(HttpStatus.CONFLICT, "이미 같은 수준의 제재가 진행 중이에요."),
+    REVIEW_ALREADY_RESOLVED(HttpStatus.CONFLICT, "다른 운영자가 먼저 처리했어요."),
+    APPEAL_ALREADY_USED(HttpStatus.CONFLICT, "재검토를 이미 사용했어요."),
+    /** 운영자 콘솔 진입 인증 — 비밀번호 하나만 받는다(공통 5-2-1 B). */
+    INVALID_PASSCODE(HttpStatus.UNAUTHORIZED, "비밀번호가 맞지 않아요."),
+    TOO_MANY_ATTEMPTS(HttpStatus.TOO_MANY_REQUESTS, "시도가 너무 많아요. 잠시 후 다시 시도해주세요."),
+    /** 이상탐지 신호를 이미 다른 운영자가 검토했다. */
+    ANOMALY_NOT_FOUND(HttpStatus.NOT_FOUND, "이상탐지 신호를 찾을 수 없어요."),
+    ANNOUNCEMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "공지를 찾을 수 없어요."),
+    /** 이미 팬아웃된 공지는 회수되지 않는다 — 취소는 대기 중인 공지에만 의미가 있다. */
+    ANNOUNCEMENT_ALREADY_SENT(HttpStatus.CONFLICT, "이미 발송된 공지는 취소할 수 없어요."),
+    /**
+     * 공지 원본은 컬럼(제목 100 · 본문 500 · 딥링크 200)을 넘길 수 없다.
+     *
+     * <p>전용 코드를 둔 이유는 <b>순서</b> 때문이다. 길이 초과를 저장 단계까지 끌고 가면 운영자는
+     * 2단계 확인을 마친 뒤에야 500 을 보고, 무엇이 왜 틀렸는지 알 수 없다.
+     */
+    ANNOUNCEMENT_TITLE_LENGTH(HttpStatus.BAD_REQUEST, "공지 제목은 100자를 넘을 수 없어요."),
+    ANNOUNCEMENT_BODY_LENGTH(HttpStatus.BAD_REQUEST, "공지 내용은 500자를 넘을 수 없어요."),
+    /**
+     * 딥링크는 전부 {@code ruleup://} 커스텀 스킴이다(공통 8절). 검증하지 않으면 외부 URL 이
+     * 약 2만 명의 알림함에 그대로 팬아웃된다 — 되돌릴 수 없는 발송이다.
+     */
+    ANNOUNCEMENT_DEEPLINK_INVALID(HttpStatus.BAD_REQUEST, "공지 링크는 앱 안의 화면만 가리킬 수 있어요."),
+
+    // ===== CS 문의 (앱 운영 정책 § 5) =====
+    INQUIRY_NOT_FOUND(HttpStatus.NOT_FOUND, "문의 내역을 찾을 수 없어요."),
+    INQUIRY_BODY_LENGTH(HttpStatus.BAD_REQUEST, "문의 내용은 10자 이상 1,000자 이하로 적어주세요."),
+    INQUIRY_IMAGE_LIMIT(HttpStatus.BAD_REQUEST, "사진은 3장까지 첨부할 수 있어요."),
+    INQUIRY_DAILY_LIMIT(HttpStatus.TOO_MANY_REQUESTS, "문의는 하루에 3건까지 보낼 수 있어요. 내일 다시 시도해주세요."),
+    /** 답변 등록이 곧 종결이라 재등록 경로가 없다(§ 5.4). */
+    ALREADY_ANSWERED(HttpStatus.CONFLICT, "이미 답변이 등록된 문의예요."),
+
+    // ===== 공통 =====
+    TOO_MANY_REQUESTS(HttpStatus.TOO_MANY_REQUESTS, "요청이 너무 많습니다. 잠시 후 다시 시도해주세요."),
+    INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류가 발생했습니다."),
+    INVALID_REQUEST(HttpStatus.BAD_REQUEST, "요청 형식이 올바르지 않습니다.");
+
+    private final HttpStatus status;
+    private final String message;
+
+    ErrorCode(HttpStatus status, String message) {
+        this.status = status;
+        this.message = message;
+    }
+}

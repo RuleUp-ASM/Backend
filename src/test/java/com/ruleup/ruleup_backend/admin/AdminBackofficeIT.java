@@ -1,0 +1,652 @@
+package com.ruleup.ruleup_backend.admin;
+
+import com.ruleup.ruleup_backend.TestcontainersConfiguration;
+import com.ruleup.ruleup_backend.admin.domain.AdminAction;
+import com.ruleup.ruleup_backend.admin.domain.AdminAuditLog;
+import com.ruleup.ruleup_backend.admin.repository.AdminAuditLogRepository;
+import com.ruleup.ruleup_backend.challenge.ChallengeApiSupport;
+import com.ruleup.ruleup_backend.notification.repository.NotificationRepository;
+import com.ruleup.ruleup_backend.notification.announcement.AnnouncementFanoutJob;
+import com.ruleup.ruleup_backend.notification.domain.NotificationTab;
+import com.ruleup.ruleup_backend.notification.domain.NotificationToggleGroup;
+import com.ruleup.ruleup_backend.notification.domain.NotificationType;
+import com.ruleup.ruleup_backend.sanction.SanctionRepository;
+import com.ruleup.ruleup_backend.sanction.domain.SanctionTrack;
+import com.ruleup.ruleup_backend.sanction.domain.SanctionType;
+import com.ruleup.ruleup_backend.user.UserRepository;
+import com.ruleup.ruleup_backend.user.domain.UserStatus;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.Limit;
+import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.WebApplicationContext;
+
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+
+/**
+ * 운영자 백오피스 — 공통 5-2·5-3·5-5, 백엔드 4-2.
+ *
+ * <p>이 모듈이 존재하는 이유는 하나다 — <b>페이지1의 모든 계정 제재는 사람의 검토를 반드시
+ * 거치도록 설계돼 있다.</b> 신고는 임계값 없이 전건 적재되고 적재 자체는 어떤 제재도 발동시키지
+ * 않으며, 이상탐지도 탐지만으로는 제재하지 않는다. 그 유일한 경로의 도구가 여기다.
+ *
+ * <p>네 개의 가드레일을 각각 테스트한다.
+ * <ol>
+ *   <li>일반 회원 계정의 접근 성공 <b>0건</b></li>
+ *   <li>조작 이력이 남지 않는 제재 <b>0건</b> — 재검토 대응의 유일한 근거다</li>
+ *   <li>검토 없이 발동된 계정 제재 <b>0건</b> — 잠금·영구 정지는 직권 전용이다</li>
+ *   <li>고지 없이 집행된 직권 제재 <b>0건</b> — 긴급 선조치도 사후 고지가 필수다</li>
+ * </ol>
+ */
+@SpringBootTest
+@Import(TestcontainersConfiguration.class)
+class AdminBackofficeIT extends ChallengeApiSupport {
+
+    @Autowired WebApplicationContext wac;
+    @Autowired JdbcTemplate jdbcTemplate;
+    @Autowired UserRepository userRepository;
+    @Autowired SanctionRepository sanctionRepository;
+    @Autowired AdminAuditLogRepository auditLogRepository;
+    @Autowired NotificationRepository notificationRepository;
+    @Autowired AnnouncementFanoutJob announcementFanoutJob;
+
+    private MockMvc mvc;
+
+    @BeforeEach
+    void setUp() {
+        mvc = MockMvcBuilders.webAppContextSetup(wac).apply(springSecurity()).build();
+    }
+
+    @Override
+    protected MockMvc mvc() {
+        return mvc;
+    }
+
+    @Override
+    protected JdbcTemplate jdbc() {
+        return jdbcTemplate;
+    }
+
+    // ===== 헬퍼 =====
+
+    /** 운영자 롤을 부여한 계정. */
+    private Member operator(String tag) throws Exception {
+        Member m = member(uniq(tag));
+        jdbcTemplate.update("UPDATE users SET role = 'OPERATOR' WHERE id = ?", bytes(m.id()));
+        return m;
+    }
+
+    private MvcResult postAuth(String url, String token, Map<String, Object> body) throws Exception {
+        var req = post(url).header("Authorization", "Bearer " + token);
+        if (body != null) req = req.contentType(MediaType.APPLICATION_JSON)
+                .content(OM.writeValueAsString(body));
+        return mvc.perform(req).andReturn();
+    }
+
+    /** 2단계 확인을 거쳐 실행한다 — 첫 호출로 토큰을 받고 두 번째에 실어 보낸다. */
+    private MvcResult confirmAndPost(String url, String token, Map<String, Object> body) throws Exception {
+        MvcResult preview = postAuth(url, token, body);
+        assertThat(preview.getResponse().getStatus())
+                .as("확인 토큰 없이는 실행되지 않는다").isEqualTo(428);
+
+        Map<String, Object> confirmed = new java.util.LinkedHashMap<>(body);
+        // 토큰은 봉투 안에 있다 — 재제시 문구를 클라이언트가 만들지 않게 서버가 함께 준다.
+        confirmed.put("confirmationToken", read(preview, "$.error.confirmation.token"));
+        return postAuth(url, token, confirmed);
+    }
+
+    private Map<String, Object> sanctionBody(String type) {
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("type", type);
+        body.put("reasonCode", "REPORT_CONFIRMED");
+        body.put("reasonText", "신고 검토 결과 커뮤니티 가이드 위반이 확인되었습니다.");
+        body.put("source", "DIRECT");
+        return body;
+    }
+
+    /** 신고 1건 적재 — 접수는 방 내부 모듈이 하고 백오피스는 읽기만 한다. */
+    private UUID insertReport(UUID reporterId, UUID targetUserId) {
+        UUID id = UUID.randomUUID();
+        jdbcTemplate.update("INSERT INTO reports (id, reporter_id, target_type, target_id, reason) " +
+                        "VALUES (?, ?, 'USER', ?, 'INAPPROPRIATE')",
+                bytes(id), bytes(reporterId), bytes(targetUserId));
+        jdbcTemplate.update("INSERT INTO report_snapshots (report_id, payload) VALUES (?, ?)",
+                bytes(id), "{\"nickname\":\"피신고자\",\"content\":\"신고 시점 스냅샷\"}");
+        return id;
+    }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("접근 통제 — 일반 회원 접근 성공 0건")
+    class Access {
+
+        @Test
+        @DisplayName("운영자가 아니면 403 ADMIN_FORBIDDEN")
+        void member_cannot_access() throws Exception {
+            Member normal = member(uniq("normal"));
+            expectError(getAuth("/api/v1/admin/reports", normal.token()), 403, "ADMIN_FORBIDDEN");
+        }
+
+        @Test
+        @DisplayName("거부도 감사 로그에 남는다 — DENIED 급증이 우회 시도의 신호다")
+        void denied_is_logged() throws Exception {
+            Member normal = member(uniq("denied"));
+            getAuth("/api/v1/admin/reports", normal.token());
+
+            assertThat(auditLogRepository.findByOperatorIdOrderByOccurredAtDesc(normal.id()))
+                    .as("운영자가 아닌 계정 ID 도 조작자로 들어올 수 있다")
+                    .isNotEmpty()
+                    .allMatch(l -> l.getResult() == AdminAuditLog.Result.DENIED);
+        }
+
+        @Test
+        @DisplayName("미인증은 401 LOGIN_REQUIRED")
+        void unauthenticated_401() throws Exception {
+            expectError(mvc.perform(get("/api/v1/admin/reports")).andReturn(), 401, "LOGIN_REQUIRED");
+        }
+
+        @Test
+        @DisplayName("운영자는 통과하고 그 조회도 기록된다 — 읽기만 해도 남긴다")
+        void operator_access_is_logged() throws Exception {
+            Member op = operator("op");
+            assertThat(getAuth("/api/v1/admin/reports", op.token()).getResponse().getStatus())
+                    .isEqualTo(200);
+
+            assertThat(auditLogRepository.findByOperatorIdOrderByOccurredAtDesc(op.id()))
+                    .anyMatch(l -> l.getAction() == AdminAction.REPORT_QUEUE_VIEW
+                            && l.getResult() == AdminAuditLog.Result.ALLOWED);
+        }
+
+        @Test
+        @DisplayName("요청 본문은 통째로 남기지 않고 다이제스트만 남긴다 — 민감정보가 로그로 새지 않게")
+        void payload_is_digested() throws Exception {
+            Member op = operator("digest");
+            Member target = member(uniq("t"));
+
+            confirmAndPost("/api/v1/admin/users/" + target.id() + "/sanctions",
+                    op.token(), sanctionBody("LOCK"));
+
+            AdminAuditLog log = auditLogRepository.findByOperatorIdOrderByOccurredAtDesc(op.id())
+                    .stream().filter(l -> l.getAction() == AdminAction.SANCTION_APPLY)
+                    .findFirst().orElseThrow();
+            assertThat(log.getPayloadDigest()).hasSize(64);   // SHA-256 hex
+            assertThat(log.getPayloadDigest()).doesNotContain("커뮤니티 가이드");
+        }
+    }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("2단계 확인 — 서버가 요구하지 않으면 클라이언트 모달만으로는 못 막는다")
+    class Confirmation {
+
+        @Test
+        @DisplayName("확인 토큰 없이 제재를 집행하면 428 CONFIRMATION_REQUIRED")
+        void sanction_requires_confirmation() throws Exception {
+            Member op = operator("confirm");
+            Member target = member(uniq("t"));
+
+            MvcResult res = postAuth("/api/v1/admin/users/" + target.id() + "/sanctions",
+                    op.token(), sanctionBody("LOCK"));
+
+            expectError(res, 428, "CONFIRMATION_REQUIRED");
+            assertThat(sanctionRepository.findByUserIdOrderByStartsAtDesc(target.id()))
+                    .as("확인 전에는 아무것도 집행되지 않는다").isEmpty();
+        }
+
+        @Test
+        @DisplayName("428 응답에 대상·집행 내용·기간을 재제시한다 — 문구를 서버가 만든다")
+        void preview_shows_what_is_confirmed() throws Exception {
+            Member op = operator("preview");
+            Member target = member(uniq("t"));
+
+            MvcResult res = postAuth("/api/v1/admin/users/" + target.id() + "/sanctions",
+                    op.token(), sanctionBody("LOCK"));
+
+            assertThat((String) read(res, "$.error.confirmation.token")).isNotBlank();
+            assertThat((String) read(res, "$.error.confirmation.expiresAt")).isNotBlank();
+            assertThat((String) read(res, "$.error.confirmation.targetLabel")).isNotBlank();
+            assertThat((String) read(res, "$.error.confirmation.actionLabel"))
+                    .as("클라이언트가 조립하지 않고 그대로 띄우는 문장이다").isEqualTo("로그인 정지 · 1개월");
+            assertThat((String) read(res, "$.error.confirmation.effectiveUntil"))
+                    .as("null 이면 영구다 — 1개월 잠금은 값이 있어야 한다").isNotBlank();
+        }
+
+        @Test
+        @DisplayName("permanent 를 바꾸면 토큰이 무효다 — 1개월로 확인받고 영구를 집행할 수 없다")
+        void permanent_flag_is_part_of_the_fingerprint() throws Exception {
+            Member op = operator("permflag");
+            Member target = member(uniq("t"));
+
+            MvcResult preview = postAuth("/api/v1/admin/users/" + target.id() + "/sanctions",
+                    op.token(), sanctionBody("LOCK"));
+            String tokenForOneMonth = read(preview, "$.error.confirmation.token");
+
+            Map<String, Object> permanent = sanctionBody("LOCK");
+            permanent.put("permanent", true);
+            permanent.put("confirmationToken", tokenForOneMonth);
+
+            expectError(postAuth("/api/v1/admin/users/" + target.id() + "/sanctions",
+                    op.token(), permanent), 428, "CONFIRMATION_REQUIRED");
+        }
+
+        @Test
+        @DisplayName("다른 요청의 토큰은 통하지 않는다 — 대상·내용이 바뀌면 다시 확인해야 한다")
+        void token_is_bound_to_the_request() throws Exception {
+            Member op = operator("bound");
+            Member first = member(uniq("t1"));
+            Member second = member(uniq("t2"));
+
+            MvcResult preview = postAuth("/api/v1/admin/users/" + first.id() + "/sanctions",
+                    op.token(), sanctionBody("LOCK"));
+            String stolen = read(preview, "$.error.confirmation.token");
+
+            Map<String, Object> body = sanctionBody("LOCK");
+            body.put("confirmationToken", stolen);
+            expectError(postAuth("/api/v1/admin/users/" + second.id() + "/sanctions", op.token(), body),
+                    428, "CONFIRMATION_REQUIRED");
+        }
+
+        @Test
+        @DisplayName("직권 폐쇄는 영향 인원 수를 먼저 응답한다 — 오조작을 막는 정보다")
+        void close_previews_affected_count() throws Exception {
+            Member op = operator("close");
+            Member owner = member(uniq("owner"));
+            UUID challengeId = insertChallenge(owner.id(), "EXERCISE", "ACTIVE", "GROUP");
+            insertActiveMembership(challengeId, owner.id(), "OWNER");
+
+            MvcResult res = postAuth("/api/v1/admin/challenges/" + challengeId + "/close",
+                    op.token(), Map.of("reasonText", "반복 위반으로 폐쇄합니다."));
+
+            expectError(res, 428, "CONFIRMATION_REQUIRED");
+            // sideEffects 가 "영향 인원 수를 먼저 응답"을 겸한다 — 별도 미리보기 경로를 두지 않는다.
+            assertThat((String) read(res, "$.error.confirmation.sideEffects[0].label"))
+                    .isEqualTo("참여자 자동 탈퇴");
+            assertThat((Integer) read(res, "$.error.confirmation.sideEffects[0].count")).isEqualTo(1);
+        }
+    }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("제재 집행 — 상태 전이 커밋 후 아웃박스")
+    class Sanction {
+
+        @Test
+        @DisplayName("집행하면 제재가 남고 계정이 SUSPENDED 로 전이한다")
+        void applies_sanction_and_transitions_status() throws Exception {
+            Member op = operator("apply");
+            Member target = member(uniq("t"));
+
+            MvcResult res = confirmAndPost("/api/v1/admin/users/" + target.id() + "/sanctions",
+                    op.token(), sanctionBody("LOCK"));
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+
+            assertThat(sanctionRepository.findByUserIdOrderByStartsAtDesc(target.id()))
+                    .singleElement()
+                    .satisfies(s -> {
+                        assertThat(s.getType()).isEqualTo(SanctionType.LOCK);
+                        assertThat(s.getTrack())
+                                .as("운영자 집행은 직권 트랙이다").isEqualTo(SanctionTrack.DISCRETIONARY);
+                        assertThat(s.getOperatorId()).isEqualTo(op.id());
+                    });
+            assertThat(userRepository.findById(target.id()).orElseThrow().getStatus())
+                    .isEqualTo(UserStatus.SUSPENDED);
+        }
+
+        @Test
+        @DisplayName("고지 없이 집행된 직권 제재가 0건이다 — 필수(A) 알림이 함께 나간다")
+        void never_sanctions_without_notice() throws Exception {
+            Member op = operator("notice");
+            Member target = member(uniq("t"));
+
+            confirmAndPost("/api/v1/admin/users/" + target.id() + "/sanctions",
+                    op.token(), sanctionBody("LOCK"));
+
+            assertThat(sanctionRepository.findByUserIdOrderByStartsAtDesc(target.id()))
+                    .singleElement()
+                    .satisfies(s -> assertThat(s.getNotifiedAt())
+                            .as("null 이면 가드레일 위반이다").isNotNull());
+            assertThat(notificationRepository.findByUserIdOrderByIdDesc(target.id()))
+                    .anyMatch(n -> NotificationType.ACCOUNT_SANCTION.name().equals(n.getType()));
+            // 발행부가 멱등키를 채웠는지 — 없으면 UNIQUE 가 무력해져 재시도가 두 줄로 쌓인다.
+            assertThat(notificationRepository.findByUserIdOrderByIdDesc(target.id()))
+                    .allSatisfy(n -> assertThat(n.getDedupKey()).isNotNull());
+            // 감사 쿼리 자체(notified_at IS NULL 인 직권 제재)는 운영에서 전역으로 도는 것이지만,
+            // 여기서는 대상 유저로 좁힌다 — 공유 DB 라 다른 테스트가 게이트 검증용으로 만든
+            // 제재(고지 경로를 타지 않는다)까지 전역 카운트에 섞인다.
+            assertThat(sanctionRepository.findByUserIdAndTrackOrderByStartsAtDesc(
+                    target.id(), SanctionTrack.DISCRETIONARY))
+                    .allMatch(sanction -> sanction.getNotifiedAt() != null);
+        }
+
+        @Test
+        @DisplayName("조작 이력이 남지 않는 제재가 0건이다")
+        void never_sanctions_without_audit_log() throws Exception {
+            Member op = operator("audit");
+            Member target = member(uniq("t"));
+
+            confirmAndPost("/api/v1/admin/users/" + target.id() + "/sanctions",
+                    op.token(), sanctionBody("LOCK"));
+
+            assertThat(auditLogRepository.findByTargetTypeAndTargetIdOrderByOccurredAtDesc(
+                    AdminAuditLog.TargetType.USER, target.id()))
+                    .anyMatch(l -> l.getAction() == AdminAction.SANCTION_APPLY
+                            && l.getResult() == AdminAuditLog.Result.ALLOWED);
+        }
+
+        @Test
+        @DisplayName("같은 수준의 제재가 이미 있으면 409 SANCTION_ALREADY_ACTIVE")
+        void duplicate_sanction_rejected() throws Exception {
+            Member op = operator("dup");
+            Member target = member(uniq("t"));
+            confirmAndPost("/api/v1/admin/users/" + target.id() + "/sanctions",
+                    op.token(), sanctionBody("LOCK"));
+
+            MvcResult second = confirmAndPost("/api/v1/admin/users/" + target.id() + "/sanctions",
+                    op.token(), sanctionBody("LOCK"));
+            expectError(second, 409, "SANCTION_ALREADY_ACTIVE");
+        }
+
+        @Test
+        @DisplayName("영구 정지는 밴리스트에 해시를 남긴다")
+        void ban_records_hash() throws Exception {
+            Member op = operator("ban");
+            Member target = member(uniq("t"));
+            long before = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ban_list", Long.class);
+
+            confirmAndPost("/api/v1/admin/users/" + target.id() + "/sanctions",
+                    op.token(), sanctionBody("BAN"));
+
+            assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ban_list", Long.class))
+                    .isEqualTo(before + 1);
+        }
+
+        @Test
+        @DisplayName("사유 입력은 필수다 — 고지 알림과 재검토 대응의 근거다")
+        void reason_text_required() throws Exception {
+            Member op = operator("noreason");
+            Member target = member(uniq("t"));
+
+            Map<String, Object> body = sanctionBody("LOCK");
+            body.remove("reasonText");
+            expectError(postAuth("/api/v1/admin/users/" + target.id() + "/sanctions", op.token(), body),
+                    400, "INVALID_REQUEST");
+        }
+
+        @Test
+        @DisplayName("제재 해제는 재검토 인용이며 계정을 되돌린다")
+        void revoke_restores_account() throws Exception {
+            Member op = operator("revoke");
+            Member target = member(uniq("t"));
+            MvcResult applied = confirmAndPost("/api/v1/admin/users/" + target.id() + "/sanctions",
+                    op.token(), sanctionBody("LOCK"));
+            String sanctionId = read(applied, "$.data.sanctionId");
+
+            MvcResult res = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                    .delete("/api/v1/admin/users/" + target.id() + "/sanctions/" + sanctionId)
+                    .header("Authorization", "Bearer " + op.token())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(OM.writeValueAsString(Map.of("reasonText", "재검토 인용 — 오탐으로 확인됨")))).andReturn();
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+
+            assertThat(userRepository.findById(target.id()).orElseThrow().getStatus())
+                    .isEqualTo(UserStatus.ACTIVE);
+        }
+    }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("신고 검토 — 적재된 것을 읽고 상태만 종결한다")
+    class Review {
+
+        @Test
+        @DisplayName("대상 단위 큐는 같은 대상의 신고를 묶어 내린다 — 판단 속도를 위해서다")
+        void queue_is_grouped_by_target() throws Exception {
+            Member op = operator("queue");
+            Member target = member(uniq("t"));
+            insertReport(member(uniq("r1")).id(), target.id());
+            insertReport(member(uniq("r2")).id(), target.id());
+
+            MvcResult res = getAuth("/api/v1/admin/reports/targets", op.token());
+            List<Map<String, Object>> groups = read(res, "$.data.items");
+
+            assertThat(groups).filteredOn(g -> target.id().toString().equals(g.get("targetId")))
+                    .singleElement()
+                    .satisfies(g -> assertThat(g.get("reportCount")).isEqualTo(2));
+        }
+
+        @Test
+        @DisplayName("건별 큐는 커서와 총 건수를 함께 내린다 — 처리 기한 필드는 없다")
+        void queue_is_cursor_paged() throws Exception {
+            Member op = operator("cursor");
+            Member target = member(uniq("t"));
+            insertReport(member(uniq("r1")).id(), target.id());
+            insertReport(member(uniq("r2")).id(), target.id());
+
+            MvcResult res = mvc.perform(get("/api/v1/admin/reports?status=PENDING&size=1")
+                    .header("Authorization", "Bearer " + op.token())).andReturn();
+
+            assertThat((List<?>) read(res, "$.data.items")).hasSize(1);
+            assertThat((String) read(res, "$.data.nextCursor"))
+                    .as("다음 페이지가 있으면 커서를 준다").isNotBlank();
+            assertThat(((Number) read(res, "$.data.totalCount")).longValue()).isGreaterThanOrEqualTo(2);
+        }
+
+        @Test
+        @DisplayName("신고자 신원은 응답에 없다 — 피신고자에게도 방장에게도 공개하지 않는다")
+        void reporter_identity_is_never_exposed() throws Exception {
+            Member op = operator("anon");
+            Member reporter = member(uniq("r"));
+            Member target = member(uniq("t"));
+            UUID reportId = insertReport(reporter.id(), target.id());
+
+            MvcResult res = getAuth("/api/v1/admin/reports/" + reportId, op.token());
+            String body = res.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+            assertThat(body).doesNotContain(reporter.id().toString());
+        }
+
+        @Test
+        @DisplayName("스냅샷 열람은 별도 action 으로 남긴다 — 개인정보 열람이기 때문이다")
+        void snapshot_view_is_audited_separately() throws Exception {
+            Member op = operator("snapshot");
+            UUID reportId = insertReport(member(uniq("r")).id(), member(uniq("t")).id());
+
+            getAuth("/api/v1/admin/reports/" + reportId, op.token());
+
+            assertThat(auditLogRepository.findByOperatorIdOrderByOccurredAtDesc(op.id()))
+                    .anyMatch(l -> l.getAction() == AdminAction.SNAPSHOT_VIEW);
+        }
+
+        @Test
+        @DisplayName("종결하면 상태가 바뀌고 다시 종결하면 409 REVIEW_ALREADY_RESOLVED")
+        void resolve_is_once() throws Exception {
+            Member op = operator("resolve");
+            UUID reportId = insertReport(member(uniq("r")).id(), member(uniq("t")).id());
+
+            MvcResult first = postAuth("/api/v1/admin/reports/" + reportId + "/resolve",
+                    op.token(), Map.of("decision", "NO_ACTION"));
+            assertThat(first.getResponse().getStatus()).isEqualTo(200);
+
+            expectError(postAuth("/api/v1/admin/reports/" + reportId + "/resolve",
+                    op.token(), Map.of("decision", "NO_ACTION")), 409, "REVIEW_ALREADY_RESOLVED");
+        }
+
+        @Test
+        @DisplayName("종결해도 신고자의 개인 차단은 유지된다 — 차단은 제재가 아니라 개인 선택이다")
+        void resolving_keeps_personal_block() throws Exception {
+            Member op = operator("keepblock");
+            Member reporter = member(uniq("r"));
+            Member target = member(uniq("t"));
+            UUID reportId = insertReport(reporter.id(), target.id());
+            jdbcTemplate.update(
+                    "INSERT INTO user_blocks (blocker_id, target_type, target_id) VALUES (?, 'USER', ?)",
+                    bytes(reporter.id()), bytes(target.id()));
+
+            postAuth("/api/v1/admin/reports/" + reportId + "/resolve",
+                    op.token(), Map.of("decision", "NO_ACTION"));
+
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM user_blocks WHERE blocker_id=? AND target_type='USER' "
+                            + "AND target_id=?",
+                    Integer.class, bytes(reporter.id()), bytes(target.id()))).isEqualTo(1);
+        }
+    }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("이상탐지 · 장애 구제 · 운영 공지")
+    class Others {
+
+        @Test
+        @DisplayName("이상탐지 신호는 조회만 되고 그것만으로 제재하지 않는다")
+        void anomaly_is_review_only() throws Exception {
+            Member op = operator("anomaly");
+            Member target = member(uniq("t"));
+            jdbcTemplate.update("INSERT INTO anomaly_signals " +
+                            "(id, signal_type, target_user_id, score, detected_at) " +
+                            "VALUES (?, 'REPORT_ABUSE', ?, 80, NOW(3))",
+                    bytes(UUID.randomUUID()), bytes(target.id()));
+
+            MvcResult res = getAuth("/api/v1/admin/anomalies", op.token());
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+            assertThat((List<?>) read(res, "$.data.items")).isNotEmpty();
+
+            assertThat(sanctionRepository.findByUserIdOrderByStartsAtDesc(target.id()))
+                    .as("탐지만으로는 제재하지 않는다").isEmpty();
+            assertThat(userRepository.findById(target.id()).orElseThrow().getStatus())
+                    .isEqualTo(UserStatus.ACTIVE);
+        }
+
+        @Test
+        @DisplayName("장애 구제는 성공 처리가 아니라 분모에서 제외하는 중립 처리다")
+        void outage_relief_is_neutral() throws Exception {
+            Member op = operator("relief");
+
+            MvcResult res = confirmAndPost("/api/v1/admin/outage-relief", op.token(), Map.of(
+                    "periodStart", "2026-08-30T00:00:00Z",
+                    "periodEnd", "2026-08-30T06:00:00Z",
+                    "scope", "ALL"));
+
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+            assertThat((String) read(res, "$.data.scope")).isEqualTo("ALL");
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM outage_reliefs", Integer.class)).isPositive();
+        }
+
+        @Test
+        @DisplayName("운영 공지는 필수(A) 알림으로 나간다")
+        void notice_is_required_category() throws Exception {
+            Member op = operator("opsnotice");
+            Member reader = member(uniq("reader"));
+
+            MvcResult res = confirmAndPost("/api/v1/admin/notices", op.token(), Map.of(
+                    "title", "점검 안내",
+                    "body", "02:00~03:00 점검이 있어요."));
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+
+            // 요청은 공지 원본만 저장하고 즉시 응답한다 — 2만 행 INSERT 를 요청-응답 안에서
+            // 하면 커넥션을 오래 잡고 실패 시 전부 롤백된다. 적재는 팬아웃 잡의 몫이다.
+            assertThat((String) read(res, "$.data.announcementId")).isNotNull();
+            assertThat(notificationRepository.findByUserIdOrderByIdDesc(reader.id()))
+                    .as("아직 팬아웃 전이다").noneMatch(
+                            n -> NotificationType.ANNOUNCEMENT.name().equals(n.getType()));
+
+            announcementFanoutJob.fanOutPending();
+
+            assertThat(notificationRepository.findByUserIdOrderByIdDesc(reader.id()))
+                    .filteredOn(n -> NotificationType.ANNOUNCEMENT.name().equals(n.getType()))
+                    .singleElement()
+                    .satisfies(n -> {
+                        // 운영 공지는 공지 탭에 쌓이고 별도 그룹 토글 없이 푸시한다.
+                        assertThat(n.tabEnum()).isEqualTo(NotificationTab.ANNOUNCEMENT);
+                        assertThat(n.toggleGroupEnum()).isEqualTo(NotificationToggleGroup.NONE);
+                        assertThat(n.getTitle()).isEqualTo("점검 안내");
+                    });
+
+            // 두 번 돌려도 한 줄뿐이다 — dedup_key UNIQUE 가 재개 시 중복 적재를 막는다.
+            announcementFanoutJob.fanOutPending();
+            assertThat(notificationRepository.findByUserIdOrderByIdDesc(reader.id()))
+                    .filteredOn(n -> NotificationType.ANNOUNCEMENT.name().equals(n.getType()))
+                    .hasSize(1);
+        }
+
+        @Test
+        @DisplayName("제목·본문이 컬럼을 넘으면 거절한다 — 저장까지 끌고 가면 500 이 된다")
+        void notice_rejects_oversized_text() throws Exception {
+            Member op = operator("opslen");
+
+            expectError(postAuth("/api/v1/admin/notices", op.token(), Map.of(
+                            "title", "가".repeat(101),
+                            "body", "점검이 있어요.")),
+                    400, "ANNOUNCEMENT_TITLE_LENGTH");
+
+            expectError(postAuth("/api/v1/admin/notices", op.token(), Map.of(
+                            "title", "점검 안내",
+                            "body", "나".repeat(501))),
+                    400, "ANNOUNCEMENT_BODY_LENGTH");
+        }
+
+        /**
+         * 공지는 되돌릴 수 없는 전체 팬아웃이다. 외부 URL 을 받아 주면 약 2만 명의 알림함에
+         * 그대로 실려 나가고, 적재된 뒤에는 회수 경로가 없다.
+         */
+        @Test
+        @DisplayName("딥링크가 ruleup:// 가 아니면 거절한다 — 외부 URL 이 전체 알림함으로 나간다")
+        void notice_rejects_external_deeplink() throws Exception {
+            Member op = operator("opslink");
+
+            expectError(postAuth("/api/v1/admin/notices", op.token(), Map.of(
+                            "title", "점검 안내",
+                            "body", "점검이 있어요.",
+                            "deepLink", "https://example.com/promo")),
+                    400, "ANNOUNCEMENT_DEEPLINK_INVALID");
+        }
+
+        @Test
+        @DisplayName("형식 검증이 2단계 확인보다 앞선다 — 틀린 요청에 「한 번 더 확인」을 묻지 않는다")
+        void notice_validates_before_confirmation() throws Exception {
+            Member op = operator("opsorder");
+
+            MvcResult res = postAuth("/api/v1/admin/notices", op.token(), Map.of(
+                    "title", "점검 안내",
+                    "body", "점검이 있어요.",
+                    "deepLink", "https://example.com/promo"));
+
+            assertThat(res.getResponse().getStatus())
+                    .as("428 이면 검증이 토큰 발급 뒤에 있다는 뜻이다 — 형식이 틀린 요청에 확인을 요구하게 된다")
+                    .isEqualTo(400);
+        }
+
+        @Test
+        @DisplayName("유저 통합 뷰는 자동·직권 제재를 별개 트랙으로 내린다")
+        void user_view_separates_tracks() throws Exception {
+            Member op = operator("userview");
+            Member target = member(uniq("t"));
+            confirmAndPost("/api/v1/admin/users/" + target.id() + "/sanctions",
+                    op.token(), sanctionBody("LOCK"));
+
+            MvcResult res = getAuth("/api/v1/admin/users/" + target.id(), op.token());
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+            assertThat((String) read(res, "$.data.accountStatus")).isEqualTo("SUSPENDED");
+            assertThat((List<?>) read(res, "$.data.adminSanctions")).hasSize(1);
+            assertThat((List<?>) read(res, "$.data.autoSanctions")).isEmpty();
+        }
+    }
+}

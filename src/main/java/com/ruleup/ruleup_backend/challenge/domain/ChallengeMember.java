@@ -1,0 +1,415 @@
+package com.ruleup.ruleup_backend.challenge.domain;
+
+import com.ruleup.ruleup_backend.common.AssignedIdEntity;
+import com.ruleup.ruleup_backend.common.UuidGenerator;
+import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
+import jakarta.persistence.*;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import org.hibernate.annotations.Generated;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.generator.EventType;
+import org.hibernate.type.SqlTypes;
+import com.ruleup.ruleup_backend.common.verification.ScheduleType;
+import com.ruleup.ruleup_backend.common.verification.PeriodUnit;
+import com.ruleup.ruleup_backend.common.verification.SetupStatus;
+import com.ruleup.ruleup_backend.common.verification.GeoAnchor;
+import com.ruleup.ruleup_backend.common.verification.ScreenApp;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * 챌린지 멤버십 (ChallengeMember 테이블). 챌린지 1개 × 사용자 1명 = 1행.
+ *  - uqMember(challengeId, userId)로 한 챌린지 1회 멤버십 (스펙 5 재참여).
+ *  - 생성자는 챌린지 생성 시 OWNER/ACTIVE로 함께 등록.
+ *  - 참여 신청: 솔로/기준미설정 → ACTIVE 즉시, 그룹+기준 → PENDING(운영자 승인 대기).
+ *  - 진행률(scheduleType~periodsMet)은 인증 sync·확정 배치가 유지하는 비정규화 필드(인증 스펙 §4.2).
+ *    멤버 생성 시엔 기본값(FIXED_DAYS·0)으로 시작하고, 인증 단계에서 실제 스케줄로 세팅·갱신.
+ * 연관관계 대신 challengeId/userId만 보유(다른 도메인과 동일 패턴).
+ */
+@Entity
+@Table(name = "challenge_members")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class ChallengeMember extends AssignedIdEntity {
+
+    @Id
+    @JdbcTypeCode(SqlTypes.BINARY)
+    @Column(name = "id", nullable = false, updatable = false)
+    private UUID id;
+
+    @JdbcTypeCode(SqlTypes.BINARY)
+    @Column(name = "challenge_id", nullable = false, updatable = false)
+    private UUID challengeId;
+
+    @JdbcTypeCode(SqlTypes.BINARY)
+    @Column(name = "user_id", nullable = false, updatable = false)
+    private UUID userId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "role", nullable = false)
+    private MemberRole role;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false)
+    private MemberStatus status;
+
+    /**
+     * <b>처음</b> 들어온 시각. 재입장해도 바뀌지 않는다.
+     *
+     * <p>인기 점수가 보는 「최근 24시간 신규 참여」는 이 값이 아니라 {@code challenge_join_events}
+     * 가 센다 — 멤버십은 사람당 한 줄인 <b>상태</b>라 여러 번의 가입을 담을 수 없다.
+     * 한때 재입장마다 이 값을 덮었지만, 그러면 처음 들어온 날이 사라져 둘 중 하나만 갖게 된다.
+     */
+    @Generated(event = EventType.INSERT)
+    @Column(name = "joined_at", nullable = false, updatable = false)
+    private Instant joinedAt;
+
+    // ===== 진행률 비정규화 (인증 스펙 §4.2) — 인증 sync·확정 배치가 유지 =====
+    @Enumerated(EnumType.STRING)
+    @Column(name = "schedule_type", nullable = false)
+    private ScheduleType scheduleType = ScheduleType.FIXED_DAYS;
+
+    @Column(name = "target_days", nullable = false)
+    private int targetDays = 0;          // 전체 대상일(빈도형: 필요 횟수 ΣN)
+
+    @Column(name = "success_days", nullable = false)
+    private int successDays = 0;
+
+    @Column(name = "fail_days", nullable = false)
+    private int failDays = 0;
+
+    @Column(name = "progress_rate", nullable = false, precision = 5, scale = 2)
+    private BigDecimal progressRate = BigDecimal.ZERO;   // 진행률(%)
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "today_status")
+    private VerificationStatus todayStatus;
+
+    @Column(name = "last_synced_at")
+    private Instant lastSyncedAt;
+
+    // --- 빈도형(FREQUENCY) 전용 주기 카운터 ---
+    @Enumerated(EnumType.STRING)
+    @Column(name = "period_unit")
+    private PeriodUnit periodUnit;
+
+    @Column(name = "period_target")
+    private Integer periodTarget;        // 주기당 N
+
+    @Column(name = "cur_period_start")
+    private LocalDate curPeriodStart;
+
+    @Column(name = "cur_period_end")
+    private LocalDate curPeriodEnd;
+
+    @Column(name = "cur_period_completed")
+    private Integer curPeriodCompleted;
+
+    // ===== v2: 셋업 상태 + 멤버 바인딩 앵커(PER_MEMBER) + 예비 폴백 카운터 (테크스펙 v2 §4·§5·§9) =====
+    @Enumerated(EnumType.STRING)
+    @Column(name = "setup_status", nullable = false)
+    private SetupStatus setupStatus = SetupStatus.PENDING_SETUP;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "anchors")
+    private List<GeoAnchor> anchors;          // 멤버 GeoAnchor[] (없으면 null). config가 아니라 멤버에 저장.
+
+    @Column(name = "anchor_updated_at")
+    private Instant anchorUpdatedAt;          // 마지막 저장 시각(최초 셋업 포함)
+
+    @Column(name = "anchor_changed_at")
+    private Instant anchorChangedAt;          // 마지막 "변경"(PUT) 시각 — 월 1회 한도 기준. 최초 셋업은 기록 안 함
+
+    // ===== SCREEN_TIME 측정 대상 앱(PER_MEMBER 바인딩, my-screen-apps API) =====
+    // 현재 적용 세트 + 익일 적용 대기 세트(pending). 변경은 항상 익일 00:00부터 적용(당일 조작 방지).
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "screen_apps")
+    private List<ScreenApp> screenApps;               // 현재 적용 중인 세트(없으면 null)
+
+    @Column(name = "screen_apps_applied_from")
+    private Instant screenAppsAppliedFrom;            // 현재 세트 적용 시작 시각
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "pending_screen_apps")
+    private List<ScreenApp> pendingScreenApps;        // 익일 적용 대기 세트(없으면 null)
+
+    @Column(name = "pending_screen_apps_effective_date")
+    private LocalDate pendingScreenAppsEffectiveDate; // 대기 세트 적용 시작 날짜(익일)
+
+    @Column(name = "screen_apps_updated_at")
+    private Instant screenAppsUpdatedAt;             // 마지막 stage 시각(최초 셋업 포함)
+
+    @Column(name = "screen_apps_changed_at")
+    private Instant screenAppsChangedAt;             // 마지막 "변경"(PUT) 시각 — 월 1회 한도 기준
+
+    @Column(name = "fallback_used_period_start")
+    private LocalDate fallbackUsedPeriodStart;// 예비 폴백 주1회(롤링 7일) 윈도우 시작
+
+    @Column(name = "fallback_used_count", nullable = false)
+    private int fallbackUsedCount = 0;
+
+    /**
+     * 셋업 미완료 고스트(무음) 푸시를 마지막으로 보낸 시각. 재발송 쿨다운 기준(스팸 방지).
+     * NULL = 아직 보낸 적 없음. 셋업이 READY 되면 더는 대상이 아니라 이 값은 자연히 의미를 잃는다.
+     */
+    @Column(name = "ghost_pushed_at")
+    private Instant ghostPushedAt;
+
+    @Column(name = "left_type", length = 10)
+    private String leftType;
+
+    @Column(name = "leave_reason", length = 20)
+    private String leaveReason;
+
+    @Column(name = "left_at")
+    private Instant leftAt;
+
+    @Column(name = "kick_reason", length = 500)
+    private String kickReason;
+
+    @Column(name = "kick_count", nullable = false)
+    private int kickCount;
+
+    /** 재입장 가능 시각 — 자진 탈퇴 1주 / 강퇴 배수. 영구 차단은 {@link #rejoinBanned} 가 따로 든다. */
+    @Column(name = "rejoin_available_at")
+    private Instant rejoinAvailableAt;
+
+    /**
+     * 이 챌린지 영구 차단 — 부정행위 검출 강퇴만 켠다(방 내부 테크 스펙 5-6). 백오프 대상이 아니라
+     * {@link #rejoinAvailableAt} 은 비어 있고, 재입장으로도 풀리지 않는다.
+     */
+    @Column(name = "rejoin_banned", nullable = false)
+    private boolean rejoinBanned;
+
+    private static ChallengeMember of(UUID challengeId, UUID userId, MemberRole role, MemberStatus status) {
+        ChallengeMember m = new ChallengeMember();
+        m.id = UuidGenerator.generate();
+        m.challengeId = challengeId;
+        m.userId = userId;
+        m.role = role;
+        m.status = status;
+        return m;
+    }
+
+    /** 생성자 등록: OWNER + 즉시 ACTIVE */
+    public static ChallengeMember owner(UUID challengeId, UUID userId) {
+        return of(challengeId, userId, MemberRole.OWNER, MemberStatus.ACTIVE);
+    }
+
+    /** 일반 참여: 솔로/기준미설정이면 ACTIVE, 그룹+기준이면 PENDING */
+    public static ChallengeMember join(UUID challengeId, UUID userId, MemberStatus initialStatus) {
+        return of(challengeId, userId, MemberRole.MEMBER, initialStatus);
+    }
+
+    // 참여/재참여/탈퇴 상태 전이는 동시성 안전을 위해
+    // ChallengeMemberRepository.compareAndSetStatus(CAS)로 처리한다(엔티티 직접 변경 X).
+
+    public boolean isPending() { return status == MemberStatus.PENDING; }
+    public boolean isActive()  { return status == MemberStatus.ACTIVE; }
+    public boolean isOwner()   { return role == MemberRole.OWNER; }
+    /** 역할 변경(임명/해제 §7-1, 위임 role swap §7-2). OWNER 정확히 1명 불변식은 호출부가 보장. */
+    public void changeRole(MemberRole role) { this.role = role; }
+
+    /**
+     * 자진 탈퇴: ACTIVE → LEFT. 구 "재참여 영구 불가"는 폐기됐고(탈퇴 API 명세),
+     * 1주 대기 후 같은 행을 재활성화한다(uq_member 유지).
+     */
+    public void leave(Instant at, Instant rejoinAt) {
+        this.status = MemberStatus.LEFT;
+        this.role = MemberRole.MEMBER;      // 방장이 나가면 봇방장 전환 — 역할은 내려놓는다
+        this.leftType = "LEAVE";
+        this.leaveReason = "VOLUNTARY";
+        this.leftAt = at;
+        this.rejoinAvailableAt = rejoinAt;
+    }
+
+    public void leaveExternally(Instant at, String reason) {
+        leave(at, null);
+        this.leaveReason = reason;
+    }
+
+    /** 강퇴 — 배수 백오프(연속 실패·권한 미허용·방장 재량, 정책 §10.2). 부정행위는 {@link #kickPermanently}. */
+    public void kick(String reason, Instant at, Instant rejoinAt) {
+        this.status = MemberStatus.REMOVED;
+        this.leftType = "KICK";
+        this.leaveReason = "KICKED";
+        this.leftAt = at;
+        this.kickReason = reason;
+        this.kickCount++;
+        this.rejoinAvailableAt = rejoinAt;
+    }
+
+    /** 부정행위 검출 강퇴 — 백오프 없이 이 챌린지 영구 차단(방 내부 테크 스펙 5-6). */
+    public void kickPermanently(String reason, Instant at) {
+        kick(reason, at, null);
+        this.role = MemberRole.MEMBER;      // 방장이었다면 봇방장 전환 — 역할은 내려놓는다
+        this.rejoinBanned = true;
+    }
+
+    /** 이미 나간 멤버에게 뒤늦게 확정된 부정행위 — 멤버십은 그대로 두고 재입장만 영구히 막는다. */
+    public void banFromRejoin() {
+        this.rejoinAvailableAt = null;
+        this.rejoinBanned = true;
+    }
+
+    /**
+     * 대기 기간이 끝난 뒤 재입장(자진 탈퇴·강퇴 공통). kickCount 는 배수 계산 근거라 남긴다.
+     *
+     * <p>{@code joinedAt} 은 건드리지 않는다 — 그건 <b>처음</b> 들어온 날이다. 이번 재입장이라는
+     * 사건은 {@code challenge_join_events} 에 한 줄로 쌓이며, 인기 점수는 그쪽을 센다.
+     */
+    public void rejoin() {
+        this.status = MemberStatus.ACTIVE;
+        this.role = MemberRole.MEMBER;
+        this.leftType = null;
+        this.leaveReason = null;
+        this.leftAt = null;
+        this.kickReason = null;
+        this.rejoinAvailableAt = null;
+    }
+
+    // ===== 인증 진행률 비정규화 갱신 (sync·배치) =====
+    public void extendTargetDays(int additional) { this.targetDays += additional; }
+
+    public void setupFixedDays(int targetDays) {
+        this.scheduleType = ScheduleType.FIXED_DAYS;
+        this.targetDays = targetDays;
+    }
+
+    public void setupFrequency(PeriodUnit unit, int periodTarget, LocalDate curStart,
+                               LocalDate curEnd, int targetDays) {
+        this.scheduleType = ScheduleType.FREQUENCY;
+        this.periodUnit = unit;
+        this.periodTarget = periodTarget;
+        this.curPeriodStart = curStart;
+        this.curPeriodEnd = curEnd;
+        this.curPeriodCompleted = 0;
+        this.targetDays = targetDays;
+    }
+
+    public void applyProgress(int successDays, int failDays, BigDecimal progressRate,
+                              VerificationStatus todayStatus,
+                              Instant lastSyncedAt) {
+        this.successDays = successDays;
+        this.failDays = failDays;
+        this.progressRate = progressRate;
+        this.todayStatus = todayStatus;
+        this.lastSyncedAt = lastSyncedAt;
+    }
+
+    public void incrementPeriodCompleted() {
+        this.curPeriodCompleted = (this.curPeriodCompleted == null ? 0 : this.curPeriodCompleted) + 1;
+    }
+
+    /** 성공을 되돌릴 때(수동 체크 취소). 0 아래로는 내려가지 않는다. */
+    public void decrementPeriodCompleted() {
+        this.curPeriodCompleted = Math.max((this.curPeriodCompleted == null ? 0 : this.curPeriodCompleted) - 1, 0);
+    }
+
+    /** 진행률 카운터만 갱신(확정 배치 — todayStatus·lastSyncedAt 안 건드림). */
+    public void applyCounts(int successDays, int failDays, BigDecimal progressRate) {
+        this.successDays = successDays;
+        this.failDays = failDays;
+        this.progressRate = progressRate;
+    }
+
+    /** 빈도형 주기 롤오버: 미달분 정산 + 다음 주기로. */
+    public void rolloverPeriod(LocalDate nextStart, LocalDate nextEnd, int shortfall) {
+        this.failDays += shortfall;
+        this.curPeriodStart = nextStart;
+        this.curPeriodEnd = nextEnd;
+        this.curPeriodCompleted = 0;
+    }
+
+    // ===== v2: 셋업 / 앵커 / 폴백 =====
+
+    /** 최초 진입 셋업 완료 → READY(평가 대상 진입). */
+    public void markSetupReady() { this.setupStatus = SetupStatus.READY; }
+
+    /** 셋업 유도 고스트 푸시 발송 기록(쿨다운 기준 갱신). */
+    public void markGhostPushed(Instant at) { this.ghostPushedAt = at; }
+
+    public boolean isSetupReady() { return setupStatus == SetupStatus.READY; }
+
+    /** 최초 셋업의 앵커 바인딩. 변경 한도를 소진하지 않는다(월 1회는 이후 changeAnchors부터). */
+    public void replaceAnchors(List<GeoAnchor> newAnchors, Instant at) {
+        this.anchors = (newAnchors != null) ? new ArrayList<>(newAnchors) : null;
+        this.anchorUpdatedAt = at;
+    }
+
+    /** 내 인증 장소 <b>변경</b>(PUT my-location). 이 저장이 그 달의 변경 1회를 소진한다. */
+    public void changeAnchors(List<GeoAnchor> newAnchors, Instant at) {
+        replaceAnchors(newAnchors, at);
+        this.anchorChangedAt = at;
+    }
+
+    // ===== SCREEN_TIME 측정 대상 앱 =====
+
+    /** 최초 설정: 대기 없이 즉시 현재 세트로 적용(보호할 이전 세트가 없음). */
+    public void setScreenAppsInitial(List<ScreenApp> apps, Instant at) {
+        this.screenApps = (apps != null) ? new ArrayList<>(apps) : null;
+        this.screenAppsAppliedFrom = at;
+        this.pendingScreenApps = null;
+        this.pendingScreenAppsEffectiveDate = null;
+        this.screenAppsUpdatedAt = at;
+    }
+
+    /** 변경 접수: 익일 00:00부터 적용될 대기 세트로 stage. 이 저장이 그 달의 변경 1회를 소진한다. */
+    public void stagePendingScreenApps(List<ScreenApp> apps, LocalDate effectiveDate, Instant at) {
+        this.pendingScreenApps = (apps != null) ? new ArrayList<>(apps) : null;
+        this.pendingScreenAppsEffectiveDate = effectiveDate;
+        this.screenAppsUpdatedAt = at;
+        this.screenAppsChangedAt = at;
+    }
+
+    /**
+     * 대기 세트의 적용일이 도래(effectiveDate ≤ today)했으면 현재 세트로 승격(persist 대상).
+     * @return 승격이 일어났으면 true.
+     */
+    public boolean promoteScreenAppsIfDue(LocalDate today, ZoneId zone) {
+        if (pendingScreenAppsEffectiveDate == null || today.isBefore(pendingScreenAppsEffectiveDate)) {
+            return false;
+        }
+        this.screenApps = this.pendingScreenApps;
+        this.screenAppsAppliedFrom = pendingScreenAppsEffectiveDate.atStartOfDay(zone).toInstant();
+        this.pendingScreenApps = null;
+        this.pendingScreenAppsEffectiveDate = null;
+        return true;
+    }
+
+    /** 대기 세트가 아직 미래(익일 이후) 적용 대기 중인가. */
+    public boolean hasPendingScreenApps(LocalDate today) {
+        return pendingScreenAppsEffectiveDate != null && today.isBefore(pendingScreenAppsEffectiveDate);
+    }
+
+    /** {@code today} 시점에 실제 적용되는 세트(도래한 대기 세트를 반영, persist 없이 계산만). 없으면 빈 리스트. */
+    public List<ScreenApp> effectiveScreenApps(LocalDate today) {
+        if (pendingScreenAppsEffectiveDate != null && !today.isBefore(pendingScreenAppsEffectiveDate)) {
+            return (pendingScreenApps != null) ? pendingScreenApps : List.of();
+        }
+        return (screenApps != null) ? screenApps : List.of();
+    }
+
+    /**
+     * 예비 폴백 한도 소진 시도(월 N회·달력 월, §10.2). 달이 바뀌면 리셋 후 허용.
+     * @return true=사용 허용(카운터 반영됨) / false=한도 초과
+     */
+    public boolean tryUseFallback(LocalDate today, int monthlyLimit) {
+        LocalDate monthStart = today.withDayOfMonth(1);
+        if (fallbackUsedPeriodStart == null || !fallbackUsedPeriodStart.equals(monthStart)) {
+            this.fallbackUsedPeriodStart = monthStart;   // 새 달 윈도우 개시
+            this.fallbackUsedCount = 0;
+        }
+        if (fallbackUsedCount >= monthlyLimit) return false;
+        this.fallbackUsedCount++;
+        return true;
+    }
+}

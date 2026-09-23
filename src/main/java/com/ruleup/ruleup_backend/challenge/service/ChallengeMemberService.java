@@ -1,0 +1,430 @@
+package com.ruleup.ruleup_backend.challenge.service;
+
+import com.ruleup.ruleup_backend.challenge.domain.*;
+import com.ruleup.ruleup_backend.challenge.dto.JoinResponse;
+import com.ruleup.ruleup_backend.challenge.dto.LeaveResponse;
+import com.ruleup.ruleup_backend.challenge.dto.MemberListResponse;
+import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
+import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
+import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
+import com.ruleup.ruleup_backend.common.error.BusinessException;
+import com.ruleup.ruleup_backend.common.error.ErrorCode;
+import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
+import com.ruleup.ruleup_backend.notification.service.NotificationMuteCleaner;
+import com.ruleup.ruleup_backend.notification.domain.NotificationType;
+import com.ruleup.ruleup_backend.room.RoomAuthority;
+import com.ruleup.ruleup_backend.report.BlockService;
+import com.ruleup.ruleup_backend.score.domain.IncidentType;
+import com.ruleup.ruleup_backend.score.repository.UserScoreSummaryRepository;
+import com.ruleup.ruleup_backend.score.domain.Tier;
+import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
+import com.ruleup.ruleup_backend.user.domain.User;
+import com.ruleup.ruleup_backend.user.UserRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+/**
+ * 챌린지 멤버십 (생성 및 라이프사이클 스펙 §5·§6·§11): 가입 / 탈퇴 / 역할 변경 / 멤버 목록.
+ *
+ *  - 가입: 승인 절차 없이 <b>종료 상태 검사 1개 + 자격 게이트 5개</b>만 통과하면 즉시 ACTIVE.
+ *    거절은 전부 409 {@code JOIN_BLOCKED} + reason 단일 형식이다.
+ *    락 순서는 <b>사용자 행 → 챌린지 행</b>으로 전 경로 고정한다(데드락 방지 + 동시 3개 제한 보장).
+ *    기기 권한은 서버 게이트가 아니다 — 클라가 공개 상세의 requiredPermissions 로 가입 전에 확보한다.
+ *  - 탈퇴: 방장도 자유롭게 나갈 수 있고, 넘기지 않고 나가면 즉시 봇방장 체제가 된다(§11.2).
+ *  - 목록: 현재 멤버(ACTIVE)만. 익명 챌린지는 닉네임 마스킹.
+ */
+@Service
+@RequiredArgsConstructor
+public class ChallengeMemberService {
+
+    private static final Logger log = LoggerFactory.getLogger(ChallengeMemberService.class);
+
+    /** 자진 탈퇴 후 재입장 대기(정책 §10.1 — 고정 1주). 강퇴 배수는 {@link RejoinBackoff}. */
+    private static final Duration LEAVE_REJOIN_COOLDOWN = Duration.ofDays(7);
+    /** "1년 이상 성공을 이어왔다" 면제 기준(정책 §10.1). */
+    private static final Duration LONG_SUCCESS_THRESHOLD = Duration.ofDays(365);
+    /** 날짜 단위 정책은 KST를 사용한다. */
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+
+    private final ChallengeRepository challengeRepository;
+    private final ChallengeMemberRepository memberRepository;
+    private final UserRepository userRepository;
+    private final UserScoreSummaryRepository scoreSummaryRepository;
+    private final VerificationDailyRepository verificationDailyRepository;
+    private final NotificationMuteCleaner muteCleaner;
+    private final ApplicationEventPublisher eventPublisher;
+    /**
+     * 자기 자신의 프록시. 정원 유무를 <b>트랜잭션 밖에서</b> 읽고 들어가야 하므로, 진입 메서드는
+     * 트랜잭션이 없고 본체만 트랜잭션이다. 같은 빈의 메서드를 그냥 부르면 프록시를 거치지 않아
+     * {@code @Transactional} 이 붙지 않는다.
+     */
+    private final org.springframework.beans.factory.ObjectProvider<ChallengeMemberService> selfProvider;
+
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
+    private final RoomAuthority roomAuthority;
+    private final BlockService blockService;
+    private final com.ruleup.ruleup_backend.room.service.ChallengeRejoinPolicy rejoinPolicy;
+    private final com.ruleup.ruleup_backend.common.outbox.OutboxService outbox;
+    private final com.ruleup.ruleup_backend.common.outbox.OutboxDispatcher outboxDispatcher;
+
+    // ===== 가입 =====
+    /**
+     * 챌린지 가입. 판정 순서:
+     * ① 종료 → ② 비공개(초대로만) → ③ 재입장 대기 → ④ 정원(정원 있는 방만, 챌린지 행 락)
+     * → ⑤ 최소 티어(표시 티어 기준).
+     *
+     * <p>동시 참여 개수 상한은 탐색 스펙 개정으로 사라졌다(5-1). 그 판정을 직렬화하려고 잡던
+     * 사용자 행 락도 함께 걷었다 — 막을 것이 없는데 모든 가입을 사용자 단위로 줄 세울 이유가 없다.
+     */
+    public JoinResponse join(UUID userId, UUID challengeId) {
+        return join(userId, challengeId, false);
+    }
+
+    /** Invitation bypasses only the private-room gate. Membership and settings changes share a room lock. */
+    public JoinResponse join(UUID userId, UUID challengeId, boolean invited) {
+        return selfProvider.getObject().joinInTransaction(userId, challengeId, invited);
+    }
+
+    @Transactional
+    public JoinResponse joinInTransaction(UUID userId, UUID challengeId, boolean invited) {
+        Instant now = Instant.now();
+
+        // Membership changes bump settings version even for unlimited rooms. Take the write lock
+        // up front to avoid upgrading concurrent shared locks; only finite rooms count capacity.
+        Challenge c = challengeRepository.findByIdForUpdate(challengeId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
+
+        // 솔로 방은 본인만 — 타인에겐 존재를 숨긴다(상세 조회 404 규칙과 동일).
+        if (!c.isGroup() && !c.isOwner(userId))
+            throw new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND);
+
+        // ① 종료된 챌린지는 가입 개념 없음
+        if (c.getStatus() == ChallengeStatus.COMPLETED) throw blocked(JoinBlockReason.CHALLENGE_COMPLETED);
+
+        ChallengeMember existing = memberRepository.findByChallengeIdAndUserId(challengeId, userId).orElse(null);
+        if (existing != null && existing.isActive()) throw blocked(JoinBlockReason.ALREADY_JOINED);
+
+        // ② 비공개 방은 초대 링크로만 입장 — 직접 가입 불가
+        if (!invited && c.isGroup() && "PRIVATE".equals(c.getVisibility()))
+            throw blocked(JoinBlockReason.PRIVATE_INVITE_ONLY);
+
+        // ③ 영구 차단 → 재입장 대기. 부정행위 검출 강퇴만 영구 차단이고(방 내부 5-6) 대기 시각이 없다 —
+        //    백오프로 치환하면 치팅으로 쫓겨난 사용자가 1주 뒤 그대로 돌아온다.
+        //    나머지(자진 탈퇴 1주 / 연속 실패·권한 미허용 강퇴 배수)는 대기 시각으로 판정한다.
+        {
+            if (rejoinPolicy.permanentlyBanned(challengeId, userId) || (existing != null && existing.isRejoinBanned())) throw blocked(JoinBlockReason.PERMANENT_BAN);
+            Instant availableAt = rejoinPolicy.availableAt(challengeId, userId, existing);
+            if (availableAt != null && now.isBefore(availableAt))
+                throw new BusinessException(ErrorCode.JOIN_BLOCKED,
+                        JoinBlockReason.REJOIN_COOLDOWN.name(), availableAt.toString());
+        }
+
+        // ④ 정원 — 챌린지 행 락 하에서만 판정한다("마지막 1자리 동시 가입" 차단).
+        //    무제한 방은 락도 COUNT 도 하지 않는다(탐색 백엔드 12 체크리스트).
+        //    동시 참여 개수 상한은 개정으로 사라졌다 — 사용자 행 락도 함께 걷었다.
+        Integer cap = c.getMaxParticipants();
+        if (cap != null) {
+            long activeCount = memberRepository.countByChallengeIdAndStatus(challengeId, MemberStatus.ACTIVE);
+            if (activeCount >= cap) throw blocked(JoinBlockReason.FULL);
+        }
+
+        // ⑥ 최소 티어 — 표시 티어 기준
+        if (c.getMinTier() != null && displayTier(userId).ordinal() < c.getMinTier().ordinal())
+            throw blocked(JoinBlockReason.TIER_GATE);
+
+        // 즉시 ACTIVE 등록. uq_member 로 동시 INSERT는 1건만 성공, 나머지는 중복으로 변환.
+        if (existing != null) {
+            existing.rejoin();
+            recordJoinEvent(challengeId, userId);
+        } else {
+            try {
+                memberRepository.saveAndFlush(ChallengeMember.join(challengeId, userId, MemberStatus.ACTIVE));
+                recordJoinEvent(challengeId, userId);
+            } catch (DataIntegrityViolationException dup) {
+                throw blocked(JoinBlockReason.ALREADY_JOINED);
+            }
+        }
+        c.bumpVersion();
+        // 표시용 참여자 수는 여기서 올리지 않는다. 그 행을 가입 트랜잭션 안에서 쓰면 같은 방의
+        // 모든 가입이 그 한 행에서 직렬화되고, 무제한 방에 락을 걷은 의미가 사라진다.
+        // 정확해야 하는 값은 멤버십 행이고, 표시값은 커밋 뒤 원천에서 다시 센다(탐색 백엔드 5-2).
+        // 통계도 같은 자리에서 다시 센다 — 실패해도 가입을 되돌리지 않는다
+        eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "JOIN"));
+
+        // 사이클은 1주 고정 — 주 중간에 들어오면 판정은 다음 사이클 경계부터.
+        LocalDate countFrom = ChallengeCycle.countFrom(c.getStartDate(), LocalDate.now(KST));
+        log.info("challenge_join_result success=true challengeId={} userId={}", challengeId, userId);
+        return JoinResponse.of(countFrom.toString(), c.getVerificationConfig());
+    }
+
+    /**
+     * 가입 게이트 사전 판정 — 초대 링크 조회 화면이 "수락 버튼을 눌러도 되는지"를 미리 보여주기 위한 것.
+     * 통과면 null, 막히면 사유를 돌려준다.
+     *
+     * <p>{@link #join} 과 달리 <b>락을 잡지 않는다.</b> 미리보기 하나 때문에 챌린지 행을 잠글 이유가 없고,
+     * 어차피 조회와 수락 사이에 정원이 찰 수 있어 이 결과는 보장이 아니다 — 최종 판정은 수락 시점의 409다.
+     * 판정 순서는 join 과 같게 유지한다(같은 상황에서 다른 사유가 나오면 클라 안내가 어긋난다).
+     */
+    @Transactional(readOnly = true)
+    public JoinBlockReason previewBlockReason(UUID userId, Challenge c, boolean invited) {
+        if (c.getStatus() == ChallengeStatus.COMPLETED) return JoinBlockReason.CHALLENGE_COMPLETED;
+
+        ChallengeMember existing = memberRepository.findByChallengeIdAndUserId(c.getId(), userId).orElse(null);
+        if (existing != null && existing.isActive()) return JoinBlockReason.ALREADY_JOINED;
+        if (!invited && c.isGroup() && "PRIVATE".equals(c.getVisibility()))
+            return JoinBlockReason.PRIVATE_INVITE_ONLY;
+        if (rejoinPolicy.permanentlyBanned(c.getId(), userId) || (existing != null && existing.isRejoinBanned())) return JoinBlockReason.PERMANENT_BAN;
+        Instant availableAt = rejoinPolicy.availableAt(c.getId(), userId, existing);
+        if (availableAt != null && Instant.now().isBefore(availableAt))
+            return JoinBlockReason.REJOIN_COOLDOWN;
+        Integer cap = c.getMaxParticipants();
+        if (cap != null && memberRepository.countByChallengeIdAndStatus(c.getId(), MemberStatus.ACTIVE) >= cap)
+            return JoinBlockReason.FULL;
+        if (c.getMinTier() != null && displayTier(userId).ordinal() < c.getMinTier().ordinal())
+            return JoinBlockReason.TIER_GATE;
+        return null;
+    }
+
+    // ===== 탈퇴 =====
+    /**
+     * 챌린지 탈퇴(본인). 언제든 나갈 수 있다 — 구 "재참여 영구 불가"·"방장 탈퇴 불가"는 둘 다 폐기.
+     *  - 방장이 권한을 넘기지 않고 나가면 <b>즉시 봇방장 체제</b>로 전환하고 잔류 멤버에게 승계 알림을 보낸다(§11.2).
+     *  - 감점 면제: 1년 이상 성공(LONG_SUCCESS) / 승계 3일 면책(SUCCESSION_GRACE — 모든 멤버 기준, §11.3).
+     *  - 재입장은 1주 대기.
+     */
+    @Transactional
+    public LeaveResponse leave(UUID userId, UUID challengeId) {
+        Instant now = Instant.now();
+
+        // 가입과 같은 규칙 — 정원 있는 방만 같은 챌린지 락으로 직렬화한다(탐색 백엔드 5-2).
+        Challenge c = challengeRepository.findByIdForUpdate(challengeId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
+
+        if (c.getStatus() == ChallengeStatus.COMPLETED)
+            throw new BusinessException(ErrorCode.CHALLENGE_COMPLETED);
+
+        ChallengeMember me = memberRepository.findByChallengeIdAndUserId(challengeId, userId)
+                .filter(ChallengeMember::isActive)
+                .orElseThrow(() -> new BusinessException(ErrorCode.MEMBER_NOT_FOUND));
+
+        // 면제 판정은 상태를 바꾸기 전에 — 나가면서 스스로 만든 봇방장 전환으로 자기 감점을 면제받으면 안 된다.
+        String exemptReason = resolveExemptReason(c, me, now);
+
+        // 방장이 넘기지 않고 나감 → 즉시 봇방장 체제 + 잔류 멤버에게 승계 알림
+        boolean botOwnerActivated = false;
+        if (c.isOwner(userId)) {
+            c.convertToBotOwner(now);
+            botOwnerActivated = true;
+            notifyBotOwnerActivated(c, userId);
+        }
+
+        Instant rejoinAt = now.plus(LEAVE_REJOIN_COOLDOWN);
+        me.leave(now, rejoinAt);
+        rejoinPolicy.voluntaryLeave(challengeId, userId, rejoinAt);
+        // 참여 인원 변화 → version 증가. decrementParticipantCount 는 clearAutomatically 라
+        // 그 뒤에서 부르면 c 가 준영속이 되어 증가가 조용히 사라진다(반드시 앞에서).
+        c.bumpVersion();
+        // 표시용 참여자 수는 커밋 뒤 원천에서 다시 센다 — 가입과 같은 이유다.
+        // 나간 방의 음소거는 설정 목록에 남을 이유가 없고, 재입장 시 되살아나면 안 된다.
+        muteCleaner.clearMute(userId, challengeId);
+        eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "LEAVE"));
+
+        // 중도 탈퇴 감점은 정액이 아니라 진행 기간에 반비례한다 — −⌈15 × (1 − 진행주간/52)⌉.
+        // 오래 해온 방일수록 가볍고, 1년을 채웠으면 면제다(점수 및 티어 정책 §4.8).
+        // 시작 전에 나가는 건 "중도" 이탈이 아니다 — 감점도 점수 이력도 남기지 않는다(2026-09-19 정책 확정).
+        // 상태 전환 배치가 조금 늦어도 시작일 전이면 시작 전으로 본다.
+        int scoreDelta = 0;
+        boolean beforeStart = c.isUpcoming() || LocalDate.now(KST).isBefore(c.getStartDate());
+        if (c.getPenalties().score() && !beforeStart) {
+            int completedWeeks = progressWeeks(me);
+            scoreDelta = exemptReason == null ? IncidentType.VOLUNTARY_LEAVE.deduction(completedWeeks) : 0;
+            String source = "leave:" + me.getId() + ":" + now;
+            outbox.enqueue(com.ruleup.ruleup_backend.score.service.LeaveScoreOutboxHandler.TYPE,
+                    new com.ruleup.ruleup_backend.score.service.LeaveScoreOutboxHandler.Payload(userId, challengeId,
+                            source, completedWeeks, "AUTO", scoreDelta, now), source);
+            outboxDispatcher.requestFlush();
+        }
+        log.info("challenge_leave challengeId={} userId={} penalty={} exempt={} beforeStart={} botOwner={}",
+                challengeId, userId, scoreDelta, exemptReason, beforeStart, botOwnerActivated);
+        return new LeaveResponse(true, scoreDelta, exemptReason, rejoinAt.toString(), botOwnerActivated);
+    }
+
+    // ===== 회원 탈퇴에 따른 일괄 정리 =====
+    /**
+     * 탈퇴하는 회원을 참여 중인 <b>모든</b> 방에서 내보낸다. 정리한 방 수를 반환.
+     *
+     * <p>멤버십을 그대로 두는 선택지도 있었지만, 인증하지 않는 유령 멤버가 남의 방 정원을 먹고
+     * 그 방은 "ACTIVE 멤버 0명" 유령방 삭제 대상에서도 빠져 영영 남는다 — 남은 참여자가 피해를 본다.
+     * 그래서 계정 복구(1년 내 재로그인) 시에도 방은 되돌아오지 않는다.
+     *
+     * <p>{@link #leave} 와 다른 점 셋:
+     * <ul>
+     *   <li>종료(COMPLETED)된 방도 정리한다 — 이건 사용자 행동이 아니라 계정 정리라 탈퇴 거부 규칙 밖이다.</li>
+     *   <li>중도 이탈 감점을 매기지 않는다 — 사라지는 계정에 점수를 남길 이유가 없고, 복구하면 억울해진다.</li>
+     *   <li>재입장 대기를 걸지 않는다 — 계정이 돌아와도 그 방으로는 안 돌아간다.</li>
+     * </ul>
+     * 방장이었으면 자진 탈퇴와 동일하게 봇방장으로 전환하고 잔류 멤버에게 알린다.
+     */
+    @Transactional
+    public int leaveAllForWithdrawal(UUID userId) {
+        return leaveAllExternally(userId, "VOLUNTARY");
+    }
+
+    @Transactional
+    public int leaveAllExternally(UUID userId, String reason) {
+        Instant now = Instant.now();
+
+        // 엔티티가 아니라 id 만 먼저 모은다 — 반복마다 새로 읽어 준영속 사고를 피한다.
+        List<UUID> challengeIds = memberRepository.findByUserIdAndStatus(userId, MemberStatus.ACTIVE)
+                .stream().map(ChallengeMember::getChallengeId).toList();
+
+        int left = 0;
+        for (UUID challengeId : challengeIds) {
+            Challenge c = challengeRepository.findByIdForUpdate(challengeId).orElse(null);
+            ChallengeMember me = memberRepository.findByChallengeIdAndUserId(challengeId, userId)
+                    .filter(ChallengeMember::isActive).orElse(null);
+            if (me == null) continue;
+            if (c == null) continue;   // 이미 삭제된 방 — 멤버 행도 곧 사라진다
+            if ("TIER_GATE".equals(reason)) {
+                if (c.getStatus() == ChallengeStatus.COMPLETED) continue;
+                var state = scoreSummaryRepository.findForUpdate(userId).orElseThrow();
+                if (c.getMinTier() == null || state.getDisplayTier().ordinal() >= c.getMinTier().ordinal()) continue;
+            }
+
+
+            if (c.isOwner(userId)) {
+                c.convertToBotOwner(now);
+                notifyBotOwnerActivated(c, userId);
+            }
+            me.leaveExternally(now, reason);       // rejoinAt=null — 재입장 대기 없음
+            c.bumpVersion();
+            muteCleaner.clearMute(userId, challengeId);
+            eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, reason));
+            left++;
+        }
+
+        // 계정이 사라지므로 참여 중이던 방·종료된 방을 가리지 않고 전부 정리한다.
+        if (!"TIER_GATE".equals(reason)) muteCleaner.clearMutesOfUser(userId);
+
+        if (left > 0) log.info("회원 탈퇴 정리 userId={} 나간 방 {}건", userId, left);
+        return left;
+    }
+
+    /**
+     * 감점 계산에는 판정이 끝난 유효 주간만 센다. 경과 시간이나 미완료/중립 주간은 포함하지 않는다.
+     */
+    private int progressWeeks(ChallengeMember me) {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM cycle_score_states WHERE user_id=? AND challenge_id=? AND closed_at IS NOT NULL AND cycle_result<>'INVALID'",
+                Integer.class, com.ruleup.ruleup_backend.score.ScoreKeys.bytes(me.getUserId()),
+                com.ruleup.ruleup_backend.score.ScoreKeys.bytes(me.getChallengeId()));
+    }
+
+    private String resolveExemptReason(Challenge c, ChallengeMember me, Instant now) {
+        LocalDate firstSuccess = verificationDailyRepository
+                .findEarliestDate(me.getId(), VerificationStatus.SUCCESS);
+        if (firstSuccess != null
+                && !firstSuccess.isAfter(LocalDate.now(KST).minusDays(LONG_SUCCESS_THRESHOLD.toDays()))) {
+            return LeaveResponse.EXEMPT_LONG_SUCCESS;
+        }
+        return null;
+    }
+
+    /** 봇방장 전환 사실을 잔류 ACTIVE 멤버 전원에게 알린다(선착순 클레임 유도). */
+    private void notifyBotOwnerActivated(Challenge c, UUID leavingUserId) {
+        // 봇방장 전환 통지는 폐지됐다 — 선착순 클레임이 사라지면서 알릴 행동이 없어졌다
+        // (챌린지 정책 §11, 알림 정책 2026-08-25). 방은 그대로 운영되고 수정만 불가해진다.
+    }
+
+    private BusinessException blocked(JoinBlockReason reason) {
+        return new BusinessException(ErrorCode.JOIN_BLOCKED, reason.name());
+    }
+
+
+    // ===== §7 멤버 목록 =====
+    @Transactional(readOnly = true)
+    public MemberListResponse listMembers(UUID viewerId, UUID challengeId) {
+        Challenge c = roomAuthority.requireMember(challengeId, viewerId);
+
+        // 승인제 폐기 — 현재 멤버(ACTIVE)만 반환. 탈퇴/제거(LEFT/REMOVED)는 목록에서 제외.
+        List<ChallengeMember> members =
+                memberRepository.findByChallengeIdAndStatusOrderByJoinedAtAsc(challengeId, MemberStatus.ACTIVE);
+
+        // 사용자/표시 티어 정보 일괄 조회 (N+1 방지)
+        List<UUID> userIds = members.stream().map(ChallengeMember::getUserId).toList();
+        Map<UUID, User> userMap = userRepository.findAllById(userIds).stream()
+                .collect(Collectors.toMap(User::getId, Function.identity()));
+        Map<UUID, com.ruleup.ruleup_backend.score.domain.Tier> tierMap = scoreSummaryRepository.findAllById(userIds)
+                .stream().collect(Collectors.toMap(s -> s.getUserId(), s -> s.getDisplayTier()));
+        Set<UUID> blockedUsers = blockService.blockedUsers(viewerId);
+
+        List<MemberListResponse.Member> dto = members.stream().map(m -> {
+            User u = userMap.get(m.getUserId());
+            boolean blocked = blockedUsers.contains(m.getUserId());
+            // 익명 챌린지(§11.2)면 닉네임 마스킹 + 프로필 사진 숨김. 그 외엔 본인 가시성 규칙 적용.
+            String visibleNick = (u != null) ? u.visibleNicknameTo(viewerId) : null;
+            String nickname = u == null ? null : blocked
+                    ? u.deriveTempNickname() : c.getAnonymity().maskNickname(visibleNick);
+            String profile = (u != null && !blocked && !c.getAnonymity().isAnonymous())
+                    ? u.visibleProfileImageTo(viewerId) : null;
+            return new MemberListResponse.Member(
+                    m.getUserId().toString(), nickname, profile,
+                    c.isOwner(m.getUserId()) ? "OWNER" : "MEMBER",
+                    tierMap.getOrDefault(m.getUserId(), com.ruleup.ruleup_backend.score.domain.Tier.UNRANKED).name(),
+                    m.getJoinedAt() != null ? m.getJoinedAt().toString() : null,
+                    blocked);
+        }).toList();
+
+        return new MemberListResponse(c.getId().toString(), members.size(), c.getMaxParticipants(),
+                c.getOwnerType().name(), dto);
+    }
+
+    // ===== 헬퍼 =====
+    private Challenge loadActive(UUID challengeId) {
+        return challengeRepository.findByIdAndDeletedAtIsNull(challengeId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
+    }
+
+    /** 표시 티어. 요약 행이 없거나 UNRANKED 면 BRONZE(가입 초기 티어) — 생성 경로와 동일 규칙. */
+    private Tier displayTier(UUID userId) {
+        Tier tier = scoreSummaryRepository.findById(userId)
+                .map(s -> s.getDisplayTier()).orElse(Tier.BRONZE);
+        return (tier == Tier.UNRANKED) ? Tier.BRONZE : tier;
+    }
+
+
+    /**
+     * 가입 <b>사건</b>을 남긴다. 멤버십은 사람당 한 줄인 상태라 여러 번의 가입을 담을 수 없다 —
+     * 인기 점수가 보는 「최근 24시간 신규 참여」는 이 표가 센다.
+     *
+     * <p>같은 트랜잭션 안이다. 이건 파생값이 아니라 <b>일어난 일의 기록</b>이라, 가입이 커밋됐는데
+     * 사건이 없거나 그 반대인 상태가 생기면 인기 점수를 원천에서 복원할 수 없다.
+     */
+    private void recordJoinEvent(UUID challengeId, UUID userId) {
+        jdbc.update("INSERT INTO challenge_join_events (id, challenge_id, user_id) VALUES (?, ?, ?)",
+                uuidBytes(com.ruleup.ruleup_backend.common.UuidGenerator.generate()),
+                uuidBytes(challengeId), uuidBytes(userId));
+    }
+
+    private static byte[] uuidBytes(UUID id) {
+        java.nio.ByteBuffer bb = java.nio.ByteBuffer.allocate(16);
+        bb.putLong(id.getMostSignificantBits());
+        bb.putLong(id.getLeastSignificantBits());
+        return bb.array();
+    }
+}

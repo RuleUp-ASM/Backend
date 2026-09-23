@@ -1,0 +1,85 @@
+package com.ruleup.ruleup_backend.me.service;
+
+import com.ruleup.ruleup_backend.challenge.service.ChallengeTitleResolver;
+import com.ruleup.ruleup_backend.me.dto.MeTierResponse;
+import com.ruleup.ruleup_backend.score.repository.ScoreTransactionRepository;
+import com.ruleup.ruleup_backend.score.repository.UserScoreSummaryRepository;
+import com.ruleup.ruleup_backend.score.domain.ScoreTransaction;
+import com.ruleup.ruleup_backend.score.domain.Tier;
+import com.ruleup.ruleup_backend.score.domain.TierBands;
+import com.ruleup.ruleup_backend.score.domain.UserScoreSummary;
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+/**
+ * 내 티어 상세(GET /me/tier). 점수를 <b>계산하지 않고</b> 요약 테이블과 변동 원장을 읽어 조립만 한다 —
+ * 승강급 판정은 티어 모듈 소관이다(Non-Goals).
+ */
+@Service
+@RequiredArgsConstructor
+@Transactional(readOnly = true)
+public class MeTierService {
+
+    /** 최근 변동으로 내리는 건수 — API 계약 고정값. */
+    private static final int RECENT_CHANGES = 10;
+
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+
+    private final UserScoreSummaryRepository summaryRepository;
+    private final ScoreTransactionRepository transactionRepository;
+    private final ChallengeTitleResolver challengeTitles;
+    private final ScoreChangeView changeView;
+
+    public MeTierResponse tier(UUID userId) {
+        // 요약이 아직 없는 계정(구 데이터)은 가입 초기값과 같은 상태로 본다 — 빈 화면 대신 브론즈 10점.
+        UserScoreSummary summary = summaryRepository.findById(userId)
+                .orElseGet(() -> UserScoreSummary.initialize(userId));
+
+        long score = summary.getTotalScore();
+        Tier display = summary.getDisplayTier();
+
+        return new MeTierResponse(
+                summary.getActualTier().name(), score, display.name(),
+                TierBands.isInGraceBand(score, display),
+                promotion(summary.getActualTier(), score),
+                demotion(display),
+                recentChanges(userId));
+    }
+
+    /** 승급 안내는 <b>실제 티어</b> 기준이다 — 표시 티어가 유예로 남아 있어도 올라갈 곳은 실제 티어의 다음이다. */
+    private MeTierResponse.Promotion promotion(Tier actual, long score) {
+        Tier next = TierBands.next(actual);
+        if (next == null) return null;   // 루비 — 더 올라갈 곳이 없다
+        return new MeTierResponse.Promotion(next.name(), TierBands.pointsToPromote(score, next));
+    }
+
+    /** 강등 안내는 <b>표시 티어</b> 기준이다 — 유예 하한도 강등 확정선도 표시 티어의 시작점에서 나온다. */
+    private MeTierResponse.Demotion demotion(Tier display) {
+        if (!TierBands.hasDemotion(display)) return null;   // 브론즈 — 더 내려갈 티어가 없다
+        return new MeTierResponse.Demotion(TierBands.graceFloor(display), TierBands.demoteAt(display));
+    }
+
+    /**
+     * 최근 변동. 챌린지명을 <b>한 번에</b> 모아 붙인다 — 항목마다 방을 조회하면 10번의 추가 쿼리가
+     * 나가고, 완료 방은 이미 삭제돼 그중 절반은 결과도 없다.
+     */
+    private List<MeTierResponse.Change> recentChanges(UUID userId) {
+        List<ScoreTransaction> transactions =
+                transactionRepository.findRecent(userId, PageRequest.of(0, RECENT_CHANGES));
+        Map<UUID, String> titles = challengeTitles.titlesOf(userId,
+                transactions.stream().map(ScoreTransaction::getChallengeId).toList());
+        return transactions.stream()
+                .filter(changeView::renderable)
+                .map(t -> changeView.toChange(t, titles))
+                .toList();
+    }
+
+}

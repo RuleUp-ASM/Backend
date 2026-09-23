@@ -1,0 +1,76 @@
+package com.ruleup.ruleup_backend.common.error;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
+
+/**
+ * 모든 에러 응답의 공통 본문 (테크 스펙 3.5).
+ * 예: { "code": "NICKNAME_DUPLICATED", "message": "이미 사용 중인 닉네임입니다." }
+ * reason: 클라이언트 분기용 선택 필드(예: JOIN_BLOCKED → PRIVATE_INVITE_ONLY/FULL/TIER_GATE). 없으면 직렬화 생략.
+ *
+ * <p>아래 둘은 "그 코드를 받은 클라가 곧바로 다음 행동을 정할 수 있어야 하는" 값이라 본문에 함께 싣는다.
+ * 해당 코드가 아니면 필드 자체가 직렬화되지 않는다.
+ *  - rejoinAvailableAt      : JOIN_BLOCKED + REJOIN_COOLDOWN — 재입장 가능 시각
+ *  - nextChangeAvailableAt  : SETTING_CHANGE_LIMIT — 다음 변경 가능 시각(다음 달 1일 00:00 KST)
+ *  - confirmation           : CONFIRMATION_REQUIRED — 2단계 확인 봉투. **서버가 계산한 재제시 문구**와
+ *    그 확인에 한해 유효한 토큰이 함께 들어 있어, 클라가 문구를 조립하지 않고 그대로 띄운다
+ *  - retryAfterSeconds      : 429 — 다시 시도할 수 있을 때까지 남은 초
+ */
+@JsonInclude(JsonInclude.Include.NON_NULL)
+@io.swagger.v3.oas.annotations.media.Schema(description = "에러 상세. 분기는 code 로 하고, message 는 사용자에게 그대로 보여줄 수 있다.")
+public record ErrorResponse(
+
+        @io.swagger.v3.oas.annotations.media.Schema(description = "에러 코드 — 클라이언트 분기 키", example = "NICKNAME_DUPLICATED")
+        String code,
+
+        @io.swagger.v3.oas.annotations.media.Schema(description = "사용자 안내 문구", example = "이미 사용 중인 닉네임입니다.")
+        String message,
+
+        @io.swagger.v3.oas.annotations.media.Schema(description = "세부 사유 — 해당 코드에만 실린다. 없으면 필드가 생략된다.")
+        String reason,
+
+        @io.swagger.v3.oas.annotations.media.Schema(description = "재참여 가능 시각 — JOIN_BLOCKED + REJOIN_COOLDOWN 일 때만 실린다.")
+        String rejoinAvailableAt,
+
+        @io.swagger.v3.oas.annotations.media.Schema(
+                description = "다음 변경 가능 시각(ISO-8601, KST) — SETTING_CHANGE_LIMIT 일 때만 실린다.",
+                example = "2026-09-01T00:00:00+09:00")
+        String nextChangeAvailableAt,
+
+        @io.swagger.v3.oas.annotations.media.Schema(
+                description = """
+                        2단계 확인 봉투 — CONFIRMATION_REQUIRED 일 때만 실린다.
+                        토큰 · 만료 · 대상 · 집행 내용 · 해제 예정 · 부수 효과가 함께 들어 있다.""")
+        Confirmation confirmation,
+
+        @io.swagger.v3.oas.annotations.media.Schema(description="통합 프로필 변경 잠금 해제 시각")
+        String profileLockedUntil,
+
+        @io.swagger.v3.oas.annotations.media.Schema(
+                description = "다시 시도할 수 있을 때까지 남은 초 — 429 일 때만 실린다.",
+                example = "42")
+        Integer retryAfterSeconds) {
+
+    public ErrorResponse(String code,String message,String reason,String rejoinAvailableAt,String nextChangeAvailableAt,Confirmation confirmation) {
+        this(code,message,reason,rejoinAvailableAt,nextChangeAvailableAt,confirmation,null,null);
+    }
+
+    public static ErrorResponse of(ErrorCode errorCode) {
+        return new ErrorResponse(errorCode.name(), errorCode.getMessage(), null, null, null, null);
+    }
+
+    public static ErrorResponse of(ErrorCode errorCode, String reason) {
+        return new ErrorResponse(errorCode.name(), errorCode.getMessage(), reason, null, null, null);
+    }
+
+    /**
+     * 예외가 실어 보낸 부가 필드까지 그대로 옮긴다. 없는 값은 null 이라 직렬화에서 빠진다.
+     * message 는 예외가 상황에 맞춰 채운 문구가 있으면 그것을 쓴다(없으면 ErrorCode 기본 문구).
+     * code 는 언제나 ErrorCode 이름 그대로라 클라이언트 분기는 영향받지 않는다.
+     */
+    public static ErrorResponse of(BusinessException e) {
+        ErrorCode code = e.getErrorCode();
+        return new ErrorResponse(code.name(), e.getUserMessage(),
+                e.getDetail(), e.getRejoinAvailableAt(), e.getNextChangeAvailableAt(),
+                e.getConfirmation(), e.getProfileLockedUntil(), e.getRetryAfterSeconds());
+    }
+}

@@ -1,3 +1,346 @@
 spring:
   application:
     name: ruleup-backend
+
+  # Jackson 3 기본은 누락/null 원시값(boolean 등) 역직렬화 실패. 계약상 일부 필드(예: penalty.groupShare)는
+  # 생략 가능하므로, 누락/null 원시값은 기본값으로 받아들이도록 완화한다(요청 본문 호환).
+  jackson:
+    deserialization:
+      fail-on-null-for-primitives: false
+
+  # 종료 예산. 컨테이너의 stopTimeout(60초)보다 짧게 잡아야 의미가 있다 —
+  # 이 값을 넘기면 어차피 SIGKILL 이라 "기다렸는데 잘리는" 최악이 된다.
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+  task:
+    scheduling:
+      # 확정 배치·정산·파기처럼 @Scheduled 로 도는 작업이 많다. 종료 시 스케줄러를 곧바로
+      # 끊으면 그 작업이 중간에 죽는데, 대부분 청크 트랜잭션이라 롤백은 깨끗해도 그만큼
+      # 다음 주기까지 처리가 밀린다. 짧게 기다려 진행 중인 한 사이클만 마치게 한다.
+      shutdown:
+        await-termination: true
+        await-termination-period: 20s
+
+  datasource:
+    # 접속 주소는 env(DB_URL)로 주입한다. 미설정 시 로컬 기본값(localhost)으로 폴백.
+    #  · 운영(RDS): DB_URL=jdbc:mysql://<rds-endpoint>:3306/RuleUp7?serverTimezone=UTC&characterEncoding=UTF-8&rewriteBatchedStatements=true&sslMode=REQUIRED
+    #  · 로컬: env 미설정이면 아래 기본값 사용. RuleUp7 리베이스라인 DB — 없으면 자동 생성.
+    url: ${DB_URL:jdbc:mysql://localhost:3306/RuleUp7?serverTimezone=UTC&characterEncoding=UTF-8&rewriteBatchedStatements=true&createDatabaseIfNotExist=true}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    hikari:
+      # 동시 로그인이 몰릴 때 기본값(10)으로는 DB 커넥션이 말라 지연될 수 있어 명시.
+      # 토큰 발급마다 refresh_tokens write가 일어나므로 여유를 둔다.
+      maximum-pool-size: 20
+      minimum-idle: 5
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+      naming:
+        physical-strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  # 캐시는 Caffeine(JVM 로컬). 캐시 매니저는 CacheConfig(@Profile("!test"))가 명시적으로 구성한다.
+  #
+  # Redis 는 캐시가 아니라 **탐색 파생 인덱스의 저장소**로 쓴다(정렬 ZSET·표시 HASH·필터 SET).
+  # 인스턴스 로컬 캐시로는 서버가 늘 때 순위가 서로 달라져 커서 페이징이 깨지기 때문이다.
+  # 미배포 환경에서는 회로차단기가 열려 MySQL 폴백으로 돌므로 기동에 영향이 없다.
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      # 명령 타임아웃은 짧게 — 탐색 조회가 Redis 를 기다리며 늘어지면 그건 장애를 지연으로
+      # 바꾸는 것뿐이다. 느리면 빨리 포기하고 회로를 열어 503 으로 드러낸다.
+      timeout: ${REDIS_TIMEOUT:500ms}
+      # <b>연결</b> 타임아웃은 그럴 수 없다. 기동 직후 워밍업은 JVM 이 아직 차가운 상태에서
+      # DNS 조회·TCP·Lettuce 핸드셰이크를 한꺼번에 하는데, 500ms 로는 그 한 번을 못 넘긴다 —
+      # 실제로 배포할 때마다 워밍업이 여기서 실패해 회로가 열렸고, 5분 스윕이 다시 시도할
+      # 때까지 탐색이 503 이었다. 연결은 커넥션마다 한 번뿐이라 넉넉히 줘도 요청 지연에
+      # 더해지지 않는다 — 명령이 느려지는 것은 위의 timeout 이 따로 막는다.
+      connect-timeout: ${REDIS_CONNECT_TIMEOUT:3000ms}
+
+  servlet:
+    multipart:
+      max-file-size: 10MB     # 프로필 사진 10MB 제한 (스펙)
+      max-request-size: 11MB
+
+# Redis 헬스체크는 끈다. 탐색은 Redis 없이도 폴백으로 정상 동작하는데, 여기서 DOWN 이 되면
+# Redis 미배포 환경의 태스크가 헬스체크 실패로 재시작 루프에 빠진다.
+# 폴백 여부는 explore_redis_circuit_open 게이지로 본다.
+management:
+  health:
+    redis:
+      enabled: ${REDIS_HEALTH_CHECK:false}
+
+# 우리 앱 전용 설정 (외부에서 받는 값은 전부 .env에서 주입)
+app:
+  moderation:
+    local: ${MODERATION_LOCAL:false}
+    user-queue-url: ${USER_MODERATION_QUEUE_URL:}
+    queue:
+      url: ${MODERATION_QUEUE_URL:}
+      region: ${AWS_REGION:ap-northeast-2}
+      endpoint: ${MODERATION_QUEUE_ENDPOINT:}
+
+  auth:
+    refresh-token-cleanup:
+      # 일반 만료·폐기 RT는 운영·장애 확인용으로 30일, reuse_detected 보안 흔적은 180일 보관한다.
+      ordinary-retention-days: ${REFRESH_TOKEN_ORDINARY_RETENTION_DAYS:30}
+      reuse-detected-retention-days: ${REFRESH_TOKEN_REUSE_RETENTION_DAYS:180}
+      # 대량 DELETE 락을 짧게 유지하기 위한 청크와 일일 상한(유형별 최대 10만 건).
+      batch-size: ${REFRESH_TOKEN_CLEANUP_BATCH_SIZE:1000}
+      max-batches-per-type: ${REFRESH_TOKEN_CLEANUP_MAX_BATCHES:100}
+      cron: "${REFRESH_TOKEN_CLEANUP_CRON:0 30 4 * * *}"
+  jwt:
+    secret: ${JWT_SECRET}
+    access-token-ttl: 1800        # 30분 (초)
+    refresh-token-ttl: 604800    # 7일 (60*60*24*7)
+    # 온보딩 6단계(약관 5종 열람 포함)를 보통 속도로 마치면 8분이 걸린다 — 5분이면 정상 사용자가
+    # 마지막 '시작하기'에서 400 INVALID_SIGNUP_TOKEN 을 맞고 닉네임·생일·성별·관심사·동의가 전부 날아간다(QA ONB-18).
+    signup-token-ttl: ${SIGNUP_TOKEN_TTL:1800}   # 30분
+  # 인증 운영 상수. 반경은 유저가 정하는 값이 아니라 서버 단일값이라 요청에 없고 응답의 serverRadiusM으로만 내려간다.
+  verification:
+    geofence-radius-m: ${VERIFICATION_GEOFENCE_RADIUS_M:500}     # 잠정 500m — 성능 테스트 후 조정
+    max-payload-bytes: ${VERIFICATION_MAX_PAYLOAD_BYTES:1048576} # sync 1회 상한(클라가 이 값으로 구간을 쪼갠다)
+
+    # --- 신호 신뢰 게이트 (기본 꺼짐) --------------------------------------
+    # 둘 다 스펙이 요구하는 검증인데 기본값이 false 다. 켜는 순간 필드를 보내지 않는 앱이
+    # 인증 불가가 되기 때문이고, 지금 안드로이드가 실제로 보내지 않고 있다(stg 실측).
+    # 값이 여기 적혀 있어야 「왜 꺼져 있는지」와 「언제 켜는지」가 코드 밖에서도 보인다.
+    #
+    # require-active-device: sync 요청에 deviceId 를 강제한다.
+    #   없으면 400 INVALID_SIGNAL_PAYLOAD 로 요청 전체를 반려하고, 계정에 활성 기기가
+    #   등록돼 있지 않으면 신호를 판정에 쓰지 않는다(모르면 쓰지 않는다).
+    #   켜는 조건 → verification.sync.device_id_missing 과
+    #              verification.sync.active_device_unknown 이 둘 다 0 으로 떨어질 것.
+    #
+    # require-signal-origin: 수면 기록에 출처 메타데이터를 강제한다.
+    #   없으면 그 세그먼트를 판정에서 뺀다 — 출처를 안 보내는 앱은 수면 인증이 전부 실패한다.
+    #   켜는 조건 → 수면 신호에 origin 이 실려 오는 것을 실제 트래픽에서 확인할 것.
+    require-active-device: ${VERIFICATION_REQUIRE_ACTIVE_DEVICE:false}
+    require-signal-origin: ${VERIFICATION_REQUIRE_SIGNAL_ORIGIN:false}
+
+  # 추천 세그먼트 점수 윈도우 배치 튜닝(SegmentScoreService, 매일 04:00 KST).
+  recommendation:
+    segment-window-days: ${RECO_SEGMENT_WINDOW_DAYS:30}        # 최근 N일 생성 챌린지만 인기도 집계
+    # 루틴 아웃컴 수집 배치(RoutineOutcomeCollector, 매일 03:30 KST). 첫 수집 시 최근 N일치 소급.
+    outcome-lookback-days: ${RECO_OUTCOME_LOOKBACK_DAYS:30}
+
+  # 탐색 파생 인덱스(Redis). 끄면 처음부터 MySQL 경로로만 돈다.
+  explore:
+    redis:
+      enabled: ${EXPLORE_REDIS_ENABLED:true}
+      # 회로가 열린 뒤 다시 Redis 를 찔러 보기까지의 시간.
+      open-duration-ms: ${EXPLORE_REDIS_OPEN_MS:30000}
+
+  # 발행 대기함 스윕 주기. 즉시 경로가 죽었을 때 이 간격만큼이 최대 지연이다.
+  outbox:
+    sweep-interval-ms: ${OUTBOX_SWEEP_INTERVAL_MS:30000}
+
+  # 앱링크(딥링크) — 발급과 검사가 같은 규칙을 써야 하므로 베이스 URL 을 한 곳에 둔다.
+  # 커스텀 스킴(ruleup://)도 같은 경로 규칙을 공유한다.
+  app-links:
+    base-url: ${APP_LINK_BASE_URL:https://android.ruleup.co.kr}
+    scheme: ${APP_LINK_SCHEME:ruleup}
+
+  # 운영자 콘솔(백오피스) 진입. **비밀번호는 서버에만 둔다** — 프론트 env 에 넣으면 번들에 실려
+  # 접근 통제가 성립하지 않는다. 비어 있으면 로그인 자체가 불가능하다(미설정 = 비활성).
+  # operator-id 는 비워 두면 서버가 운영자 롤(users.role='OPERATOR') 계정을 찾아 쓴다.
+  admin:
+    passcode: ${ADMIN_PASSCODE:}
+    operator-id: ${ADMIN_OPERATOR_ID:}
+
+  # 개발용 토큰 발급. 시크릿이 비어 있으면 헤더가 무엇이든 404 라, 미설정이 곧 비활성이다.
+  # prod 프로필에서는 빈 자체가 등록되지 않는다(@Profile("!prod")).
+  dev-tokens:
+    secret: ${DEV_TOKEN_SECRET:}
+
+  # 시연·개발 확인용 요청 로그(devlog 패키지). 요청 한 건을 콘솔에 한 덩어리로 찍는다.
+  # 임시 코드다 — 필요 없어지면 끄지 말고 devlog 패키지와 이 블록을 함께 지운다.
+  request-log:
+    enabled: ${APP_REQUEST_LOG_ENABLED:true}
+    body: ${APP_REQUEST_LOG_BODY:true}      # 요청·응답 본문까지 찍을지
+    max-body: ${APP_REQUEST_LOG_MAX_BODY:2000}   # 본문 잘라내는 길이(자)
+
+  # 시스템 자원 지표 샘플러(SystemMetricsSampler, 개발기간 관찰용). test 프로파일에선 비활성.
+  observability:
+    metrics:
+      sample-interval-ms: ${SYS_METRICS_INTERVAL_MS:60000}     # 수집 주기(기본 60초)
+      retention-days: ${SYS_METRICS_RETENTION_DAYS:14}         # 스냅샷 보관 일수(초과분 정리)
+  oauth:
+    http:
+      # OAuth 로그인은 토큰 교환 + 사용자 조회 2회 직렬 호출이다. 풀 고갈/IdP 지연에 무한정 매달리지 않도록
+      # 각 단계 제한 시간을 분리한다. Duration 형식(예: 500ms, 3s)으로 운영 환경에서 조정 가능하다.
+      connection-request-timeout: ${OAUTH_CONNECTION_REQUEST_TIMEOUT:1s}
+      connect-timeout: ${OAUTH_CONNECT_TIMEOUT:3s}
+      response-timeout: ${OAUTH_RESPONSE_TIMEOUT:3s}
+    kakao:
+      client-id: ${KAKAO_REST_API_KEY}
+      client-secret: ${KAKAO_CLIENT_SECRET}
+      redirect-uri: ${KAKAO_REDIRECT_URI:}
+    google:
+      client-id: ${GOOGLE_CLIENT_ID}
+      client-secret: ${GOOGLE_CLIENT_SECRET:}
+      redirect-uri: ${GOOGLE_REDIRECT_URI:}
+    # 서버 콜백(/login/{provider}/callback)이 인가코드를 앱으로 넘길 커스텀 스킴 딥링크.
+    # iOS는 카카오가 요구하는 https redirect를 앱이 직접 못 잡으므로 서버가 중계한다.
+    app-redirect-uri: ${APP_OAUTH_REDIRECT_URI:ruleup://login/callback}
+  llm:
+    # 활성 LLM provider. fallback(기본) | gemini | bedrock. env(LLM_PROVIDER)로 스위치.
+    #  · fallback → FallbackLlmClient 활성. Gemini 우선 호출, 실패(null) 시 Bedrock Nova 로 폴백.
+    #  · gemini   → GeminiClient 단독(Google Gemini)
+    #  · bedrock  → BedrockNovaClient 단독(AWS Bedrock Nova, 자격증명=ECS 태스크 역할)
+    provider: ${LLM_PROVIDER:fallback}
+    gemini:
+      api-key: ${GEMINI_API_KEY:}                  # 비밀키만 env (없어도 기동은 됨, 호출 시에만 필요)
+      model: ${GEMINI_MODEL:gemini-3.1-flash-lite} # 모델 업그레이드는 코드 변경 없이 env 로(예: 최신 Flash/Flash-Lite)
+      base-url: https://generativelanguage.googleapis.com/v1beta
+      timeout-ms: ${GEMINI_TIMEOUT_MS:10000}       # connect·read 공통(재시도와 곱해지므로 과도하게 올리지 말 것)
+      max-retries: ${GEMINI_MAX_RETRIES:2}         # 503(UNAVAILABLE)·429·타임아웃 시 재시도 횟수
+      retry-backoff-ms: ${GEMINI_RETRY_BACKOFF_MS:300}  # 지수 백오프 base (300→600→1200ms)
+    bedrock:
+      region: ${BEDROCK_REGION:ap-northeast-2}     # 서울(Bedrock·모델 승인이 된 리전)
+      model-id: ${BEDROCK_MODEL_ID:apac.amazon.nova-lite-v1:0}  # Nova Lite APAC 크로스리전 추론 프로파일
+      timeout-ms: ${BEDROCK_TIMEOUT_MS:8000}       # Converse 총 호출 타임아웃
+      max-retries: ${BEDROCK_MAX_RETRIES:2}        # 쓰로틀 재시도 횟수
+      retry-backoff-ms: ${BEDROCK_RETRY_BACKOFF_MS:300}
+
+  # 장소 검색 프록시(§5.2 NEARBY_BRAND 앵커 바인딩). 키 없으면 빈 결과(graceful).
+  places:
+    naver:
+      base-url: https://openapi.naver.com
+      client-id: ${NAVER_CLIENT_ID:}               # 발급 후 주입(없으면 검색 빈 결과)
+      client-secret: ${NAVER_CLIENT_SECRET:}
+      timeout-ms: 3000
+
+  # 이미지 저장소. 바깥 주소는 어느 쪽이든 /files/{파일명} 으로 같고, 바이트가 놓이는 곳만 바뀐다.
+  #  · local — 로컬 디스크. 개발·테스트 기본값.
+  #            **운영에서 쓰면 안 된다.** Fargate 디스크는 임시라 배포마다 업로드본이 사라진다.
+  #  · s3    — ElastiCache 와 달리 폴백이 없다. 버킷을 지정하지 않으면 기동에 실패한다(조용히
+  #            로컬로 떨어지면 배포마다 사진이 사라지는 것을 아무도 모른 채 지나간다).
+  upload:
+    storage: ${IMAGE_STORAGE:local}
+    dir: ./uploads
+    s3:
+      bucket: ${IMAGE_S3_BUCKET:}
+      # 버킷 안 정리·수명주기용 접두사. 바깥 주소에는 드러나지 않으므로 나중에 바꿔도 안전하다.
+      key-prefix: ${IMAGE_S3_PREFIX:media}
+      # 리전을 비우면 기본 provider 체인(ECS 는 AWS_REGION)에서 읽는다.
+      region: ${IMAGE_S3_REGION:}
+      # 실제 AWS 면 비워 둔다. LocalStack·MinIO 로 띄울 때만 채운다(path-style 이 함께 켜진다).
+      endpoint: ${IMAGE_S3_ENDPOINT:}
+      # presigned GET 수명. 짧을수록 유출 창이 작지만, 너무 짧으면 목록을 스크롤하는 동안 만료된다.
+      presign-ttl-seconds: ${IMAGE_S3_PRESIGN_TTL_SECONDS:300}
+
+  # 알림 푸시 대기열 — SQS 표준 큐.
+  #  · url 을 비우면 큐 구현이 만들어지지 않고 **푸시가 나가지 않는다.** 적재는 정상이므로
+  #    알림 센터와 법적 고지는 그대로 동작한다(공통 3절이 푸시 유실을 허용한다).
+  #  · FIFO 를 쓰지 않는다. 그룹당 처리량 제한이 있고, 알림 센터가 id 정렬이라 화면 순서는
+  #    이미 보장된다 — 트레이 순서가 몇 초 섞이는 것은 수용한다.
+  #  · 자격증명은 기본 provider 체인(ECS 태스크 역할)이다. access-key/secret-key 는
+  #    LocalStack 으로 띄울 때만 채운다.
+  notification:
+    queue:
+      url: ${NOTIFICATION_QUEUE_URL:}
+      region: ${NOTIFICATION_QUEUE_REGION:}
+      endpoint: ${NOTIFICATION_QUEUE_ENDPOINT:}
+      access-key: ${NOTIFICATION_QUEUE_ACCESS_KEY:}
+      secret-key: ${NOTIFICATION_QUEUE_SECRET_KEY:}
+
+  # 스토어 심사 계정 — <b>자동 제재에서만</b> 뺀다(쉼표로 구분한 사용자 UUID).
+  #
+  # 심사자는 소셜 로그인만 쓸 수 있어 계정을 직접 만들 수 없다. 온보딩까지 끝낸 전용 계정을
+  # 넘겨야 하는데, 정책을 그대로 적용하면 연속 실패로 강퇴되고 30일이면 휴면으로 챌린지가
+  # 정리된다 — 다음 심사 때 보여 줄 것이 없어진다.
+  #
+  # 표도 열도 만들지 않는다. 어느 계정이 심사용인가는 사용자의 속성이 아니라 환경 설정이고,
+  # 심사 반려로 급히 바꿔야 할 때 코드 배포 없이 값만 바꿔 태스크를 새로 띄우면 된다.
+  # 비어 있으면 아무도 면제되지 않으므로 평소 동작은 그대로다.
+  #
+  # 심사가 끝나면 <b>값을 지워야 한다.</b> 만료가 없다.
+  review-accounts: ${REVIEW_ACCOUNT_IDS:}
+
+  # 감시자(§11.4). 연락처 암호화 키는 prod 필수(Secrets Manager), 로컬은 미설정 시 임시 키로 동작.
+  watcher:
+    contact-secret: ${WATCHER_CONTACT_SECRET:}
+    invite-base-url: ${WATCHER_INVITE_BASE_URL:https://ruleup.app}
+
+  # 고스트(무음) 푸시 — FCM. 자격증명(서비스 계정) 없으면 enabled=false → LoggingPushSender 스텁으로 폴백
+  # (로컬/CI/테스트 기동 무영향). 활성 시 FcmPushSender(@Primary)가 실제 전송.
+  fcm:
+    enabled: ${FCM_ENABLED:false}
+    project-id: ${FCM_PROJECT_ID:}
+    credentials-path: ${FCM_CREDENTIALS_PATH:}   # 서비스계정 JSON 파일 경로(마운트)
+    credentials-json: ${FCM_CREDENTIALS_JSON:}   # 또는 원문 JSON(Secrets Manager 주입)
+
+  # 앱 버전 게이트 (GET /intro). 배포 환경마다 env로 바꿔 끼운다.
+  client:
+    # 강제 업데이트 판정은 플랫폼별로 한다(스토어 심사 주기·버전 체계가 달라 최소 버전이 갈린다).
+    android:
+      min-version-code: ${MIN_APP_VERSION_CODE_ANDROID:1}   # 이 코드 미만이면 강제 업데이트
+      min-app-version: ${MIN_APP_VERSION_ANDROID:1.0.0}     # 화면 표시용 최소 버전명
+    ios:
+      min-version-code: ${MIN_APP_VERSION_CODE_IOS:1}
+      min-app-version: ${MIN_APP_VERSION_IOS:1.0.0}
+    dev-test-msg: ${DEV_TEST_MSG:}                 # 점검/안내 메시지 (없으면 빈값 → null)
+    # 현행 약관 버전. 인트로 응답 + 가입 동의 이력의 서버 기준값(클라 하드코딩 방지).
+    terms-versions:
+      terms-of-service: ${TERMS_VERSION_TOS:1.0}
+      privacy-policy: ${TERMS_VERSION_PRIVACY:1.0}
+      location-service: ${TERMS_VERSION_LOCATION:1.0}
+      marketing: ${TERMS_VERSION_MARKETING:1.0}
+      event: ${TERMS_VERSION_EVENT:1.0}
+      location-info: ${TERMS_VERSION_LOCATION_INFO:1.0}
+      health-info: ${TERMS_VERSION_HEALTH_INFO:1.0}
+
+  # 밴리스트 해시 솔트. 바꾸면 기존 영구 정지 차단이 전부 풀리므로 로테이션 시 재해시가 선행돼야 한다.
+  security:
+    ban-salt: ${BAN_LIST_SALT:ruleup-local-ban-salt}
+
+
+  # 리버스 프록시(EC2 + Cloudflare 터널) 뒤에서 Swagger Try-it-out이 정확한 주소로 가도록.
+  # 로컬은 비워두고, EC2에서만 systemd 환경변수로 채운다: SWAGGER_SERVER_URL=https://<도메인>
+  swagger:
+    server-url: ${SWAGGER_SERVER_URL:}
+
+# Swagger / OpenAPI 문서 설정
+springdoc:
+  # 문서에 표시할 기본 미디어 타입. 컨트롤러에 produces 를 안 붙이면 응답이 */* 로 그려져
+  # "이게 JSON인가?"를 문서만 보고 알 수 없다. 문서 표기용 설정이라 런타임 협상에는 영향이 없다.
+  default-produces-media-type: application/json
+  swagger-ui:
+    enabled: true                 # 운영에서 닫고 싶으면 false (또는 SPRINGDOC_SWAGGER_UI_ENABLED=false)
+    path: /swagger-ui.html        # 접속 주소
+    operations-sorter: method
+    tags-sorter: as-is            # 태그 순서는 OpenApiConfig 가 정한다(앱 호출 순서) — 알파벳 정렬 금지
+    doc-expansion: none           # 처음엔 태그만 접힌 채로 — 엔드포인트가 많아 전부 펼치면 못 읽는다
+    display-request-duration: true
+  api-docs:
+    enabled: true                 # 문서(JSON)까지 닫으려면 false
+    path: /v3/api-docs
+
+
+logging:
+  level:
+    # 기본 유저는 우리 설정상 쓸 수 없으니, 'generated password' 경고만 숨김
+    org.springframework.boot.security.autoconfigure: error
+    org.springframework.boot.autoconfigure.security: error
+
+server:
+  forward-headers-strategy: framework
+  # SIGTERM 을 받으면 <b>진행 중인 요청을 끝내고</b> 내려간다. 기본값(immediate)은 그 자리에서
+  # 커넥터를 닫아 버려, 배포·Spot 회수·스케일인 때마다 처리 중이던 요청이 그대로 잘린다.
+  # ALB 의 deregistration_delay 는 <b>새 요청</b>만 막아 줄 뿐 이미 들어온 요청은 보호하지 못한다.
+  shutdown: graceful
+  # 요청·응답 charset 을 UTF-8 로 못 박는다(CharacterEncodingFilter).
+  # JSON 은 규격상 UTF-8 이지만 Content-Type 에 charset 이 없으면 latin1 로 디코딩하는
+  # 클라이언트가 아직 있어서, 한글이 깨져 보이는 사고의 단골 원인이 된다.
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true

@@ -1,0 +1,856 @@
+package com.ruleup.ruleup_backend.watcher;
+
+import com.ruleup.ruleup_backend.TestcontainersConfiguration;
+import com.ruleup.ruleup_backend.challenge.ChallengeApiSupport;
+import com.ruleup.ruleup_backend.notification.repository.NotificationRepository;
+import com.ruleup.ruleup_backend.notification.domain.NotificationType;
+import com.ruleup.ruleup_backend.watcher.domain.*;
+import com.ruleup.ruleup_backend.watcher.repository.*;
+import com.ruleup.ruleup_backend.watcher.service.WatcherBatch;
+import com.ruleup.ruleup_backend.watcher.service.WatcherNoticeService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.Limit;
+import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.WebApplicationContext;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+
+/**
+ * 감시자 — 패널티 감시자 공통 5-2·5-3·5-5, 백엔드 4-1·4-2.
+ *
+ * <p>설계 전체가 <b>두 개의 절대 가드레일</b>에서 나온다.
+ * <ol>
+ *   <li><b>PENDING 상태에 발송 0건</b> — 동의하지 않은 사람에게 보내면 위법이다</li>
+ *   <li><b>이의 기간 종료 전 발송 0건</b> — 인용될 수 있는 실패로 망신을 주면 복구가 안 된다</li>
+ * </ol>
+ *
+ * <p>세 번째 축은 <b>연락처를 수집하지 않는다</b>는 것이다. 마스킹이나 암호화가 아니라
+ * <b>스키마에 자리를 두지 않는 방식</b>으로 막으므로, 컬럼 부재 자체를 테스트한다.
+ */
+@SpringBootTest
+@Import(TestcontainersConfiguration.class)
+class WatcherRelationIT extends ChallengeApiSupport {
+
+    @Autowired WebApplicationContext wac;
+    @Autowired JdbcTemplate jdbcTemplate;
+    @Autowired WatcherRelationRepository relationRepository;
+    @Autowired WatcherInvitationRepository invitationRepository;
+    @Autowired WatcherNoticeRepository noticeRepository;
+    @Autowired WatcherReactionRepository reactionRepository;
+    @Autowired com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository verifications;
+    @Autowired com.ruleup.ruleup_backend.watcher.service.WatcherNoticeRecovery recovery;
+    @Autowired WatcherNoticeService noticeService;
+    @Autowired WatcherBatch batch;
+    @Autowired com.ruleup.ruleup_backend.watcher.service.WatcherHealth health;
+    @Autowired NotificationRepository notificationRepository;
+
+    private MockMvc mvc;
+
+    @BeforeEach
+    void setUp() {
+        mvc = MockMvcBuilders.webAppContextSetup(wac).apply(springSecurity()).build();
+    }
+
+    @Override
+    protected MockMvc mvc() {
+        return mvc;
+    }
+
+    @Override
+    protected JdbcTemplate jdbc() {
+        return jdbcTemplate;
+    }
+
+    // ===== 헬퍼 =====
+
+    /** 챌린지를 가진 피감시자. */
+    private record Target(Member owner, UUID challengeId) {}
+
+    private Target target(String tag) throws Exception {
+        Member owner = member(uniq(tag));
+        UUID challengeId = insertChallenge(owner.id(), "EXERCISE", "ACTIVE", "SOLO");
+        insertActiveMembership(challengeId, owner.id(), "OWNER");
+        jdbcTemplate.update("UPDATE challenges SET penalties = '{\"score\":false,\"groupShare\":false,\"watcher\":true}' WHERE id = ?", bytes(challengeId));
+        return new Target(owner, challengeId);
+    }
+
+    private MvcResult postAuth(String url, String token, Object body) throws Exception {
+        var req = post(url).header("Authorization", "Bearer " + token);
+        if (body != null) req = req.contentType(MediaType.APPLICATION_JSON)
+                .content(OM.writeValueAsString(body));
+        return mvc.perform(req).andReturn();
+    }
+
+    private MvcResult patchAuth(String url, String token, Map<String, Object> body) throws Exception {
+        return patchJsonAuth(url, token, body);
+    }
+
+    /** 초대 발급 → 원본 토큰. */
+    private String invite(Target t) throws Exception {
+        MvcResult res = postAuth("/api/v1/challenges/" + t.challengeId() + "/watchers/invitations",
+                t.owner().token(), null);
+        assertThat(res.getResponse().getStatus()).isEqualTo(201);
+        assertThat((String) read(res, "$.data.status")).isEqualTo("INVITED");
+        return read(res, "$.data.token");
+    }
+
+    /** 초대 발급 → 수락까지. 반환은 성립된 관계. */
+    private WatcherRelation accept(Target t, Member watcher) throws Exception {
+        String token = invite(t);
+        MvcResult res = postAuth("/api/v1/watchers/invitations/" + token + "/accept",
+                watcher.token(), null);
+        assertThat(res.getResponse().getStatus()).isEqualTo(200);
+        return relationRepository.findById(UUID.fromString(read(res, "$.data.watcherId"))).orElseThrow();
+    }
+
+    /** 실패 확정 이벤트가 오는 상황을 만든다 — 인증 모듈이 발행하는 것과 같은 입력. */
+    private WatcherNotice confirmFailure(Target t, UUID verificationId) {
+        if (verifications.findById(verificationId).isEmpty()) {
+            jdbcTemplate.update("INSERT INTO VerificationDaily (id,challengeMemberId,challengeId,userId,targetDate,status,verifiedAt,shareableAt,appealClosesAt,finalizeAfter) "
+                    + "SELECT ?,id,challenge_id,user_id,DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 2 DAY), 'FAILED',DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 SECOND),DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 SECOND),DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 SECOND),DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 SECOND) "
+                    + "FROM challenge_members WHERE challenge_id=? AND user_id=?", bytes(verificationId), bytes(t.challengeId()), bytes(t.owner().id()));
+        }
+        // Keep millisecond database precision from moving the fixture's failure before acceptance.
+        jdbcTemplate.update("UPDATE watcher_relations SET accepted_at = LEAST(accepted_at, DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 SECOND)) WHERE challenge_id=?", bytes(t.challengeId()));
+        var daily = verifications.findById(verificationId).orElseThrow();
+        noticeService.onFailureConfirmed(t.challengeId(), t.owner().id(), verificationId,
+                daily.getTargetDate(), Instant.now());
+        return noticeRepository.findByVerificationId(verificationId).stream().findFirst().orElse(null);
+    }
+
+    /** 해당 챌린지의 초대를 만료시킨다. 시각 계산을 DB 안에서 해 타임존 변환을 피한다. */
+    private void expireInvitations(UUID challengeId, String interval) {
+        jdbcTemplate.update("UPDATE watcher_invitations SET expires_at = DATE_SUB(NOW(3), "
+                + interval + ") WHERE challenge_id = ?", bytes(challengeId));
+    }
+
+    private boolean columnExists(String table, String column) {
+        Integer n = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.columns " +
+                        "WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?",
+                Integer.class, table, column);
+        return n != null && n > 0;
+    }
+
+    private boolean tableExists(String table) {
+        Integer n = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.tables " +
+                        "WHERE table_schema = DATABASE() AND table_name = ?", Integer.class, table);
+        return n != null && n > 0;
+    }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("연락처를 수집하지 않는다 — 스키마에 자리를 두지 않는 방식")
+    class NoContact {
+
+        @Test
+        @DisplayName("어느 감시자 테이블에도 연락처 컬럼이 없다")
+        void no_contact_column_anywhere() {
+            for (String table : List.of("watcher_relations", "watcher_invitations",
+                    "watcher_notices", "watcher_reactions", "watcher_consent_logs")) {
+                for (String column : List.of("contact", "contact_enc", "contact_masked",
+                        "phone", "phone_enc", "phone_hash", "email")) {
+                    assertThat(columnExists(table, column))
+                            .as("%s.%s — 스키마에 자리가 없으면 실수로도 수집할 수 없다", table, column)
+                            .isFalse();
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("SMS·OTP·비유저 감시자 테이블이 남아 있지 않다")
+        void legacy_tables_are_gone() {
+            assertThat(tableExists("WatcherOtp")).as("SMS OTP — 채널 자체가 폐지됐다").isFalse();
+            assertThat(tableExists("Watcher")).as("구 관계 테이블").isFalse();
+            assertThat(tableExists("WatcherNotification")).isFalse();
+        }
+
+        @Test
+        @DisplayName("초대 토큰은 해시만 보관한다 — 원본은 저장하지 않는다")
+        void token_is_hashed() throws Exception {
+            Target t = target("hash");
+            String token = invite(t);
+
+            Integer raw = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM watcher_invitations WHERE HEX(token_hash) = ?",
+                    Integer.class, token);
+            assertThat(raw).as("원본 토큰이 그대로 들어가 있으면 안 된다").isZero();
+            assertThat(invitationRepository.count()).isPositive();
+        }
+    }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("억제 키 — 이름이 아니라 식별자")
+    class SuppressKey {
+
+        @Test
+        @DisplayName("루틴 id 를 키에 넣는다 — 이름을 넣으면 개명에 억제가 풀리고 동명 루틴이 묶인다")
+        void key_carries_routine_id() throws Exception {
+            Target t = target("key");
+            Member watcher = member(uniq("wk"));
+            accept(t, watcher);
+            // 픽스처는 템플릿을 비워 두므로 직접 심는다 — 비워 두면 폴백 경로만 지나가
+            // 「이름 대신 id」를 증명하지 못한다.
+            jdbcTemplate.update("UPDATE challenges SET template_id = 7 WHERE id = ?",
+                    bytes(t.challengeId()));
+
+            confirmFailure(t, UUID.randomUUID());
+
+            assertThat(notificationRepository.findByUserIdOrderByIdDesc(watcher.id()))
+                    .filteredOn(n -> NotificationType.PENALTY_FAILURE_SHARED.name().equals(n.getType()))
+                    .singleElement()
+                    .satisfies(n -> assertThat(n.getSuppressKey())
+                            .as("키는 (challenge_id, routine_id, target_user_id) 다")
+                            .isEqualTo("PENALTY_FAILURE_SHARED:" + t.challengeId()
+                                    + ":7:" + t.owner().id()));
+        }
+
+        @Test
+        @DisplayName("템플릿이 없는 커스텀 루틴은 챌린지 id 로 대신한다 — 키가 비면 발행이 막힌다")
+        void falls_back_to_challenge_id() throws Exception {
+            Target t = target("fallback");
+            Member watcher = member(uniq("wf"));
+            accept(t, watcher);   // template_id 를 심지 않는다
+
+            confirmFailure(t, UUID.randomUUID());
+
+            assertThat(notificationRepository.findByUserIdOrderByIdDesc(watcher.id()))
+                    .filteredOn(n -> NotificationType.PENALTY_FAILURE_SHARED.name().equals(n.getType()))
+                    .singleElement()
+                    .satisfies(n -> assertThat(n.getSuppressKey())
+                            .isEqualTo("PENALTY_FAILURE_SHARED:" + t.challengeId()
+                                    + ":" + t.challengeId() + ":" + t.owner().id()));
+        }
+    }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("초대와 동의 성립")
+    class Consent {
+
+        @Test
+        @DisplayName("초대를 발급하면 관계가 PENDING 으로 생기고 아직 발송 대상이 아니다")
+        void invitation_creates_pending() throws Exception {
+            Target t = target("pending");
+            invite(t);
+
+            // 초대 시점에는 누가 수락할지 모르므로 관계는 수락 때 생긴다.
+            assertThat(relationRepository.findDispatchTargets(t.challengeId(), t.owner().id()))
+                    .as("PENDING 발송 0건 — 수락 전에는 대상이 없다").isEmpty();
+        }
+
+        @Test
+        @DisplayName("인앱 수락으로만 동의가 성립하고 그 시각이 남는다")
+        void accept_establishes_consent() throws Exception {
+            Target t = target("accept");
+            Member watcher = member(uniq("w"));
+
+            WatcherRelation relation = accept(t, watcher);
+
+            assertThat(relation.getStatus()).isEqualTo(WatcherRelationStatus.ACTIVE);
+            assertThat(relation.getAcceptedAt())
+                    .as("동의 시각이 입증 책임의 근거다").isNotNull();
+            assertThat(relation.getConsentVersion()).isEqualTo(WatcherRelation.CONSENT_VERSION);
+            assertThat(tableExists("watcher_consent_logs")).isFalse();
+        }
+
+        @Test
+        @DisplayName("로그인하지 않으면 수락할 수 없다 — 웹 수락을 동의로 인정하지 않는다")
+        void accept_requires_login() throws Exception {
+            Target t = target("login");
+            String token = invite(t);
+
+            MvcResult res = mvc.perform(post("/api/v1/watchers/invitations/" + token + "/accept"))
+                    .andReturn();
+            expectError(res, 401, "LOGIN_REQUIRED");
+        }
+
+        @Test
+        @DisplayName("만료된 초대는 410 INVITATION_EXPIRED")
+        void expired_invitation() throws Exception {
+            Target t = target("expire");
+            Member watcher = member(uniq("w"));
+            String token = invite(t);
+
+            // Timestamp 로 넘기면 JVM 기본 타임존으로 변환돼 DB 세션 타임존과 어긋난다 — SQL 안에서 계산한다.
+            expireInvitations(t.challengeId(), "INTERVAL 1 MINUTE");
+
+            expectError(postAuth("/api/v1/watchers/invitations/" + token + "/accept",
+                    watcher.token(), null), 410, "INVITATION_EXPIRED");
+        }
+
+        @Test
+        @DisplayName("위조 토큰은 404 INVITATION_NOT_FOUND")
+        void forged_token() throws Exception {
+            Member watcher = member(uniq("w"));
+            expectError(postAuth("/api/v1/watchers/invitations/inv_forged/accept",
+                    watcher.token(), null), 404, "INVITATION_NOT_FOUND");
+        }
+
+        @Test
+        @DisplayName("본인을 감시자로 수락할 수 없다 — 400 CANNOT_WATCH_SELF")
+        void cannot_watch_self() throws Exception {
+            Target t = target("self");
+            String token = invite(t);
+
+            expectError(postAuth("/api/v1/watchers/invitations/" + token + "/accept",
+                    t.owner().token(), null), 400, "CANNOT_WATCH_SELF");
+        }
+
+        @Test
+        @DisplayName("같은 사람이 같은 방을 두 번 수락하면 409 ALREADY_WATCHER")
+        void already_watcher() throws Exception {
+            Target t = target("dup");
+            Member watcher = member(uniq("w"));
+            accept(t, watcher);
+
+            String token = invite(t);
+            expectError(postAuth("/api/v1/watchers/invitations/" + token + "/accept",
+                    watcher.token(), null), 409, "ALREADY_WATCHER");
+        }
+
+        @Test
+        @DisplayName("같은 사람을 여러 챌린지에서 감시자로 둘 수 있다 — 관계는 서로 독립이다")
+        void same_watcher_across_challenges() throws Exception {
+            Member watcher = member(uniq("w"));
+            Target first = target("multi1");
+            Target second = target("multi2");
+
+            accept(first, watcher);
+            accept(second, watcher);
+
+            assertThat(relationRepository.findByWatcherUserIdAndRemovedAtIsNull(watcher.id())).hasSize(2);
+        }
+
+        @Test
+        void watchers_are_unlimited() throws Exception {
+            Target t = target("limit");
+            for (int i = 0; i < 5; i++) accept(t, member(uniq("w" + i)));
+            assertThat(relationRepository.findDispatchTargets(t.challengeId(), t.owner().id())).hasSize(5);
+        }
+
+    }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("실패 통지 — 두 개의 절대 가드레일")
+    class Notice {
+
+        @Test
+        @DisplayName("ACTIVE 감시자에게만 통지한다 — PENDING 에는 발송 0건")
+        void only_active_receives() throws Exception {
+            Target t = target("dispatch");
+            Member accepted = member(uniq("ok"));
+            accept(t, accepted);
+            invite(t);   // 수락하지 않은 초대 — 발송 대상이 아니다
+
+            UUID verificationId = UUID.randomUUID();
+            WatcherNotice notice = confirmFailure(t, verificationId);
+
+            assertThat(notice).isNotNull();
+            assertThat(noticeRepository.findByVerificationId(verificationId))
+                    .as("ACTIVE 1명에게만 나간다").hasSize(1);
+            assertThat(relationRepository.findById(notice.getRelationId()).orElseThrow()
+                    .getWatcherUserId()).isEqualTo(accepted.id());
+        }
+
+        @Test
+        @DisplayName("통지 시각과 근거 인증 건을 남긴다 — 조기 발송 감사의 조인 키다")
+        void notice_keeps_audit_join_key() throws Exception {
+            Target t = target("audit");
+            accept(t, member(uniq("w")));
+            UUID verificationId = UUID.randomUUID();
+
+            WatcherNotice notice = confirmFailure(t, verificationId);
+
+            assertThat(notice.getVerificationId()).isEqualTo(verificationId);
+            assertThat(notice.getSentAt()).isNotNull();
+        }
+
+        @Test
+        @DisplayName("같은 실패 건이 재전송돼도 통지는 1회만 나간다")
+        void notice_is_idempotent() throws Exception {
+            Target t = target("idem");
+            accept(t, member(uniq("w")));
+            UUID verificationId = UUID.randomUUID();
+
+            confirmFailure(t, verificationId);
+            confirmFailure(t, verificationId);   // 이벤트 재전송
+
+            assertThat(noticeRepository.findByVerificationId(verificationId))
+                    .as("(relation_id, verification_id) UNIQUE 로 막는다").hasSize(1);
+        }
+
+        @Test
+        @DisplayName("통지에는 실패자 닉네임·챌린지명·루틴명 3개만 담고 방 진입점을 주지 않는다")
+        void notice_contains_three_fields_only() throws Exception {
+            Target t = target("payload");
+            Member watcher = member(uniq("w"));
+            accept(t, watcher);
+
+            confirmFailure(t, UUID.randomUUID());
+
+            var inbox = notificationRepository.findByUserIdOrderByIdDesc(watcher.id());
+            assertThat(inbox).singleElement().satisfies(n -> {
+                assertThat(n.getType()).isEqualTo(NotificationType.PENALTY_FAILURE_SHARED.name());
+                assertThat(n.getDeeplink())
+                        .as("감시자는 방 멤버가 아니다 — 방 상세·랭킹·멤버로 보내지 않는다")
+                        .doesNotContain("/challenges/")
+                        .startsWith("ruleup://watching/");
+            });
+        }
+
+        @Test
+        void notification_preferences_preserve_inbox_and_relation() throws Exception {
+            Target t = target("toggle");
+            Member watcher = member(uniq("w"));
+            WatcherRelation relation = accept(t, watcher);
+            jdbcTemplate.update("INSERT INTO user_notification_settings (user_id,push_enabled,group_challenge,updated_at) VALUES (?,0,0,UTC_TIMESTAMP(3))", bytes(watcher.id()));
+            WatcherNotice notice = confirmFailure(t, UUID.randomUUID());
+            assertThat(notice).isNotNull();
+            assertThat(notificationRepository.findByUserIdOrderByIdDesc(watcher.id())).hasSize(1);
+            assertThat(relationRepository.findById(relation.getId()).orElseThrow().isDispatchable()).isTrue();
+        }
+
+
+        @Test
+        @DisplayName("루틴이 끝나 관계가 제거되면 통지 대상에서 빠진다")
+        void removed_relation_stops_notice() throws Exception {
+            Target t = target("removed");
+            Member watcher = member(uniq("w"));
+            WatcherRelation relation = accept(t, watcher);
+
+            relationRepository.save(relation);
+            jdbcTemplate.update("UPDATE watcher_relations SET removed_at = NOW(3) WHERE id = ?",
+                    bytes(relation.getId()));
+
+            UUID verificationId = UUID.randomUUID();
+            confirmFailure(t, verificationId);
+            assertThat(noticeRepository.findByVerificationId(verificationId)).isEmpty();
+        }
+    }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("수신 관리 — 조회와 토글")
+    class Watching {
+
+        @Test
+        @DisplayName("내가 감시자로 등록된 관계를 조회한다")
+        void list_my_watching() throws Exception {
+            Target t = target("list");
+            Member watcher = member(uniq("w"));
+            accept(t, watcher);
+
+            MvcResult res = getAuth("/api/v1/users/me/watching", watcher.token());
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+
+            List<Map<String, Object>> items = read(res, "$.data.items");
+            assertThat(items).singleElement().satisfies(item -> {
+                assertThat(item.get("status")).isEqualTo("ACTIVE");
+                assertThat(item).doesNotContainKey("pushEnabled");
+                assertThat(item.get("acceptedAt")).isNotNull();
+                assertThat(item.get("challengeTitle")).isNotNull();
+            });
+        }
+
+        @Test
+        @DisplayName("해제 엔드포인트를 두지 않는다 — 관계를 끊는 경로가 없다")
+        void no_revoke_endpoint() throws Exception {
+            Target t = target("norevoke");
+            Member watcher = member(uniq("w"));
+            WatcherRelation relation = accept(t, watcher);
+
+            // 구 계약의 감시자 해제 — 경로 자체가 사라졌다.
+            MvcResult res = mvc.perform(delete("/api/v1/challenges/" + t.challengeId()
+                    + "/watchers/" + relation.getId())
+                    .header("Authorization", "Bearer " + t.owner().token())).andReturn();
+            // 매핑된 패턴이 아예 없으므로 405(메서드 불가)가 아니라 404 다 —
+            // 핸들러를 남겨 두고 막는 것이 아니라 경로 자체를 지웠다는 뜻이다.
+            assertThat(res.getResponse().getStatus())
+                    .as("경로를 두지 않는 것이 정책과 구현을 일치시키는 방법이다").isEqualTo(404);
+        }
+
+        @Test
+        void relation_patch_is_removed() throws Exception {
+            Target t = target("togglelog");
+            Member watcher = member(uniq("w"));
+            WatcherRelation relation = accept(t, watcher);
+            assertThat(patchAuth("/api/v1/users/me/watching/" + relation.getId(), watcher.token(),
+                    Map.of("pushEnabled", false)).getResponse().getStatus()).isEqualTo(404);
+        }
+
+
+        @Test
+        void cannot_toggle_others() throws Exception {
+            Target t = target("othertoggle");
+            WatcherRelation relation = accept(t, member(uniq("w")));
+            assertThat(patchAuth("/api/v1/users/me/watching/" + relation.getId(), member(uniq("stranger")).token(),
+                    Map.of("pushEnabled", false)).getResponse().getStatus()).isEqualTo(404);
+        }
+
+
+        @Test
+        @DisplayName("피감시자는 자기가 지정한 감시자 목록을 본다")
+        void owner_lists_watchers() throws Exception {
+            Target t = target("ownerlist");
+            accept(t, member(uniq("w")));
+
+            MvcResult res = getAuth("/api/v1/challenges/" + t.challengeId() + "/watchers",
+                    t.owner().token());
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+            assertThat((List<?>) read(res, "$.data.watchers")).hasSize(1);
+        }
+    }
+
+    // =====================================================================
+
+    @Nested
+    @DisplayName("감시자 목록 — watchers 키와 슬롯 한도")
+    class WatcherList {
+
+        @Test
+        @DisplayName("응답 키는 watchers 다 — 구 items 키는 존재하지 않는다")
+        void response_key_is_watchers() throws Exception {
+            Target t = target("key");
+            accept(t, member(uniq("w")));
+
+            Map<String, Object> data = read(getAuth(
+                    "/api/v1/challenges/" + t.challengeId() + "/watchers", t.owner().token()), "$.data");
+
+            assertThat(data).containsOnlyKeys("watchers");
+        }
+
+        @Test
+        void list_has_no_limit_contract() throws Exception {
+            Target t = target("slots");
+            accept(t, member(uniq("w1")));
+            Map<String,Object> data = read(getAuth("/api/v1/challenges/" + t.challengeId() + "/watchers", t.owner().token()), "$.data");
+            assertThat(data).containsOnlyKeys("watchers");
+        }
+
+
+        @Test
+        @DisplayName("항목은 명세 9필드 — 연락처는 언제나 null 이다(스키마에 자리가 없다)")
+        void item_shape() throws Exception {
+            Target t = target("shape");
+            accept(t, member(uniq("w")));
+
+            List<Map<String, Object>> watchers = read(getAuth(
+                    "/api/v1/challenges/" + t.challengeId() + "/watchers", t.owner().token()),
+                    "$.data.watchers");
+
+            assertThat(watchers).singleElement().satisfies(w -> {
+                assertThat(w).containsOnlyKeys("watcherId", "type", "channel", "status",
+                        "displayName", "invitationId", "invitedAt", "expiresAt", "acceptedAt");
+                assertThat(w).containsEntry("type", "USER")        // 비유저 감시자는 폐지됐다
+                        .containsEntry("channel", "IN_APP")        // SMS·이메일 채널도 폐지됐다
+                        .containsEntry("status", "ACTIVE")
+                        .containsEntry("invitationId", null)      // 연락처를 수집하지 않는다
+                        .containsEntry("expiresAt", null)          // 성립한 관계에는 만료가 없다
+                        ;
+                assertThat(w.get("acceptedAt")).isNotNull();
+                assertThat(w.get("displayName")).isNotNull();
+                assertThat(w.get("invitedAt")).isNotNull();
+            });
+        }
+
+        @Test
+        @DisplayName("미수락 초대는 INVITED 로 보인다 — 기본 목록(ACTIVE)에는 없다")
+        void invited_rows() throws Exception {
+            Target t = target("invited");
+            invite(t);   // 발급만 하고 수락하지 않는다
+
+            String url = "/api/v1/challenges/" + t.challengeId() + "/watchers";
+            assertThat((List<?>) read(getAuth(url, t.owner().token()), "$.data.watchers")).isEmpty();
+
+            List<Map<String, Object>> invited =
+                    read(getAuth(url + "?status=INVITED", t.owner().token()), "$.data.watchers");
+            assertThat(invited).singleElement().satisfies(w -> {
+                assertThat(w).containsEntry("status", "INVITED")
+                        .containsEntry("channel", null)       // 아직 전달 수단이 정해지지 않았다
+                        .containsEntry("displayName", null);  // 누가 수락할지 모른다
+                assertThat(w.get("expiresAt")).as("INVITED 는 토큰 만료를 함께 내린다").isNotNull();
+            });
+        }
+
+        @Test
+        @DisplayName("status=ALL 은 수락·미수락을 함께 내린다")
+        void status_all() throws Exception {
+            Target t = target("all");
+            accept(t, member(uniq("w")));
+            invite(t);
+
+            List<Map<String, Object>> all = read(getAuth(
+                    "/api/v1/challenges/" + t.challengeId() + "/watchers?status=ALL",
+                    t.owner().token()), "$.data.watchers");
+
+            assertThat(all).extracting(w -> w.get("status"))
+                    .containsExactlyInAnyOrder("ACTIVE", "INVITED");
+        }
+
+        @Test
+        void outstanding_invitation_has_its_own_id() throws Exception {
+            Target t = target("consume");
+            invite(t);
+            List<Map<String,Object>> rows = read(getAuth("/api/v1/challenges/" + t.challengeId() + "/watchers?status=INVITED", t.owner().token()), "$.data.watchers");
+            assertThat(rows).singleElement().satisfies(row -> {
+                assertThat(row.get("watcherId")).isNull();
+                assertThat(row.get("invitationId")).isNotNull();
+            });
+        }
+
+
+        @Test
+        void invitation_requires_enabled_penalty() throws Exception {
+            Target t = target("disabled");
+            jdbcTemplate.update("UPDATE challenges SET penalties=JSON_SET(penalties,'$.watcher',false) WHERE id=?", bytes(t.challengeId()));
+            expectError(postAuth("/api/v1/challenges/"+t.challengeId()+"/watchers/invitations", t.owner().token(), null),409,"WATCHER_PENALTY_DISABLED");
+        }
+
+
+        @Test
+        void spare_invitation_has_no_capacity_gate() throws Exception {
+            Target t = target("acceptfull");
+            String spare = invite(t);
+            for (int i=0;i<3;i++) accept(t, member(uniq("w"+i)));
+            assertThat(postAuth("/api/v1/watchers/invitations/"+spare+"/accept", member(uniq("w4")).token(),null).getResponse().getStatus()).isEqualTo(200);
+        }
+
+
+        @Test
+        @DisplayName("만료된 초대는 목록에서 사라진다 — 죽은 링크를 감시자처럼 보여주지 않는다")
+        void expired_invitation_disappears() throws Exception {
+            Target t = target("expfree");
+            invite(t);
+            expireInvitations(t.challengeId(), "INTERVAL 8 DAY");
+
+            assertThat((List<?>) read(getAuth("/api/v1/challenges/" + t.challengeId()
+                    + "/watchers?status=INVITED", t.owner().token()), "$.data.watchers")).isEmpty();
+        }
+    }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("응원·놀림 — 실패 건당 1회")
+    class Reaction {
+
+        @Test
+        @DisplayName("반응을 보내면 실패 당사자에게 알림이 가고 닉네임이 공개된다")
+        void reaction_notifies_target() throws Exception {
+            Target t = target("react");
+            Member watcher = member(uniq("w"));
+            accept(t, watcher);
+            WatcherNotice notice = confirmFailure(t, UUID.randomUUID());
+
+            MvcResult res = postAuth("/api/v1/watcher-notices/" + notice.getId() + "/reactions",
+                    watcher.token(), Map.of("reaction", "CHEER"));
+
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+            assertThat((String) read(res, "$.data.reaction")).isEqualTo("CHEER");
+            assertThat((String) read(res, "$.data.reactorNickname")).isNotBlank();
+
+            assertThat(notificationRepository.findByUserIdOrderByIdDesc(t.owner().id()))
+                    .anyMatch(n -> NotificationType.WATCHER_REACTION.name().equals(n.getType()));
+        }
+
+        @Test
+        @DisplayName("같은 통지에 두 번째 반응은 409 REACTION_ALREADY_SENT")
+        void second_reaction_rejected() throws Exception {
+            Target t = target("react2");
+            Member watcher = member(uniq("w"));
+            accept(t, watcher);
+            WatcherNotice notice = confirmFailure(t, UUID.randomUUID());
+
+            postAuth("/api/v1/watcher-notices/" + notice.getId() + "/reactions",
+                    watcher.token(), Map.of("reaction", "CHEER"));
+
+            // 응원과 놀림을 둘 다 보낼 수 없다 — 하나를 보내면 그 통지에 대한 반응은 끝난다.
+            expectError(postAuth("/api/v1/watcher-notices/" + notice.getId() + "/reactions",
+                    watcher.token(), Map.of("reaction", "TEASE")), 409, "REACTION_ALREADY_SENT");
+            assertThat(reactionRepository.count()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("그 통지의 수신 감시자가 아니면 403 NOT_WATCHER")
+        void stranger_cannot_react() throws Exception {
+            Target t = target("react3");
+            accept(t, member(uniq("w")));
+            Member stranger = member(uniq("s"));
+            WatcherNotice notice = confirmFailure(t, UUID.randomUUID());
+
+            expectError(postAuth("/api/v1/watcher-notices/" + notice.getId() + "/reactions",
+                    stranger.token(), Map.of("reaction", "CHEER")), 403, "NOT_WATCHER");
+        }
+
+        @Test
+        @DisplayName("CHEER·TEASE 외의 값은 400 INVALID_REQUEST")
+        void invalid_reaction_value() throws Exception {
+            Target t = target("react4");
+            Member watcher = member(uniq("w"));
+            accept(t, watcher);
+            WatcherNotice notice = confirmFailure(t, UUID.randomUUID());
+
+            expectError(postAuth("/api/v1/watcher-notices/" + notice.getId() + "/reactions",
+                    watcher.token(), Map.of("reaction", "ANGRY")), 400, "INVALID_REQUEST");
+        }
+
+        @Test
+        @DisplayName("없는 통지는 404 NOTICE_NOT_FOUND")
+        void unknown_notice() throws Exception {
+            Member watcher = member(uniq("w"));
+            expectError(postAuth("/api/v1/watcher-notices/" + UUID.randomUUID() + "/reactions",
+                    watcher.token(), Map.of("reaction", "CHEER")), 404, "NOTICE_NOT_FOUND");
+        }
+    }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("배치 — 자동 제거 · 만료 · 보정")
+    class Batch {
+
+        @Test
+        @DisplayName("루틴이 끝난 챌린지의 관계를 자동 제거한다 — 유저가 끊는 경로가 없으니 이게 수신거부권이다")
+        void removes_relations_of_finished_challenges() throws Exception {
+            Target t = target("cleanup");
+            Member watcher = member(uniq("w"));
+            WatcherRelation relation = accept(t, watcher);
+
+            jdbcTemplate.update("UPDATE challenges SET status = 'COMPLETED' WHERE id = ?",
+                    bytes(t.challengeId()));
+            batch.removeFinishedRelations();
+
+            assertThat(relationRepository.findById(relation.getId()).orElseThrow().getRemovedAt())
+                    .isNotNull();
+        }
+
+        @Test
+        @DisplayName("진행 중인 챌린지의 관계는 건드리지 않는다")
+        void keeps_ongoing_relations() throws Exception {
+            Target t = target("keep");
+            WatcherRelation relation = accept(t, member(uniq("w")));
+
+            batch.removeFinishedRelations();
+
+            assertThat(relationRepository.findById(relation.getId()).orElseThrow().getRemovedAt())
+                    .isNull();
+        }
+
+        @Test
+        @DisplayName("만료된 초대는 생성자에게만 알린다 — 감시자 후보는 아직 외부인이다")
+        void expiry_notifies_inviter_only() throws Exception {
+            Target t = target("expirynoti");
+            invite(t);
+            expireInvitations(t.challengeId(), "INTERVAL 1 DAY");
+
+            batch.notifyExpiredInvitations();
+
+            assertThat(notificationRepository.findByUserIdOrderByIdDesc(t.owner().id()))
+                    .anyMatch(n -> NotificationType.WATCHER_INVITATION_EXPIRED.name().equals(n.getType()));
+        }
+
+        @Test
+        @DisplayName("만료 알림은 한 번만 보낸다")
+        void expiry_notice_is_idempotent() throws Exception {
+            Target t = target("expiryidem");
+            invite(t);
+            expireInvitations(t.challengeId(), "INTERVAL 1 DAY");
+
+            batch.notifyExpiredInvitations();
+            batch.notifyExpiredInvitations();
+
+            long count = notificationRepository.findByUserIdOrderByIdDesc(t.owner().id())
+                    .stream()
+                    .filter(n -> NotificationType.WATCHER_INVITATION_EXPIRED.name().equals(n.getType()))
+                    .count();
+            assertThat(count).isEqualTo(1);
+        }
+    }
+
+    @Test
+    void blocked_inviter_cannot_create_a_relation_and_unblock_is_immediate() throws Exception {
+        Target t=target("blocked"); Member w=member(uniq("watcher")); String token=invite(t);
+        jdbcTemplate.update("INSERT INTO user_blocks (blocker_id,target_type,target_id) VALUES (?,'USER',?)",bytes(w.id()),bytes(t.owner().id()));
+        expectError(postAuth("/api/v1/watchers/invitations/"+token+"/accept",w.token(),null),409,"WATCHER_BLOCKED");
+        jdbcTemplate.update("DELETE FROM user_blocks WHERE blocker_id=?",bytes(w.id()));
+        assertThat(postAuth("/api/v1/watchers/invitations/"+token+"/accept",w.token(),null).getResponse().getStatus()).isEqualTo(200);
+        jdbcTemplate.update("INSERT INTO user_blocks (blocker_id,target_type,target_id) VALUES (?,'USER',?)",bytes(w.id()),bytes(t.owner().id()));
+        assertThat(confirmFailure(t,UUID.randomUUID())).isNull();
+    }
+
+    @Test
+    void duplicate_accepts_are_serialized_and_consent_is_stored_once() throws Exception {
+        Target t=target("race"); Member w=member(uniq("watcher")); String token=invite(t);
+        try(var pool=java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            var start=new java.util.concurrent.CountDownLatch(1);
+            java.util.concurrent.Callable<Integer> call=()-> { start.await(); return postAuth("/api/v1/watchers/invitations/"+token+"/accept",w.token(),null).getResponse().getStatus(); };
+            var a=pool.submit(call);var b=pool.submit(call);start.countDown();
+            assertThat(List.of(a.get(),b.get())).containsExactlyInAnyOrder(200,409);
+        }
+        assertThat(relationRepository.findByWatcherUserIdAndRemovedAtIsNull(w.id())).hasSize(1);
+    }
+
+    @Test
+    void public_preview_and_authenticated_token_contract() throws Exception {
+        health.sample();
+        Target t=target("preview");String token=invite(t);
+        var data=(Map<String,Object>)read(mvc.perform(get("/api/v1/watchers/invitations/"+token)).andReturn(),"$.data");
+        assertThat(data).containsEntry("status","INVITED").containsEntry("acceptRequiresLogin",true)
+                .containsEntry("consentVersion",WatcherRelation.CONSENT_VERSION);
+        assertThat(data.get("appLink").toString()).startsWith("ruleup://watchers/invitations/").endsWith("/accept");
+        // 한 글자만 바꿔 위조한다. 무엇으로 바꿀지는 원래 글자를 보고 정해야 한다 —
+        // 고정으로 'A' 를 넣으면 원래가 'A' 인 토큰에서는 그대로라 200 이 되어 무작위로 깨진다.
+        char at10=token.charAt(10);
+        String forged=token.substring(0,10)+(at10=='A'?'B':'A')+token.substring(11);
+        assertThat(forged).isNotEqualTo(token);
+        expectError(mvc.perform(get("/api/v1/watchers/invitations/"+forged)).andReturn(),404,"INVITATION_NOT_FOUND");
+        assertThat(columnExists("watcher_relations","push_enabled")).isFalse();
+        assertThat(tableExists("watcher_consent_logs")).isFalse();
+    }
+
+    @Test
+    void stale_outbox_and_early_failures_never_send_then_hourly_repair_sends_once() throws Exception {
+        Target t=target("guard"); Member w=member(uniq("watcher"));WatcherRelation r=accept(t,w);
+        jdbcTemplate.update("UPDATE watcher_relations SET status='PENDING' WHERE id=?",bytes(r.getId()));
+        UUID id=UUID.randomUUID(); assertThat(confirmFailure(t,id)).isNull();
+        jdbcTemplate.update("UPDATE watcher_relations SET status='ACTIVE' WHERE id=?",bytes(r.getId()));
+        var d=verifications.findById(id).orElseThrow();
+        for(String status:List.of("PENDING","SUCCESS")) {
+            jdbcTemplate.update("UPDATE VerificationDaily SET status=? WHERE id=?",status,bytes(id));
+            noticeService.onFailureConfirmed(t.challengeId(),t.owner().id(),id,d.getTargetDate(),Instant.now());
+            assertThat(noticeRepository.findByVerificationId(id)).isEmpty();
+        }
+        jdbcTemplate.update("UPDATE VerificationDaily SET status='FAILED',appealClosesAt=DATE_ADD(UTC_TIMESTAMP(3),INTERVAL 1 HOUR) WHERE id=?",bytes(id));
+        noticeService.onFailureConfirmed(t.challengeId(),t.owner().id(),id,d.getTargetDate(),Instant.now());
+        assertThat(noticeRepository.findByVerificationId(id)).isEmpty();
+        jdbcTemplate.update("UPDATE VerificationDaily SET appealClosesAt=DATE_SUB(UTC_TIMESTAMP(3),INTERVAL 1 SECOND),targetDate=DATE(CONVERT_TZ(UTC_TIMESTAMP(),'+00:00','+09:00')) WHERE id=?",bytes(id));
+        noticeService.onFailureConfirmed(t.challengeId(),t.owner().id(),id,LocalDate.now(java.time.ZoneId.of("Asia/Seoul")),Instant.now());
+        assertThat(noticeRepository.findByVerificationId(id)).isEmpty();
+        jdbcTemplate.update("UPDATE VerificationDaily SET targetDate=?,verifiedAt=DATE_SUB(UTC_TIMESTAMP(3),INTERVAL 25 HOUR) WHERE id=?",d.getTargetDate(),bytes(id));
+        recovery.recover();assertThat(noticeRepository.findByVerificationId(id)).isEmpty();
+        jdbcTemplate.update("UPDATE VerificationDaily SET verifiedAt=DATE_SUB(UTC_TIMESTAMP(3),INTERVAL 1 SECOND) WHERE id=?",bytes(id));
+        recovery.recover();recovery.recover();
+        assertThat(noticeRepository.findByVerificationId(id)).hasSize(1);
+    }
+}

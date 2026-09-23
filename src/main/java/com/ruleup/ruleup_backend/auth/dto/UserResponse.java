@@ -1,0 +1,161 @@
+package com.ruleup.ruleup_backend.auth.dto;
+
+import com.ruleup.ruleup_backend.score.domain.Tier;
+import com.ruleup.ruleup_backend.sanction.domain.Sanction;
+import com.ruleup.ruleup_backend.score.domain.UserScoreSummary;
+import com.ruleup.ruleup_backend.user.domain.NicknameStatus;
+import com.ruleup.ruleup_backend.user.domain.ProfileImageStatus;
+import com.ruleup.ruleup_backend.user.domain.User;
+import io.swagger.v3.oas.annotations.media.Schema;
+
+import java.util.List;
+
+/**
+ * 로그인/가입/내 프로필 응답의 user 블록 — 카카오 로그인 API 계약(2026-08-03)과 동일 스키마.
+ * - nickname: 본인 화면용 — 심사 중이면 입력값, 거부면 직전 승인본(없으면 임시 닉네임)
+ * - tier/score/displayTier: user_score_summaries 기준 (가입 직후 BRONZE 10)
+ * - provider: 연결된 소셜 제공자 — 마이페이지 계정 관리의 "연동된 소셜 계정" 표시용
+ * - accountStatus: ACTIVE/LOCKED (BANNED는 403으로 응답 자체가 없음)
+ * - lockInfo: LOCKED일 때만 { reason, unlockAt } — 처벌 도메인 확정 전까지 사유·해제일은 미정
+ */
+@Schema(name = "UserResponse", description = """
+        사용자 정보 블록. 로그인·가입·내 프로필 응답이 모두 같은 스키마를 쓴다.
+        여기 담긴 nickname 은 '본인 화면용'이라 검수 결과와 무관하게 본인이 인지하는 값이 내려간다.""")
+public record UserResponse(
+
+        @Schema(description = "사용자 ID (UUID)", example = "0f7a3c1e-2b9d-4f6a-8c11-5d2e7b4a9c03",
+                requiredMode = Schema.RequiredMode.REQUIRED)
+        String id,
+
+        @Schema(description = """
+                본인 화면에 표시할 닉네임. 검수 중(PENDING)이면 신청한 값,
+                거부(REJECTED)면 직전 승인본(없으면 서버가 배정한 임시 닉네임)이 내려간다.""",
+                example = "규칙왕", requiredMode = Schema.RequiredMode.REQUIRED)
+        String nickname,
+
+        @Schema(description = """
+                닉네임 검수 상태.
+                · PENDING — 검수 대기(기능 제한 없음)
+                · APPROVED — 승인
+                · REJECTED — 거부. 타인에게는 임시 닉네임이 보인다
+                · CONFLICT — 복원 중 다른 사람이 선점. 재설정이 필요하다""",
+                example = "PENDING",
+                allowableValues = {"PENDING", "APPROVED", "REJECTED", "CONFLICT"})
+        String nicknameStatus,
+
+        @Schema(description = "프로필 사진 URL. 등록 전이거나 검수 통과 전이면 null.",
+                example = "https://cdn.ruleup.app/profile/0f7a3c1e.jpg")
+        String profileImageUrl,
+
+        @Schema(description = """
+                사진 검수 상태. **미등록이면 null.** 마이페이지가 「검수 중」 뱃지를 그리는 근거다 —
+                닉네임은 nicknameStatus 로 알 수 있었는데 사진만 같은 값을 /profile/me 로 따로
+                조회해야 했다.""",
+                example = "PENDING", allowableValues = {"PENDING", "APPROVED", "REJECTED"})
+        String profileImageStatus,
+
+        @Schema(description = "실제 티어. 가입 직후에는 BRONZE.", example = "BRONZE")
+        String tier,
+
+        @Schema(description = """
+                누적 점수 0~2,000. 티어마다 0~99 로 끊지 않는 계정당 단일 축이라
+                승급해도 초과 점수가 사라지지 않는다. 가입 직후에는 10.""", example = "10")
+        long score,
+
+        @Schema(description = "화면 표시용 티어. 승급 연출 등으로 실제 티어와 다를 수 있다.", example = "BRONZE")
+        String displayTier,
+
+        @Schema(description = """
+                연결된 소셜 제공자. 마이페이지 설정 허브의 계정 관리가 「연동된 소셜 계정」으로 표시한다.
+                로그인 시점에 클라이언트도 아는 값이지만 재설치·기기 변경 후에는 알 수 없으므로
+                서버 값을 원본으로 둔다.""",
+                example = "KAKAO", allowableValues = {"KAKAO", "GOOGLE"})
+        String provider,
+
+        @Schema(description = "선택한 관심 카테고리 코드 목록", example = "[\"EXERCISE\",\"STUDY\"]")
+        List<String> interestCategories,
+
+        @Schema(description = "온보딩 완료 여부. 가입이 원자적이라 조회되는 사용자는 항상 true 다.", example = "true")
+        Boolean onboardingCompleted,
+
+        @Schema(description = """
+                계정 상태. ACTIVE 또는 LOCKED.
+                LOCKED 는 열람 전용이라 조회는 되지만 쓰기 요청이 403 ACCOUNT_LOCKED 로 막힌다(로그아웃·탈퇴는 허용).
+                정지(BANNED)는 로그인·재가입이 모두 403 이라 이 값으로 내려오지 않는다.""",
+                example = "ACTIVE", allowableValues = {"ACTIVE", "LOCKED"})
+        String accountStatus,
+
+        @Schema(description = "잠금 상세. accountStatus=LOCKED 일 때만 채워지고 그 외에는 null.")
+        LockInfo lockInfo) {
+
+    @Schema(name = "LockInfo", description = "계정 잠금 상세 (LOCKED 일 때만)")
+    public record LockInfo(
+            @Schema(description = "운영자가 입력한 제재 사유. 그대로 화면에 보여 줄 문구다.",
+                    example = "커뮤니티 규정 위반으로 7일 이용이 제한되었습니다.") String reason,
+            @Schema(description = """
+                    해제 예정 시각(ISO-8601). **영구 정지와 탈퇴 동결은 null** 이다 —
+                    둘 다 끝나는 시각이 정해져 있지 않다.""",
+                    example = "2026-09-01T00:00:00Z")
+            String unlockAt) {}
+
+    /**
+     * @param lock 지금 효력이 있는 제재. <b>정지 상태가 아니면 호출부가 null 을 넘긴다</b> —
+     *             정상 사용자까지 제재 테이블을 읽게 하지 않으려는 것이다.
+     */
+    public static UserResponse from(User user, UserScoreSummary summary, Sanction lock) {
+        Tier tier = (summary != null) ? summary.getActualTier() : Tier.UNRANKED;
+        Tier displayTier = (summary != null) ? summary.getDisplayTier() : Tier.UNRANKED;
+        // 티어 안에서 0~99 로 끊지 않는다 — 계정당 하나의 단일 축 0~2,000 이다(정책 §1.1, 2026-08-26).
+        long score = (summary != null) ? summary.getTotalScore() : 0L;
+        return new UserResponse(
+                user.getId().toString(),
+                selfDisplayNickname(user),
+                user.getNicknameStatus().name(),
+                user.visibleProfileImageTo(user.getId()),
+                profileImageStatus(user),
+                tier.name(), score, displayTier.name(),
+                user.getOauthProvider().name(),
+                user.getInterestCategories(),
+                true,                                   // 가입이 원자적이라 완료 사용자만 존재
+                user.getStatus().name(),
+                lockInfo(user, lock));
+    }
+
+    /**
+     * 사진 검수 상태 — <b>등록한 적이 없으면 null</b> 이다.
+     *
+     * <p>저장값 {@code NONE} 을 그대로 내리지 않는 이유는 계약이다. 명세가 「미등록 시 null」로
+     * 정의하고 있고, 클라이언트가 뱃지를 그릴지 말지를 null 하나로 판단할 수 있어야 한다.
+     */
+    private static String profileImageStatus(User user) {
+        ProfileImageStatus status = user.getProfileImageStatus();
+        return (status == null || status == ProfileImageStatus.NONE) ? null : status.name();
+    }
+
+    /** 본인 화면용 닉네임 — REJECTED면 직전 승인본(없으면 임시 닉네임 = approvedNickname). */
+    private static String selfDisplayNickname(User user) {
+        return (user.getNicknameStatus() == NicknameStatus.REJECTED)
+                ? user.getApprovedNickname() : user.getNickname();
+    }
+
+    /**
+     * 잠금 상세. <b>기간제 정지의 사유와 해제 예정 시각을 실제 값으로 채운다</b> — 클라이언트는
+     * 이 두 값으로 남은 기간을 계산해 보여 준다. 예전에는 "계정 제재"·null 을 고정으로 내려서,
+     * 기간제 정지인데도 화면이 언제 풀리는지 말해 줄 수 없었다.
+     *
+     * <p>조회 비용은 늘지 않는다. 호출부가 <b>정지 상태일 때만</b> 제재를 찾아 넘기므로 정상
+     * 사용자는 제재 테이블을 건드리지 않는다.
+     *
+     * <p>{@code unlockAt} 이 null 인 경우가 둘이라는 점이 중요하다 — <b>영구 정지</b>와
+     * <b>탈퇴로 동결된 잔여 기간</b>이다. 둘 다 「지금은 끝나는 시각이 없다」가 맞는 표현이라
+     * 같은 값으로 내린다. 종류까지 구분해야 하면 {@code GET /api/v1/users/me/sanctions} 를 쓴다.
+     */
+    private static LockInfo lockInfo(User user, Sanction lock) {
+        if (!user.isSuspended()) return null;
+        // 정지 상태인데 효력 있는 제재 행이 없다 — 만료됐는데 상태가 아직 안 풀린 경우다.
+        // 화면이 빈 값을 그리지 않도록 예전 문구로 폴백한다.
+        if (lock == null) return new LockInfo("계정 제재", null);
+        return new LockInfo(lock.getReasonText(),
+                lock.getEndsAt() == null ? null : lock.getEndsAt().toString());
+    }
+}

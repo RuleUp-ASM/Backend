@@ -1,0 +1,90 @@
+package com.ruleup.ruleup_backend.watcher.service;
+
+import com.ruleup.ruleup_backend.challenge.domain.Challenge;
+import com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus;
+import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
+import com.ruleup.ruleup_backend.notification.NotificationEvent;
+import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
+import com.ruleup.ruleup_backend.notification.service.NotificationPublisher;
+import com.ruleup.ruleup_backend.notification.domain.NotificationType;
+import com.ruleup.ruleup_backend.watcher.domain.WatcherInvitation;
+import com.ruleup.ruleup_backend.watcher.domain.WatcherRelation;
+import com.ruleup.ruleup_backend.watcher.repository.WatcherInvitationRepository;
+import com.ruleup.ruleup_backend.watcher.repository.WatcherRelationRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Limit;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.util.Map;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * 감시자 배치 — 관계 자동 제거와 초대 만료 처리.
+ *
+ * <p><b>자동 제거가 안전장치다.</b> 유저가 관계를 끊는 기능이 없으므로, 루틴이 끝났는데도
+ * 관계가 살아 있으면 통지가 계속 나간다. 이 배치의 정확도가 곧 수신거부권이다.
+ */
+@Slf4j
+@Component
+@RequiredArgsConstructor
+public class WatcherBatch {
+
+    private static final int BATCH_SIZE = 500;
+
+    private final WatcherRelationRepository relationRepository;
+    private final WatcherInvitationRepository invitationRepository;
+    private final NotificationPublisher notificationPublisher;
+    private final WatcherAudit audit;
+
+    /**
+     * 종료된 챌린지의 관계를 제거한다. 멱등하며 이미 제거된 행은 건드리지 않는다.
+     *
+     * <p>02:00~03:00 점검 창과 00시 판정 배치를 피해 04:10 에 돈다.
+     */
+    @Scheduled(cron = "0 10 4 * * *", zone = "Asia/Seoul")
+    @Transactional
+    public int removeFinishedRelations() {
+        Instant now = Instant.now();
+        List<WatcherRelation> live = relationRepository.findFinishedRelations();
+        live.forEach(r -> {
+            r.remove(now);
+            audit.afterCommit("WATCHER_ROUTINE_ENDED", r.getId(), null, "ACTIVE", "ENDED", r.getConsentVersion());
+        });
+        if (!live.isEmpty()) log.info("감시자 관계 자동 제거 — {}건", live.size());
+        return live.size();
+    }
+
+    /**
+     * 만료된 초대를 <b>생성자에게만</b> 알린다.
+     *
+     * <p>감시자 후보에게는 어떤 알림도 보내지 않는다 — 아직 동의하지 않은 외부인이고,
+     * "당신을 초대한 링크가 만료됐다"는 연락 자체가 무동의 접촉이다.
+     */
+    @Scheduled(cron = "0 20 4 * * *", zone = "Asia/Seoul")
+    @Transactional
+    public int notifyExpiredInvitations() {
+        Instant now = Instant.now();
+        List<WatcherInvitation> expired =
+                invitationRepository.findExpiredUnnotified(now, Limit.of(BATCH_SIZE));
+        if (expired.isEmpty()) return 0;
+
+        for (WatcherInvitation invitation : expired) {
+            notificationPublisher.publish(NotificationEvent.forChallenge(
+                    invitation.getInviterUserId(),
+                    NotificationType.WATCHER_INVITATION_EXPIRED,
+                    invitation.getChallengeId(),
+                    // 초대 id 가 곧 사건이다. 멀티 태스크가 같은 만료 건을 집어도 한 번만 쌓인다.
+                    Map.of(NotificationParams.CHALLENGE_ID, invitation.getChallengeId().toString(),
+                            NotificationParams.WATCHER_ID, invitation.getId().toString())));
+            audit.afterCommit("WATCHER_INVITATION_EXPIRED", invitation.getId(), invitation.getInviterUserId(), "INVITED", "EXPIRED", null);
+            invitation.markExpiryNotified(now);   // 중복 발송 방지
+        }
+        log.info("감시자 초대 만료 알림 — {}건", expired.size());
+        return expired.size();
+    }
+}

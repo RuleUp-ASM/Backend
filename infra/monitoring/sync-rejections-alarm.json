@@ -1,0 +1,17 @@
+{
+  "AlarmName": "ruleup-stg-sync-repeated-rejections",
+  "AlarmDescription": "Sync envelope rejected at least 3 consecutive times for one account on an API instance. Check sync_envelope_rejected reason and streak in /ecs/ruleup-stg-api.",
+  "ActionsEnabled": true,
+  "AlarmActions": ["arn:aws:sns:ap-northeast-2:961178969292:ruleup-stg-alarms"],
+  "OKActions": ["arn:aws:sns:ap-northeast-2:961178969292:ruleup-stg-alarms"],
+  "MetricName": "SyncRepeatedRejections",
+  "Namespace": "RuleUp/Verification",
+  "Statistic": "Sum",
+  "Unit": "Count",
+  "Period": 300,
+  "EvaluationPeriods": 1,
+  "DatapointsToAlarm": 1,
+  "Threshold": 1,
+  "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+  "TreatMissingData": "notBreaching"
+}

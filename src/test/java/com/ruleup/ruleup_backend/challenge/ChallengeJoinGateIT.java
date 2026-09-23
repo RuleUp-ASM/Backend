@@ -1,0 +1,477 @@
+package com.ruleup.ruleup_backend.challenge;
+
+import com.ruleup.ruleup_backend.TestcontainersConfiguration;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.WebApplicationContext;
+
+import java.time.LocalDate;
+import java.util.Map;
+import java.util.UUID;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+
+/**
+ * 가입 게이트 5중 검사 · 탈퇴 · 방장 승계 회귀 계약 테스트.
+ *
+ * <p>정책 §5·§10·§11 → 통합 테크스펙 5-1(유형 3) → 백엔드 4-3 → 가입·탈퇴 API 명세 순서로 고정한다.
+ * 거절은 전부 409 {@code JOIN_BLOCKED} + reason 단일 형식이어야 한다.
+ */
+@SpringBootTest
+@Import(TestcontainersConfiguration.class)
+class ChallengeJoinGateIT extends ChallengeApiSupport {
+
+    @Autowired WebApplicationContext wac;
+    @Autowired JdbcTemplate jdbcTemplate;
+    MockMvc mvc;
+
+    @Override protected MockMvc mvc() { return mvc; }
+    @Override protected JdbcTemplate jdbc() { return jdbcTemplate; }
+
+    @BeforeEach
+    void setUp() {
+        mvc = MockMvcBuilders.webAppContextSetup(wac).apply(springSecurity()).build();
+    }
+
+    // ===== 헬퍼 =====
+
+    private MvcResult join(String token, UUID challengeId) throws Exception {
+        return postJsonAuth("/api/v1/challenges/" + challengeId + "/members", token, Map.of());
+    }
+
+    private MvcResult leave(String token, UUID challengeId) throws Exception {
+        return mvc.perform(delete("/api/v1/challenges/" + challengeId + "/members/me")
+                .header("Authorization", "Bearer " + token)).andReturn();
+    }
+
+    /** 방장 1명이 이미 들어 있는 공개 그룹 방(가입 대상). */
+    private UUID openGroup(UUID ownerId) {
+        UUID challengeId = insertChallenge(ownerId, "EXERCISE", "ACTIVE", "GROUP");
+        insertActiveMembership(challengeId, ownerId, "OWNER");
+        jdbcTemplate.update("UPDATE challenges SET visibility = 'PUBLIC' WHERE id = ?", (Object) bytes(challengeId));
+        return challengeId;
+    }
+
+    private void expectBlocked(MvcResult res, String reason) throws Exception {
+        assertThat(res.getResponse().getStatus()).isEqualTo(409);
+        assertThat((String) read(res, "$.error.code")).isEqualTo("JOIN_BLOCKED");
+        assertThat((String) read(res, "$.error.reason")).isEqualTo(reason);
+    }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("가입 게이트")
+    class JoinGate {
+
+        @Test
+        @DisplayName("통과 → joined + countFromCycle + requiredPermissions + personalSetupRequired")
+        void joinContract() throws Exception {
+            Member owner = member(uniq("gate-owner"));
+            Member joiner = member(uniq("gate-joiner"));
+            UUID challengeId = openGroup(owner.id());
+
+            MvcResult res = join(joiner.token(), challengeId);
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+            assertThat((Boolean) read(res, "$.data.joined")).isTrue();
+            assertThat((String) read(res, "$.data.countFromCycle")).isNotBlank();
+            // 수동 인증 방 → 필요 권한 없음, 개인 설정 불필요
+            assertThat((Integer) read(res, "$.data.requiredPermissions.length()")).isZero();
+            assertThat((Boolean) read(res, "$.data.personalSetupRequired")).isFalse();
+
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM challenge_members WHERE challenge_id = ? AND user_id = ? "
+                            + "AND status = 'ACTIVE'",
+                    Integer.class, bytes(challengeId), bytes(joiner.id())))
+                    .as("참여 사실의 원천은 멤버십 행 하나다 — 동시 참여 카운터는 개정으로 사라졌다")
+                    .isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("사이클은 1주 고정 — 주 중간 입장이면 판정은 다음 사이클 경계부터")
+        void countFromNextCycleBoundary() throws Exception {
+            Member owner = member(uniq("cycle-owner"));
+            Member joiner = member(uniq("cycle-joiner"));
+            UUID challengeId = openGroup(owner.id());
+            // 사이클 경계는 KST 기준으로 계산되므로 픽스처도 KST 로 잡는다.
+            LocalDate start = LocalDate.now(java.time.ZoneId.of("Asia/Seoul")).minusDays(3);
+            jdbcTemplate.update("UPDATE challenges SET start_date = ? WHERE id = ?", start, bytes(challengeId));
+
+            MvcResult res = join(joiner.token(), challengeId);
+            assertThat((String) read(res, "$.data.countFromCycle")).isEqualTo(start.plusDays(7).toString());
+        }
+
+        @Test
+        @DisplayName("비공개 방 직접 가입 → PRIVATE_INVITE_ONLY (초대 링크로만)")
+        void privateInviteOnly() throws Exception {
+            Member owner = member(uniq("gate-priv-owner"));
+            Member joiner = member(uniq("gate-priv-joiner"));
+            UUID challengeId = openGroup(owner.id());
+            jdbcTemplate.update("UPDATE challenges SET visibility = 'PRIVATE' WHERE id = ?", (Object) bytes(challengeId));
+
+            expectBlocked(join(joiner.token(), challengeId), "PRIVATE_INVITE_ONLY");
+        }
+
+
+        @Test
+        @DisplayName("정원 마감 → FULL")
+        void full() throws Exception {
+            Member owner = member(uniq("gate-full-owner"));
+            Member joiner = member(uniq("gate-full-joiner"));
+            UUID challengeId = openGroup(owner.id());
+            jdbcTemplate.update("UPDATE challenges SET capacity = 1 WHERE id = ?", (Object) bytes(challengeId));
+
+            expectBlocked(join(joiner.token(), challengeId), "FULL");
+        }
+
+        @Test
+        @DisplayName("표시 티어 < minTier → TIER_GATE (구 매너온도 게이트 대체)")
+        void tierGate() throws Exception {
+            Member owner = member(uniq("gate-tier-owner"));
+            Member joiner = member(uniq("gate-tier-joiner"));
+            UUID challengeId = openGroup(owner.id());
+            jdbcTemplate.update("UPDATE challenges SET min_tier = 'GOLD' WHERE id = ?", (Object) bytes(challengeId));
+
+            expectBlocked(join(joiner.token(), challengeId), "TIER_GATE");
+        }
+
+        @Test
+        @DisplayName("종료된 챌린지 → CHALLENGE_COMPLETED / 이미 멤버 → ALREADY_JOINED")
+        void completedAndAlreadyJoined() throws Exception {
+            Member owner = member(uniq("gate-done-owner"));
+            Member joiner = member(uniq("gate-done-joiner"));
+            UUID challengeId = openGroup(owner.id());
+
+            assertThat(join(joiner.token(), challengeId).getResponse().getStatus()).isEqualTo(200);
+            expectBlocked(join(joiner.token(), challengeId), "ALREADY_JOINED");
+
+            jdbcTemplate.update("UPDATE challenges SET status = 'COMPLETED' WHERE id = ?", (Object) bytes(challengeId));
+            Member other = member(uniq("gate-done-other"));
+            expectBlocked(join(other.token(), challengeId), "CHALLENGE_COMPLETED");
+        }
+
+        @Test
+        @DisplayName("기기 권한은 서버 게이트가 아니다 — 자동 인증 방도 권한 없이 가입되고 필요 권한만 안내한다")
+        void devicePermissionIsNotAServerGate() throws Exception {
+            Member owner = member(uniq("gate-perm-owner"));
+            Member joiner = member(uniq("gate-perm-joiner"));
+            UUID challengeId = openGroup(owner.id());
+            jdbcTemplate.update("UPDATE challenges SET verification_config = ? WHERE id = ?",
+                    "{\"selectedMethod\":\"AUTO\",\"verificationType\":\"PHONE\",\"signalSource\":\"USAGE\","
+                            + "\"wearableReq\":\"NONE\",\"requiredPermissions\":[\"PACKAGE_USAGE_STATS\"]}",
+                    bytes(challengeId));
+
+            MvcResult res = join(joiner.token(), challengeId);
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+            assertThat((String) read(res, "$.data.requiredPermissions[0]")).isEqualTo("PACKAGE_USAGE_STATS");
+            assertThat((Boolean) read(res, "$.data.personalSetupRequired")).isTrue();
+        }
+
+
+        @Test
+        @DisplayName("마지막 한 자리에 20명이 동시에 가입해도 정확히 한 명만 성공한다")
+        void concurrentLastSlotHasSingleWinner() throws Exception {
+            UUID challengeId = openGroup(member(uniq("race-slot-owner")).id());
+            jdbcTemplate.update("UPDATE challenges SET capacity = 2 WHERE id = ?", (Object) bytes(challengeId));
+
+            List<String> tokens = new ArrayList<>();
+            List<UUID> challengeIds = new ArrayList<>();
+            for (int i = 0; i < 20; i++) {
+                tokens.add(member(uniq("race-slot-" + i)).token());
+                challengeIds.add(challengeId);
+            }
+
+            List<MvcResult> results = joinConcurrently(tokens, challengeIds);
+
+            assertThat(results.stream().filter(r -> r.getResponse().getStatus() == 200)).hasSize(1);
+            assertThat(results.stream().filter(r -> r.getResponse().getStatus() == 409)).hasSize(19);
+            for (MvcResult result : results) {
+                if (result.getResponse().getStatus() == 409) {
+                    assertThat((String) read(result, "$.error.reason")).isEqualTo("FULL");
+                }
+            }
+            Integer activeMembers = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM challenge_members WHERE challenge_id = ? AND status = 'ACTIVE'",
+                    Integer.class, bytes(challengeId));
+            assertThat(activeMembers)
+                    .as("정원 판정의 근거는 멤버십 행이다. 표시용 participant_count 는 커밋 뒤 "
+                            + "원천에서 다시 세므로 이 시점에 맞아떨어질 필요가 없다")
+                    .isEqualTo(2);
+        }
+    }
+
+    private List<MvcResult> joinConcurrently(List<String> tokens, List<UUID> challengeIds) throws Exception {
+        ExecutorService executor = Executors.newFixedThreadPool(tokens.size());
+        CountDownLatch ready = new CountDownLatch(tokens.size());
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            List<Future<MvcResult>> futures = new ArrayList<>();
+            for (int i = 0; i < tokens.size(); i++) {
+                String token = tokens.get(i);
+                UUID challengeId = challengeIds.get(i);
+                futures.add(executor.submit(() -> {
+                    ready.countDown();
+                    start.await();
+                    return join(token, challengeId);
+                }));
+            }
+            ready.await();
+            start.countDown();
+            List<MvcResult> results = new ArrayList<>();
+            for (Future<MvcResult> future : futures) results.add(future.get());
+            return results;
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("탈퇴와 재입장")
+    class LeaveAndRejoin {
+
+        /** 방의 낙관적 충돌 감지 버전. 설정 수정(PATCH)이 이 값으로 "그 사이 변한 게 있나"를 판정한다. */
+        private int versionOf(UUID challengeId) {
+            Integer v = jdbcTemplate.queryForObject(
+                    "SELECT version FROM challenges WHERE id = ?", Integer.class, bytes(challengeId));
+            return v != null ? v : 0;
+        }
+
+        @Test
+        @DisplayName("일반 멤버가 나가도 version 이 오른다 — 수정 화면이 인원 변화를 놓치지 않게")
+        void leaveBumpsVersion() throws Exception {
+            Member owner = member(uniq("leave-ver-owner"));
+            Member joiner = member(uniq("leave-ver-joiner"));
+            UUID challengeId = openGroup(owner.id());
+            join(joiner.token(), challengeId);
+            int before = versionOf(challengeId);
+
+            leave(joiner.token(), challengeId);
+
+            // 벌크 UPDATE(clearAutomatically) 뒤에서 bumpVersion 을 부르면 준영속이라 조용히 사라진다.
+            assertThat(versionOf(challengeId)).isGreaterThan(before);
+        }
+
+        @Test
+        @DisplayName("자진 탈퇴 → 감점 + 재입장 1주 대기, 그 안에 재가입하면 REJOIN_COOLDOWN")
+        void leaveThenCooldown() throws Exception {
+            Member owner = member(uniq("leave-owner"));
+            Member joiner = member(uniq("leave-joiner"));
+            UUID challengeId = openGroup(owner.id());
+            jdbcTemplate.update("UPDATE challenges SET verification_config=JSON_SET(verification_config,'$.selectedMethod','AUTO') WHERE id=?",bytes(challengeId));
+            join(joiner.token(), challengeId);
+
+            MvcResult res = leave(joiner.token(), challengeId);
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+            assertThat((Boolean) read(res, "$.data.left")).isTrue();
+            assertThat((Integer) read(res, "$.data.scoreDelta")).isNegative();
+            assertThat((Object) read(res, "$.data.exemptReason")).isNull();
+            assertThat((String) read(res, "$.data.rejoinAvailableAt")).isNotBlank();
+            assertThat((Boolean) read(res, "$.data.botOwnerActivated")).isFalse();
+
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM challenge_members WHERE challenge_id = ? AND user_id = ? "
+                            + "AND status = 'ACTIVE'",
+                    Integer.class, bytes(challengeId), bytes(joiner.id())))
+                    .as("나갔으면 ACTIVE 멤버십이 남아 있으면 안 된다").isZero();
+
+            MvcResult blocked = join(joiner.token(), challengeId);
+            expectBlocked(blocked, "REJOIN_COOLDOWN");
+            assertThat((String) read(blocked, "$.error.rejoinAvailableAt")).isNotBlank();
+        }
+
+        @Test
+        @DisplayName("부정행위 검출 강퇴 → BANNED 영구 차단. 대기 시각이 없고 시간이 흘러도 풀리지 않는다")
+        void cheatKickBansRejoinPermanently() throws Exception {
+            Member owner = member(uniq("cheat-owner"));
+            Member cheater = member(uniq("cheat-user"));
+            UUID challengeId = openGroup(owner.id());
+            join(cheater.token(), challengeId);
+
+            var roomAdmin = wac.getBean(com.ruleup.ruleup_backend.challenge.service.RoomAdminService.class);
+            roomAdmin.kickForCheat(challengeId, cheater.id());
+            roomAdmin.kickForCheat(challengeId, cheater.id());   // 같은 신호 재전송 — 멱등이어야 한다
+
+            MvcResult blocked = join(cheater.token(), challengeId);
+            expectBlocked(blocked, "PERMANENT_BAN");
+            // 사유는 설명하지 않는다 — 언제 풀리는지도 없다.
+            assertThat(blocked.getResponse().getContentAsString()).doesNotContain("rejoinAvailableAt");
+
+            // 백오프 강퇴라면 여기서 풀린다. 영구 차단은 대기 시각과 무관해야 한다.
+            jdbcTemplate.update("UPDATE challenge_members SET rejoin_available_at = DATE_SUB(NOW(6), INTERVAL 1 HOUR) "
+                    + "WHERE challenge_id = ? AND user_id = ?", bytes(challengeId), bytes(cheater.id()));
+            expectBlocked(join(cheater.token(), challengeId), "PERMANENT_BAN");
+
+            // 초대 링크 미리보기도 같은 사유를 내린다 — 판정 순서가 어긋나면 클라 안내가 갈라진다.
+            var challenge = wac.getBean(com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository.class)
+                    .findById(challengeId).orElseThrow();
+            assertThat(wac.getBean(com.ruleup.ruleup_backend.challenge.service.ChallengeMemberService.class)
+                    .previewBlockReason(cheater.id(), challenge, true))
+                    .isEqualTo(com.ruleup.ruleup_backend.challenge.domain.JoinBlockReason.PERMANENT_BAN);
+            // 상세 화면도 같은 사유 — 대기 시각은 비워 둔다.
+            MvcResult detail = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                    .get("/api/v1/challenges/" + challengeId).header("Authorization", "Bearer " + cheater.token()))
+                    .andReturn();
+            assertThat((String) read(detail, "$.data.joinBlockReason")).isEqualTo("PERMANENT_BAN");
+            assertThat((Object) read(detail, "$.data.rejoinAvailableAt")).isNull();
+
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM challenge_members WHERE challenge_id = ? AND user_id = ? "
+                            + "AND status = 'ACTIVE'",
+                    Integer.class, bytes(challengeId), bytes(cheater.id())))
+                    .as("쫓겨났으면 ACTIVE 멤버십이 남아 있으면 안 된다").isZero();
+
+            // 제재 이력에는 영구로 찍힌다.
+            MvcResult sanctions = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                    .get("/api/v1/users/me/sanctions").header("Authorization", "Bearer " + cheater.token())).andReturn();
+            assertThat((String) read(sanctions, "$.data.auto[0].reasonCode")).isEqualTo("CHEAT_DETECTED");
+            assertThat((Boolean) read(sanctions, "$.data.auto[0].permanent")).isTrue();
+        }
+
+        @Test
+        @DisplayName("검출 전에 스스로 나갔어도 영구 차단 — 탈퇴 1주 대기로 우회되지 않는다")
+        void cheatAfterLeaveStillBans() throws Exception {
+            Member owner = member(uniq("cheat-left-owner"));
+            Member cheater = member(uniq("cheat-left-user"));
+            UUID challengeId = openGroup(owner.id());
+            join(cheater.token(), challengeId);
+            leave(cheater.token(), challengeId);
+
+            wac.getBean(com.ruleup.ruleup_backend.challenge.service.RoomAdminService.class)
+                    .kickForCheat(challengeId, cheater.id());
+            jdbcTemplate.update("UPDATE challenge_members SET rejoin_available_at = DATE_SUB(NOW(6), INTERVAL 1 HOUR) "
+                    + "WHERE challenge_id = ? AND user_id = ?", bytes(challengeId), bytes(cheater.id()));
+
+            expectBlocked(join(cheater.token(), challengeId), "PERMANENT_BAN");
+        }
+
+        @Test
+        @DisplayName("1주가 지나면 같은 방에 다시 들어갈 수 있다 (구 '재참여 영구 불가' 폐기)")
+        void rejoinAfterCooldown() throws Exception {
+            Member owner = member(uniq("rejoin-owner"));
+            Member joiner = member(uniq("rejoin-joiner"));
+            UUID challengeId = openGroup(owner.id());
+            join(joiner.token(), challengeId);
+            leave(joiner.token(), challengeId);
+
+            jdbcTemplate.update("UPDATE challenge_members SET rejoin_available_at = DATE_SUB(NOW(6), INTERVAL 1 HOUR) "
+                    + "WHERE challenge_id = ? AND user_id = ?", bytes(challengeId), bytes(joiner.id()));
+
+            jdbcTemplate.update("UPDATE challenge_rejoin_backoffs SET available_at=DATE_SUB(NOW(6),INTERVAL 1 HOUR) WHERE challenge_id=? AND user_id=?", bytes(challengeId),bytes(joiner.id()));
+            assertThat(join(joiner.token(), challengeId).getResponse().getStatus()).isEqualTo(200);
+        }
+    }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("방장 승계")
+    class Succession {
+
+        @Test
+        @DisplayName("방장이 넘기지 않고 나가면 즉시 봇방장 체제가 된다 — 새 방장을 뽑지는 않는다")
+        void ownerLeavesThenBotOwnerThenClaim() throws Exception {
+            Member owner = member(uniq("succ-owner"));
+            Member joiner = member(uniq("succ-joiner"));
+            UUID challengeId = openGroup(owner.id());
+            join(joiner.token(), challengeId);
+
+            MvcResult res = leave(owner.token(), challengeId);
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+            assertThat((Boolean) read(res, "$.data.botOwnerActivated")).isTrue();
+
+            String ownerType = jdbcTemplate.queryForObject(
+                    "SELECT owner_type FROM challenges WHERE id = ?", String.class, bytes(challengeId));
+            assertThat(ownerType).isEqualTo("BOT");
+
+            // 여기서 끝이다 — 멤버가 방장이 되는 경로는 페이지1에 없다. 봇방장 체제로 유지된다
+            // (챌린지 정책 §11.2). 선착순 클레임은 LegacyRoomAdminApiIT 가 플래그를 켜고 본다.
+        }
+
+        @Test
+        @DisplayName("봇방장 전환은 남은 멤버에게 탈퇴 감점 면책을 만들지 않는다")
+        void botOwnerGraceCoversEveryMember() throws Exception {
+            Member owner = member(uniq("botgrace-owner"));
+            Member joiner = member(uniq("botgrace-joiner"));
+            Member bystander = member(uniq("botgrace-bystander"));
+            UUID challengeId = openGroup(owner.id());
+            jdbcTemplate.update("UPDATE challenges SET verification_config=JSON_SET(verification_config,'$.selectedMethod','AUTO') WHERE id=?",bytes(challengeId));
+            join(joiner.token(), challengeId);
+            join(bystander.token(), challengeId);
+
+            leave(owner.token(), challengeId);   // 넘기지 않고 나감 → 봇방장 전환
+
+            MvcResult res = leave(bystander.token(), challengeId);
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+            assertThat((String) read(res, "$.data.exemptReason")).isNull();
+            assertThat((Integer) read(res, "$.data.scoreDelta")).isNegative();
+        }
+
+        @Test
+        @DisplayName("봇방장 전환 3일이 지나면 면책이 끝나 일반 탈퇴와 동일하게 감점")
+        void botOwnerGraceExpires() throws Exception {
+            Member owner = member(uniq("expire-owner"));
+            Member joiner = member(uniq("expire-joiner"));
+            UUID challengeId = openGroup(owner.id());
+            jdbcTemplate.update("UPDATE challenges SET verification_config=JSON_SET(verification_config,'$.selectedMethod','AUTO') WHERE id=?",bytes(challengeId));
+            join(joiner.token(), challengeId);
+            leave(owner.token(), challengeId);
+
+            jdbcTemplate.update("UPDATE challenges SET owner_granted_at = DATE_SUB(NOW(6), INTERVAL 4 DAY) "
+                    + "WHERE id = ?", (Object) bytes(challengeId));
+
+            MvcResult res = leave(joiner.token(), challengeId);
+            assertThat((Object) read(res, "$.data.exemptReason")).isNull();
+            assertThat((Integer) read(res, "$.data.scoreDelta")).isNegative();
+        }
+
+        @Test
+        @DisplayName("나가면서 스스로 만든 봇방장 전환으로 자기 감점을 면제받지는 못한다")
+        void leavingOwnerDoesNotSelfExempt() throws Exception {
+            Member owner = member(uniq("selfexempt-owner"));
+            Member joiner = member(uniq("selfexempt-joiner"));
+            UUID challengeId = openGroup(owner.id());
+            jdbcTemplate.update("UPDATE challenges SET verification_config=JSON_SET(verification_config,'$.selectedMethod','AUTO') WHERE id=?",bytes(challengeId));
+            join(joiner.token(), challengeId);
+
+            MvcResult res = leave(owner.token(), challengeId);
+            assertThat((Boolean) read(res, "$.data.botOwnerActivated")).isTrue();
+            assertThat((Object) read(res, "$.data.exemptReason")).isNull();
+            assertThat((Integer) read(res, "$.data.scoreDelta")).isNegative();
+        }
+
+        @Test
+        @DisplayName("Phase 1에서는 클레임 시도로 탈퇴 감점 면책을 받을 수 없다")
+        void claimGraceExemption() throws Exception {
+            Member owner = member(uniq("grace-owner"));
+            Member joiner = member(uniq("grace-joiner"));
+            UUID challengeId = openGroup(owner.id());
+            jdbcTemplate.update("UPDATE challenges SET verification_config=JSON_SET(verification_config,'$.selectedMethod','AUTO') WHERE id=?",bytes(challengeId));
+            join(joiner.token(), challengeId);
+            leave(owner.token(), challengeId);
+            postJsonAuth("/api/v1/challenges/" + challengeId + "/owner/claim", joiner.token(), Map.of());
+
+            MvcResult res = leave(joiner.token(), challengeId);
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+            assertThat((String) read(res, "$.data.exemptReason")).isNull();
+            assertThat((Integer) read(res, "$.data.scoreDelta")).isNegative();
+        }
+
+    }
+}

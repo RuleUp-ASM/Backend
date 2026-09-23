@@ -1,0 +1,286 @@
+package com.ruleup.ruleup_backend.verification.service;
+
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.DistributionSummary;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import org.springframework.stereotype.Component;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+
+/**
+ * 인증 도메인 전용 지표 (백엔드 7절 모니터링).
+ *
+ * <p>스펙이 알림 조건을 <b>수치</b>로 적어 뒀는데 지표가 없으면 그 조건은 문서에만 존재한다.
+ * 여기서 재는 것은 네 가지다.
+ * <ul>
+ *   <li><b>sync p95</b> — 목표 1초, 3초 초과 지속이면 알림. 백분위를 서버가 계산해 내보낸다
+ *       (평균만 있으면 느린 꼬리가 평균에 묻힌다).</li>
+ *   <li><b>dedup·게이트·동의 비율</b> — 급변이 곧 Android 재전송 버그·권한 변경·기기 이슈의 신호다.
+ *       절대값이 아니라 <b>수신 신호 수 대비</b>로 봐야 해서 분모(수신 수)도 함께 센다.</li>
+ *   <li><b>확정 배치</b> — 소요 시간과 처리 건수, 그리고 <b>03:30 이전에 끝났는지</b>.
+ *       탐색 reconciliation 이 확정 결과를 입력으로 쓰므로 이 시각이 계약이다.</li>
+ *   <li><b>확정 실패</b> — 스펙상 0건이어야 하는 값이라 1건이라도 세어져야 한다.</li>
+ * </ul>
+ */
+@Component
+public class VerificationMetrics {
+
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+
+    /** 탐색 reconciliation 시각 — 확정 배치는 이보다 먼저 끝나야 한다. */
+    private static final LocalTime RECONCILIATION_AT = LocalTime.of(3, 30);
+
+    private final Timer syncTimer;
+    private final MeterRegistry registry;
+    private final Timer finalizeTimer;
+    private final Counter signalsReceived;
+    private final Counter signalsDeduped;
+    private final Counter signalsGateDropped;
+    private final Counter signalsConsentRejected;
+    private final Counter finalized;
+    private final Counter finalizeLate;
+    private final Counter finalizeFailed;
+    private final Counter materializeFailed;
+    private final Counter deviceIdMissing;
+    private final Counter activeDeviceUnknown;
+    private final Counter signalsStored;
+    private final Counter coordinatesPurged;
+    private final Counter duplicateConfirm;
+    private final Counter mutatedAfterConfirm;
+    private final Counter confirmedTooEarly;
+    private final Counter appealSubmitted;
+    private final Counter appealAccepted;
+    private final Counter appealDuplicate;
+    private final Counter appealAbuseSampled;
+    private final Counter backlogRequests;
+    private final Counter signalsReadTruncated;
+    private final Counter payloadRejected;
+    private final DistributionSummary payloadBytes;
+    private final DistributionSummary backlogSpanSeconds;
+
+    /** 마지막으로 확정 배치가 대상을 비운 시각(epoch millis). 0 이면 아직 돈 적이 없다. */
+    private final AtomicLong lastFinalizeCompletedAt = new AtomicLong();
+
+    public VerificationMetrics(MeterRegistry registry) {
+        this.registry = registry;
+        this.syncTimer = Timer.builder("verification.sync")
+                .description("sync 처리 시간 — 목표 p95 1초")
+                .publishPercentiles(0.5, 0.95, 0.99)
+                .register(registry);
+        this.finalizeTimer = Timer.builder("verification.finalize.batch")
+                .description("확정 배치 한 번이 대상을 비우는 데 걸린 시간")
+                .publishPercentiles(0.5, 0.95)
+                .register(registry);
+        this.signalsReceived = Counter.builder("verification.signals.received")
+                .description("수신 신호 수 — dedup·게이트 비율의 분모").register(registry);
+        this.signalsDeduped = Counter.builder("verification.signals.deduped")
+                .description("이미 받은 적이 있어 걸러낸 신호 수").register(registry);
+        this.signalsGateDropped = Counter.builder("verification.signals.gate_dropped")
+                .description("신뢰 게이트로 판정에서 뺀 신호 수").register(registry);
+        this.signalsConsentRejected = Counter.builder("verification.signals.consent_rejected")
+                .description("개별 동의가 없어 수집을 거부한 신호 수").register(registry);
+        this.finalized = Counter.builder("verification.finalize.confirmed")
+                .description("확정 배치가 종결한 판정 수").register(registry);
+        this.finalizeLate = Counter.builder("verification.finalize.late")
+                .description("03:30 탐색 reconciliation 이후까지 이어진 확정 배치 실행 수")
+                .register(registry);
+        // 스펙상 0 이어야 하는 값이라 1건이라도 세어져야 한다. 격리된 건은 조용히 미뤄지므로
+        // 이 카운터가 없으면 「확정되지 않은 채 계속 밀리는 판정」을 아무도 모른다.
+        // 스펙 7절이 <b>0건</b>을 요구하는 두 값. 0 을 확인하려면 세는 자리가 있어야 한다.
+        this.finalizeFailed = Counter.builder("verification.finalize.failed")
+                .description("대상 단위 확정 실패 — 격리 후 뒤로 미뤄진 판정 수").register(registry);
+        // 채우기에 실패한 멤버는 그 날짜가 통계에서 비어 버린다. 확정 실패와 원인이 달라 따로 센다.
+        this.materializeFailed = Counter.builder("verification.materialize.failed")
+                .description("무신호 귀속일 채우기 실패 — 그 멤버·날짜는 판정 행이 열리지 않았다")
+                .register(registry);
+        // 활성 기기 검증을 엄격 모드로 켤 수 있는 시점을 이 값이 알려 준다. 0 이 되기 전에 켜면
+        // 기기를 안 보내는 구버전 앱이 전부 인증 불가가 된다.
+        this.deviceIdMissing = Counter.builder("verification.sync.device_id_missing")
+                .description("기기 식별자 없이 들어온 sync 요청 수").register(registry);
+        // 요청은 기기를 밝혔는데 <b>계정 쪽에 활성 기기가 없는</b> 경우. 비교할 대상이 없어
+        // 관대 모드에서는 통과시킬 수밖에 없다 — 이 값이 0 이 되어야 엄격 모드가 의미를 갖는다.
+        this.activeDeviceUnknown = Counter.builder("verification.sync.active_device_unknown")
+                .description("계정에 활성 기기가 없어 기기 대조를 못 한 sync 요청 수").register(registry);
+        this.signalsStored = Counter.builder("verification.signals.stored")
+                .description("실제로 적재된 원본 신호 수 — 저장량 증가율의 원천").register(registry);
+        // 파기가 실제로 돌고 있는지의 유일한 수치. 0 이 이어지면 배치가 죽은 것이다.
+        this.coordinatesPurged = Counter.builder("verification.location.coordinates_purged")
+                .description("파기된 GPS 원본 좌표 행 수").register(registry);
+        // 판정이 원본 전량을 다시 읽는 구조라, 상한에 걸려 잘린 날은 <b>그 날 판정이 틀렸다</b>는 뜻이다.
+        this.signalsReadTruncated = Counter.builder("verification.signals.read_truncated")
+                .description("일별 원본 조회가 상한에 걸려 잘린 횟수").register(registry);
+        this.payloadRejected = Counter.builder("verification.sync.payload_rejected")
+                .description("본문 크기 상한을 넘겨 413 으로 반려한 요청 수 — 초과율의 분자")
+                .register(registry);
+        this.payloadBytes = DistributionSummary.builder("verification.sync.payload_bytes")
+                .description("sync 본문 크기 — p99 가 상한에 근접하면 압축·요약 전송을 검토한다")
+                .baseUnit("bytes").publishPercentiles(0.5, 0.95, 0.99).register(registry);
+        this.backlogSpanSeconds = DistributionSummary.builder("verification.sync.backlog_span_seconds")
+                .description("한 요청이 선언한 커버리지 구간 길이 — 오프라인 복구 규모")
+                .baseUnit("seconds").publishPercentiles(0.5, 0.95, 0.99).register(registry);
+        // 아래 넷은 스펙 7절이 <b>0건</b>을 요구하는 값이다. 0 을 확인하려면 세는 자리가 있어야 한다.
+        this.duplicateConfirm = Counter.builder("verification.confirm.duplicate")
+                .description("같은 멤버·날짜에 확정이 두 번 시도된 횟수 — 유일 제약이 막은 수")
+                .register(registry);
+        // <b>오류 지표가 아니다.</b> 확정된 날짜로 신호가 계속 들어오는 것은 정상이고(오프라인
+        // 복구·재전송), 결과가 바뀌지 않는 것은 early-return 이 구조적으로 보장한다. 스펙 7절의
+        // 「확정 후 자동 정정 0건」은 그래서 셀 자리가 없다 — 대신 그 경로로 들어오는 <b>양</b>을
+        // 관찰해 재전송이 비정상적으로 늘어나는지를 본다.
+        this.mutatedAfterConfirm = Counter.builder("verification.sync.terminal_day_signals")
+                .description("이미 확정된 날짜로 들어온 sync 평가 시도 — 관찰값(정상 경로)")
+                .register(registry);
+        this.confirmedTooEarly = Counter.builder("verification.confirm.too_early")
+                .description("확정 시각 전에 실패를 확정하려 한 횟수").register(registry);
+        // 인정률은 분자만으로 계산할 수 없다. 형식 요건에서 걸린 건까지 포함한 <b>전체 신청</b>이
+        // 분모다 — 그게 없으면 「인정률 급변」 알람을 걸 수 없다.
+        this.appealSubmitted = Counter.builder("verification.appeal.submitted")
+                .description("이의 신청 시도 — 인정률의 분모(형식 요건 탈락 포함)").register(registry);
+        this.appealAccepted = Counter.builder("verification.appeal.accepted")
+                .description("이의 인용 건수 — 인정률의 분자").register(registry);
+        this.appealDuplicate = Counter.builder("verification.appeal.duplicate_blocked")
+                .description("같은 판정에 두 번째 이의가 막힌 횟수 — 중복 정정·중복 지급의 방어선")
+                .register(registry);
+        this.appealAbuseSampled = Counter.builder("verification.appeal.abuse_sampled")
+                .description("이의 남용 이상탐지 집계가 실제로 돈 횟수").register(registry);
+        this.backlogRequests = Counter.builder("verification.sync.backlog_requests")
+                .description("복구 전송(backlog=true)으로 들어온 요청 수 — 구간당 요청 수의 분자")
+                .register(registry);
+        registry.gauge("verification.finalize.last_completed_epoch_ms", lastFinalizeCompletedAt,
+                AtomicLong::doubleValue);
+    }
+
+    /** sync 한 번의 처리 시간과 신호 구성. */
+    public void sync(long elapsedNanos, int received, int deduped, int gateDropped, int consentRejected) {
+        syncTimer.record(elapsedNanos, TimeUnit.NANOSECONDS);
+        if (received > 0) signalsReceived.increment(received);
+        if (deduped > 0) signalsDeduped.increment(deduped);
+        if (gateDropped > 0) signalsGateDropped.increment(gateDropped);
+        if (consentRejected > 0) signalsConsentRejected.increment(consentRejected);
+    }
+
+    /**
+     * 요청 봉투의 모양 — 크기와 커버리지 구간 길이.
+     *
+     * @param coveredSeconds 이 요청이 「빠짐없이 담았다」고 선언한 구간의 길이. 길수록 오프라인
+     *                       복구분이고, 이 값의 분포가 FCM 기동 효과를 판단하는 근거다
+     */
+    public void envelope(long payloadBytesValue, long coveredSeconds) {
+        if (payloadBytesValue > 0) payloadBytes.record(payloadBytesValue);
+        if (coveredSeconds > 0) backlogSpanSeconds.record(coveredSeconds);
+    }
+
+    /** 본문 크기 상한을 넘겨 반려했다(413). */
+    public void payloadRejected() {
+        payloadRejected.increment();
+    }
+
+    /**
+     * 봉투 검증에서 400 으로 반려한 sync — 사유별로 센다. 사유가 하나로 뭉쳐 있으면
+     * 앱 계약 버그(필드 누락)와 일시적 이상을 구분할 수 없다. 사유는 고정 열거라 태그 폭발이 없다.
+     */
+    public void envelopeRejected(String reason) {
+        Counter.builder("verification.sync.envelope_rejected")
+                .description("봉투 검증 실패로 400 반려한 sync 수 — 사유별")
+                .tag("reason", reason)
+                .register(registry).increment();
+    }
+
+    /**
+     * 이미 확정된 날짜로 sync 가 들어왔다 — <b>정상 경로</b>다. 결과는 바뀌지 않는다.
+     * 오류 지표가 아니라 재전송·오프라인 복구의 규모를 보는 관찰값이다.
+     */
+    public void terminalDaySignals() { mutatedAfterConfirm.increment(); }
+
+    /** 이의 신청이 들어왔다(결과와 무관) — 인정률의 분모. */
+    public void appealSubmitted() { appealSubmitted.increment(); }
+
+    /** 이의가 인용됐다. */
+    public void appealAccepted() { appealAccepted.increment(); }
+
+    /** 같은 판정의 두 번째 이의가 막혔다. */
+    public void appealDuplicateBlocked() { appealDuplicate.increment(); }
+
+    /** 이의 남용 이상탐지 집계가 돌았다. */
+    public void appealAbuseSampled() { appealAbuseSampled.increment(); }
+
+    /** GPS 좌표를 실제로 파기했다. */
+    public void locationCoordinatesPurged(int count) {
+        if (count > 0) coordinatesPurged.increment(count);
+    }
+
+    /** 원본을 실제로 적재했다. */
+    public void signalsStored(int count) {
+        if (count > 0) signalsStored.increment(count);
+    }
+
+    /** 일별 원본 조회가 상한에 걸려 잘렸다 — 그 날 판정은 전량 재평가가 아니다. */
+    public void signalsReadTruncated() {
+        signalsReadTruncated.increment();
+    }
+
+    /** 기기 식별자 없이 sync 가 들어왔다(관대 모드에서만 도달한다). */
+    public void deviceIdMissing() {
+        deviceIdMissing.increment();
+    }
+
+    /** 계정에 활성 기기가 없어 대조하지 못했다 — 엄격 모드에서는 신호를 쓰지 않는다. */
+    public void activeDeviceUnknown() {
+        activeDeviceUnknown.increment();
+    }
+
+    /** 복구 전송(backlog=true)으로 들어온 요청. 구간당 요청 수를 볼 때 분자가 된다. */
+    public void backlogRequest() {
+        backlogRequests.increment();
+    }
+
+    /** 한 멤버의 무신호 채우기가 실패해 그 날짜 판정 행이 열리지 않았다. */
+    public void materializeFailed() {
+        materializeFailed.increment();
+    }
+
+    /** 같은 멤버·날짜에 확정이 두 번 시도됐다(유일 제약이 막았다). */
+    public void duplicateConfirm() { duplicateConfirm.increment(); }
+
+    /** 확정 시각 전에 실패를 확정하려 했다. 스펙상 0 이어야 한다. */
+    public void confirmedTooEarly() { confirmedTooEarly.increment(); }
+
+    /** 한 건의 확정이 실패해 격리·연기됐다. */
+    public void finalizeFailed() {
+        finalizeFailed.increment();
+    }
+
+    /**
+     * 확정 배치가 대상을 한 번 비웠다.
+     *
+     * <p>완료 시각이 03:30 을 넘겼으면 따로 센다 — 확정 결과가 탐색 reconciliation 의 입력이라,
+     * 늦으면 완주율·유지율이 하루 밀린 값으로 계산된다.
+     */
+    public void finalizeBatch(int confirmed, long elapsedNanos) {
+        finalizeTimer.record(elapsedNanos, TimeUnit.NANOSECONDS);
+        if (confirmed > 0) finalized.increment(confirmed);
+        Instant now = Instant.now();
+        lastFinalizeCompletedAt.set(now.toEpochMilli());
+        if (pastReconciliation(now)) finalizeLate.increment();
+    }
+
+    /**
+     * 오늘 00시 확정분이 03:30 을 넘겨 처리되고 있는지.
+     *
+     * <p>00:00~03:30 사이의 실행만 「그날 확정분」이다. 그 뒤의 실행은 배치가 밀렸거나 늦게 도착한
+     * 대상이며, 어느 쪽이든 reconciliation 이 이미 지나간 뒤라 같은 문제를 뜻한다.
+     */
+    private boolean pastReconciliation(Instant now) {
+        var kstNow = now.atZone(KST);
+        LocalDate today = kstNow.toLocalDate();
+        return kstNow.toInstant().isAfter(today.atTime(RECONCILIATION_AT).atZone(KST).toInstant())
+                && Duration.between(today.atStartOfDay(KST).toInstant(), kstNow.toInstant())
+                        .compareTo(Duration.ofHours(12)) < 0;
+    }
+}

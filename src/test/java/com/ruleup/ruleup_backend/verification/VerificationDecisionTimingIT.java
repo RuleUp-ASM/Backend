@@ -1,0 +1,415 @@
+package com.ruleup.ruleup_backend.verification;
+
+import com.ruleup.ruleup_backend.TestcontainersConfiguration;
+import com.ruleup.ruleup_backend.TestcontainersConfiguration.MutableClock;
+import com.ruleup.ruleup_backend.verification.service.VerificationFinalizeService;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.WebApplicationContext;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
+
+/**
+ * 판정 시간 규칙 (인증 정책 §2 · 테크스펙 §5-1).
+ *
+ * <p>규칙은 한 줄이다 — <b>성공은 조건 충족 즉시, 실패는 귀속일 이틀 뒤 00:00 KST 에만 확정한다.</b>
+ * 귀속일이 끝나도 하루는 더 기다리며, 그 사이 도착한 신호도 발생 시각이 맞으면 그대로 인정한다.
+ * 신호가 늦게 도착하는 기기가 흔해서, 귀속일 종료 즉시 확정하면 실제로 수행한 사람이 억울하게 실패한다.
+ * 그 유예 하루가 유저가 "이대로면 실패"를 보고 이의를 내는 창이기도 하다.
+ *
+ * <p>확정 이후 도착한 신호는 저장만 하고 판정을 바꾸지 않는다 — 구제는 이의제기 한 경로뿐이다.
+ */
+@SpringBootTest
+@Import(TestcontainersConfiguration.class)
+class VerificationDecisionTimingIT extends VerificationApiSupport {
+
+    private static final double GYM_LAT = 37.4979, GYM_LNG = 127.0276;
+
+    @Autowired WebApplicationContext wac;
+    @Autowired JdbcTemplate jdbcTemplate;
+    @Autowired VerificationFinalizeService finalizeService;
+    @Autowired MutableClock clock;
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    com.ruleup.ruleup_backend.challenge.lifecycle.ChallengeScoreInputs scoreCycles;
+
+    private MockMvc mvc;
+
+    @BeforeEach
+    void setUp() {
+        mvc = MockMvcBuilders.webAppContextSetup(wac).apply(springSecurity()).build();
+    }
+
+    @AfterEach
+    void restoreClock() {
+        clock.reset();
+    }
+
+    @Override protected MockMvc mvc() { return mvc; }
+    @Override protected JdbcTemplate jdbc() { return jdbcTemplate; }
+
+    private MvcResult sync(String token, List<Map<String, Object>> signals) throws Exception {
+        MvcResult res = postJsonAuth("/api/v1/verifications/sync", token, syncBody(signals));
+        assertThat(res.getResponse().getStatus()).isEqualTo(200);
+        return res;
+    }
+
+    private String todayApiStatus(String token, UUID challengeId) throws Exception {
+        MvcResult res = getAuth("/api/v1/challenges/" + challengeId + "/verifications/today", token);
+        assertThat(res.getResponse().getStatus()).isEqualTo(200);
+        return read(res, "$.data.status");
+    }
+
+    /**
+     * 확정 시각까지 <b>시계를 앞으로 돌린다</b>.
+     *
+     * <p>예전에는 행의 {@code finalizeAfter} 를 과거로 당겼는데, 그 우회는 정작 막아야 할
+     * 것을 시험하지 못한다 — 확정 배치가 귀속일에서 <b>다시 파생</b>한 시각으로도 거르기
+     * 때문에, 저장된 값만 흔드는 테스트는 「오늘 행을 오늘 확정해도 되는가」를 영영 묻지 않는다.
+     * 시계를 옮기면 오늘 만든 판정이 진짜로 D+2 를 지난 상태가 된다.
+     *
+     * <p>인자는 남겨 둔다 — 호출부가 「이 멤버의 판정을 확정 시점으로 보낸다」고 읽히는 편이
+     * 시계를 직접 만지는 것보다 의도가 분명하다.
+     */
+    private void makeDue(UUID challengeMemberId) {
+        clock.advance(Duration.ofDays(2).plusMinutes(1));
+    }
+
+    /** 저장된 시각 컬럼을 UTC 기준 Instant 로 읽는다. */
+    private Instant instantColumn(String column, UUID challengeMemberId) {
+        String raw = jdbc().queryForObject(
+                "SELECT DATE_FORMAT(" + column + ", '%Y-%m-%dT%H:%i:%sZ') FROM VerificationDaily " +
+                        "WHERE challengeMemberId = ? AND targetDate = ?",
+                String.class, bytes(challengeMemberId), java.sql.Date.valueOf(LocalDate.now(KST)));
+        return (raw != null) ? Instant.parse(raw) : null;
+    }
+
+    private Instant finalizeAfterOf(UUID challengeMemberId) {
+        return instantColumn("finalizeAfter", challengeMemberId);
+    }
+
+    private String failureReasonOf(UUID challengeMemberId) {
+        List<String> rows = jdbc().queryForList(
+                "SELECT failureReason FROM VerificationDaily WHERE challengeMemberId = ? AND targetDate = ?",
+                String.class, bytes(challengeMemberId), java.sql.Date.valueOf(LocalDate.now(KST)));
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    private Instant appealClosesAtOf(UUID challengeMemberId) {
+        return instantColumn("appealClosesAt", challengeMemberId);
+    }
+
+    private Instant shareableAtOf(UUID challengeMemberId) {
+        return instantColumn("shareableAt", challengeMemberId);
+    }
+
+    private static String visitParams() { return "{\"duration_min\":30,\"radius_m\":100}"; }
+
+    @Nested
+    @DisplayName("귀속일 중")
+    class DuringTargetDate {
+
+        @Test
+        @DisplayName("최대 사용 시간을 넘겨도 그날은 실패로 저장하지 않고 '실패 예정'으로만 보인다")
+        void maxUsageBreachIsOnlyFailExpected() throws Exception {
+            Member me = member(uniq("timing-max"));
+            UUID challenge = insertAutoChallenge(me.id(), "SCREEN_TIME_MAX", "USAGE", "{\"duration_min\":10}");
+            UUID memberId = insertReadyMember(challenge, me.id(), null, screenApps("com.instagram.android"));
+
+            // 10분 제한인데 40분 썼다 — 위반이 이미 확인됐다.
+            sync(me.token(), List.of(usageSignal("com.instagram.android", todayAt(20, 0), todayAt(20, 40))));
+
+            assertThat(todayStatusOf(memberId))
+                    .as("귀속일 중에는 최종 실패로 저장하지 않는다")
+                    .isEqualTo("PENDING");
+            assertThat(failureReasonOf(memberId)).isEqualTo("USAGE_EXCEEDED");
+            assertThat(appealClosesAtOf(memberId))
+                    .as("이의는 확정 전에 받는다 — 행을 여는 시점에 기한이 서 있다")
+                    .isEqualTo(LocalDate.now(KST).plusDays(2).atStartOfDay(KST).toInstant());
+            assertThat(shareableAtOf(memberId)).as("확정 전에는 피드에 실리지 않는다").isNull();
+
+            MvcResult today = getAuth("/api/v1/challenges/" + challenge + "/verifications/today", me.token());
+            assertThat((String) read(today, "$.data.status")).isEqualTo("FAIL_EXPECTED");
+            assertThat((Boolean) read(today, "$.data.appeal.eligible"))
+                    .as("실패 예정 구간이 실제 이의 신청 창이다").isTrue();
+            // 이의 경로가 /verifications/{verificationId}/appeals 라, 버튼이 살아 있는데 대상 ID 가
+            // 없으면 화면에서 누를 수가 없다. 예전에는 unacknowledgedResult 안에만 있었고
+            // 그 값은 이미 확인한 판정에서는 사라진다.
+            assertThat((String) read(today, "$.data.verificationId"))
+                    .as("이의를 걸 대상 ID 가 최상위에 있어야 한다").isNotBlank();
+        }
+
+        @Test
+        @DisplayName("도달형 목표에 못 미치면 진행중이다 — 실패도 실패 예정도 아니다")
+        void unmetAchievementGoalIsInProgress() throws Exception {
+            Member me = member(uniq("timing-under"));
+            UUID challenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
+            UUID memberId = insertReadyMember(challenge, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+
+            // 30분 목표인데 10분만 머물렀다.
+            sync(me.token(), List.of(
+                    geofenceSignal(memberId, "ENTER", todayAt(9, 0)),
+                    geofenceSignal(memberId, "EXIT", todayAt(9, 10))));
+
+            assertThat(todayStatusOf(memberId)).isEqualTo("PENDING");
+            assertThat(failureReasonOf(memberId)).isNull();
+            assertThat(todayApiStatus(me.token(), challenge))
+                    .as("귀속일이 아직 안 끝났으니 채울 기회가 남아 있다")
+                    .isEqualTo("IN_PROGRESS");
+        }
+
+        @Test
+        @DisplayName("성공 조건을 채우면 기다리지 않고 즉시 완료된다")
+        void successConfirmsImmediately() throws Exception {
+            Member me = member(uniq("timing-success"));
+            UUID challenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
+            UUID memberId = insertReadyMember(challenge, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+
+            sync(me.token(), List.of(
+                    geofenceSignal(memberId, "ENTER", todayAt(9, 0)),
+                    geofenceSignal(memberId, "EXIT", todayAt(10, 0))));
+
+            assertThat(todayStatusOf(memberId)).isEqualTo("SUCCESS");
+            assertThat(todayApiStatus(me.token(), challenge)).isEqualTo("DONE");
+            assertThat(shareableAtOf(memberId)).as("성공은 즉시 공유 가능").isNotNull();
+        }
+
+        @Test
+        @DisplayName("실패 예정이 붙은 뒤라도 늦게 도착한 신호로 성공을 되찾을 수 있다")
+        void lateSignalCanStillRescueBeforeConfirmation() throws Exception {
+            Member me = member(uniq("timing-rescue"));
+            UUID challenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
+            UUID memberId = insertReadyMember(challenge, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+
+            sync(me.token(), List.of(
+                    geofenceSignal(memberId, "ENTER", todayAt(9, 0)),
+                    geofenceSignal(memberId, "EXIT", todayAt(9, 10))));
+            assertThat(todayStatusOf(memberId)).isEqualTo("PENDING");
+
+            // 절전 때문에 늦게 올라온 나머지 구간.
+            sync(me.token(), List.of(
+                    geofenceSignal(memberId, "ENTER", todayAt(10, 0)),
+                    geofenceSignal(memberId, "EXIT", todayAt(10, 40))));
+
+            assertThat(todayStatusOf(memberId)).isEqualTo("SUCCESS");
+        }
+
+        @Test
+        @DisplayName("귀속일이 끝난 뒤에도 늦게 도착한 신호로 성공을 되찾을 수 있다 — 유예 하루")
+        void lateSignalDuringGraceStillCounts() throws Exception {
+            Member me = member(uniq("timing-grace"));
+            UUID challenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
+            UUID memberId = insertReadyMember(challenge, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+            // 어제도 챌린지 기간 안이어야 인증 대상이다 — 시작일을 당긴다.
+            jdbc().update("UPDATE challenges SET start_date = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 3 DAY) WHERE id = ?",
+                    bytes(challenge));
+
+            // 어제 귀속 건이 목표 미달로 남아 있다(귀속일은 끝났고 확정은 아직).
+            UUID verificationId = UUID.randomUUID();
+            jdbc().update("INSERT INTO VerificationDaily " +
+                            "(id, challengeMemberId, challengeId, userId, targetDate, status, finalizeAfter, appealClosesAt) " +
+                            "VALUES (?, ?, ?, ?, DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 1 DAY), 'PENDING', " +
+                            " UTC_TIMESTAMP(6) + INTERVAL 1 DAY, UTC_TIMESTAMP(6) + INTERVAL 1 DAY)",
+                    bytes(verificationId), bytes(memberId), bytes(challenge), bytes(me.id()));
+
+            // 절전 때문에 하루 늦게 올라온 어제 기록.
+            sync(me.token(), List.of(
+                    geofenceSignal(memberId, "ENTER", todayAt(9, 0).minusSeconds(86_400)),
+                    geofenceSignal(memberId, "EXIT", todayAt(10, 0).minusSeconds(86_400))));
+
+            String status = jdbc().queryForObject(
+                    "SELECT status FROM VerificationDaily WHERE id = ?", String.class, bytes(verificationId));
+            assertThat(status)
+                    .as("확정 전에 도착했고 발생 시각이 귀속일 조건에 맞으면 인정한다")
+                    .isEqualTo("SUCCESS");
+        }
+
+        @Test
+        @DisplayName("확정 시각은 판정 유형과 무관하게 귀속일 이틀 뒤 00:00 KST 다")
+        void finalizeBoundaryIsIdenticalAcrossMethods() throws Exception {
+            Member me = member(uniq("timing-boundary"));
+
+            UUID gps = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
+            UUID gpsMember = insertReadyMember(gps, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+            UUID sleep = insertAutoChallenge(me.id(), "SLEEP", "SLEEP", "{\"sleep_hours\":7}");
+            UUID sleepMember = insertReadyMember(sleep, me.id(), null, null);
+            UUID screen = insertAutoChallenge(me.id(), "SCREEN_TIME_MAX", "USAGE", "{\"duration_min\":10}");
+            UUID screenMember = insertReadyMember(screen, me.id(), null, screenApps("com.instagram.android"));
+
+            sync(me.token(), List.of(geofenceSignal(gpsMember, "ENTER", todayAt(9, 0))));
+
+            Instant expected = LocalDate.now(KST).plusDays(2).atStartOfDay(KST).toInstant();
+            assertThat(finalizeAfterOf(gpsMember)).isEqualTo(expected);
+            assertThat(finalizeAfterOf(sleepMember))
+                    .as("수면도 별도 cutoff 없이 같은 경계를 쓴다")
+                    .isEqualTo(expected);
+            assertThat(finalizeAfterOf(screenMember)).isEqualTo(expected);
+        }
+    }
+
+    @Nested
+    @DisplayName("확정 배치")
+    class Finalization {
+
+        @Test
+        @DisplayName("점수 사이클 입력을 만들 수 없어도 실패 확정은 커밋된다 — 점수는 보정 배치가 나중에 반영한다")
+        void finalizationCommitsEvenWhenScoreInputsAreMissing() throws Exception {
+            Member me = member(uniq("final-score-missing"));
+            UUID challenge = insertAutoChallenge(me.id(), "SCREEN_TIME_MAX", "USAGE", "{\"duration_min\":10}");
+            jdbc().update("UPDATE challenges SET penalties = '{\"score\":true,\"groupShare\":true,\"watcher\":false}' WHERE id = ?",
+                    bytes(challenge));
+            UUID memberId = insertReadyMember(challenge, me.id(), null, screenApps("com.instagram.android"));
+            sync(me.token(), List.of(usageSignal("com.instagram.android", todayAt(20, 0), todayAt(20, 40))));
+            // 멤버십 스냅샷이 없는 등으로 사이클 입력을 만들 수 없는 상황(QA TIER-15 B4).
+            org.mockito.Mockito.doThrow(new IllegalStateException("SCORE_MEMBERSHIP_INPUT_MISSING"))
+                    .when(scoreCycles).cycle(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.anyInt());
+            try {
+                makeDue(memberId);
+                finalizeService.finalizeDue();
+            } finally {
+                org.mockito.Mockito.reset(scoreCycles);
+            }
+
+            assertThat(todayStatusOf(memberId))
+                    .as("예전에는 확정 직전 예외로 확정 자체가 롤백돼 PENDING 에 머물렀다")
+                    .isEqualTo("FAILED");
+        }
+
+        @Test
+        @DisplayName("확정 시각이 지나면 위반이 남아 있는 건만 실패로 확정된다")
+        void breachBecomesFailureAfterMidnight() throws Exception {
+            Member me = member(uniq("final-breach"));
+            UUID challenge = insertAutoChallenge(me.id(), "SCREEN_TIME_MAX", "USAGE", "{\"duration_min\":10}");
+            UUID memberId = insertReadyMember(challenge, me.id(), null, screenApps("com.instagram.android"));
+
+            sync(me.token(), List.of(usageSignal("com.instagram.android", todayAt(20, 0), todayAt(20, 40))));
+            makeDue(memberId);
+            finalizeService.finalizeDue();
+
+            assertThat(todayStatusOf(memberId)).isEqualTo("FAILED");
+            assertThat(failureReasonOf(memberId)).isEqualTo("USAGE_EXCEEDED");
+            assertThat(shareableAtOf(memberId))
+                    .as("이의는 확정 전에 이미 마감됐다 — 확정된 실패는 바로 공유된다")
+                    .isNotNull();
+        }
+
+        @Test
+        @DisplayName("[P1] 저장된 확정 시각이 앞당겨져 있어도 귀속일 기준 D+2 전이면 확정하지 않는다")
+        void anEarlyStoredDeadlineDoesNotConfirmBeforeTheDerivedOne() throws Exception {
+            Member me = member(uniq("final-too-early"));
+            UUID challenge = insertAutoChallenge(me.id(), "SCREEN_TIME_MAX", "USAGE", "{\"duration_min\":10}");
+            UUID memberId = insertReadyMember(challenge, me.id(), null, screenApps("com.instagram.android"));
+
+            sync(me.token(), List.of(usageSignal("com.instagram.android", todayAt(20, 0), todayAt(20, 40))));
+
+            // 행에 적힌 확정 시각만 과거로 당긴다. 시계는 그대로라 <b>오늘</b>이고, 오늘 귀속
+            // 판정의 확정 경계는 아직 이틀 뒤다. 저장값만 믿으면 여기서 실패로 굳어 버린다.
+            jdbc().update("UPDATE VerificationDaily SET finalizeAfter = UTC_TIMESTAMP(6) - INTERVAL 1 MINUTE "
+                            + "WHERE challengeMemberId = ? AND targetDate = ?",
+                    bytes(memberId), java.sql.Date.valueOf(LocalDate.now(KST)));
+
+            finalizeService.finalizeDue();
+
+            assertThat(todayStatusOf(memberId))
+                    .as("이른 확정은 이의 창이 열린 건을 실패로 굳히는 일이라 되돌릴 수 없다 — "
+                            + "세는 것만으로는 「D+2 이전 확정 0건」을 지킬 수 없다")
+                    .isNotEqualTo("FAILED");
+        }
+
+        @Test
+        @DisplayName("규칙 지키기형에서 위반이 없으면 확정 시각에 완료가 된다")
+        void constraintWithoutBreachBecomesSuccess() throws Exception {
+            Member me = member(uniq("final-clean"));
+            UUID challenge = insertAutoChallenge(me.id(), "SCREEN_TIME_MAX", "USAGE", "{\"duration_min\":60}");
+            UUID memberId = insertReadyMember(challenge, me.id(), null, screenApps("com.instagram.android"));
+
+            sync(me.token(), List.of(usageSignal("com.instagram.android", todayAt(20, 0), todayAt(20, 10))));
+            makeDue(memberId);
+            finalizeService.finalizeDue();
+
+            assertThat(todayStatusOf(memberId)).isEqualTo("SUCCESS");
+        }
+
+        @Test
+        @DisplayName("도달형이 목표에 못 미친 채 확정 시각을 넘기면 실패가 된다")
+        void unmetAchievementBecomesFailure() throws Exception {
+            Member me = member(uniq("final-unmet"));
+            UUID challenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
+            UUID memberId = insertReadyMember(challenge, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+
+            sync(me.token(), List.of(
+                    geofenceSignal(memberId, "ENTER", todayAt(9, 0)),
+                    geofenceSignal(memberId, "EXIT", todayAt(9, 10))));
+            makeDue(memberId);
+            finalizeService.finalizeDue();
+
+            assertThat(todayStatusOf(memberId)).isEqualTo("FAILED");
+            assertThat(failureReasonOf(memberId)).isEqualTo("INSUFFICIENT_DWELL");
+        }
+
+        @Test
+        @DisplayName("배치를 다시 돌려도 확정 결과가 바뀌거나 중복되지 않는다")
+        void rerunIsIdempotent() throws Exception {
+            Member me = member(uniq("final-rerun"));
+            UUID challenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
+            UUID memberId = insertReadyMember(challenge, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+
+            sync(me.token(), List.of(geofenceSignal(memberId, "ENTER", todayAt(9, 0))));
+            makeDue(memberId);
+            finalizeService.finalizeDue();
+
+            Instant firstConfirmed = instantColumn("verifiedAt", memberId);
+
+            finalizeService.finalizeDue();
+            finalizeService.finalizeDue();
+
+            assertThat(todayStatusOf(memberId)).isEqualTo("FAILED");
+            assertThat(jdbc().queryForObject(
+                    "SELECT COUNT(*) FROM VerificationDaily WHERE challengeMemberId = ? AND targetDate = ?",
+                    Integer.class, bytes(memberId), java.sql.Date.valueOf(LocalDate.now(KST)))).isEqualTo(1);
+            assertThat(instantColumn("verifiedAt", memberId))
+                    .as("이미 확정된 건은 다시 확정하지 않는다")
+                    .isEqualTo(firstConfirmed);
+        }
+
+        @Test
+        @DisplayName("확정 이후 도착한 신호는 저장만 되고 판정을 바꾸지 않는다 — 절대 조건")
+        void signalsArrivingAfterConfirmationNeverChangeTheResult() throws Exception {
+            Member me = member(uniq("final-late"));
+            UUID challenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
+            UUID memberId = insertReadyMember(challenge, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+
+            sync(me.token(), List.of(geofenceSignal(memberId, "ENTER", todayAt(9, 0))));
+            makeDue(memberId);
+            finalizeService.finalizeDue();
+            assertThat(todayStatusOf(memberId)).isEqualTo("FAILED");
+
+            // 뒤늦게 올라온 "사실은 2시간 있었다" 기록.
+            sync(me.token(), List.of(
+                    geofenceSignal(memberId, "ENTER", todayAt(9, 0)),
+                    geofenceSignal(memberId, "EXIT", todayAt(11, 0))));
+
+            assertThat(todayStatusOf(memberId))
+                    .as("확정 이후 도착분은 판정에 반영하지 않는다 — 구제는 이의제기로만")
+                    .isEqualTo("FAILED");
+        }
+    }
+}

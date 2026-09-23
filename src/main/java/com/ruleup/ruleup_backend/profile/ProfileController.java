@@ -1,0 +1,112 @@
+package com.ruleup.ruleup_backend.profile;
+
+import com.ruleup.ruleup_backend.common.docs.ApiErrorCodes;
+import com.ruleup.ruleup_backend.common.error.ErrorCode;
+import com.ruleup.ruleup_backend.common.response.ApiResponse;
+import com.ruleup.ruleup_backend.profile.dto.ProfileImageResponse;
+import com.ruleup.ruleup_backend.profile.dto.ProfileResponse;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+import com.ruleup.ruleup_backend.common.image.UploadRateLimiter;
+
+import java.util.UUID;
+
+/**
+ * 프로필 조회·사진 API. 모두 로그인 필요.
+ *
+ * <p>편집(PATCH)은 여기 없다 — 마이페이지 계약이 {@code PATCH /api/v1/users/me/profile} 로 옮겼다
+ * ({@link MyProfileController}). 닉네임과 사진이 <b>통합 1개월 잠금</b>을 공유하게 되면서
+ * 프로필 화면 전용 API 가 아니라 회원 편집 API 가 됐기 때문이다.
+ */
+@Tag(name = "Profile", description = "프로필 조회 · 수정 · 사진 — 검수(PENDING/APPROVED/REJECTED)에 따라 타인에게 보이는 값이 달라진다")
+@SecurityRequirement(name = "bearerAuth")    // Swagger UI에서 자물쇠(토큰 입력) 표시
+@RestController
+@RequestMapping("/api/v1/profile")
+@RequiredArgsConstructor
+public class ProfileController {
+
+    private final ProfileService profileService;
+    private final UploadRateLimiter uploadRateLimiter;
+
+    @Operation(
+            summary = "내 프로필 조회",
+            description = """
+                    프로필 화면용 상세 조회다. 로그인 응답의 `user` 블록보다 항목이 많다
+                    (이메일·가입일·프로필 변경 가능 시각).
+
+                    `nickname`·`profileImageUrl` 은 **항상 본인이 정한 값**이다(본인 화면이므로).
+                    타인에게 지금 어떻게 보이는지는 `nicknameStatus`·`profileImageStatus` 로 판단한다.
+                    - `APPROVED` — 타인에게도 본인 값이 보인다
+                    - `PENDING` — 검수 중. 타인에게는 `tempNickname` 과 기본 프로필이 보인다
+                    - `REJECTED` — 거절됨. 타인에게는 `tempNickname` 과 기본 프로필이 보이고, 변경을 유도해야 한다
+
+                    `nicknameChangeableAfter` 는 다음 닉네임 변경이 가능해지는 시각이다(통합 저장 +1개월).
+                    null 이면 아직 한 번도 바꾸지 않아 지금 바로 변경할 수 있다.
+
+                    잠금(LOCKED) 계정도 조회할 수 있다 — 열람 전용이라 읽기는 허용된다.
+                    """
+    )
+    @ApiErrorCodes({ErrorCode.LOGIN_REQUIRED, ErrorCode.ACCOUNT_BANNED})
+    @GetMapping
+    public ApiResponse<ProfileResponse> getMyProfile(@AuthenticationPrincipal String userId) {
+        return ApiResponse.ok(profileService.getMyProfile(UUID.fromString(userId)));
+    }
+
+    @Operation(
+            summary = "프로필 사진 업로드",
+            description = """
+                    `multipart/form-data` 로 `image` 파트 하나를 보낸다(jpg 또는 png, 최대 10MB).
+                    가입 직후 등록용인 `POST /api/v1/users/me/profile-image` 와 동작이 같다 — 이쪽은 프로필 화면 경로다.
+
+                    응답은 자동 심사의 최종 상태를 포함하며, 심사 제공자 장애 시 `PENDING`을 유지한다.
+                    본인 화면에는 즉시 반영되지만 승인 전까지 **타인에게는 기본 프로필**이 보인다.
+                    거절되면 사진이 내려가고 알림이 간다.
+
+                    최초 등록은 잠금을 시작하지 않는다. 이후 변경·삭제는 닉네임과 같은 1개월 잠금을 사용한다.
+
+                    남용 방지를 위해 **사용자당 1분에 10회**로 제한한다.
+                    """
+    )
+    @ApiErrorCodes({
+            ErrorCode.PROFILE_CHANGE_LOCKED,
+            ErrorCode.IMAGE_CORRUPTED,
+            ErrorCode.LOGIN_REQUIRED,
+            ErrorCode.ACCOUNT_LOCKED,
+            ErrorCode.ACCOUNT_BANNED,
+            ErrorCode.IMAGE_TOO_LARGE,
+            ErrorCode.IMAGE_INVALID_TYPE,
+            ErrorCode.TOO_MANY_REQUESTS
+    })
+    // consumes 를 명시해야 문서가 이 요청을 multipart 로 그린다(기본값은 application/json 이라 파일 선택 UI가 안 나온다).
+    @PostMapping(value = "/image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResponse<ProfileImageResponse> uploadImage(
+            @AuthenticationPrincipal String userId,
+
+            @Parameter(description = "프로필 사진 파일. jpg 또는 png, 최대 10MB.")
+            @RequestPart("image") MultipartFile image) {
+        uploadRateLimiter.check(userId);
+        return ApiResponse.ok(profileService.uploadImage(UUID.fromString(userId), image));
+    }
+
+    @Operation(
+            summary = "프로필 사진 제거",
+            description = """
+                    등록한 사진을 내리고 기본 프로필로 돌아간다. 검수 대기 상태였어도 그대로 제거된다.
+
+                    응답 본문은 없다 — `{"success": true, "data": null, "error": null}`.
+                    """
+    )
+    @ApiErrorCodes({ErrorCode.LOGIN_REQUIRED, ErrorCode.ACCOUNT_LOCKED, ErrorCode.ACCOUNT_BANNED})
+    @DeleteMapping("/image")
+    public ApiResponse<Void> deleteImage(@AuthenticationPrincipal String userId) {
+        profileService.deleteImage(UUID.fromString(userId));
+        return ApiResponse.ok();
+    }
+}

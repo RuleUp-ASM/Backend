@@ -1,0 +1,14 @@
+{
+  "logGroupName": "/ecs/ruleup-stg-api",
+  "filterName": "ruleup-stg-sync-repeated-rejections",
+  "filterPattern": "\"sync_envelope_rejected\" \"WARN\"",
+  "metricTransformations": [
+    {
+      "metricName": "SyncRepeatedRejections",
+      "metricNamespace": "RuleUp/Verification",
+      "metricValue": "1",
+      "defaultValue": 0,
+      "unit": "Count"
+    }
+  ]
+}
