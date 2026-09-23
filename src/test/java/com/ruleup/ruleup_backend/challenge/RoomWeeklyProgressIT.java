@@ -134,9 +134,16 @@ class RoomWeeklyProgressIT extends ChallengeApiSupport {
                         " weekly_count = ? WHERE id = ?",
                 startedDaysAgo, weeklyCount, bytes(challengeId));
         // 방장은 시작일부터 있던 사람이다 — 중간 입장 분기를 타지 않게 가입 시각을 시작일로 맞춘다.
-        jdbcTemplate.update("UPDATE challenge_members SET joined_at = " +
-                        " DATE_SUB(NOW(6), INTERVAL ? DAY) WHERE challenge_id=? AND user_id=?",
-                startedDaysAgo, bytes(challengeId), bytes(me.id()));
+        // 주기 필드는 실제 셋업(VerificationMemberSetup)이 채우는 값과 같은 모양으로 둔다 —
+        // 빈도형 방인데 주기가 비어 있는 멤버는 운영에 존재하지 않는 상태다.
+        jdbcTemplate.update("UPDATE challenge_members SET joined_at = DATE_SUB(NOW(6), INTERVAL ? DAY)," +
+                        " schedule_type='FREQUENCY', period_unit='WEEK', period_target=?," +
+                        " cur_period_start = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL ? DAY)," +
+                        " cur_period_end = DATE_ADD(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL ? DAY)," +
+                        " cur_period_completed = 0" +
+                        " WHERE challenge_id=? AND user_id=?",
+                startedDaysAgo, weeklyCount, startedDaysAgo, 6 - startedDaysAgo,
+                bytes(challengeId), bytes(me.id()));
         return challengeId;
     }
 
@@ -158,6 +165,9 @@ class RoomWeeklyProgressIT extends ChallengeApiSupport {
                         "(id, challengeMemberId, challengeId, userId, targetDate, status, verifiedAt) " +
                         "VALUES (?, ?, ?, ?, DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL ? DAY), 'SUCCESS', NOW(6))",
                 bytes(UUID.randomUUID()), bytes(memberId), bytes(challengeId), bytes(me.id()), daysAgo);
+        // 성공이 남으면 주기 몫도 함께 올라간다 — 운영에서 판정 경로가 하는 일이다.
+        jdbcTemplate.update("UPDATE challenge_members SET cur_period_completed = COALESCE(cur_period_completed,0) + 1"
+                + " WHERE id = ?", bytes(memberId));
     }
 
     private String todayStatus(UUID challengeId, Member me) throws Exception {

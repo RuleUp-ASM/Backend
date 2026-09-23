@@ -10,6 +10,8 @@ import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
 import com.ruleup.ruleup_backend.room.RoomAuthority;
 import com.ruleup.ruleup_backend.room.dto.RoomDtos;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
+import com.ruleup.ruleup_backend.verification.service.VerificationConfigFactory;
+import com.ruleup.ruleup_backend.verification.service.VerificationTargetDays;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,6 +37,7 @@ public class RoomService {
     private final RankingService rankingService;
     private final ChallengeMemberRepository memberRepository;
     private final VerificationDailyRepository verificationRepository;
+    private final VerificationConfigFactory configFactory;
 
     public RoomDtos.RankingResponse ranking(UUID userId, UUID challengeId) {
         if (history.archived(challengeId)) return history.ranking(userId, challengeId);
@@ -116,9 +119,14 @@ public class RoomService {
                 case PENDING -> { /* 아래 사이클 판정으로 넘어간다 */ }
             }
         }
-        int weeklyCount = challenge.getWeeklyCount() == null ? ChallengeCycle.CYCLE_DAYS : challenge.getWeeklyCount();
-        // 이번 주 몫을 이미 채웠으면 오늘은 더 할 게 없다 — 요일 지정이 없으므로 이것이 유일한 비대상 조건이다.
-        if (!weekly.judging() || weekly.done() >= weeklyCount) return "NOT_TARGET";
+        // 아직 판정 구간에 들어오지 않았으면(시작 전·중간 합류) 그것만으로 비대상이다.
+        if (!weekly.judging()) return "NOT_TARGET";
+        // 그 다음은 인증 도메인의 판단을 그대로 쓴다 — 여기서 규칙을 따로 세웠더니 같은 순간에
+        // 방은 NOT_TARGET, /verifications/today 는 IN_PROGRESS 를 내놓았다(QA VER-03).
+        if (VerificationTargetDays.of(configFactory.build(challenge), challenge, me, now.toLocalDate())
+                != VerificationTargetDays.Disposition.EVALUATE) {
+            return "NOT_TARGET";
+        }
         // 자정 직후를 「확인 중」으로 따로 그리던 분기를 걷어냈다 — 확정이 귀속일 이틀 뒤 00:00 로
         // 옮겨지면서 00~03시가 특별한 구간이 아니게 됐다(상태값 4종, 백엔드 정합화 §4).
         return "IN_PROGRESS";

@@ -309,6 +309,11 @@ public class ChallengeMember extends AssignedIdEntity {
         this.curPeriodCompleted = (this.curPeriodCompleted == null ? 0 : this.curPeriodCompleted) + 1;
     }
 
+    /** 성공을 되돌릴 때(수동 체크 취소). 0 아래로는 내려가지 않는다. */
+    public void decrementPeriodCompleted() {
+        this.curPeriodCompleted = Math.max((this.curPeriodCompleted == null ? 0 : this.curPeriodCompleted) - 1, 0);
+    }
+
     /** 진행률 카운터만 갱신(확정 배치 — todayStatus·lastSyncedAt 안 건드림). */
     public void applyCounts(int successDays, int failDays, BigDecimal progressRate) {
         this.successDays = successDays;

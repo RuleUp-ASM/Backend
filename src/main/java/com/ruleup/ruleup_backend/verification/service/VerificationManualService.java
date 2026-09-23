@@ -6,6 +6,7 @@ import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
 import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
+import com.ruleup.ruleup_backend.common.verification.ScheduleType;
 import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
 import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.service.NotificationPublisher;
@@ -91,6 +92,12 @@ public class VerificationManualService {
 
         if (member.getTargetDays() == 0) memberSetup.apply(member, ch, config);
 
+        // 오늘이 인증하는 날인지는 sync·확정 배치와 같은 판단을 쓴다. 여기에만 이 검사가 없어서
+        // 비대상일에 제출해도 DONE 이 찍혔고, 그 결과 방 상세(NOT_TARGET)와 답이 갈렸다(QA MAN-13).
+        if (VerificationTargetDays.of(config, ch, member, targetDate) != VerificationTargetDays.Disposition.EVALUATE) {
+            throw new BusinessException(ErrorCode.NOT_TARGET_DATE);
+        }
+
         VerificationDaily daily = dailyRepo.findByChallengeMemberIdAndTargetDate(member.getId(), targetDate)
                 .orElseGet(() -> dailyRepo.save(
                         VerificationDaily.open(member.getId(), ch.getId(), member.getUserId(), targetDate)));
@@ -113,6 +120,9 @@ public class VerificationManualService {
 
         daily.recordManual(method, now);
         daily.acknowledge(now);   // 본인이 직접 체크한 결과라 확인할 모달이 없다
+        // 빈도형 주기 카운터는 sync 경로에만 있었다. 수동 방은 sync 를 타지 않으므로 이 값이
+        // 영영 0 에 머물렀고, 그래서 주 몫을 다 채운 뒤에도 today 가 계속 「할 차례」라고 답했다.
+        if (config.isFrequency()) member.incrementPeriodCompleted();
         progressService.updateAfterSync(member, VerificationStatus.SUCCESS, now);
         eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "MANUAL_SUCCESS"));
 
@@ -158,6 +168,9 @@ public class VerificationManualService {
 
         ChallengeMember member = challengeQuery.findMembership(daily.getChallengeId(), userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_CHALLENGE_MEMBER));
+        // 체크를 되돌렸으면 주기 몫도 되돌린다. 안 그러면 취소한 뒤에도 그 주는 계속
+        // 「다 했다」로 남아 다시 체크할 길이 막힌다.
+        if (member.getScheduleType() == ScheduleType.FREQUENCY) member.decrementPeriodCompleted();
         progressService.recountAndSetToday(member, VerificationStatus.PENDING);
         eventPublisher.publishEvent(
                 ChallengeStatsRefreshRequested.of(daily.getChallengeId(), "MANUAL_CANCELED"));

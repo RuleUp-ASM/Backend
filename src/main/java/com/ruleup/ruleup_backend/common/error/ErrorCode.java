@@ -222,6 +222,8 @@ public enum ErrorCode {
 
     // ===== 수동 인증 제출 / 취소 =====
     NOT_MANUAL_CHALLENGE(HttpStatus.CONFLICT, "직접 체크로 인증하는 챌린지가 아니에요."),
+    // 날짜 형식이 틀린 것(INVALID_TARGET_DATE)과 다르다 — 날짜는 멀쩡하고 그날 할 게 없는 것이다.
+    NOT_TARGET_DATE(HttpStatus.CONFLICT, "오늘은 인증하는 날이 아니에요."),
     NOTE_TOO_LONG(HttpStatus.BAD_REQUEST, "메모는 200자까지 쓸 수 있어요."),
     NOT_MANUAL_VERIFICATION(HttpStatus.CONFLICT, "자동으로 판정된 인증은 취소할 수 없어요."),
     CANCEL_WINDOW_CLOSED(HttpStatus.CONFLICT, "오늘이 지나서 취소할 수 없어요."),
