@@ -71,10 +71,41 @@ class TierScoringIT extends ChallengeApiSupport {
                 (rs, row) -> uuid(rs.getBytes(1)), bytes(id));
         jdbc().update("UPDATE challenges SET status='COMPLETED',end_date=DATE_SUB(CURDATE(),INTERVAL 3 DAY) WHERE id=?", bytes(id));
         assertThat(archive.deleteIfEligible(id)).isTrue();
-        jdbc().update("UPDATE VerificationDaily SET status='SUCCESS',verifiedVia='APPEAL',version=version+1 WHERE id=?", bytes(original));
+        jdbc().update("UPDATE VerificationDaily SET status='SUCCESS',verifiedVia='APPEAL',version=version+1,scoreVersion=scoreVersion+1 WHERE id=?", bytes(original));
         scoreService.recompute(me.id(), id, 1, original);
         assertThat(scoreOf(me.id())).isGreaterThan(before);
         assertThat(jdbc().queryForObject("SELECT COUNT(*) FROM score_transactions WHERE reason='CORRECTION_COMMIT' AND JSON_UNQUOTE(JSON_EXTRACT(payload_json,'$.inputs[0].challengeId'))=?", Integer.class, id.toString())).isEqualTo(1);
+    }
+
+    /**
+     * 결과 모달을 확인하는 것은 판정이 아니다 — 원장이 움직이면 안 된다.
+     *
+     * <p>예전에는 ack 가 낙관적 락 version 을 올렸고, 점수 동기화가 그 값을 「새 판정」으로 읽어
+     * 그 시각 이후를 통째로 되감았다가 똑같은 값으로 다시 쌓았다. 화면에는 CYCLE_FAIL -1 과
+     * APPEAL_RESTORE +1 이 짝을 지어 늘어났다(QA TIER-05 · TIER-15).
+     */
+    @Test
+    void acknowledgingAResultAddsNoLedgerRows() throws Exception {
+        Member me = member(uniq("ack-ledger"));
+        UUID id = challengeWith(me.id(), 7, 21);
+        judge(id, me.id(), 1, 0, "SUCCESS");
+        scoreService.reconcileCycle(me.id(), id, 1);
+
+        List<Map<String, Object>> before = ledger(me.id());
+        long scoreBefore = scoreOf(me.id());
+        assertThat(before).isNotEmpty();
+
+        UUID verificationId = jdbc().queryForObject(
+                "SELECT id FROM VerificationDaily WHERE challengeId=? ORDER BY targetDate LIMIT 1",
+                (rs, row) -> uuid(rs.getBytes(1)), bytes(id));
+        // 결과 확인이 하는 일 그대로 — acknowledgedAt 과 낙관적 락 version 만 움직인다.
+        jdbc().update("UPDATE VerificationDaily SET acknowledgedAt=NOW(6), version=version+1 WHERE id=?",
+                bytes(verificationId));
+
+        scoreService.reconcileCycle(me.id(), id, 1);
+
+        assertThat(ledger(me.id())).as("확인만 했을 뿐인데 원장이 늘어나면 안 된다").isEqualTo(before);
+        assertThat(scoreOf(me.id())).isEqualTo(scoreBefore);
     }
 
     @Test
@@ -696,7 +727,7 @@ class TierScoringIT extends ChallengeApiSupport {
             long beforeAppeal = scoreOf(me.id());
 
             // 이의 인용 — 판정 원본이 성공으로 정정된다.
-            jdbc().update("UPDATE VerificationDaily SET status = 'SUCCESS', failureReason = NULL,version=version+1 WHERE id = ?",
+            jdbc().update("UPDATE VerificationDaily SET status = 'SUCCESS', failureReason = NULL,version=version+1,scoreVersion=scoreVersion+1 WHERE id = ?",
                     bytes(failed));
             scoreService.recompute(me.id(), ch, 1, failed);
 
@@ -714,7 +745,7 @@ class TierScoringIT extends ChallengeApiSupport {
             UUID failed = judge(ch, me.id(), 1, 0, "FAILED");
             scoreService.reconcileCycle(me.id(), ch, 1);
 
-            jdbc().update("UPDATE VerificationDaily SET status = 'SUCCESS',version=version+1 WHERE id = ?", bytes(failed));
+            jdbc().update("UPDATE VerificationDaily SET status = 'SUCCESS',version=version+1,scoreVersion=scoreVersion+1 WHERE id = ?", bytes(failed));
             scoreService.recompute(me.id(), ch, 1, failed);
 
             assertThat(jdbc().queryForObject("SELECT COUNT(*) FROM score_transactions WHERE reason='CORRECTION_COMMIT' AND user_id = ?",
@@ -732,7 +763,7 @@ class TierScoringIT extends ChallengeApiSupport {
             UUID failed = judge(ch, me.id(), 1, 0, "FAILED");
             scoreService.reconcileCycle(me.id(), ch, 1);
 
-            jdbc().update("UPDATE VerificationDaily SET status = 'SUCCESS',version=version+1 WHERE id = ?", bytes(failed));
+            jdbc().update("UPDATE VerificationDaily SET status = 'SUCCESS',version=version+1,scoreVersion=scoreVersion+1 WHERE id = ?", bytes(failed));
             scoreService.recompute(me.id(), ch, 1, failed);
             long once = scoreOf(me.id());
             scoreService.recompute(me.id(), ch, 1, failed);

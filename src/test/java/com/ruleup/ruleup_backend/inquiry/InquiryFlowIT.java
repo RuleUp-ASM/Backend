@@ -205,6 +205,28 @@ class InquiryFlowIT extends ChallengeApiSupport {
         }
 
         @Test
+        @DisplayName("코드가 모르는 분류 한 건이 목록 전체를 가리지 않는다 — 원문 그대로 실어 내린다")
+        void unknown_category_row_does_not_break_the_list() throws Exception {
+            Member user = member(uniq("unknown-cat"));
+            String known = submit(user, "VERIFICATION");
+            String stale = submit(user, "ERROR_ETC");
+            // 컬럼이 varchar 라 구 분류나 Phase 2 값이 실제로 들어올 수 있다(QA CS-14).
+            jdbcTemplate.update("UPDATE inquiries SET category = 'PAYMENT', origin_category = 'PAYMENT'"
+                    + " WHERE id = ?", bytes(UUID.fromString(stale)));
+
+            MvcResult list = getAuth("/api/v1/inquiries", user.token());
+            assertThat(list.getResponse().getStatus()).isEqualTo(200);
+            assertThat((List<?>) read(list, "$.data.items")).hasSize(2);
+            assertThat((List<String>) read(list, "$.data.items[*].category"))
+                    .containsExactlyInAnyOrder("PAYMENT", "VERIFICATION");
+
+            assertThat(getAuth("/api/v1/inquiries/" + stale, user.token()).getResponse().getStatus())
+                    .isEqualTo(200);
+            assertThat(getAuth("/api/v1/inquiries/" + known, user.token()).getResponse().getStatus())
+                    .isEqualTo(200);
+        }
+
+        @Test
         @DisplayName("남의 문의는 404 — 소유자가 아니면 없는 것과 같다")
         void other_users_inquiry_is_404() throws Exception {
             Member owner = member(uniq("owner"));
@@ -299,6 +321,32 @@ class InquiryFlowIT extends ChallengeApiSupport {
             String userView = getAuth("/api/v1/inquiries/" + inquiryId, user.token())
                     .getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
             assertThat(userView).doesNotContain("originCategory");
+        }
+
+        @Test
+        @DisplayName("모르는 분류로 들어온 건도 큐에서 열고 옳은 분류로 옮길 수 있다")
+        void unknown_category_stays_workable() throws Exception {
+            Member op = operator("unknown-op");
+            Member user = member(uniq("u"));
+            String inquiryId = submit(user, "ERROR_ETC");
+            jdbcTemplate.update("UPDATE inquiries SET category = 'PAYMENT', origin_category = 'PAYMENT'"
+                    + " WHERE id = ?", bytes(UUID.fromString(inquiryId)));
+
+            assertThat(getAuth("/api/v1/admin/inquiries", op.token()).getResponse().getStatus())
+                    .isEqualTo(200);
+            MvcResult detail = getAuth("/api/v1/admin/inquiries/" + inquiryId, op.token());
+            assertThat((String) read(detail, "$.data.category")).isEqualTo("PAYMENT");
+
+            MvcResult moved = mvc.perform(patch("/api/v1/admin/inquiries/" + inquiryId + "/category")
+                    .header("Authorization", "Bearer " + op.token())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(OM.writeValueAsString(Map.of("category", "ERROR_ETC")))).andReturn();
+            assertThat((String) read(moved, "$.data.category")).isEqualTo("ERROR_ETC");
+            assertThat((String) read(moved, "$.data.originCategory"))
+                    .as("유저가 처음 고른 값은 옮겨도 그대로다 — 지표를 그 값으로 센다").isEqualTo("PAYMENT");
+
+            assertThat(auditLogRepository.findByOperatorIdOrderByOccurredAtDesc(op.id()))
+                    .anyMatch(l -> l.getAction() == AdminAction.INQUIRY_RECLASSIFY);
         }
 
         @Test

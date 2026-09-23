@@ -6,7 +6,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import java.nio.ByteBuffer;
-import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -105,7 +107,7 @@ class NotificationStore {
             args[i++] = n.getDeeplink();
             args[i++] = n.getDedupKey();
             args[i++] = n.getSuppressKey();
-            args[i++] = Timestamp.from(n.getCreatedAt());
+            args[i++] = utc(n.getCreatedAt());
         }
 
         jdbc.update(sql, args);
@@ -120,6 +122,18 @@ class NotificationStore {
 
         Set<UUID> present = new HashSet<>(jdbc.query(sql, (rs, row) -> uuid(rs.getBytes(1)), ids));
         return chunk.stream().filter(n -> present.contains(n.getId())).toList();
+    }
+
+    /**
+     * datetime 컬럼에 <b>UTC 벽시계</b>를 적는다 — 이 저장소의 규약이고 JPA 가 읽는 방식이다.
+     *
+     * <p>{@code Timestamp.from(instant)} 은 접속 타임존에 따라 렌더링이 달라진다. 운영 접속은
+     * KST 라 그 방식으로 적으면 KST 벽시계가 들어가는데, 같은 행을 읽는 쪽은 JPA 의
+     * {@code Instant} 매핑이라 그 값을 UTC 로 해석한다 — 알림함 createdAt 이 정확히 9시간
+     * 앞선 이유다. {@code LocalDateTime} 은 타임존이 없어 드라이버가 그대로 적는다.
+     */
+    private static LocalDateTime utc(Instant time) {
+        return LocalDateTime.ofInstant(time, ZoneOffset.UTC);
     }
 
     private static byte[] bytes(UUID id) {

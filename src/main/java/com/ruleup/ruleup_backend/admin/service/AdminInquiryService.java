@@ -61,7 +61,8 @@ public class AdminInquiryService {
         auditService.allowed(operatorId, AdminAction.INQUIRY_QUEUE_VIEW, null, null, null);
 
         InquiryStatus statusFilter = parseOrNull(InquiryStatus.class, status);
-        InquiryCategory categoryFilter = parseOrNull(InquiryCategory.class, category);
+        InquiryCategory parsedCategory = parseOrNull(InquiryCategory.class, category);
+        String categoryFilter = (parsedCategory == null) ? null : parsedCategory.name();
         String q = (keyword == null || keyword.isBlank()) ? null : keyword.trim();
         int limit = (size == null || size <= 0 || size > 100) ? PAGE : size;
 
@@ -82,7 +83,7 @@ public class AdminInquiryService {
                         i.getId().toString(),
                         i.getUserId().toString(),
                         nicknameOf(users, i.getUserId()),
-                        i.getCategory().name(),
+                        i.getCategory(),
                         i.getStatus().name(),
                         preview(i.getBody()),
                         i.getCreatedAt().toString(),
@@ -117,8 +118,8 @@ public class AdminInquiryService {
                 inquiry.getUserId().toString(),
                 user == null ? null : user.visibleNicknameTo(null),
                 user == null ? null : user.getStatus().name(),
-                inquiry.getCategory().name(),
-                inquiry.getOriginCategory().name(),
+                inquiry.getCategory(),
+                inquiry.getOriginCategory(),
                 inquiry.getStatus().name(),
                 inquiry.getBody(),
                 links.urls(),
@@ -178,7 +179,7 @@ public class AdminInquiryService {
         // 유저에게 노출하지 않는 조작이라 감사 로그가 유일한 흔적이다.
         auditService.allowed(operatorId, AdminAction.INQUIRY_RECLASSIFY,
                 AdminAuditLog.TargetType.INQUIRY, inquiryId,
-                inquiry.getCategory().name() + "->" + category.name());
+                inquiry.getCategory() + "->" + category.name());
 
         inquiry.reclassify(category);
         return detailOf(inquiry);
@@ -197,8 +198,8 @@ public class AdminInquiryService {
                 inquiry.getUserId().toString(),
                 user == null ? null : user.visibleNicknameTo(null),
                 user == null ? null : user.getStatus().name(),
-                inquiry.getCategory().name(),
-                inquiry.getOriginCategory().name(),
+                inquiry.getCategory(),
+                inquiry.getOriginCategory(),
                 inquiry.getStatus().name(),
                 inquiry.getBody(),
                 links.urls(),

@@ -37,7 +37,7 @@ public interface InquiryRepository extends JpaRepository<Inquiry, UUID> {
              ORDER BY i.createdAt ASC
             """)
     List<Inquiry> findQueue(@Param("status") InquiryStatus status,
-                            @Param("category") com.ruleup.ruleup_backend.inquiry.domain.InquiryCategory category,
+                            @Param("category") String category,
                             @Param("keyword") String keyword,
                             @Param("cursor") Instant cursor,
                             Limit limit);
@@ -49,7 +49,7 @@ public interface InquiryRepository extends JpaRepository<Inquiry, UUID> {
                AND (:keyword IS NULL OR i.body LIKE %:keyword%)
             """)
     long countQueue(@Param("status") InquiryStatus status,
-                    @Param("category") com.ruleup.ruleup_backend.inquiry.domain.InquiryCategory category,
+                    @Param("category") String category,
                     @Param("keyword") String keyword);
 
     long countByStatus(InquiryStatus status);

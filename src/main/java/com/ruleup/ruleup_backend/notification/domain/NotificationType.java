@@ -293,7 +293,14 @@ public enum NotificationType {
         return tab;
     }
 
-    /** 큐에 넣을지. <b>공지만 false</b> 다. */
+    /**
+     * 큐에 넣을지. <b>현재는 23종 전부 true</b> 다 — 운영 공지도 푸시한다
+     * (2026-09-18 결정, {@code docs/notification/spec-alignment.md}).
+     *
+     * <p>이 주석이 한동안 「공지만 false」로 남아 있었다. 값은 바뀌었는데 설명이 안 바뀌어서,
+     * 푸시가 안 온다는 제보를 조사할 때 여기서 「공지는 원래 안 나간다」고 접고 실제 원인을
+     * 더 안 보게 만든다. 값을 바꿀 때 이 문장을 같이 고친다.
+     */
     public boolean isPushable() {
         return pushable;
     }

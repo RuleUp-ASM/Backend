@@ -272,9 +272,12 @@ class ChallengeDraftPipelineIT extends ChallengeApiSupport {
                         Map.of("description", "매일 아침 물 한 잔 마시기 " + i));
                 assertThat(ok.getResponse().getStatus()).isEqualTo(200);
             }
-            expectError(postJsonAuth("/api/v1/challenges/draft", token,
-                            Map.of("description", "매일 아침 물 한 잔 마시기 11")),
-                    429, "RECOMMENDATION_RATE_LIMITED");
+            MvcResult limited = postJsonAuth("/api/v1/challenges/draft", token,
+                    Map.of("description", "매일 아침 물 한 잔 마시기 11"));
+            expectError(limited, 429, "RECOMMENDATION_RATE_LIMITED");
+            // 명세대로 남은 대기 초를 숫자 자리로 싣는다 — reason 에 넣으면 클라가 파싱해야 한다(QA CRE-04).
+            assertThat((Integer) read(limited, "$.error.retryAfterSeconds")).isBetween(1, 60);
+            assertThat(limited.getResponse().getContentAsString()).doesNotContain("\"reason\"");
         }
     }
 

@@ -104,13 +104,13 @@ class VerificationIntegrityRepairIT extends VerificationApiSupport {
         assertThat(repaired.getVerifiedVia()).isNull();
         assertThat(repaired.getVersion()).isGreaterThan(daily.getVersion());
         assertThat(jdbc().queryForObject("SELECT COUNT(*) FROM outbox_messages WHERE dedup_key=?", Integer.class,
-                "score-input:" + daily.getId() + ":" + repaired.getVersion())).isEqualTo(1);
+                "score-input:" + daily.getId() + ":" + repaired.getScoreVersion())).isEqualTo(1);
         assertThat(jdbc().queryForObject("SELECT COUNT(*) FROM outbox_messages WHERE dedup_key=?", Integer.class,
                 "ROUTINE_FAILURE_CONFIRMED:" + daily.getId())).isEqualTo(1);
         scoreSync.syncConfirmedJudgements();
         assertThat(jdbc().queryForObject("SELECT MAX(source_version) FROM score_transactions WHERE user_id=? AND source_event_key=? AND entry_kind='RESULT'",
                 Long.class, bytes(daily.getUserId()), com.ruleup.ruleup_backend.score.ScoreKeys.hash(
-                        daily.getUserId(), "DAILY", daily.getId()))).isEqualTo(repaired.getVersion());
+                        daily.getUserId(), "DAILY", daily.getId()))).isEqualTo(repaired.getScoreVersion());
         assertThatThrownBy(() -> jdbc().update("CALL repair_verification_daily(?, ?)", daily.getId().toString(), repaired.getVersion()))
                 .hasMessageContaining("does not need repair");
     }

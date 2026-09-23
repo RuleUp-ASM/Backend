@@ -13,6 +13,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  *  - nextChangeAvailableAt  : SETTING_CHANGE_LIMIT — 다음 변경 가능 시각(다음 달 1일 00:00 KST)
  *  - confirmation           : CONFIRMATION_REQUIRED — 2단계 확인 봉투. **서버가 계산한 재제시 문구**와
  *    그 확인에 한해 유효한 토큰이 함께 들어 있어, 클라가 문구를 조립하지 않고 그대로 띄운다
+ *  - retryAfterSeconds      : 429 — 다시 시도할 수 있을 때까지 남은 초
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @io.swagger.v3.oas.annotations.media.Schema(description = "에러 상세. 분기는 code 로 하고, message 는 사용자에게 그대로 보여줄 수 있다.")
@@ -42,10 +43,15 @@ public record ErrorResponse(
         Confirmation confirmation,
 
         @io.swagger.v3.oas.annotations.media.Schema(description="통합 프로필 변경 잠금 해제 시각")
-        String profileLockedUntil) {
+        String profileLockedUntil,
+
+        @io.swagger.v3.oas.annotations.media.Schema(
+                description = "다시 시도할 수 있을 때까지 남은 초 — 429 일 때만 실린다.",
+                example = "42")
+        Integer retryAfterSeconds) {
 
     public ErrorResponse(String code,String message,String reason,String rejoinAvailableAt,String nextChangeAvailableAt,Confirmation confirmation) {
-        this(code,message,reason,rejoinAvailableAt,nextChangeAvailableAt,confirmation,null);
+        this(code,message,reason,rejoinAvailableAt,nextChangeAvailableAt,confirmation,null,null);
     }
 
     public static ErrorResponse of(ErrorCode errorCode) {
@@ -65,6 +71,6 @@ public record ErrorResponse(
         ErrorCode code = e.getErrorCode();
         return new ErrorResponse(code.name(), e.getUserMessage(),
                 e.getDetail(), e.getRejoinAvailableAt(), e.getNextChangeAvailableAt(),
-                e.getConfirmation(), e.getProfileLockedUntil());
+                e.getConfirmation(), e.getProfileLockedUntil(), e.getRetryAfterSeconds());
     }
 }

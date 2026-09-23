@@ -84,7 +84,7 @@ public class InquiryService {
                 repository.findByUserIdOrderByCreatedAtDesc(userId, Limit.of(LIST_SIZE)).stream()
                         .map(i -> new InquiryDtos.Item(
                                 i.getId().toString(),
-                                i.getCategory().name(),
+                                i.getCategory(),
                                 i.getStatus().name(),
                                 preview(i.getBody()),
                                 i.getCreatedAt().toString(),
@@ -101,7 +101,7 @@ public class InquiryService {
 
         return new InquiryDtos.Detail(
                 inquiry.getId().toString(),
-                inquiry.getCategory().name(),
+                inquiry.getCategory(),
                 inquiry.getStatus().name(),
                 inquiry.getBody(),
                 inquiry.imageUrlsOrEmpty(),

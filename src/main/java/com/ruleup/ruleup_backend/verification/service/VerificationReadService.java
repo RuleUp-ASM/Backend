@@ -172,9 +172,16 @@ public class VerificationReadService {
 
     // ===== 조립 헬퍼 =====
 
-    /** 오늘이 대상 날짜가 아니면 판정 행과 무관하게 NOT_TARGET. 나머지는 공용 매핑(TodayStatusView). */
+    /**
+     * 오늘 상태. <b>이미 난 판정이 대상일 여부보다 앞선다</b> — 방 상세가 저장된 today_status 를
+     * 먼저 보는 것과 같은 순서다. 뒤집으면 방금 체크해서 그 주 몫이 찬 순간 「오늘은 아니다」가
+     * 방금의 성공을 덮어, 두 화면이 또 갈린다. 판정이 없는 날에만 대상일을 묻는다.
+     */
     private String todayStatus(boolean isTarget, VerificationDaily daily, LocalDate today,
                                Polarity polarity, Instant now) {
+        if (daily != null && daily.isTerminal()) {
+            return TodayStatusView.of(daily.getStatus(), today, daily.getFailureReason(), polarity, now);
+        }
         if (!isTarget) return TodayStatusView.NOT_TARGET;
         if (daily == null) return TodayStatusView.IN_PROGRESS;
         return TodayStatusView.of(daily.getStatus(), today, daily.getFailureReason(), polarity, now);
@@ -237,13 +244,14 @@ public class VerificationReadService {
                 (m.getLastSyncedAt() != null) ? m.getLastSyncedAt().toString() : null);
     }
 
+    /**
+     * 오늘이 대상일인가 — 판단은 {@link VerificationTargetDays} 하나만 한다.
+     *
+     * <p>여기에 같은 규칙을 다시 적어 두었더니 챌린지 기간(시작·종료) 검사가 빠져 있었고,
+     * 그래서 시작 전·종료 후 방에서도 이 API 만 「할 차례」라고 답했다(QA VER-03).
+     */
     private boolean isTodayTarget(VerificationConfig config, Challenge ch, ChallengeMember m, LocalDate today) {
-        if (config.isFrequency()) {
-            Integer done = m.getCurPeriodCompleted(), need = m.getPeriodTarget();
-            return !(done != null && need != null && done >= need);
-        }
-        List<String> repeat = ch.getRepeatDays();
-        return repeat != null && repeat.contains(WeekdayCodes.code(today.getDayOfWeek()));
+        return VerificationTargetDays.of(config, ch, m, today) == VerificationTargetDays.Disposition.EVALUATE;
     }
 
     private ChallengeProgress.Period toPeriod(ChallengeMember m) {
