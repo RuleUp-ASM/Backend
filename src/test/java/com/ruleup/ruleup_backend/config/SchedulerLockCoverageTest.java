@@ -1,18 +1,20 @@
 package com.ruleup.ruleup_backend.config;
 
+import com.ruleup.ruleup_backend.RuleupBackendApplication;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.config.BeanDefinition;
-import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
 import org.springframework.scheduling.annotation.Scheduled;
 
 import java.lang.reflect.Method;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -63,16 +65,28 @@ class SchedulerLockCoverageTest {
         assertThat(stalePerTask).as("목록에 있지만 더는 없는 배치").isEmpty();
     }
 
-    private static List<Class<?>> scanMainClasses() throws ClassNotFoundException {
-        ClassPathScanningCandidateComponentProvider scanner = new ClassPathScanningCandidateComponentProvider(false);
-        scanner.addIncludeFilter((reader, factory) -> true);
+    /**
+     * 메인 클래스 디렉터리의 .class 를 직접 순회한다.
+     *
+     * <p>Spring 의 ClassPathScanningCandidateComponentProvider 는 쓰지 않는다 — 클래스 메타데이터를
+     * 읽다 실패하면 <b>예외 없이 그 클래스를 건너뛴다</b>. 실제로 CI(Linux)에서만 SystemMetricsSampler 가
+     * 빠져 이 시험이 흔들렸다. 락이 빠진 배치를 잡아야 하는 시험이 조용히 클래스를 놓치면 안 된다.
+     */
+    private static List<Class<?>> scanMainClasses() throws Exception {
+        Path root = Path.of(RuleupBackendApplication.class.getProtectionDomain().getCodeSource().getLocation().toURI());
         List<Class<?>> types = new ArrayList<>();
-        for (BeanDefinition bd : scanner.findCandidateComponents("com.ruleup.ruleup_backend")) {
-            String name = bd.getBeanClassName();
-            if (name == null || name.endsWith("Test") || name.endsWith("IT")) continue;
-            types.add(Class.forName(name));
+        try (Stream<Path> files = Files.walk(root)) {
+            for (Path f : files.filter(p -> p.toString().endsWith(".class")).toList()) {
+                String name = root.relativize(f).toString()
+                        .replace(java.io.File.separatorChar, '.')
+                        .replaceAll("\\.class$", "");
+                if (name.equals("module-info") || name.endsWith("package-info")) continue;
+                types.add(Class.forName(name, false, SchedulerLockCoverageTest.class.getClassLoader()));
+            }
         }
         assertThat(types).as("스캔이 비면 이 시험은 아무것도 지키지 못한다").hasSizeGreaterThan(100);
+        assertThat(types).as("태스크별 목록의 클래스가 스캔에 잡혀야 한다")
+                .extracting(Class::getSimpleName).contains("SystemMetricsSampler", "OutboxMetrics", "WatcherHealth");
         return types;
     }
 }
