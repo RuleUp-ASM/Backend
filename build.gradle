@@ -58,7 +58,7 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-cache'
 	// 탐색 정렬·표시통계·필터 집합(ZSET/HASH/SET). 인스턴스별 Caffeine 으로는 서버가 늘면
 	// 순위가 서로 달라져 커서 페이징이 깨진다 — 탐색 테크스펙 5-1이 요구하는 공유 저장소다.
-	// Redis 가 없거나 죽어 있으면 회로차단기가 열려 MySQL 폴백으로 내려간다(이관이 아니라 이중화).
+	// Redis 장애·미준비 시 목록·인기는 503을 반환하고 카테고리 개수만 DB로 폴백한다.
 	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
 	// 추천 세그먼트 점수·카테고리 마스터 캐시(JVM 로컬). 캐시 매니저는 CacheConfig에서 CaffeineCacheManager로 구성.
 	// Spring Boot가 버전 관리하므로 버전 명시 불필요.
@@ -110,7 +110,7 @@ dependencies {
 	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
 	testImplementation 'org.testcontainers:junit-jupiter'
 	testImplementation 'org.testcontainers:mysql'
-	// 탐색 Redis 경로와 MySQL 폴백이 같은 순서를 내는지 실제 Redis 로 검증한다.
+	// 실제 Redis로 탐색 순서·커서·장애 시 503 계약을 검증한다.
 	testImplementation 'com.redis:testcontainers-redis:2.2.2'
 	// 이미지 S3 저장을 실제 S3 API(LocalStack)로 검증한다 — 목으로는 키 규칙·presigned 서명·
 	// 리다이렉트가 실제로 맞물리는지 알 수 없다.
