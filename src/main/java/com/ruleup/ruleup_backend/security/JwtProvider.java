@@ -14,7 +14,7 @@ import java.util.UUID;
 
 /**
  * JWT 발급/검증 (HS256, 테크 스펙 3.6).
- * Access(30분)·Refresh(30일)·Signup(5분)을 발급하고 서명/만료를 검증한다.
+ * 기본 TTL은 Access 30분·Refresh 7일·Signup 30분이며 서명/만료를 검증한다.
  * 비밀키·만료시간은 .env → AppProperties에서 주입.
  */
 @Component
