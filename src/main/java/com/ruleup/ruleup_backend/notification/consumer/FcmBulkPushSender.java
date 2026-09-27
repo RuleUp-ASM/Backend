@@ -49,9 +49,17 @@ public class FcmBulkPushSender implements BulkPushSender {
             MessagingErrorCode.UNAVAILABLE, MessagingErrorCode.INTERNAL,
             MessagingErrorCode.QUOTA_EXCEEDED);
 
-    /** 재시도해도 소용없는 토큰 오류 — 기기를 비활성화한다. */
+    /**
+     * 재시도해도 소용없는 토큰 오류 — 기기를 비활성화한다.
+     *
+     * <p>{@code SENDER_ID_MISMATCH} 는 토큰이 <b>다른 Firebase 프로젝트</b>에서 발급됐다는 뜻이다.
+     * 프로젝트를 옮기면(ruleup-android → ruleup-5e41e) 옛 토큰이 전부 이 오류를 내는데, 정리하지 않으면
+     * 앱을 업데이트하지 않은 사용자의 토큰이 활성으로 남아 매번 실패만 쌓인다. 잘못 내려도 앱이 토큰을
+     * 다시 등록하면 {@code reassign} 이 되살린다.
+     */
     private static final Set<MessagingErrorCode> DEAD_TOKEN = Set.of(
-            MessagingErrorCode.UNREGISTERED, MessagingErrorCode.INVALID_ARGUMENT);
+            MessagingErrorCode.UNREGISTERED, MessagingErrorCode.INVALID_ARGUMENT,
+            MessagingErrorCode.SENDER_ID_MISMATCH);
 
     private final FirebaseMessaging firebaseMessaging;
 
