@@ -137,6 +137,20 @@ class FcmBulkFoldTest {
             assertThat(outcomes).singleElement()
                     .satisfies(outcome -> assertThat(outcome.deadTokens()).containsExactly("tok-bad"));
         }
+
+        @Test
+        @DisplayName("SENDER_ID_MISMATCH 도 죽은 토큰이다 — 다른 Firebase 프로젝트에서 발급된 토큰")
+        void senderIdMismatchIsDead() {
+            PushRequest request = request("tok-old-project");
+
+            List<PushOutcome> outcomes = flatten(List.of(request))
+                    .apply(error(MessagingErrorCode.SENDER_ID_MISMATCH));
+
+            assertThat(outcomes).singleElement().satisfies(outcome -> {
+                assertThat(outcome.deadTokens()).containsExactly("tok-old-project");
+                assertThat(outcome.retryable()).as("프로젝트가 다르면 다시 보내도 같다").isFalse();
+            });
+        }
     }
 
     @Nested
