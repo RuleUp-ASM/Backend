@@ -67,7 +67,7 @@ class RoomNoticeRemovalMigrationIT {
                     '운영자 공지', '점검 안내', NOW())
                 """);
 
-        Flyway current = Flyway.configure().dataSource(dataSource).load();
+        Flyway current = Flyway.configure().dataSource(dataSource).target("18").load();
         assertThat(current.migrate().migrationsExecuted).isEqualTo(1);
         assertThat(jdbc.queryForList("""
                 SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE()
