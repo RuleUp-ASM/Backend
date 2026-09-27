@@ -79,11 +79,21 @@ jobs:
           aws ecs wait services-stable \
             --cluster ${{ env.ECS_CLUSTER }} \
             --services ${{ env.ECS_SERVICE }}
-          STATE=$(aws ecs describe-services \
-            --cluster ${{ env.ECS_CLUSTER }} \
-            --services ${{ env.ECS_SERVICE }} \
-            --query "services[0].deployments[?id=='$DEPLOYMENT_ID'].rolloutState | [0]" --output text)
+          # services-stable 이 풀린 뒤에도 rolloutState 는 옛 태스크 드레이닝이 끝날 때까지 수 초간
+          # IN_PROGRESS 로 남는다. 그 순간에 한 번만 보면 성공한 배포를 실패로 오판한다 — 종결 상태까지 기다린다.
+          for i in $(seq 1 60); do
+            STATE=$(aws ecs describe-services \
+              --cluster ${{ env.ECS_CLUSTER }} \
+              --services ${{ env.ECS_SERVICE }} \
+              --query "services[0].deployments[?id=='$DEPLOYMENT_ID'].rolloutState | [0]" --output text)
+            [ "$STATE" != "IN_PROGRESS" ] && break
+            sleep 10
+          done
           echo "rolloutState=$STATE"
+          if [ "$STATE" = "IN_PROGRESS" ]; then
+            echo "::error::10분이 지나도 롤아웃이 끝나지 않았다. ECS 서비스 이벤트와 CloudWatch /ecs/ruleup-stg-api 를 확인한다."
+            exit 1
+          fi
           if [ "$STATE" != "COMPLETED" ]; then
             echo "::error::새 태스크가 뜨지 못해 이전 버전으로 되돌려졌다(rolloutState=$STATE). CloudWatch /ecs/ruleup-stg-api 기동 로그를 확인한다."
             exit 1
