@@ -24,7 +24,7 @@ public record CalendarDayResponse(
             String verificationId,
             @Schema(description = "IN_PROGRESS / FAIL_EXPECTED / DONE / FAILED / NOT_TARGET",
                     example = "FAILED") String status,
-            @Schema(description = "AUTO / MANUAL / MANUAL_FALLBACK") String verifiedVia,
+            @Schema(description = "AUTO / MANUAL / APPEAL") String verifiedVia,
             @Schema(description = "확정 시각") String confirmedAt,
             @Schema(description = "실패 사유 코드") String failureReason,
             @Schema(description = "실패·실패 예정 건에만 붙는다. 그 외에는 null") Appeal appeal) {}

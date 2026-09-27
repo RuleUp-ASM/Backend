@@ -2,8 +2,8 @@
 -- sync 진단 — 「신호가 안 들어온 것」과 「들어왔는데 안 쓰인 것」을 가른다
 --
 -- 전부 읽기 전용이다. 쓰기 문장은 하나도 없다.
--- 위에서 아래로 차례대로 돌린다. 앞 단계가 0을 내면 뒤 단계는 볼 필요가 없다 —
--- 그 자리가 끊긴 자리다.
+-- 위에서 아래로 차례대로 돌리고 챌린지가 요구하는 신호에 맞춰 해석한다.
+-- 배제 신호 0건처럼 정상인 결과도 있으므로 0건만으로 조사를 중단하지 않는다.
 --
 --   1) 요청이 오는가        verification_sync_sessions.lastSeenAt
 --   2) 동의가 있는가        user_agreement_states (위치·건강 신호의 적재 전제)
@@ -12,18 +12,20 @@
 --   5) 멤버가 평가 대상인가 challenge_members.setup_status / status
 --   6) 판정이 움직이는가    VerificationDaily / VerificationMethodResult.evidence
 --
--- ⚠️ 두 무리의 시각이 <b>9시간 어긋나 보인다</b>. JPA 가 쓰는 표(VerificationDaily ·
+-- 스테이징의 KST JDBC 설정에서는 두 무리의 시각이 <b>9시간 어긋나 보인다</b>. JPA 가 쓰는 표(VerificationDaily ·
 -- VerificationMethodResult …)는 UTC 로, JdbcTemplate 가 쓰는 표(verification_*_signals ·
 -- verification_sync_sessions · signal_exclusions)는 <b>KST 로</b> 저장된다. 같은 sync 요청의
 -- receivedAt 이 11:25:18, lastEvaluatedAt 이 02:25:18 로 찍히는 것이 그 때문이다(실제 UTC 는
 -- 02:25:18 — 서버 로그와 맞다). 두 무리의 시각을 SQL 안에서 직접 빼지 말 것.
+-- UTC JDBC 설정의 로컬·CI에는 이 차이가 없다. 실행 환경의 JDBC 타임존부터 확인한다.
 -- observedDate·targetDate 는 양쪽 다 KST 날짜다.
 --
 -- 세션을 UTC 로 고정하고 읽는다 — 클라이언트 타임존에 따라 값이 달리 보이지 않게.
 -- ======================================================================
 
 SET time_zone = '+00:00';
-SET @user := UUID_TO_BIN('여기에-유저-UUID');
+-- SOURCE 전에 같은 세션에서 SET @user := UUID_TO_BIN('유저 UUID'); 를 실행한다.
+-- 호출자가 지정한 값을 덮어쓰지 않는다.
 -- 닉네임만 안다면 먼저:
 --   SELECT BIN_TO_UUID(id) AS userId, nickname, created_at FROM users WHERE nickname = '닉네임';
 --
@@ -36,7 +38,7 @@ SET @user := UUID_TO_BIN('여기에-유저-UUID');
 --    issuedAt 만 있고 lastSeenAt 이 없으면 인트로만 하고 sync 를 한 번도 안 쳤다.
 -- ----------------------------------------------------------------------
 SELECT BIN_TO_UUID(id) AS sessionId, deviceId, appVersion, sdkInt,
-       issuedAt, lastSeenAt, TIMESTAMPDIFF(MINUTE, lastSeenAt, UTC_TIMESTAMP()) AS 마지막_sync_분전
+       issuedAt, lastSeenAt -- 저장 타임존 확인 전 UTC_TIMESTAMP()와 직접 차이를 계산하지 않는다
 FROM verification_sync_sessions
 WHERE userId = @user
 ORDER BY issuedAt DESC

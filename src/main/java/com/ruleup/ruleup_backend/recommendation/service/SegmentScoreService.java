@@ -88,6 +88,7 @@ public class SegmentScoreService {
         for (Challenge c : challengeRepository.findAll()) {
             if (c.getDeletedAt() != null || c.getTemplateId() == null) continue;   // 직접 입력/삭제분 제외
             if (c.getCreatedAt() != null && c.getCreatedAt().isBefore(since)) continue;   // 윈도우 밖 제외
+            if (c.getCreatorId() == null) continue;   // 봇방장 방: 세그먼트를 잴 생성자가 없다(findById(null) 은 예외)
             User creator = userCache.computeIfAbsent(c.getCreatorId(), userRepository::findById).orElse(null);
             if (creator == null) continue;
             for (Segment seg : segmentResolver.resolve(creator)) {

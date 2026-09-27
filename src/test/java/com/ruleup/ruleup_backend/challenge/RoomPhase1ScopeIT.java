@@ -26,13 +26,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 
 /**
- * Phase 1 범위 계약 — 공지·댓글 API는 비활성화하되 호환 필드와 저장소는 보존한다.
- *
- * <p>기능 스펙 6-2 #9·#10(2026-08-12 범위 조정)에 따라 공지 일체와 댓글·답글은 이번 범위에서 빠졌다.
- * API 비활성화와 저장소 삭제는 다른 결정이다. Phase 1에서는 엔드포인트를 열지 않되 재개 가능한 저장소와
- * `pinnedNotice:null` 응답 호환을 함께 고정한다.
- *
- * <p>재개(Phase 2) 시점에는 이 테스트가 통째로 실패하는 것이 정상이며, 그때 삭제하면 된다.
+ * Phase 1 범위 계약 — 방 공지·댓글 API와 저장소는 제거하고 pinnedNotice:null 호환은 유지한다.
+ * 운영자 공지·인앱 알림·감시자 통지 저장소는 방 공지와 별개로 보존한다.
  */
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
@@ -133,27 +128,15 @@ class RoomPhase1ScopeIT extends ChallengeApiSupport {
     }
 
     @Test
-    @DisplayName("Phase 2 재개를 위한 공지·댓글 테이블과 단일 고정 공지 제약은 보존된다")
-    void phase2TablesArePreserved() {
-        assertThat(tableExists("Notice")).isTrue();
-        assertThat(tableExists("NoticeRead")).isTrue();
-        assertThat(tableExists("room_comments")).isTrue();
+    @DisplayName("방 공지·댓글 테이블만 제거하고 운영자 공지·알림·감시자·활동 로그는 보존한다")
+    void roomNoticeTablesAreRemovedWithoutAffectingAnnouncements() {
+        assertThat(tableExists("Notice")).isFalse();
+        assertThat(tableExists("NoticeRead")).isFalse();
+        assertThat(tableExists("room_comments")).isFalse();
+        assertThat(tableExists("announcements")).isTrue();
+        assertThat(tableExists("notifications")).isTrue();
+        assertThat(tableExists("watcher_notices")).isTrue();
         assertThat(tableExists("RoomActivityLog")).isTrue();
-
-        Integer pinConstraint = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() " +
-                        "AND table_name='Notice' AND index_name='uqNoticeOneActivePin' AND non_unique=0",
-                Integer.class);
-        assertThat(pinConstraint).isEqualTo(1);
-
-        // 공지·댓글 알림 5종은 Phase 2 이관분이라 레지스트리에 아직 없다. 알림 타입이 VARCHAR 라
-        // 롤백 후 옛 값이 남을 수 있으므로 적재분이 없는지도 함께 본다.
-        assertThat(com.ruleup.ruleup_backend.notification.domain.NotificationType.find("NOTICE_CREATED"))
-                .isEmpty();
-        Integer leftovers = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM notifications WHERE type IN ('NOTICE_CREATED','COMMENT_CREATED')",
-                Integer.class);
-        assertThat(leftovers).isZero();
     }
 
     private boolean tableExists(String table) {

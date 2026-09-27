@@ -69,7 +69,7 @@ public class RoutineOutcome extends AssignedIdEntity {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "verifiedVia", length = 20)
-    private VerifiedVia verifiedVia;      // AUTO / MANUAL / MANUAL_FALLBACK (없으면 null)
+    private VerifiedVia verifiedVia;      // AUTO / MANUAL / APPEAL (없으면 null)
 
     @Column(name = "failureReason", length = 40)
     private String failureReason;         // 실패 사유 코드(성공이면 null)

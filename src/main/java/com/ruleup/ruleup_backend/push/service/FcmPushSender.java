@@ -28,7 +28,7 @@ import java.util.UUID;
  *
  * <p>대상 유저의 등록 토큰마다 data-only 메시지를 보낸다(notification 블록 없음 → 화면 알림 미표시,
  * 앱만 백그라운드에서 깨어남). Android 는 high priority, iOS 는 {@code content-available} 로 백그라운드 수신.
- * 전송 결과가 UNREGISTERED/INVALID 면 그 토큰을 정리한다. 전송 예외는 호출부(배치/스윕)로 전파하지 않는다.
+ * 전송 결과가 UNREGISTERED/INVALID/SENDER_ID_MISMATCH 면 그 토큰을 정리한다. 전송 예외는 호출부(배치/스윕)로 전파하지 않는다.
  */
 @Component
 @Primary
@@ -64,8 +64,9 @@ public class FcmPushSender implements PushSender {
             firebaseMessaging.send(message);
         } catch (FirebaseMessagingException e) {
             MessagingErrorCode code = e.getMessagingErrorCode();
-            if (code == MessagingErrorCode.UNREGISTERED || code == MessagingErrorCode.INVALID_ARGUMENT) {
-                deviceTokenService.remove(token);   // 죽은/잘못된 토큰 정리
+            if (code == MessagingErrorCode.UNREGISTERED || code == MessagingErrorCode.INVALID_ARGUMENT
+                    || code == MessagingErrorCode.SENDER_ID_MISMATCH) {
+                deviceTokenService.remove(token);   // 죽은/잘못된/다른 프로젝트 토큰 정리
             } else {
                 log.warn("FCM 전송 실패 userId={} code={}: {}", userId, code, e.getMessage());
             }
