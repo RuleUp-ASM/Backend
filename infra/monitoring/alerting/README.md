@@ -5,8 +5,8 @@
 
 | 토픽 | 받는 곳 | 보내는 경보 |
 |---|---|---|
-| `ruleup-prod-p0-alerts` | Slack 긴급 채널(C0C4HUAHBHV) | prod `P0-*` |
-| `ruleup-prod-alerts` | 이메일 + Slack 운영 채널(C0C4Z5VJJNN) | prod 전체(P0 포함) |
+| `ruleup-prod-p0-alerts` | Slack `#ruleup-alert-urgent`(C0C4Z5VJJNN) — 새벽에도 고쳐야 하는 것만 | prod `P0-*` |
+| `ruleup-prod-alerts` | 이메일 + Slack 운영 채널(C0C4HUAHBHV) | prod 전체(P0 포함) |
 | `ruleup-stg-alerts` | 이메일 + Slack 운영 채널 | stg 전체 |
 
 Slack 전달은 Amazon Q Developer in chat applications(워크스페이스 `ASM - LEE`, 역할 `ruleup-chatbot-notify` — CloudWatch 읽기 전용).
