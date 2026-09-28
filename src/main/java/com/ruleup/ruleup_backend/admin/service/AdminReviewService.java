@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.admin.service;
 
+import com.ruleup.ruleup_backend.common.DbTime;
 import com.ruleup.ruleup_backend.admin.domain.AdminAction;
 import com.ruleup.ruleup_backend.admin.domain.AdminAuditLog;
 import com.ruleup.ruleup_backend.admin.dto.AdminDtos;
@@ -18,7 +19,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.ByteBuffer;
-import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -82,7 +82,7 @@ public class AdminReviewService {
         // 커서는 정렬 축(created_at)을 그대로 이어받는다.
         if (after != null) {
             where.append(" AND r.created_at > ?");
-            args.add(Timestamp.from(after));
+            args.add(DbTime.utc(after));
         }
 
         List<Object> pageArgs = new ArrayList<>(args);
@@ -97,9 +97,8 @@ public class AdminReviewService {
                         rs.getString("target_label"),
                         rs.getString("reason"),
                         rs.getString("status"),
-                        rs.getTimestamp("created_at").toInstant().toString(),
-                        rs.getTimestamp("resolved_at") == null
-                                ? null : rs.getTimestamp("resolved_at").toInstant().toString(),
+                        DbTime.read(rs, "created_at").toString(),
+                        java.util.Objects.toString(DbTime.read(rs, "resolved_at"), null),
                         rs.getInt("target_report_count"),
                         rs.getBoolean("reporter_flagged")),
                 pageArgs.toArray());
@@ -198,7 +197,7 @@ public class AdminReviewService {
                  ORDER BY created_at DESC LIMIT 50
                 """,
                 (rs, i) -> new AdminDtos.Sibling(uuid(rs.getBytes(1)).toString(), rs.getString(2),
-                        rs.getString(3), rs.getTimestamp(4).toInstant().toString()),
+                        rs.getString(3), DbTime.read(rs, 4).toString()),
                 row.get("target_type"), targetId, bytes(reportId));
 
         String status = (String) row.get("status");
@@ -355,7 +354,7 @@ public class AdminReviewService {
                        String condition, Object... conditionArgs) {
         List<Object> args = new ArrayList<>();
         args.add(status);
-        args.add(Timestamp.from(at));
+        args.add(DbTime.utc(at));
         args.add(note);
         args.add(operatorId == null ? null : bytes(operatorId));
         args.addAll(java.util.Arrays.asList(conditionArgs));
@@ -373,9 +372,8 @@ public class AdminReviewService {
                         rs.getString("target_label"),
                         rs.getString("reason"),
                         rs.getString("status"),
-                        rs.getTimestamp("created_at").toInstant().toString(),
-                        rs.getTimestamp("resolved_at") == null
-                                ? null : rs.getTimestamp("resolved_at").toInstant().toString(),
+                        DbTime.read(rs, "created_at").toString(),
+                        java.util.Objects.toString(DbTime.read(rs, "resolved_at"), null),
                         rs.getInt("target_report_count"),
                         rs.getBoolean("reporter_flagged")),
                 bytes(reportId)).stream().findFirst()

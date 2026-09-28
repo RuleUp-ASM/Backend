@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.challenge.service;
 
+import com.ruleup.ruleup_backend.common.DbTime;
 import com.ruleup.ruleup_backend.challenge.dto.ChallengeListResponse;
 import com.ruleup.ruleup_backend.challenge.domain.TargetModerationStatus;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
@@ -216,7 +217,7 @@ public class MyChallengeQueryService {
                        String ownerType, String leftType, String leftAt, Double successRate) {}
 
     private Row mapRow(ResultSet rs) throws SQLException {
-        java.sql.Timestamp leftAt = rs.getTimestamp("left_at");
+        java.time.Instant leftAt = DbTime.read(rs, "left_at");
         return new Row(
                 toUuid(rs.getBytes("challenge_id")),
                 rs.getString("title"), rs.getString("ai_title"), rs.getString("moderation_title"),
@@ -230,7 +231,7 @@ public class MyChallengeQueryService {
                 intOrNull(rs, "weekly_count"),
                 rs.getDate("start_date").toLocalDate(), rs.getDate("end_date") == null ? null : rs.getDate("end_date").toLocalDate(),
                 rs.getString("my_role"), rs.getString("owner_type"), rs.getString("left_type"),
-                leftAt == null ? null : leftAt.toInstant().toString(),
+                leftAt == null ? null : leftAt.toString(),
                 successRate(rs));
     }
 
