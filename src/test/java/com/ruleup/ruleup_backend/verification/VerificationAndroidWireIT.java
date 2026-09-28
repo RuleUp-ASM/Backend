@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.verification;
 
+import com.ruleup.ruleup_backend.verification.config.VerificationProperties;
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -12,7 +13,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
+import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -20,6 +23,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 
 /**
@@ -41,6 +45,7 @@ class VerificationAndroidWireIT extends VerificationApiSupport {
 
     @Autowired WebApplicationContext wac;
     @Autowired JdbcTemplate jdbcTemplate;
+    @Autowired VerificationProperties properties;
 
     private MockMvc mvc;
 
@@ -122,7 +127,12 @@ class VerificationAndroidWireIT extends VerificationApiSupport {
         UUID ch = insertAutoChallenge(me.id(), "GPS_AVOID", "GEOFENCE", "{\"duration_min\":0,\"radius_m\":100}");
         UUID memberId = insertReadyMember(ch, me.id(), anchor(CAFE_LAT, CAFE_LNG, 100, "편의점"), null);
 
-        sync(me.token(), List.of(androidGeofence(anchorId(me.id(), ch), "ENTER", todayAt(9, 0))));
+        // 이탈 없는 진입은 「스침」 허용 시간이 지나야 위반이다. 그래서 진입은 허용 시간보다 앞이면서
+        // 오늘(KST) 안이어야 한다 — 예전의 todayAt(9, 0) 은 00~09시 KST 에 돌면 미래 시각이라 보류로 남았다.
+        Instant enteredAt = Instant.now().minus(Duration.ofMinutes(properties.avoidGraceMinutes() + 2L));
+        assumeTrue(enteredAt.isAfter(LocalDate.now(KST).atStartOfDay(KST).toInstant()),
+                "자정 직후 몇 분은 오늘 안에 허용 시간을 넘긴 진입을 만들 수 없다");
+        sync(me.token(), List.of(androidGeofence(anchorId(me.id(), ch), "ENTER", enteredAt)));
 
         assertThat(failureReasonOf(memberId)).isEqualTo("ENTERED_AVOID_ZONE");
     }

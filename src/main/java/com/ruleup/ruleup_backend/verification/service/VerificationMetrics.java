@@ -62,6 +62,7 @@ public class VerificationMetrics {
     private final Counter backlogRequests;
     private final Counter signalsReadTruncated;
     private final Counter payloadRejected;
+    private final Counter syncFailed;
     private final DistributionSummary payloadBytes;
     private final DistributionSummary backlogSpanSeconds;
 
@@ -119,6 +120,10 @@ public class VerificationMetrics {
         this.payloadRejected = Counter.builder("verification.sync.payload_rejected")
                 .description("본문 크기 상한을 넘겨 413 으로 반려한 요청 수 — 초과율의 분자")
                 .register(registry);
+        // 4xx 반려(봉투·크기·빈도)는 앱 계약 문제라 따로 센다. 이건 <b>서버가 받지 못한</b> 경우 — 인증 데이터
+        // 접수 실패 경보의 원천이다. ALB 5xx 는 전 API 를 합친 값이라 sync 만의 장애를 가려낸다.
+        this.syncFailed = Counter.builder("verification.sync.failed")
+                .description("sync 가 서버 오류(5xx)로 끝난 요청 수").register(registry);
         this.payloadBytes = DistributionSummary.builder("verification.sync.payload_bytes")
                 .description("sync 본문 크기 — p99 가 상한에 근접하면 압축·요약 전송을 검토한다")
                 .baseUnit("bytes").publishPercentiles(0.5, 0.95, 0.99).register(registry);
@@ -174,6 +179,11 @@ public class VerificationMetrics {
     public void envelope(long payloadBytesValue, long coveredSeconds) {
         if (payloadBytesValue > 0) payloadBytes.record(payloadBytesValue);
         if (coveredSeconds > 0) backlogSpanSeconds.record(coveredSeconds);
+    }
+
+    /** sync 가 서버 오류로 끝났다 — 신호를 접수하지 못했다. */
+    public void syncFailed() {
+        syncFailed.increment();
     }
 
     /** 본문 크기 상한을 넘겨 반려했다(413). */
