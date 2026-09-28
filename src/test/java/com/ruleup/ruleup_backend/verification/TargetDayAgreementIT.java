@@ -126,7 +126,9 @@ class TargetDayAgreementIT extends ChallengeApiSupport {
         // 지난 주기(9일 전~어제)는 몫을 채웠고, 롤오버는 아직 돌지 않았다.
         jdbcTemplate.update("UPDATE challenges SET start_date = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 7 DAY) WHERE id = ?",
                 bytes(challengeId));
+        // 지난주 마지막 sync 가 남긴 캐시(today_status=NOT_REQUIRED)도 그대로 둔다 — 방 홈이 이 값을 날짜 확인 없이 쓰면 안 된다.
         jdbcTemplate.update("UPDATE challenge_members SET joined_at = DATE_SUB(NOW(6), INTERVAL 8 DAY), cur_period_completed = 2," +
+                        " today_status = 'NOT_REQUIRED', last_synced_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 DAY)," +
                         " cur_period_start = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 7 DAY)," +
                         " cur_period_end = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 1 DAY)" +
                         " WHERE challenge_id=? AND user_id=?", bytes(challengeId), bytes(me.id()));

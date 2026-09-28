@@ -109,7 +109,12 @@ public class RoomService {
      */
     private String todayStatus(Challenge challenge, ChallengeMember me,
                                RoomDtos.RoomResponse.MyWeekly weekly, ZonedDateTime now) {
-        VerificationStatus cached = me.getTodayStatus();
+        // 멤버 행의 today_status 캐시는 귀속일을 들고 있지 않다 — 자정이 지나면 어제 값(SUCCESS·NOT_REQUIRED)이
+        // 남아 새 날에도 그대로 보였다(QA VER-13). /verifications/today 처럼 오늘 판정 행을 읽는다.
+        VerificationStatus cached = verificationRepository
+                .findByChallengeMemberIdAndTargetDate(me.getId(), now.toLocalDate())
+                .map(com.ruleup.ruleup_backend.verification.domain.VerificationDaily::getStatus)
+                .orElse(null);
         if (cached != null) {
             switch (cached) {
                 case SUCCESS -> { return "DONE"; }
