@@ -3,6 +3,7 @@ package com.ruleup.ruleup_backend.verification;
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
 import com.ruleup.ruleup_backend.verification.domain.VerificationDaily;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
+import com.ruleup.ruleup_backend.verification.service.VerificationBacklogMetrics;
 import com.ruleup.ruleup_backend.verification.service.VerificationFinalizeService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -151,6 +152,34 @@ class VerificationFinalizeIsolationIT extends VerificationApiSupport {
         assertThat(elapsedSec)
                 .as("같은 행을 다시 집으면 예산(45초)을 다 쓴다 — 애초에 집지 않아야 한다")
                 .isLessThan(20L);
+    }
+
+    @Test
+    @DisplayName("[P1] 미확정 경보 지표는 확정 시각이 한 시간 넘게 지난 PENDING 만 센다")
+    void overdueGaugeCountsOnlyRowsPastTheGracePeriod() throws Exception {
+        Member me = member(uniq("finalize-overdue"));
+        UUID challenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
+        UUID memberId = insertReadyMember(challenge, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+        LocalDate maxTargetDate = LocalDate.now(KST).minusDays(2);
+        // 다른 테스트가 남긴 행이 있을 수 있어 증가분만 본다. 시각 비교가 DB 시계(UTC 벽시계)와
+        // Instant 바인딩 사이에서 9시간 어긋나면 아래 둘 중 하나가 틀린다.
+        long before = overdueCount(maxTargetDate);
+
+        UUID stale = openDue(memberId, challenge, me.id(), maxTargetDate);
+        jdbc().update("UPDATE VerificationDaily SET finalizeAfter = DATE_SUB(NOW(6), INTERVAL 2 HOUR) WHERE id = ?",
+                bytes(stale));
+        UUID fresh = openDue(memberId, challenge, me.id(), maxTargetDate.minusDays(1));
+        jdbc().update("UPDATE VerificationDaily SET finalizeAfter = DATE_SUB(NOW(6), INTERVAL 30 MINUTE) WHERE id = ?",
+                bytes(fresh));
+
+        assertThat(overdueCount(maxTargetDate) - before)
+                .as("2시간 지난 건만 밀린 것이다 — 30분 지난 건은 배치가 따라잡는 중이다")
+                .isEqualTo(1L);
+    }
+
+    private long overdueCount(LocalDate maxTargetDate) {
+        return dailyRepository.countOverduePending(
+                java.time.Instant.now().minus(VerificationBacklogMetrics.OVERDUE_AFTER), maxTargetDate);
     }
 
     @Test

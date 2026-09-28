@@ -111,6 +111,17 @@ public interface VerificationDailyRepository extends JpaRepository<VerificationD
                                                     @Param("maxTargetDate") LocalDate maxTargetDate,
                                                     @Param("limit") int limit);
 
+    /**
+     * 확정 시각이 {@code overdueBefore} 보다 앞인데 아직 {@code PENDING} 인 판정 수 — 확정 배치가 멈췄거나
+     * 계속 실패하는지 보는 경보 지표. {@link #findDuePendingForUpdate} 와 같은 조건에 재시도 연기 여부만 뺐다
+     * (연기된 건도 밀린 건이다). {@code idxVerificationDailyStatusFinalize} 를 탄다.
+     */
+    @Query(value = "SELECT COUNT(*) FROM VerificationDaily " +
+            "WHERE status = 'PENDING' AND finalizeAfter IS NOT NULL AND finalizeAfter <= :overdueBefore " +
+            "  AND targetDate <= :maxTargetDate", nativeQuery = true)
+    long countOverduePending(@Param("overdueBefore") Instant overdueBefore,
+                             @Param("maxTargetDate") LocalDate maxTargetDate);
+
 
     /**
      * 확정에 실패한 한 건을 뒤로 미룬다.
