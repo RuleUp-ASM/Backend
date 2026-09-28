@@ -59,6 +59,10 @@ public class AdminAccessInterceptor implements HandlerInterceptor {
         String path = request.getRequestURI();
         if (path.contains("/auth/")) return AdminAction.ADMIN_LOGIN;
         if (path.contains("/dashboard")) return AdminAction.DASHBOARD_VIEW;
+        if (path.contains("/stats/")) {
+            if (path.endsWith("/recompute")) return AdminAction.STATS_RECOMPUTE;
+            return path.endsWith("/csv") ? AdminAction.STATS_EXPORT : AdminAction.STATS_VIEW;
+        }
         if (path.contains("/inquiries")) return AdminAction.INQUIRY_QUEUE_VIEW;
         if (path.contains("/sanctions")) return AdminAction.SANCTION_APPLY;
         if (path.contains("/close")) return AdminAction.CHALLENGE_CLOSE;

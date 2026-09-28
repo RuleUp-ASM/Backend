@@ -7,6 +7,7 @@ import com.ruleup.ruleup_backend.admin.service.AdminInquiryService;
 import com.ruleup.ruleup_backend.admin.service.AdminOpsService;
 import com.ruleup.ruleup_backend.admin.service.AdminReviewService;
 import com.ruleup.ruleup_backend.admin.service.AdminSanctionService;
+import com.ruleup.ruleup_backend.admin.stats.AdminStatsService;
 import com.ruleup.ruleup_backend.common.docs.ApiErrorCodes;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.response.ApiResponse;
@@ -14,9 +15,14 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
 /**
@@ -26,7 +32,7 @@ import java.util.UUID;
  * 2단계 확인은 형태와 무관하게 필수</b>라 서버가 소유한다. 경로 prefix 전체에 인터셉터가 걸려
  * 있어 엔드포인트를 추가해도 권한 검사를 빠뜨릴 자리가 없다.
  */
-@Tag(name = "Admin", description = "운영자 백오피스 — 대시보드 · 신고 · 제재 · CS · 직권 폐쇄 · 이상탐지 · 공지")
+@Tag(name = "Admin", description = "운영자 백오피스 — 대시보드 · 일별 지표 · 신고 · 제재 · CS · 직권 폐쇄 · 이상탐지 · 공지")
 @SecurityRequirement(name = "bearerAuth")
 @RestController
 @RequestMapping("/api/v1/admin")
@@ -38,6 +44,7 @@ public class AdminController {
     private final AdminOpsService opsService;
     private final AdminInquiryService inquiryService;
     private final AdminDashboardService dashboardService;
+    private final AdminStatsService statsService;
 
     // ===== 대시보드 =====
 
@@ -54,6 +61,60 @@ public class AdminController {
             @AuthenticationPrincipal String userId,
             @RequestParam(required = false, defaultValue = "7d") String range) {
         return ApiResponse.ok(dashboardService.summary(UUID.fromString(userId), range));
+    }
+
+    // ===== 일별 서비스 지표 =====
+
+    @Operation(summary = "일별 서비스 지표", description = """
+            가입·챌린지 참여·재참여·실제 인증 시도·판정 결과·이의를 **하루 한 행**으로 내린다.
+            매일 00:40 KST 배치가 최근 사흘을 다시 계산해 채운다 — 기존 DB 를 모으는 집계라 건수만 있고
+            개인정보는 없다.
+
+            - 기간은 KST 날짜(`yyyy-MM-dd`), 양끝 포함, 최대 366일. 생략하면 **어제까지 30일**.
+            - **인증 성공률은 확정 판정으로만** 낸다(`successRate`). 판정은 귀속일 D+2 00:00 KST 에
+              확정되므로 어제 행은 `judgementFinal=false`·`successRate=null` 이고 이틀 뒤 채워진다.
+            - 인증 시도는 판정(멤버×귀속일) 단위로 센다 — 같은 신호를 여러 번 재전송해도 한 번이다.
+            """)
+    @ApiErrorCodes({ErrorCode.INVALID_REQUEST, ErrorCode.ADMIN_FORBIDDEN, ErrorCode.LOGIN_REQUIRED})
+    @GetMapping("/stats/daily")
+    public ApiResponse<AdminDtos.DailyStatsResponse> dailyStats(
+            @AuthenticationPrincipal String userId,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to) {
+        return ApiResponse.ok(statsService.list(UUID.fromString(userId), from, to));
+    }
+
+    @Operation(summary = "일별 서비스 지표 CSV", description = """
+            `/stats/daily` 와 같은 기간·같은 값을 CSV 로 내려받는다(UTF-8 BOM, 헤더 1행, 날짜 오름차순).
+            반출이라 감사 로그에 `STATS_EXPORT` 로 조회와 따로 남는다.
+            """)
+    @ApiErrorCodes({ErrorCode.INVALID_REQUEST, ErrorCode.ADMIN_FORBIDDEN, ErrorCode.LOGIN_REQUIRED})
+    @GetMapping("/stats/daily/csv")
+    public ResponseEntity<byte[]> dailyStatsCsv(
+            @AuthenticationPrincipal String userId,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to) {
+        AdminStatsService.Csv csv = statsService.csv(UUID.fromString(userId), from, to);
+        return ResponseEntity.ok()
+                .contentType(new MediaType("text", "csv", StandardCharsets.UTF_8))
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        ContentDisposition.attachment().filename(csv.filename()).build().toString())
+                .body(csv.body());
+    }
+
+    @Operation(summary = "일별 서비스 지표 재계산", description = """
+            기간을 **지금 데이터로 다시 계산해 덮어쓴다**(백필·정의 변경 반영). 최대 92일, 오늘 이후 불가.
+            감사 로그에 `STATS_RECOMPUTE` 로 남는다.
+
+            방이 삭제되면 그 방의 가입 사건도 지워지므로, 오래된 날짜를 다시 계산하면 처음보다 작은
+            참여 수가 나올 수 있다.
+            """)
+    @ApiErrorCodes({ErrorCode.INVALID_REQUEST, ErrorCode.ADMIN_FORBIDDEN, ErrorCode.LOGIN_REQUIRED})
+    @PostMapping("/stats/daily/recompute")
+    public ApiResponse<AdminDtos.StatsRecomputeResponse> recomputeDailyStats(
+            @AuthenticationPrincipal String userId,
+            @RequestBody AdminDtos.StatsRecomputeRequest request) {
+        return ApiResponse.ok(statsService.recompute(UUID.fromString(userId), request));
     }
 
     // ===== 신고 검토 =====

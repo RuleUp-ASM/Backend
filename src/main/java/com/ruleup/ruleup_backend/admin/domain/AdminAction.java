@@ -40,6 +40,12 @@ public enum AdminAction {
     DASHBOARD_VIEW,
     SANCTION_LIST_VIEW,
     CHALLENGE_VIEW,
+    /** 일별 서비스 지표 조회. 건수만 담겨 개인정보 열람은 아니다. */
+    STATS_VIEW,
+    /** 일별 서비스 지표 CSV 내려받기 — 반출이라 조회와 나눠 남긴다. */
+    STATS_EXPORT,
+    /** 일별 서비스 지표 수동 재계산 — 저장된 값을 덮어쓰는 조작이다. */
+    STATS_RECOMPUTE,
     /** 콘솔 진입 인증 시도. 실패는 DENIED 로 남아 무차별 대입의 흔적이 된다. */
     ADMIN_LOGIN
 }

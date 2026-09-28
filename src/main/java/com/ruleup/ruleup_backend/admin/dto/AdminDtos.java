@@ -386,4 +386,49 @@ public final class AdminDtos {
 
     @Schema(name = "AdminDashboardChallenges")
     public record Challenges(long active, long createdInRange) {}
+
+    // ===== 일별 서비스 지표 =====
+
+    @Schema(name = "AdminDailyStatsResponse", description = """
+            일별 서비스 지표 — 하루 한 번 배치가 모은 **건수만** 내린다(개인정보 없음).
+            계산된 적 없는 날짜는 `items` 에서 빠진다. 기간은 KST 달력 날짜이며 양끝을 포함한다.""")
+    public record DailyStatsResponse(String from, String to, List<DailyStatItem> items) {}
+
+    @Schema(name = "AdminDailyStatItem", description = """
+            하루치 지표. 이벤트 지표(가입·참여·이의)는 그 날 00:00~24:00 KST 에 일어난 사건,
+            인증 지표는 **귀속일**이 그 날인 판정을 센다.""")
+    public record DailyStatItem(
+            @Schema(description = "KST 날짜 (yyyy-MM-dd)") String statDate,
+            @Schema(description = "가입 — 그 날 생성된 회원 계정(이후 탈퇴해도 빼지 않는다)") int signups,
+            @Schema(description = "유저가 개설한 챌린지 — 개설자는 방장으로 곧바로 참여한다") int challengesCreated,
+            @Schema(description = "챌린지 가입 사건(같은 방 재입장 포함, 방장 개설 제외)") int challengeJoins,
+            @Schema(description = "그중 같은 방 재입장 — 나갔거나 강퇴된 방에 다시 들어온 가입") int rejoins,
+            @Schema(description = "그 날 참여를 시작한(가입·개설) 유저 수") int participants,
+            @Schema(description = "그중 그 날 이전에 참여 이력이 있던 유저(재참여). 첫 참여 = participants - 이 값")
+            int returningParticipants,
+            @Schema(description = "인증이 필요했던 판정(대상 아님·불필요 제외)") int verificationTargets,
+            @Schema(description = """
+                    실제 인증 시도 — 유효한 증거가 접수된 판정(자동·수동 성공 + 측정된 미달 실패).
+                    판정(멤버×귀속일) 단위라 같은 신호의 재전송은 중복으로 세지 않는다""")
+            int verificationAttempts,
+            @Schema(description = "판정 성공(이의 인용 포함)") int judgedSuccess,
+            @Schema(description = "그중 이의 인용으로 정정된 성공") int judgedSuccessAppeal,
+            @Schema(description = "판정 실패") int judgedFail,
+            @Schema(description = "그중 판정 불가(권한 없음·신호 없음) 실패") int judgedFailNoEvidence,
+            @Schema(description = "계산 시점에 아직 확정되지 않은 판정") int judgementPending,
+            @Schema(description = "판정이 확정된 뒤(귀속일 D+2 00:00 KST 이후) 계산했는지. false 면 판정 칸은 잠정값")
+            boolean judgementFinal,
+            @Schema(description = "인증 성공률 = judgedSuccess / (judgedSuccess + judgedFail). 확정 전이거나 판정이 없으면 null")
+            Double successRate,
+            @Schema(description = "이의 접수(=인용) 건수 — 그 날 접수된 이의") int appeals,
+            @Schema(description = "마지막 계산 시각(ISO-8601 UTC)") String computedAt) {}
+
+    @Schema(name = "AdminStatsRecomputeRequest", description = """
+            기간 재계산(백필). KST 날짜, 양끝 포함, 최대 92일. **오늘 이후는 받지 않는다** — 끝나지 않은 하루다.""")
+    public record StatsRecomputeRequest(
+            @Schema(example = "2026-09-01") String from,
+            @Schema(example = "2026-09-28") String to) {}
+
+    @Schema(name = "AdminStatsRecomputeResponse")
+    public record StatsRecomputeResponse(String from, String to, int recomputedDays, List<DailyStatItem> items) {}
 }
