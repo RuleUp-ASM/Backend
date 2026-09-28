@@ -37,6 +37,7 @@ class TargetDayAgreementIT extends ChallengeApiSupport {
 
     @Autowired WebApplicationContext wac;
     @Autowired JdbcTemplate jdbcTemplate;
+    @Autowired com.ruleup.ruleup_backend.verification.service.VerificationFinalizeService finalizeService;
     MockMvc mvc;
 
     @Override protected MockMvc mvc() { return mvc; }
@@ -115,6 +116,30 @@ class TargetDayAgreementIT extends ChallengeApiSupport {
                 "WHERE challenge_id=? AND user_id=?", bytes(challengeId), bytes(me.id()));
         assertThat(roomTodayStatus(challengeId, me)).isEqualTo("IN_PROGRESS");
         assertThat(todayStatus(challengeId, me)).isEqualTo("IN_PROGRESS");
+    }
+
+    @Test
+    @DisplayName("자정~롤오버(00:05) 사이 새 주기 첫날은 지난주 몫과 무관하게 판정 대상이고, 그날 성공은 새 주기로 넘어간다(QA VER-13)")
+    void newPeriodBeforeRollover() throws Exception {
+        Member me = member(uniq("tda-rollover"));
+        UUID challengeId = manualWeeklyRoom(me, 2);
+        // 지난 주기(9일 전~어제)는 몫을 채웠고, 롤오버는 아직 돌지 않았다.
+        jdbcTemplate.update("UPDATE challenges SET start_date = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 7 DAY) WHERE id = ?",
+                bytes(challengeId));
+        jdbcTemplate.update("UPDATE challenge_members SET joined_at = DATE_SUB(NOW(6), INTERVAL 8 DAY), cur_period_completed = 2," +
+                        " cur_period_start = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 7 DAY)," +
+                        " cur_period_end = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 1 DAY)" +
+                        " WHERE challenge_id=? AND user_id=?", bytes(challengeId), bytes(me.id()));
+
+        assertThat(roomTodayStatus(challengeId, me)).isEqualTo("IN_PROGRESS");
+        assertThat(todayStatus(challengeId, me)).isEqualTo("IN_PROGRESS");
+
+        assertThat(postJsonAuth("/api/v1/challenges/" + challengeId + "/verifications", me.token(), Map.of())
+                .getResponse().getStatus()).isEqualTo(200);
+        assertThat(periodCompleted(challengeId, me)).as("새 주기 성공을 지난 주기 카운터에 더하지 않는다").isEqualTo(2);
+
+        finalizeService.rolloverFrequencyPeriods();
+        assertThat(periodCompleted(challengeId, me)).as("롤오버가 새 주기 성공을 판정 행으로 다시 센다").isEqualTo(1);
     }
 
     // ===== 헬퍼 =====

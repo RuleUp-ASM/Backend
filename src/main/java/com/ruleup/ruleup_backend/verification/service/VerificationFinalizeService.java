@@ -656,6 +656,11 @@ public class VerificationFinalizeService {
             m.rolloverPeriod(nextStart, nextEnd, shortfall);
             changed = true;
         }
+        if (changed) {
+            // 자정~롤오버 사이에 난 새 주기 성공은 지난 주기 카운터에 들어가지 않았다 — 판정 행으로 다시 센다.
+            m.resetPeriodCompleted((int) dailyRepo.countByChallengeMemberIdAndStatusAndTargetDateBetween(
+                    m.getId(), VerificationStatus.SUCCESS, m.getCurPeriodStart(), m.getCurPeriodEnd()));
+        }
         return changed;
     }
 

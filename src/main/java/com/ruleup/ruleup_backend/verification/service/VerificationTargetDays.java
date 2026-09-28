@@ -41,6 +41,9 @@ public final class VerificationTargetDays {
         if (config.isFrequency()) {
             Integer done = member.getCurPeriodCompleted();
             Integer need = member.getPeriodTarget();
+            // 자정~롤오버(00:05) 사이에는 카운터가 아직 지난 주기 것이다. 새 주기 날짜에 그 값을 쓰면
+            // 지난주 몫을 채운 사람이 새 주기 첫날 「오늘은 아니다」가 된다(QA VER-13).
+            if (member.getCurPeriodEnd() != null && date.isAfter(member.getCurPeriodEnd())) done = 0;
             // 빈도형은 요일 고정이 없어 모든 날이 대상이다. 주기 몫을 이미 채웠으면 더 요구하지 않는다.
             // 과거 날짜에는 현재 카운터를 그대로 보므로 근사값이다 — 주기별 스냅샷은 후속 과제.
             if (done != null && need != null && done >= need) return Disposition.NOT_REQUIRED;

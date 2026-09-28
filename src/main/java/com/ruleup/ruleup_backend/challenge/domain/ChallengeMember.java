@@ -305,13 +305,31 @@ public class ChallengeMember extends AssignedIdEntity {
         this.lastSyncedAt = lastSyncedAt;
     }
 
-    public void incrementPeriodCompleted() {
+    /**
+     * 빈도형 주기 완료 +1 — <b>그 날짜가 지금 주기 안일 때만</b>. 롤오버(00:05)는 자정보다 늦게 돈다.
+     * 그 사이 새 주기 날짜의 성공을 지난 주기 카운터에 더하면 지난 주기 미달이 가려지고, 롤오버가
+     * 0 으로 되돌리며 새 주기 몫에서도 사라진다. 그런 성공은 롤오버가 판정 행으로 다시 센다.
+     */
+    public void incrementPeriodCompleted(LocalDate targetDate) {
+        if (!inCurrentPeriod(targetDate)) return;
         this.curPeriodCompleted = (this.curPeriodCompleted == null ? 0 : this.curPeriodCompleted) + 1;
     }
 
-    /** 성공을 되돌릴 때(수동 체크 취소). 0 아래로는 내려가지 않는다. */
-    public void decrementPeriodCompleted() {
+    /** 성공을 되돌릴 때(수동 체크 취소). 0 아래로는 내려가지 않는다. 지금 주기 밖 날짜는 건드리지 않는다. */
+    public void decrementPeriodCompleted(LocalDate targetDate) {
+        if (!inCurrentPeriod(targetDate)) return;
         this.curPeriodCompleted = Math.max((this.curPeriodCompleted == null ? 0 : this.curPeriodCompleted) - 1, 0);
+    }
+
+    /** 주기 구간이 아직 없으면(셋업 전) 막지 않는다. */
+    private boolean inCurrentPeriod(LocalDate date) {
+        if (date == null || curPeriodStart == null || curPeriodEnd == null) return true;
+        return !date.isBefore(curPeriodStart) && !date.isAfter(curPeriodEnd);
+    }
+
+    /** 롤오버 직후 새 주기 카운터를 판정 행 기준으로 맞춘다. */
+    public void resetPeriodCompleted(int completed) {
+        this.curPeriodCompleted = Math.max(completed, 0);
     }
 
     /** 진행률 카운터만 갱신(확정 배치 — todayStatus·lastSyncedAt 안 건드림). */
