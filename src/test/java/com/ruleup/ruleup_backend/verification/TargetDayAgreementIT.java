@@ -200,6 +200,22 @@ class TargetDayAgreementIT extends ChallengeApiSupport {
         assertThat(failDays(challengeId, me)).isZero();
     }
 
+    @Test
+    @DisplayName("잘린 주기의 진행 표시(period.target/remaining)도 판정과 같은 몫을 쓴다(리뷰 지적)")
+    void partialPeriodProgressUsesActualQuota() throws Exception {
+        Member me = member(uniq("tda-progress"));
+        UUID challengeId = lateJoinRoom(me, 6, 0);   // 6일 전~오늘 한 주, 어제 가입 → 오늘 하루만 대상
+
+        assertThat(postJsonAuth("/api/v1/challenges/" + challengeId + "/verifications", me.token(), Map.of())
+                .getResponse().getStatus()).isEqualTo(200);
+
+        MvcResult progress = getAuth("/api/v1/verifications/progress", me.token());
+        java.util.List<Map<String, Object>> rows = read(progress, "$.data.challenges");
+        Map<String, Object> period = rows.stream().filter(r -> challengeId.toString().equals(r.get("challengeId")))
+                .findFirst().map(r -> (Map<String, Object>) r.get("period")).orElseThrow();
+        assertThat(period).containsEntry("target", 1).containsEntry("completed", 1).containsEntry("remaining", 0);
+    }
+
     /** 주 7회 수동 방. 어제 가입했고 셋업 전(target_days=0)이라 첫 체크가 셋업을 부른다. */
     private UUID lateJoinRoom(Member me, int startDaysAgo, Integer endDaysFromNow) {
         UUID challengeId = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
