@@ -92,6 +92,7 @@ public class AuthService {
     private final ApplicationEventPublisher eventPublisher;
     private final CountryResolver countryResolver;
     private final com.ruleup.ruleup_backend.invitation.InvitationService invitationService;
+    private final com.ruleup.ruleup_backend.applink.InstallReferrerInvitation installReferrerInvitation;
     private final com.ruleup.ruleup_backend.notification.service.NotificationPublisher notificationPublisher;
 
     // ===== OAuth 로그인 =====
@@ -293,8 +294,14 @@ public class AuthService {
         activity.touch(user.getId());
 
         UserScoreSummary summary = scoreService.initialize(user.getId());   // 브론즈 10점
-        invitationService.recordSignup(req.inviteCode(), user.getId(), java.time.Instant.now());   // 친구 초대 기록(선택)
+        // 친구 초대 기록(선택). 설치 경로로 받은 친구 초대 링크는 코드를 따로 보내지 않아도 연동한다.
+        String inviteCode = (req.inviteCode() != null && !req.inviteCode().isBlank())
+                ? req.inviteCode() : installReferrerInvitation.friendCode(req.inviteLink()).orElse(null);
+        invitationService.recordSignup(inviteCode, user.getId(), java.time.Instant.now());
         saveAgreements(user, ag);
+        // 초대 링크로 설치·가입했으면 그 초대를 알림함에 남긴다 — 가입 화면은 일반 가입과 같아서
+        // 받은 초대로 돌아갈 자리가 알림함뿐이다(QA NAV-06). 잘못된 링크는 가입을 막지 않는다.
+        installReferrerInvitation.notifyReceived(user.getId(), req.inviteLink());
         socialTokenService.flushPending(claims.getId(), user.getId(), provider);   // IdP 토큰 암호화 저장
 
         // 가입은 여기서 그대로 완료(닉네임 상태는 PENDING — 심사 중 기능 제한 없음).

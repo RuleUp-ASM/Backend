@@ -132,6 +132,14 @@ public enum NotificationTemplate {
     APPEAL_RESULT(NotificationType.APPEAL_RESULT,
             "이의가 받아들여졌어요", "인증이 완료로 정정됐어요. 진행률과 연속 기록도 함께 되돌렸어요."),
 
+    /** 설치 후 가입한 사람이 받아 둔 초대 — 초대 종류로 갈린다. */
+    INVITATION_RECEIVED_CHALLENGE(NotificationType.INVITATION_RECEIVED, VARIANT, "CHALLENGE",
+            "챌린지 초대가 와 있어요", "[{challenge_title}] 챌린지에 초대받았어요. 눌러서 참여해보세요."),
+    INVITATION_RECEIVED_WATCHER(NotificationType.INVITATION_RECEIVED, VARIANT, "WATCHER",
+            "감시자 요청이 와 있어요", "{actor_name}님이 챌린지 감시자가 되어 달라고 요청했어요. 눌러서 확인해보세요."),
+    INVITATION_RECEIVED_FRIEND(NotificationType.INVITATION_RECEIVED, VARIANT, "FRIEND",
+            "친구 초대로 시작했어요", "{actor_name}님의 초대로 RuleUp 을 시작했어요."),
+
     TERMS_UPDATED(NotificationType.TERMS_UPDATED,
             "약관이 개정됐어요", "계속 이용하시려면 새 약관에 동의해주세요."),
 

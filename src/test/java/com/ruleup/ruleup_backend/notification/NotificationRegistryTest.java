@@ -35,7 +35,7 @@ class NotificationRegistryTest {
     class Types {
 
         @Test
-        @DisplayName("24종 — 공통 8절 표 22종 + CS 답변 1종 + 실패 예정 1종(2026-09-19)")
+        @DisplayName("25종 — 공통 8절 표 22종 + CS 답변 1종 + 실패 예정 1종(2026-09-19) + 받은 초대 1종(2026-09-28)")
         void twentyThreeTypes() {
             assertThat(Arrays.stream(NotificationType.values()).map(Enum::name))
                     .containsExactlyInAnyOrder(
@@ -43,7 +43,7 @@ class NotificationRegistryTest {
                             "INACTIVE_WITHDRAWAL_NOTICE", "MODERATION_REJECTED",
                             "CHALLENGE_IMAGE_REMOVED", "PERMISSION_REGRANT_REQUIRED",
                             "CHEAT_DETECTED", "APPEAL_RESULT", "TERMS_UPDATED",
-                            "DEVICE_LOGGED_OUT", "CS_ANSWERED",
+                            "DEVICE_LOGGED_OUT", "CS_ANSWERED", "INVITATION_RECEIVED",
                             "VERIFICATION_RESULT", "VERIFICATION_FAIL_EXPECTED", "CONSECUTIVE_FAILURE_WARNING",
                             "CHALLENGE_LIFECYCLE", "WATCHER_INVITATION_EXPIRED", "TIER_CHANGED",
                             "TIER_BOUNDARY_NEAR", "PENALTY_FAILURE_SHARED", "WATCHER_REACTION",
@@ -65,7 +65,7 @@ class NotificationRegistryTest {
     class ToggleGroups {
 
         @Test
-        @DisplayName("계정 12종")
+        @DisplayName("계정 13종")
         void account() {
             assertThat(byGroup(NotificationToggleGroup.ACCOUNT)).containsExactlyInAnyOrder(
                     NotificationType.CHALLENGE_KICKED, NotificationType.ACCOUNT_SANCTION,
@@ -73,7 +73,8 @@ class NotificationRegistryTest {
                     NotificationType.MODERATION_REJECTED, NotificationType.CHALLENGE_IMAGE_REMOVED,
                     NotificationType.PERMISSION_REGRANT_REQUIRED, NotificationType.CHEAT_DETECTED,
                     NotificationType.APPEAL_RESULT, NotificationType.TERMS_UPDATED,
-                    NotificationType.DEVICE_LOGGED_OUT, NotificationType.CS_ANSWERED);
+                    NotificationType.DEVICE_LOGGED_OUT, NotificationType.CS_ANSWERED,
+                    NotificationType.INVITATION_RECEIVED);
         }
 
         @Test
