@@ -184,6 +184,36 @@ class TargetDayAgreementIT extends ChallengeApiSupport {
         assertThat(periodCompleted(challengeId, me)).isEqualTo(1);
     }
 
+    @Test
+    @DisplayName("종료일 없는 방에 늦게 들어오면 현재 참여 주기부터 셋업하고, 가입 전 주기로 분모를 늘리지 않는다(리뷰 지적)")
+    void unlimitedLateJoinTargetsOnlyParticipation() throws Exception {
+        Member me = member(uniq("tda-unlimited"));
+        UUID challengeId = lateJoinRoom(me, 20, null);
+
+        assertThat(postJsonAuth("/api/v1/challenges/" + challengeId + "/verifications", me.token(), Map.of())
+                .getResponse().getStatus()).isEqualTo(200);
+        finalizeService.rolloverFrequencyPeriods();
+
+        assertThat(jdbcTemplate.queryForObject("SELECT target_days FROM challenge_members WHERE challenge_id=? AND user_id=?",
+                Integer.class, bytes(challengeId), bytes(me.id())))
+                .as("현재 주기에 남은 대상일은 오늘 하루다 — 가입 전 2주가 분모에 들어가면 안 된다").isEqualTo(1);
+        assertThat(failDays(challengeId, me)).isZero();
+    }
+
+    /** 주 7회 수동 방. 어제 가입했고 셋업 전(target_days=0)이라 첫 체크가 셋업을 부른다. */
+    private UUID lateJoinRoom(Member me, int startDaysAgo, Integer endDaysFromNow) {
+        UUID challengeId = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
+        insertActiveMembership(challengeId, me.id(), "MEMBER");
+        jdbcTemplate.update("UPDATE challenges SET weekly_count = 7," +
+                        " start_date = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL ? DAY)," +
+                        " end_date = " + (endDaysFromNow == null ? "NULL, duration_days = NULL"
+                        : "DATE_ADD(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL " + endDaysFromNow + " DAY)") +
+                        " WHERE id = ?", startDaysAgo, bytes(challengeId));
+        jdbcTemplate.update("UPDATE challenge_members SET joined_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 DAY)," +
+                " setup_status = 'READY', target_days = 0 WHERE challenge_id = ? AND user_id = ?", bytes(challengeId), bytes(me.id()));
+        return challengeId;
+    }
+
     // ===== 헬퍼 =====
 
     /** 3일 전 시작한 수동·빈도형 방. 주기 필드는 셋업이 채우는 모양 그대로 둔다. */

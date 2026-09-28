@@ -653,8 +653,8 @@ public class VerificationFinalizeService {
             int periodDays = (m.getPeriodUnit() == PeriodUnit.WEEK) ? 7 : 30;
             LocalDate nextEnd = nextStart.plusDays(periodDays - 1L);
             if (ch.getEndDate() != null && nextEnd.isAfter(ch.getEndDate())) nextEnd = ch.getEndDate();
-            // 종료일 없는 방은 다음 주기 몫(N)만큼 분모를 늘린다 — 닫히는 주기의 (잘렸을 수 있는) 몫이 아니다.
-            if (ch.getEndDate() == null) m.extendTargetDays(m.getPeriodTarget() != null ? m.getPeriodTarget() : 0);
+            // 종료일 없는 방은 다음 주기 몫만큼 분모를 늘린다 — 판정 구간과 겹친 날만큼이라 가입 전 주기는 0 이다.
+            if (ch.getEndDate() == null) m.extendTargetDays(VerificationTargetDays.periodNeed(ch, m, nextStart, nextEnd));
             m.rolloverPeriod(nextStart, nextEnd, shortfall);
             changed = true;
         }

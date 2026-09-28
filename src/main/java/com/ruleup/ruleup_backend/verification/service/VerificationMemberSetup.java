@@ -53,10 +53,14 @@ public class VerificationMemberSetup {
         int n = f.count();
         int periodDays = (f.unit() == PeriodUnit.WEEK) ? 7 : 30;
         LocalDate start = challenge.getStartDate();
-        LocalDate end = challenge.getEndDate() == null ? start.plusDays(periodDays - 1L) : challenge.getEndDate();
         // 주기마다 판정 구간과 겹치는 날만큼 필요 횟수를 준다 — 온전한 주기는 N, 잘린 주기(진행 중 입장의
         // 첫 주기·마지막 부분 주기)는 ceil(N×겹친 날/주기).
         LocalDate from = judgeFrom(member, challenge);
+        // 종료일 없는 방은 판정 시작일이 든 주기까지만 잡고 이후는 롤오버가 한 주기씩 늘린다. 첫 주기로
+        // 고정하면 늦게 들어온 멤버의 현재 주기가 가입 전 주기가 되고, 롤오버가 따라잡을 때마다 분모에
+        // N 을 더해 진행률이 무너진다(리뷰 지적 — 20일째 방에 어제 가입하면 target_days 15).
+        LocalDate end = challenge.getEndDate() != null ? challenge.getEndDate()
+                : start.plusDays((Math.max(ChronoUnit.DAYS.between(start, from), 0) / periodDays + 1) * periodDays - 1);
         int targetCompletions = 0;
         LocalDate curStart = null, curEnd = null;
         for (LocalDate p = start; !p.isAfter(end); p = p.plusDays(periodDays)) {
