@@ -32,6 +32,7 @@ class SchedulerLockCoverageTest {
             "ChallengeModerationQueue.poll",
             "SystemMetricsSampler.sample",
             "OutboxMetrics.refresh",
+            "VerificationBacklogMetrics.refresh",
             "WatcherHealth.sample",
             "SegmentScoreService.evictLocalCaches");
 
