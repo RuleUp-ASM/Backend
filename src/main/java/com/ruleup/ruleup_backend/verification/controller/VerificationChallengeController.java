@@ -142,8 +142,10 @@ public class VerificationChallengeController {
             description = """
                     보낸 목록으로 세트 **전체를 갈아끼운다**(부분 수정 아님). 1~10개, `packageName` 중복 불가.
 
-                    - **적용은 항상 익일 00:00부터.** 오늘 측정분은 오늘 0시 기준 세트로 판정하므로 당일 교체로 인증을 조작할 수 없다.
+                    - **변경 적용은 익일 00:00부터.** 오늘 측정분은 오늘 0시 기준 세트로 판정하므로 당일 교체로 인증을 조작할 수 없다.
+                    - **적용 중인 세트가 없으면 첫 설정**이다 — setup 과 같이 즉시 적용되고 월 1회를 쓰지 않으며, 셋업이 READY 가 된다.
                     - **변경은 월 1회** — 앵커와 동일 규칙(저장 1회 = 소진, 매월 1일 00:00 KST 리셋, 첫 설정은 미소진).
+                    - 적용(또는 적용 대기) 중인 세트와 **같은 앱으로 다시 저장하면 한도를 쓰지 않고** 현재 상태를 돌려준다.
                     - 목표값(N분 이하/이상)은 정책상 변경 불가 — 이 API는 대상 앱만 다룬다.
                     """)
     @ApiErrorCodes({ErrorCode.INVALID_APP, ErrorCode.SCREENTIME_NOT_CONFIGURED, ErrorCode.LOGIN_REQUIRED,
