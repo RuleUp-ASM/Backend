@@ -216,7 +216,7 @@ class ExploreSpecAlignmentIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("[P2] 비공개 방 복제는 볼 수 없는 사람에게도 NOT_CLONEABLE 403 이다")
+        @DisplayName("[P2] 비공개 방 복제는 볼 수 없는 사람에게 NOT_CLONEABLE 403 이다 — 404 로 숨기지 않는다")
         void cloningAPrivateRoomIsForbiddenNotHidden() throws Exception {
             Member me = member(uniq("esa-clone"));
             UUID room = publicRoom("EXERCISE");
@@ -225,7 +225,7 @@ class ExploreSpecAlignmentIT extends ChallengeApiSupport {
             MvcResult res = postJsonAuth("/api/v1/challenges/" + room + "/clone", me.token(), Map.of());
 
             assertThat(res.getResponse().getStatus())
-                    .as("복제 API 명세는 비공개·솔로를 403 NOT_CLONEABLE 로 규정한다")
+                    .as("볼 수 없는 방의 복제는 403 NOT_CLONEABLE 이다")
                     .isEqualTo(403);
             assertThat((String) read(res, "$.error.code")).isEqualTo("NOT_CLONEABLE");
         }
