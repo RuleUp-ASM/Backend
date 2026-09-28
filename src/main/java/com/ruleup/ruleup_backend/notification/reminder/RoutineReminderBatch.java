@@ -42,10 +42,11 @@ import java.util.UUID;
  * 그래서 여러 방에 미인증 루틴이 있으면 한 건으로 묶고, 딥링크는 그중 한 방을 가리킨다
  * (공통 8절이 「홈 오늘 탭이 아니라 방으로」를 요구하므로 방을 가리켜야 한다).
  *
- * <h4>음소거한 방은 집계에서 빠진다</h4>
- * 참여 챌린지를 전부 음소거하면 <b>리마인더 자체가 발송되지 않는다</b>. 발송 단계의 음소거
- * 판정과 달리 여기는 <b>적재 자체를 하지 않는</b> 것이라, 알림 센터에도 남지 않는다 —
- * 절대 규칙 1의 예외가 아니라 「보낼 알림이 애초에 없는」 상태다.
+ * <h4>음소거는 푸시만 막는다</h4>
+ * 음소거한 방의 루틴도 집계에 넣어 알림 센터에는 쌓는다 — 음소거는 어느 알림이든 푸시만 막는다
+ * (09-28 결정, QA NOTI-03·04). 푸시 차단은 발송 단계의 음소거 판정({@code DispatchDecision})이
+ * 대표 챌린지로 한다. 그래서 대표는 <b>음소거하지 않은 방을 먼저</b> 고른다 — 음소거한 방이 대표가
+ * 되면 음소거하지 않은 방의 미인증 루틴 푸시까지 함께 막힌다. 전부 음소거했을 때만 푸시가 빠진다.
  *
  * <h4>판정 대상일은 하나의 근거만 쓴다</h4>
  * {@link VerificationTargetDays} 를 그대로 부른다. 여기서 요일·빈도 계산을 다시 구현하면
@@ -121,8 +122,9 @@ public class RoutineReminderBatch {
     /**
      * 오늘 아직 인증하지 않은 루틴을 가진 유저 → 대표 챌린지.
      *
-     * <p>대표는 <b>가장 작은 챌린지 id</b>다. 오늘 마감은 전부 23:59 KST 로 같아 「가장 급한 방」
-     * 이라는 기준이 없고, 임의로 고르면 실행마다 딥링크가 바뀌어 재시도 판정이 흔들린다.
+     * <p>대표는 <b>음소거하지 않은 방 중 가장 작은 챌린지 id</b>다(전부 음소거면 전체 중 가장 작은 id).
+     * 오늘 마감은 전부 23:59 KST 로 같아 「가장 급한 방」이라는 기준이 없고, 임의로 고르면 실행마다
+     * 딥링크가 바뀌어 재시도 판정이 흔들린다.
      */
     private Map<UUID, UUID> pendingTargets(LocalDate today) {
         List<ChallengeMember> members = challengeQueryService.findActiveOnDate(today, SCAN_LIMIT);
@@ -147,16 +149,22 @@ public class RoutineReminderBatch {
 
             Challenge challenge = challenges.get(member.getChallengeId());
             if (challenge == null || challenge.getDeletedAt() != null) continue;
-            if (muted.getOrDefault(member.getUserId(), Set.of()).contains(challenge.getId()))
-                continue;   // 음소거한 방의 루틴은 집계에서 빠진다
 
             if (VerificationTargetDays.of(configFactory.build(challenge), challenge, member, today)
                     != VerificationTargetDays.Disposition.EVALUATE) continue;
 
+            Set<UUID> mine = muted.getOrDefault(member.getUserId(), Set.of());
             byUser.merge(member.getUserId(), challenge.getId(),
-                    (kept, candidate) -> kept.compareTo(candidate) <= 0 ? kept : candidate);
+                    (kept, candidate) -> representative(kept, candidate, mine));
         }
         return byUser;
+    }
+
+    /** 음소거하지 않은 방이 먼저, 같으면 작은 id. */
+    private static UUID representative(UUID kept, UUID candidate, Set<UUID> muted) {
+        boolean keptMuted = muted.contains(kept), candidateMuted = muted.contains(candidate);
+        if (keptMuted != candidateMuted) return keptMuted ? candidate : kept;
+        return kept.compareTo(candidate) <= 0 ? kept : candidate;
     }
 
     /**

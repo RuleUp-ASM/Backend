@@ -144,20 +144,22 @@ class RoutineReminderBatchIT extends ChallengeApiSupport {
     }
 
     @Test
-    @DisplayName("참여 방을 전부 음소거하면 리마인더 자체가 없다 — 집계에서 빠진다")
-    void allMutedMeansNoReminder() throws Exception {
+    @DisplayName("참여 방을 전부 음소거해도 알림 센터에는 쌓인다 — 푸시만 발송 단계 음소거 판정이 막는다")
+    void allMutedStillStoredInInbox() throws Exception {
         Member me = member(uniq("rm5"));
         UUID challengeId = joinedRoom(me.id());
         muteRepository.save(NotificationMute.of(me.id(), challengeId, Instant.now()));
 
         batch.send(slotTime(ReminderSlot.MORNING));
 
-        assertThat(reminders(me.id()))
-                .as("발송 단계 음소거와 달리 여기는 적재 자체를 하지 않는다").isEmpty();
+        // 09-28 결정(QA NOTI-03): 음소거는 예외 없이 푸시만 막는다. 대표 챌린지가 음소거한 방이라
+        // DispatchDecision 이 MUTED 로 푸시를 거른다.
+        assertThat(reminders(me.id())).singleElement()
+                .satisfies(n -> assertThat(n.getChallengeId()).isEqualTo(challengeId));
     }
 
     @Test
-    @DisplayName("음소거하지 않은 방이 하나라도 남으면 그 방으로 보낸다")
+    @DisplayName("음소거하지 않은 방이 하나라도 남으면 그 방을 대표로 보낸다 — 푸시가 막히지 않게")
     void partialMuteStillReminds() throws Exception {
         Member me = member(uniq("rm6"));
         UUID muted = joinedRoom(me.id());
