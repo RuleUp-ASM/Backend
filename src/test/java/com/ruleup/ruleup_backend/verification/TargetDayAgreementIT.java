@@ -144,6 +144,46 @@ class TargetDayAgreementIT extends ChallengeApiSupport {
         assertThat(periodCompleted(challengeId, me)).as("롤오버가 새 주기 성공을 판정 행으로 다시 센다").isEqualTo(1);
     }
 
+    @Test
+    @DisplayName("마지막 하루만 판정 대상인 중간 가입자가 그 하루를 성공하면 롤오버 뒤 실패가 0 이다(리뷰 지적, QA JOIN-14)")
+    void midJoinLastDayOnlyHasNoFailures() throws Exception {
+        Member me = member(uniq("tda-lastday"));
+        UUID challengeId = manualWeeklyRoom(me, 7);
+        // 방은 7일 전~어제 한 주짜리, 나는 그제 들어왔으니 판정은 어제 하루뿐이다.
+        jdbcTemplate.update("UPDATE challenges SET start_date = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 7 DAY)," +
+                " end_date = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 1 DAY) WHERE id = ?", bytes(challengeId));
+        jdbcTemplate.update("UPDATE challenge_members SET joined_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 2 DAY), cur_period_completed = 0," +
+                        " cur_period_start = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 7 DAY)," +
+                        " cur_period_end = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 1 DAY)," +
+                        " fail_days = 0, success_days = 0 WHERE challenge_id=? AND user_id=?", bytes(challengeId), bytes(me.id()));
+        seedSuccess(me, challengeId, 1);
+
+        finalizeService.rolloverFrequencyPeriods();
+
+        assertThat(failDays(challengeId, me)).as("가입 전 6일을 미달로 정산하면 안 된다").isZero();
+    }
+
+    @Test
+    @DisplayName("20일째 방에 어제 들어와 오늘 성공하면 롤오버가 가입 전 주기를 미달로 따라잡지 않는다(리뷰 지적, QA JOIN-14)")
+    void midJoinDoesNotCatchUpPreJoinPeriods() throws Exception {
+        Member me = member(uniq("tda-catchup"));
+        UUID challengeId = manualWeeklyRoom(me, 7);
+        jdbcTemplate.update("UPDATE challenges SET start_date = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 20 DAY)," +
+                " end_date = DATE_ADD(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 20 DAY) WHERE id = ?", bytes(challengeId));
+        // 수정 전 셋업처럼 현재 주기가 챌린지 첫 주기로 잡혀 있는 상태.
+        jdbcTemplate.update("UPDATE challenge_members SET joined_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 DAY), cur_period_completed = 0," +
+                        " cur_period_start = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 20 DAY)," +
+                        " cur_period_end = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 14 DAY)," +
+                        " fail_days = 0, success_days = 0 WHERE challenge_id=? AND user_id=?", bytes(challengeId), bytes(me.id()));
+        assertThat(postJsonAuth("/api/v1/challenges/" + challengeId + "/verifications", me.token(), Map.of())
+                .getResponse().getStatus()).isEqualTo(200);
+
+        finalizeService.rolloverFrequencyPeriods();
+
+        assertThat(failDays(challengeId, me)).as("가입 전 두 주를 미달로 쌓으면 안 된다").isZero();
+        assertThat(periodCompleted(challengeId, me)).isEqualTo(1);
+    }
+
     // ===== 헬퍼 =====
 
     /** 3일 전 시작한 수동·빈도형 방. 주기 필드는 셋업이 채우는 모양 그대로 둔다. */
@@ -181,6 +221,12 @@ class TargetDayAgreementIT extends ChallengeApiSupport {
         return jdbcTemplate.queryForObject(
                 "SELECT id FROM challenge_members WHERE challenge_id=? AND user_id=?",
                 (rs, i) -> uuidOf(rs.getBytes(1)), bytes(challengeId), bytes(me.id()));
+    }
+
+    private int failDays(UUID challengeId, Member me) {
+        return jdbcTemplate.queryForObject(
+                "SELECT fail_days FROM challenge_members WHERE challenge_id=? AND user_id=?",
+                Integer.class, bytes(challengeId), bytes(me.id()));
     }
 
     private int periodCompleted(UUID challengeId, Member me) {

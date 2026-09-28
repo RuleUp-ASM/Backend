@@ -638,7 +638,8 @@ public class VerificationFinalizeService {
         int guard = 0;
         boolean changed = false;
         while (m.getCurPeriodEnd() != null && m.getCurPeriodEnd().isBefore(today) && guard++ < 400) {
-            int need = (m.getPeriodTarget() != null) ? m.getPeriodTarget() : 0;
+            // 판정 구간과 겹친 날만큼만 요구한다 — 가입 전 날짜를 미달로 정산하지 않는다(QA JOIN-14).
+            int need = VerificationTargetDays.periodNeed(ch, m, m.getCurPeriodStart(), m.getCurPeriodEnd());
             int done = (m.getCurPeriodCompleted() != null) ? m.getCurPeriodCompleted() : 0;
             int shortfall = Math.max(need - done, 0);
 
@@ -652,7 +653,8 @@ public class VerificationFinalizeService {
             int periodDays = (m.getPeriodUnit() == PeriodUnit.WEEK) ? 7 : 30;
             LocalDate nextEnd = nextStart.plusDays(periodDays - 1L);
             if (ch.getEndDate() != null && nextEnd.isAfter(ch.getEndDate())) nextEnd = ch.getEndDate();
-            if (ch.getEndDate() == null) m.extendTargetDays(need);
+            // 종료일 없는 방은 다음 주기 몫(N)만큼 분모를 늘린다 — 닫히는 주기의 (잘렸을 수 있는) 몫이 아니다.
+            if (ch.getEndDate() == null) m.extendTargetDays(m.getPeriodTarget() != null ? m.getPeriodTarget() : 0);
             m.rolloverPeriod(nextStart, nextEnd, shortfall);
             changed = true;
         }

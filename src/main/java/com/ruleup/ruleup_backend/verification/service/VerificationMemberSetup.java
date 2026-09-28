@@ -58,17 +58,20 @@ public class VerificationMemberSetup {
         // 첫 주기·마지막 부분 주기)는 ceil(N×겹친 날/주기).
         LocalDate from = judgeFrom(member, challenge);
         int targetCompletions = 0;
+        LocalDate curStart = null, curEnd = null;
         for (LocalDate p = start; !p.isAfter(end); p = p.plusDays(periodDays)) {
             LocalDate pEnd = p.plusDays(periodDays - 1L).isAfter(end) ? end : p.plusDays(periodDays - 1L);
-            LocalDate s = p.isBefore(from) ? from : p;
-            if (s.isAfter(pEnd)) continue;
-            long days = ChronoUnit.DAYS.between(s, pEnd) + 1;
-            targetCompletions += (days == periodDays) ? n : (int) Math.ceil((double) n * days / periodDays);
+            targetCompletions += VerificationTargetDays.periodNeed(n, periodDays, p, pEnd, from);
+            // 현재 주기는 판정 시작일이 든 주기다 — 챌린지 첫 주기로 두면 롤오버가 가입 전 주기들을
+            // 미달로 따라잡아 실패를 쌓는다(리뷰 지적, QA JOIN-14).
+            if (curStart == null && !pEnd.isBefore(from)) { curStart = p; curEnd = pEnd; }
+        }
+        if (curStart == null) {   // 판정 구간이 남지 않았다 — 마지막 주기에 둔다(롤오버가 정산할 몫은 0)
+            long last = ChronoUnit.DAYS.between(start, end) / periodDays;
+            curStart = start.plusDays(last * periodDays);
+            curEnd = end;
         }
 
-        LocalDate curEnd = start.plusDays(periodDays - 1L);
-        if (curEnd.isAfter(end)) curEnd = end;
-
-        member.setupFrequency(f.unit(), n, start, curEnd, Math.max(targetCompletions, 1));
+        member.setupFrequency(f.unit(), n, curStart, curEnd, Math.max(targetCompletions, 1));
     }
 }
