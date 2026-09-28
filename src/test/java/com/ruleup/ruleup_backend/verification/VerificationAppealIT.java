@@ -210,6 +210,12 @@ class VerificationAppealIT extends VerificationApiSupport {
             assertThat(statusOn(f.memberId(), appealableDate()))
                     .as("정상 성공과 같게 완료로 정정된다")
                     .isEqualTo("SUCCESS");
+
+            // 결과 고지는 인용과 같은 커밋에 알림함으로 적재된다(QA APL-07 — 실제 인용 건에서 미적재로 보였다).
+            String appealId = read(res, "$.data.appealId");
+            assertThat(jdbc().queryForObject("SELECT COUNT(*) FROM notifications WHERE user_id = ? " +
+                            "AND type = 'APPEAL_RESULT' AND dedup_key LIKE ?", Integer.class,
+                    bytes(f.owner().id()), "%" + appealId)).isEqualTo(1);
         }
 
         @Test
