@@ -96,8 +96,7 @@ public class AgreementService {
 
             record(user, type, item.agreed(), current, now);
             if (type == AgreementType.MARKETING) syncMarketingGroup(userId, item.agreed(), now);
-            updated.add(new AgreementDtos.StatusResponse.Item(
-                    type.name(), type.isRequired(), item.agreed(), current, now.toString()));
+            updated.add(toItem(type, stateRepository.findById(new UserAgreementState.Key(userId, type)).orElse(null)));
         }
 
         // 처리 후 남은 재동의 항목 — 비어 있으면 클라이언트가 화면을 닫는다.
@@ -116,11 +115,16 @@ public class AgreementService {
      * 호출자의 트랜잭션에 참여하므로 별도 전파 설정을 두지 않는다.
      */
     public void record(User user, AgreementType type, boolean agreed, String version, Instant at) {
-        stateRepository.findById(new UserAgreementState.Key(user.getId(), type))
-                .ifPresentOrElse(
-                        s -> s.apply(agreed, version, at),
-                        () -> stateRepository.save(
-                                UserAgreementState.of(user.getId(), type, agreed, version, at)));
+        var existing = stateRepository.findById(new UserAgreementState.Key(user.getId(), type));
+        // 한 번도 동의한 적 없는 항목의 미동의는 상태에 버전·시각을 남기지 않는다 — 남기면 「동의 후 철회」와
+        // 구분되지 않는다(QA ONB-17). 이력에는 무엇을 거부했는지 알 수 있게 버전을 그대로 남긴다.
+        boolean everAgreed = agreed || existing.map(s -> s.getVersion() != null).orElse(false);
+        String stateVersion = everAgreed ? version : null;
+        Instant stateAt = everAgreed ? at : null;
+        existing.ifPresentOrElse(
+                s -> s.apply(agreed, stateVersion, stateAt),
+                () -> stateRepository.save(
+                        UserAgreementState.of(user.getId(), type, agreed, stateVersion, stateAt)));
         eventRepository.save(UserAgreementEvent.of(user, type, agreed, version));
     }
 
