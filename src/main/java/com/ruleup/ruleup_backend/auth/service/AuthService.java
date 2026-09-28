@@ -92,6 +92,7 @@ public class AuthService {
     private final ApplicationEventPublisher eventPublisher;
     private final CountryResolver countryResolver;
     private final com.ruleup.ruleup_backend.invitation.InvitationService invitationService;
+    private final com.ruleup.ruleup_backend.applink.InstallReferrerInvitation installReferrerInvitation;
     private final com.ruleup.ruleup_backend.notification.service.NotificationPublisher notificationPublisher;
 
     // ===== OAuth 로그인 =====
@@ -265,6 +266,7 @@ public class AuthService {
         SignupRequest.Agreements ag = req.agreements();
         if (ag == null || !ag.requiredAllAgreed())
             throw new BusinessException(ErrorCode.REQUIRED_AGREEMENT_MISSING);
+        requireCurrentAgreementVersions(ag);
 
         // 기기: deviceId·deviceInfo 필수(계약) / installationId는 다계정 차단 판정 키
         requireValidDevice(req.deviceId(), req.deviceInfo());
@@ -292,8 +294,14 @@ public class AuthService {
         activity.touch(user.getId());
 
         UserScoreSummary summary = scoreService.initialize(user.getId());   // 브론즈 10점
-        invitationService.recordSignup(req.inviteCode(), user.getId(), java.time.Instant.now());   // 친구 초대 기록(선택)
+        // 친구 초대 기록(선택). 설치 경로로 받은 친구 초대 링크는 코드를 따로 보내지 않아도 연동한다.
+        String inviteCode = (req.inviteCode() != null && !req.inviteCode().isBlank())
+                ? req.inviteCode() : installReferrerInvitation.friendCode(req.inviteLink()).orElse(null);
+        invitationService.recordSignup(inviteCode, user.getId(), java.time.Instant.now());
         saveAgreements(user, ag);
+        // 초대 링크로 설치·가입했으면 그 초대를 알림함에 남긴다 — 가입 화면은 일반 가입과 같아서
+        // 받은 초대로 돌아갈 자리가 알림함뿐이다(QA NAV-06). 잘못된 링크는 가입을 막지 않는다.
+        installReferrerInvitation.notifyReceived(user.getId(), req.inviteLink());
         socialTokenService.flushPending(claims.getId(), user.getId(), provider);   // IdP 토큰 암호화 저장
 
         // 가입은 여기서 그대로 완료(닉네임 상태는 PENDING — 심사 중 기능 제한 없음).
@@ -529,12 +537,33 @@ public class AuthService {
         saveAgreement(user, AgreementType.EVENT, ag.event(), now);
     }
 
-    /** 상태 UPSERT + 이력 INSERT 를 한 트랜잭션에서 함께 쓴다 — AgreementService.record 가 그 경로다. */
+    /**
+     * 동의한 항목의 버전이 현행과 다르면 400 {@code AGREEMENT_VERSION_MISMATCH} — 재동의 제출과 같은 규칙이다.
+     * 검증 없이 저장하면 옛 버전(또는 엉뚱한 값)으로 가입이 끝나 곧바로 재동의 대상이 된다(QA ONB-19).
+     * 버전을 생략(null·빈 문자열)하면 현행으로 본다 — 인트로가 내려준 값이 곧 현행이다.
+     * 거부한 항목은 무엇을 거부했든 현행 버전으로 남긴다.
+     */
+    private void requireCurrentAgreementVersions(SignupRequest.Agreements ag) {
+        requireCurrentVersion(AgreementType.TOS, ag.termsOfService());
+        requireCurrentVersion(AgreementType.PRIVACY, ag.privacyPolicy());
+        requireCurrentVersion(AgreementType.LOCATION, ag.locationService());
+        requireCurrentVersion(AgreementType.MARKETING, ag.marketing());
+        requireCurrentVersion(AgreementType.EVENT, ag.event());
+    }
+
+    private void requireCurrentVersion(AgreementType type, SignupRequest.AgreementItem item) {
+        if (item == null || !item.isAgreed() || item.version() == null || item.version().isBlank()) return;
+        if (!currentVersionOf(type).equals(item.version()))
+            throw new BusinessException(ErrorCode.AGREEMENT_VERSION_MISMATCH);
+    }
+
+    /**
+     * 상태 UPSERT + 이력 INSERT 를 한 트랜잭션에서 함께 쓴다 — AgreementService.record 가 그 경로다.
+     * 버전은 {@link #requireCurrentAgreementVersions} 를 통과했으므로 항상 현행이다.
+     */
     private void saveAgreement(User user, AgreementType type, SignupRequest.AgreementItem item, Instant at) {
         boolean agreed = item != null && item.isAgreed();
-        String version = (item != null && item.version() != null && !item.version().isBlank())
-                ? item.version() : currentVersionOf(type);   // 미전송 시 서버가 아는 현행 버전으로
-        agreementService.record(user, type, agreed, version, at);
+        agreementService.record(user, type, agreed, currentVersionOf(type), at);
     }
 
     /** 인트로가 내려주는 현행 약관 버전과 같은 값 — 클라가 version 을 생략해도 기록이 어긋나지 않게. */

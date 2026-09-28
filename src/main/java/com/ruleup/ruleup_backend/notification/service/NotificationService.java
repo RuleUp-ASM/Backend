@@ -130,7 +130,7 @@ public class NotificationService {
     @Transactional(readOnly = true)
     public NotificationSettingDtos.Response settings(UUID userId) {
         UserNotificationSetting s = settingRepository.findById(userId)
-                .orElseGet(() -> UserNotificationSetting.defaults(userId, Instant.now()));
+                .orElseGet(() -> defaultsFor(userId, Instant.now()));
         return toResponse(userId, s);
     }
 
@@ -195,7 +195,18 @@ public class NotificationService {
     /** 설정 행을 확보한다 — 없으면 기본값으로 만들어 저장한다. */
     private UserNotificationSetting settings(UUID userId, Instant now) {
         return settingRepository.findById(userId).orElseGet(() ->
-                settingRepository.save(UserNotificationSetting.defaults(userId, now)));
+                settingRepository.save(defaultsFor(userId, now)));
+    }
+
+    /**
+     * 설정 행이 없을 때의 기본값. 마케팅 그룹만은 <b>수신 동의 상태</b>를 따른다 — 가입 때 마케팅을
+     * 거부한 사람에게 토글이 켜진 채 보이면 동의와 설정이 어긋난다(QA NOTI-06).
+     */
+    private UserNotificationSetting defaultsFor(UUID userId, Instant now) {
+        UserNotificationSetting s = UserNotificationSetting.defaults(userId, now);
+        if (!agreementService.hasIndividualConsent(userId, AgreementType.MARKETING))
+            s.applyGroup(NotificationToggleGroup.MARKETING, false, now);
+        return s;
     }
 
     private NotificationSettingDtos.Response toResponse(UUID userId, UserNotificationSetting s) {

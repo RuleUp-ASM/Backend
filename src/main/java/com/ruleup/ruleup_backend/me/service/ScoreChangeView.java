@@ -27,6 +27,9 @@ public class ScoreChangeView {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
+    /** 원장 사유를 코드가 모를 때의 표기값. */
+    static final String UNKNOWN_REASON = "UNKNOWN";
+
     /**
      * 그릴 수 있는 행인가. {@code INCIDENT} 인데 {@code incident_type} 이 비어 있으면 <b>무슨 사건인지
      * 알 수 없어</b> 표기를 만들 수 없다 — 이런 행은 목록에서 뺀다.
@@ -54,9 +57,13 @@ public class ScoreChangeView {
      *
      * <p>{@code KICK_FAIL}(연속 실패 강퇴)은 여기서 나오지 않는다. 각 주의 루틴 점수에 이미
      * 반영돼 감점 이벤트 자체가 만들어지지 않기 때문이다.
+     *
+     * <p>원장 사유가 코드가 모르는 값이면 null — 표기는 {@link #toChange} 가 {@code UNKNOWN} 으로 내린다.
      */
     public ScoreReason displayReason(ScoreTransaction t) {
-        return switch (t.getReason()) {
+        ScoreLedgerReason reason = t.getReason();
+        if (reason == null) return null;
+        return switch (reason) {
             case SIGNUP, CYCLE_CLOSED, PROCESSING_COMMIT, CORRECTION_COMMIT, DAILY_SUCCESS, STREAK_BONUS -> ScoreReason.CYCLE_SUCCESS;
             case CONFIRMED_MISS, STREAK_PENALTY -> ScoreReason.CYCLE_FAIL;
             // 되감기는 방향을 봐야 한다. 점수를 되돌려 준 되감기(감점 취소)만 「이의 복원」이고,
@@ -78,9 +85,15 @@ public class ScoreChangeView {
     public MeTierResponse.Change toChange(ScoreTransaction t, Map<UUID, String> titles) {
         LocalDate date = LocalDate.ofInstant(t.getCreatedAt(), KST);   // 화면은 KST 달력으로 읽는다
         UUID challengeId = t.getChallengeId();
+        ScoreReason reason = displayReason(t);
+        if (reason == null) {
+            // 점수는 실제로 움직였으니 행은 남기고 사유만 비운다 — 앱은 모르는 사유를 「점수 변동」으로 그린다.
+            log.warn("score_change_unknown_reason transactionId={} userId={} reason={}",
+                    t.getId(), t.getUserId(), t.getReasonCode());
+        }
         return new MeTierResponse.Change(
                 date.toString(),
-                displayReason(t).name(),
+                reason == null ? UNKNOWN_REASON : reason.name(),
                 challengeId != null ? challengeId.toString() : null,
                 challengeId != null ? titles.get(challengeId) : null,
                 t.getAppliedDelta());

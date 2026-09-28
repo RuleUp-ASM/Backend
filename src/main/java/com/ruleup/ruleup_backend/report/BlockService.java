@@ -77,9 +77,13 @@ public class BlockService {
 
         UUID targetId = parseUuid(request.targetUserId(), ErrorCode.INVALID_REPORT_TARGET);
         if (targetId.equals(reporterId)) throw new BusinessException(ErrorCode.CANNOT_REPORT_SELF);
-        requireNotReported(reporterId, TARGET_USER, targetId);
+        Optional<UUID> previous = previousReport(reporterId, TARGET_USER, targetId);
         User target = userRepository.findById(targetId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
+        if (previous.isPresent()) {   // 차단 해제 후 재신고 — 차단만 다시 건다
+            block(reporterId, TARGET_USER, targetId);
+            return new ReportDtos.CreateResponse(previous.get().toString(), true, "USER_CONTENT_MASKED");
+        }
 
         // 행위 신고(프로필 밖)는 발생 챌린지가 필수다 — 스냅샷에 방 정보를 담아야 판단이 된다.
         UUID challengeId = null;
@@ -104,25 +108,46 @@ public class BlockService {
             throw new BusinessException(ErrorCode.INVALID_REPORT_REASON);
 
         UUID targetId = parseUuid(request.targetChallengeId(), ErrorCode.INVALID_REPORT_TARGET);
-        requireNotReported(reporterId, TARGET_CHALLENGE, targetId);
+        Optional<UUID> previous = previousReport(reporterId, TARGET_CHALLENGE, targetId);
         Challenge challenge = challengeRepository.findById(targetId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
 
-        UUID reportId = insert(reporterId, TARGET_CHALLENGE, targetId, request.reason(),
-                challengeSnapshot(challenge, contextType, request.contextId()));
-        block(reporterId, TARGET_CHALLENGE, targetId);
+        UUID reportId;
+        if (previous.isPresent()) {
+            block(reporterId, TARGET_CHALLENGE, targetId);
+            reportId = previous.get();
+        } else {
+            reportId = insert(reporterId, TARGET_CHALLENGE, targetId, request.reason(),
+                    challengeSnapshot(challenge, contextType, request.contextId()));
+            block(reporterId, TARGET_CHALLENGE, targetId);
+        }
 
         // 참여 중이면 방을 없애지 않는다 — 방 자체가 보기 싫으면 직접 나가야 한다.
         String effect = participating(reporterId, targetId) ? "CHALLENGE_MASKED" : "CHALLENGE_HIDDEN";
         return new ReportDtos.CreateResponse(reportId.toString(), true, effect);
     }
 
-    /** 차단 해제도 신고 취소가 아니므로 원본 신고가 있으면 재접수하지 않는다. */
-    private void requireNotReported(UUID reporterId, String targetType, UUID targetId) {
-        Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM reports "
-                        + "WHERE reporter_id=? AND target_type=? AND target_id=?",
-                Integer.class, bytes(reporterId), targetType, bytes(targetId));
-        if (count != null && count > 0) throw new BusinessException(ErrorCode.ALREADY_REPORTED);
+    /**
+     * 같은 신고자의 기존 신고. 차단이 걸려 있으면 409 {@code ALREADY_REPORTED} — 재진입·재전송이다.
+     *
+     * <p>스스로 차단을 해제한 대상은 다시 신고할 수 있고, 그러면 차단이 재등재된다(신고 정책 §2.1, QA REP-09).
+     * 다만 <b>신고 건은 늘리지 않는다</b> — 차단 해제는 신고 취소가 아니라 원본 신고가 그대로 남아 있고,
+     * 해제·재신고를 반복해 같은 대상의 신고 수를 부풀리는 경로가 생기면 안 된다. 원본 신고 id 를 돌려준다.
+     */
+    private Optional<UUID> previousReport(UUID reporterId, String targetType, UUID targetId) {
+        List<UUID> ids = jdbc.query("SELECT id FROM reports WHERE reporter_id=? AND target_type=? AND target_id=? "
+                        + "ORDER BY created_at LIMIT 1",
+                (rs, row) -> uuid(rs.getBytes(1)), bytes(reporterId), targetType, bytes(targetId));
+        if (ids.isEmpty()) return Optional.empty();
+        if (isBlocked(reporterId, targetType, targetId)) throw new BusinessException(ErrorCode.ALREADY_REPORTED);
+        return Optional.of(ids.getFirst());
+    }
+
+    private boolean isBlocked(UUID blockerId, String targetType, UUID targetId) {
+        Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM user_blocks "
+                        + "WHERE blocker_id=? AND target_type=? AND target_id=?",
+                Integer.class, bytes(blockerId), targetType, bytes(targetId));
+        return count != null && count > 0;
     }
 
     /** 최초 신고만 적재한다. 신고자 락과 중복 검사, 차단·스냅샷 저장은 한 트랜잭션이다. */

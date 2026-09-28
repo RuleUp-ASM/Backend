@@ -240,7 +240,7 @@ public class VerificationReadService {
                 isTodayTarget(config, ch, m, today),
                 m.getTodayStatus() != null ? m.getTodayStatus().name() : null,
                 m.getSetupStatus() != null ? m.getSetupStatus().name() : null,
-                freq ? toPeriod(m) : null,
+                freq ? toPeriod(ch, m) : null,
                 (m.getLastSyncedAt() != null) ? m.getLastSyncedAt().toString() : null);
     }
 
@@ -254,8 +254,15 @@ public class VerificationReadService {
         return VerificationTargetDays.of(config, ch, m, today) == VerificationTargetDays.Disposition.EVALUATE;
     }
 
-    private ChallengeProgress.Period toPeriod(ChallengeMember m) {
-        Integer target = m.getPeriodTarget(), completed = m.getCurPeriodCompleted();
+    /**
+     * 주기 진행 표시. 목표는 판정과 같은 {@link VerificationTargetDays#periodNeed} — 잘린 주기(진행 중 입장의
+     * 첫 주기·마지막 부분 주기)에서 N 을 그대로 보여주면 몫을 채워 더 인증할 수 없는데 「6회 남음」이 된다.
+     */
+    private ChallengeProgress.Period toPeriod(Challenge ch, ChallengeMember m) {
+        Integer target = (m.getCurPeriodStart() != null && m.getCurPeriodEnd() != null && m.getPeriodTarget() != null)
+                ? Integer.valueOf(VerificationTargetDays.periodNeed(ch, m, m.getCurPeriodStart(), m.getCurPeriodEnd()))
+                : m.getPeriodTarget();
+        Integer completed = m.getCurPeriodCompleted();
         Integer remaining = (target != null && completed != null) ? Math.max(target - completed, 0) : null;
         return new ChallengeProgress.Period(
                 m.getPeriodUnit() != null ? m.getPeriodUnit().name() : null,

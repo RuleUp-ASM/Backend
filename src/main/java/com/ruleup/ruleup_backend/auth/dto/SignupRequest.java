@@ -67,7 +67,15 @@ public record SignupRequest(
 
         @Schema(description = "친구 초대 코드(선택). 유효하면 초대 기록이 연동된다. 유효하지 않아도 가입은 진행된다.",
                 example = "RU7K2M")
-        String inviteCode) {   // 친구 초대 코드(선택). 유효하면 초대 기록 연동(마이프로필 §6.4).
+        String inviteCode,     // 친구 초대 코드(선택). 유효하면 초대 기록 연동(마이프로필 §6.4).
+
+        @Schema(description = """
+                앱이 없던 상태에서 초대 링크로 설치했을 때 받은 초대 링크(선택) — Install Referrer 의 링크를 그대로 싣는다.
+                챌린지(`/c/{token}`)·감시자(`/w/{token}`)·친구(`/inv/{code}`) 모두 받는다. 유효하면 가입 직후
+                그 초대를 알림함에 남기고(INVITATION_RECEIVED, 딥링크 = 초대 화면), 친구 초대는 `inviteCode` 가
+                없을 때 초대 기록도 연동한다. 유효하지 않거나 만료됐으면 조용히 무시하고 가입은 진행된다.""",
+                example = "https://android.ruleup.co.kr/c/8f2b1c")
+        String inviteLink) {
 
     /** 약관 항목별 { agreed, version }. version 미전송 시 서버 기본값으로 저장. */
     @Schema(name = "AgreementItem", description = "약관 1건의 동의 여부와 동의한 버전")

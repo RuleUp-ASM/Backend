@@ -177,16 +177,23 @@ class ChallengePublicDetailCloneIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("복제본은 생성 기본값으로 리셋된다 — 솔로·시작일 내일·이미지 미복사")
+        @DisplayName("복제본은 복제 기본값으로 리셋된다 — 그룹·공개·정원 30·시작일 내일·이미지 미복사")
         void resetsToCreationDefaults() throws Exception {
             var owner = member(uniq("c-reset"));
-            String cloner = memberToken(uniq("c-reset-cloner"));
+            var clonerMember = member(uniq("c-reset-cloner"));
+            String cloner = clonerMember.token();
             UUID id = room(owner.id(), "GROUP", "PUBLIC", "ACTIVE");
             jdbcTemplate.update("UPDATE challenges SET image_url = 'https://cdn.example.com/a.jpg', " +
                     "min_tier = 'GOLD', capacity = 7 WHERE id = ?", (Object) bytes(id));
 
+            jdbcTemplate.update("UPDATE challenges SET visibility = 'PRIVATE' WHERE id = ?", (Object) bytes(id));
+            insertActiveMembership(id, clonerMember.id(), "MEMBER");   // 비공개 방은 참여자만 복제한다
+
             MvcResult res = cloneRoom(cloner, id);
-            assertThat((String) read(res, "$.data.draft.mode")).isEqualTo("SOLO");
+            // 09-28 결정(QA CRE-06): 그룹·정원 30·공개
+            assertThat((String) read(res, "$.data.draft.mode")).isEqualTo("GROUP");
+            assertThat((String) read(res, "$.data.draft.visibility")).isEqualTo("PUBLIC");
+            assertThat((Boolean) read(res, "$.data.draft.penalties.groupShare")).isTrue();
             // 날짜 축은 KST다. 시스템 기본 타임존으로 단정하면 UTC로 도는 CI에서 하루 어긋난다.
             assertThat((String) read(res, "$.data.draft.period.start"))
                     .isEqualTo(java.time.LocalDate.now(java.time.ZoneId.of("Asia/Seoul"))
@@ -197,20 +204,21 @@ class ChallengePublicDetailCloneIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("비공개·솔로 방은 복제할 수 없다")
-        void privateAndSoloAreNotCloneable() throws Exception {
+        @DisplayName("비공개·솔로 방은 볼 수 있는 사람(방장·참여자)만 복제할 수 있다")
+        void privateAndSoloAreCloneableFromInside() throws Exception {
             var owner = member(uniq("c-deny-owner"));
             String cloner = memberToken(uniq("c-deny"));
             UUID priv = room(owner.id(), "GROUP", "PRIVATE", "ACTIVE");
             UUID solo = room(owner.id(), "SOLO", null, "ACTIVE");
 
-            // 복제는 <b>누가 부르든</b> 403 NOT_CLONEABLE 이다(복제 API 명세). 존재 은닉은 상세
-            // 조회의 규칙이고, 여기에 404 를 섞으면 클라가 「없는 방」과 「복제만 안 되는 방」을
-            // 구분하지 못해 사전 비활성 + 토스트라는 명세의 처리 방식을 그릴 수 없다.
+            // 볼 수 없는 사람에게는 403 NOT_CLONEABLE 이다. 존재 은닉은 상세 조회의 규칙이고,
+            // 여기에 404 를 섞으면 클라가 「없는 방」과 「복제만 안 되는 방」을 구분하지 못한다.
             expectError(cloneRoom(cloner, priv), 403, "NOT_CLONEABLE");
             expectError(cloneRoom(cloner, solo), 403, "NOT_CLONEABLE");
-            expectError(cloneRoom(owner.token(), priv), 403, "NOT_CLONEABLE");
-            expectError(cloneRoom(owner.token(), solo), 403, "NOT_CLONEABLE");
+            // 비공개 방도 방 정보는 복제할 수 있다(09-28 결정, QA CRE-06).
+            assertThat(cloneRoom(owner.token(), priv).getResponse().getStatus()).isEqualTo(200);
+            assertThat(cloneRoom(owner.token(), solo).getResponse().getStatus()).isEqualTo(200);
+            assertThat((Boolean) read(detail(owner.token(), priv), "$.data.cloneable")).isTrue();
         }
 
         @Test

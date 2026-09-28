@@ -273,16 +273,40 @@ class ReportBlockContractIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("차단을 해제해도 기존 신고가 남아 있으면 중복 접수되지 않는다")
-        void unblocking_does_not_allow_duplicate_report() throws Exception {
+        @DisplayName("차단을 해제한 대상은 다시 신고할 수 있고 차단이 재등재된다 — 신고 건은 늘지 않는다")
+        void re_report_after_unblock_reblocks_without_duplicate() throws Exception {
             Member reporter = member(uniq("r"));
             Member target = member(uniq("t"));
-            postAuth("/api/v1/reports", reporter.token(), userReport(target.id(), null));
+            MvcResult first = postAuth("/api/v1/reports", reporter.token(), userReport(target.id(), null));
             deleteAuth("/api/v1/users/me/blocks/users/" + target.id(), reporter.token());
+            assertThat(blockCount(reporter.id())).isZero();
+
+            MvcResult again = postAuth("/api/v1/reports", reporter.token(), userReport(target.id(), null));
+            assertThat(again.getResponse().getStatus()).as("신고 정책 §2.1 — QA REP-09").isEqualTo(201);
+            assertThat((String) read(again, "$.data.reportId")).isEqualTo(read(first, "$.data.reportId"));
+            assertSingleReport(reporter.id(), "USER", target.id());
+            assertThat(blockCount(reporter.id())).isEqualTo(1);
+
+            // 차단이 다시 걸렸으니 이후 재전송은 409 다.
             expectError(postAuth("/api/v1/reports", reporter.token(), userReport(target.id(), null)),
                     409, "ALREADY_REPORTED");
-            assertSingleReport(reporter.id(), "USER", target.id());
-            assertThat(blockCount(reporter.id())).isZero();
+        }
+
+        @Test
+        @DisplayName("챌린지도 차단 해제 후 다시 신고하면 차단이 재등재된다")
+        void re_report_challenge_after_unblock() throws Exception {
+            Member reporter = member(uniq("r"));
+            Member owner = member(uniq("o"));
+            UUID challenge = insertChallenge(owner.id(), "EXERCISE", "ACTIVE", "GROUP");
+            assertThat(postAuth("/api/v1/reports", reporter.token(), challengeReport(challenge))
+                    .getResponse().getStatus()).isEqualTo(201);
+            deleteAuth("/api/v1/users/me/blocks/challenges/" + challenge, reporter.token());
+
+            MvcResult again = postAuth("/api/v1/reports", reporter.token(), challengeReport(challenge));
+            assertThat(again.getResponse().getStatus()).isEqualTo(201);
+            assertThat((String) read(again, "$.data.hiddenEffect")).isEqualTo("CHALLENGE_HIDDEN");
+            assertSingleReport(reporter.id(), "CHALLENGE", challenge);
+            assertThat(blockCount(reporter.id())).isEqualTo(1);
         }
 
         @Test

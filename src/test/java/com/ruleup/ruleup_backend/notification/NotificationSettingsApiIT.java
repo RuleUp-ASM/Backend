@@ -48,6 +48,7 @@ class NotificationSettingsApiIT extends ChallengeApiSupport {
     @Autowired WebApplicationContext wac;
     @Autowired JdbcTemplate jdbc;
     @Autowired AgreementService agreementService;
+    @Autowired com.ruleup.ruleup_backend.config.AppProperties props;
 
     private MockMvc mvc;
 
@@ -184,6 +185,40 @@ class NotificationSettingsApiIT extends ChallengeApiSupport {
             assertThat((String) read(res, "$.data.marketingConsentSyncedAt")).isNotNull();
             assertThat(agreementService.hasIndividualConsent(a.userId(), AgreementType.MARKETING))
                     .as("설정과 동의 이력이 어긋나면 어느 쪽이 진짜인지 알 수 없게 된다").isFalse();
+        }
+
+        @Test
+        @DisplayName("약관 화면에서 마케팅 동의를 철회·재동의하면 설정의 마케팅 그룹도 따라간다")
+        void consentSyncsMarketingGroup() throws Exception {
+            Account a = join("동의연동");
+            patchSettings(a.accessToken(), Map.of("groups", Map.of("marketing", true)));   // 설정 행 생성 + 동의
+            assertThat((Boolean) read(getSettings(a.accessToken()), "$.data.groups.marketing")).isTrue();
+
+            submitMarketing(a.accessToken(), false);
+            assertThat((Boolean) read(getSettings(a.accessToken()), "$.data.groups.marketing"))
+                    .as("철회했는데 토글이 켜진 채 남으면 안 된다(QA NOTI-06)").isFalse();
+
+            submitMarketing(a.accessToken(), true);
+            assertThat((Boolean) read(getSettings(a.accessToken()), "$.data.groups.marketing")).isTrue();
+        }
+
+        @Test
+        @DisplayName("설정 행이 없어도 마케팅 그룹 기본값은 수신 동의를 따른다")
+        void defaultMarketingFollowsConsent() throws Exception {
+            Account a = join("기본동의");
+            submitMarketing(a.accessToken(), false);   // 설정을 한 번도 만지지 않은 채 철회
+            assertThat((Boolean) read(getSettings(a.accessToken()), "$.data.groups.marketing"))
+                    .as("마케팅을 거부한 사람에게 토글이 켜져 보이면 동의와 설정이 어긋난다").isFalse();
+        }
+
+        private void submitMarketing(String at, boolean agreed) throws Exception {
+            MvcResult res = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                    .post("/api/v1/users/me/agreements").header("Authorization", "Bearer " + at)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(OM.writeValueAsString(Map.of("agreements", List.of(Map.of(
+                            "type", "MARKETING", "agreed", agreed,
+                            "version", props.client().termsVersions().marketing())))))).andReturn();
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
         }
 
         @Test

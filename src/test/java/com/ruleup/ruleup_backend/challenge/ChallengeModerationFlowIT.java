@@ -209,6 +209,13 @@ class ChallengeModerationFlowIT extends ChallengeApiSupport {
             assertThat(row.get("moderation_image")).isEqualTo("REJECTED");
             assertThat(row.get("image_url")).isEqualTo("/uploads/reject-cover.png");
             assertThat(notificationCount(m.id(), "CHALLENGE_IMAGE_REMOVED")).isGreaterThanOrEqualTo(1);
+            // 본문의 챌린지 이름 자리에 「챌린지」가 아니라 방 제목이 들어간다
+            String title = jdbcTemplate.queryForObject(
+                    "SELECT title FROM challenges WHERE id = UNHEX(REPLACE(?, '-', ''))", String.class, id);
+            String body = jdbcTemplate.queryForObject(
+                    "SELECT body FROM notifications WHERE user_id = ? AND type = 'CHALLENGE_IMAGE_REMOVED' LIMIT 1",
+                    String.class, bytes(m.id()));
+            assertThat(body).startsWith("[" + title + "] 챌린지의 대표 이미지가");
         }
 
         @Test

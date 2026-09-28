@@ -19,7 +19,7 @@ public interface ScoreTransactionRepository extends JpaRepository<ScoreTransacti
      */
     @Query("""
             SELECT t FROM ScoreTransaction t
-            WHERE t.userId = :userId AND t.entryKind <> 'COMMIT' AND t.reason <> com.ruleup.ruleup_backend.score.domain.ScoreLedgerReason.SIGNUP AND t.appliedDelta <> 0
+            WHERE t.userId = :userId AND t.entryKind <> 'COMMIT' AND t.reasonCode <> 'SIGNUP' AND t.appliedDelta <> 0
             ORDER BY t.createdAt DESC, t.id DESC""")
     List<ScoreTransaction> findRecent(@Param("userId") UUID userId, Pageable pageable);
 
@@ -37,7 +37,7 @@ public interface ScoreTransactionRepository extends JpaRepository<ScoreTransacti
      */
     @Query("""
             SELECT t FROM ScoreTransaction t
-            WHERE t.userId = :userId AND t.entryKind <> 'COMMIT' AND t.reason <> com.ruleup.ruleup_backend.score.domain.ScoreLedgerReason.SIGNUP AND t.appliedDelta <> 0 AND t.createdAt >= :since
+            WHERE t.userId = :userId AND t.entryKind <> 'COMMIT' AND t.reasonCode <> 'SIGNUP' AND t.appliedDelta <> 0 AND t.createdAt >= :since
               AND (:cursorAt IS NULL
                    OR t.createdAt < :cursorAt
                    OR (t.createdAt = :cursorAt AND t.id < :cursorId))
@@ -50,7 +50,7 @@ public interface ScoreTransactionRepository extends JpaRepository<ScoreTransacti
 
     @Query("""
             SELECT t FROM ScoreTransaction t WHERE t.userId=:userId AND t.entryKind='RESULT'
-             AND t.reason <> com.ruleup.ruleup_backend.score.domain.ScoreLedgerReason.SIGNUP
+             AND t.reasonCode <> 'SIGNUP'
              AND t.effectiveAt>=:since AND NOT EXISTS (SELECT r.id FROM ScoreTransaction r WHERE r.reversalOfId=t.id)
              ORDER BY t.effectiveAt, t.effectiveOrder
             """)

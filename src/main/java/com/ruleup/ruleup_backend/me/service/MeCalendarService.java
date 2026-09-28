@@ -55,9 +55,12 @@ public class MeCalendarService {
     }
     private CalendarDayResponse.Appeal appeal(MeJudgementQuery.Row row,String status,Instant now) {
         if(row.id()==null || (!"FAILED".equals(status) && !"FAIL_EXPECTED".equals(status))) return null;
-        String until=str(row.appealClosesAt());
+        // 마감은 today·접수와 같은 정의(귀속일 D+2 00:00 KST) 하나에서 나온다 — 저장값을 따로 읽어
+        // 판단하면 읽기 경로마다 어긋날 수 있다(QA APL-05).
+        java.time.Instant closes=com.ruleup.ruleup_backend.verification.domain.VerificationDeadlines.appealClosesAt(row.date());
+        String until=str(closes);
         if(row.appealed()) return CalendarDayResponse.Appeal.closed("ALREADY_APPEALED",until);
-        return row.appealClosesAt()!=null && now.isBefore(row.appealClosesAt())
+        return now.isBefore(closes)
                 ? CalendarDayResponse.Appeal.open(until) : CalendarDayResponse.Appeal.closed("WINDOW_CLOSED",until);
     }
     private String str(Instant at) { return at==null ? null : at.toString(); }

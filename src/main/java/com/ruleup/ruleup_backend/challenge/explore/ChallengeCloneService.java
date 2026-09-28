@@ -33,7 +33,7 @@ import java.util.UUID;
  * 것을 그대로 쓴다. 그래서 응답의 draft 는 경로 A·B 와 같은 스키마이고 확인 화면·생성 API 를 재사용한다.
  *
  * <p>프리필 규칙: 루틴·인증 방식·목표값·기간 <b>길이</b>는 원본 그대로 두되,
- * 시작일은 생성일+1 로 다시 잡고 mode·정원·최소 티어는 <b>생성 기본값으로 리셋</b>한다.
+ * 시작일은 생성일+1 로 다시 잡고 mode·공개 범위·정원은 <b>그룹·공개·30</b>, 최소 티어는 내 표시 티어로 리셋한다.
  * 남의 방 설정을 그대로 물려받으면 내 티어로는 못 들어가는 방을 만들게 되기 때문이다.
  * 이미지는 복사하지 않는다 — 원본 방장이 올린 이미지의 소유·심사 이력을 승계할 수 없다.
  */
@@ -58,13 +58,12 @@ public class ChallengeCloneService {
         Challenge origin = challengeRepository.findByIdAndDeletedAtIsNull(challengeId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
 
-        boolean group = origin.getParticipationType() == ParticipationType.GROUP;
-        boolean isPublic = "PUBLIC".equals(origin.getVisibility());
-        if (!group || !isPublic) {
-            // 복제 API 명세는 비공개·솔로를 403 NOT_CLONEABLE 로 규정한다. 존재 은닉은 <b>상세
-            // 조회</b>의 규칙이고, 복제는 id 를 이미 아는 사람만 부를 수 있는 경로다 — 여기서
-            // 404 를 섞으면 클라가 「없는 방」과 「복제만 안 되는 방」을 구분하지 못해,
-            // 사전 비활성 + 토스트라는 명세의 처리 방식을 그릴 수 없다.
+        boolean inside = origin.isOwner(userId) || memberRepository.findByChallengeIdAndUserId(challengeId, userId)
+                .filter(m -> m.isActive()).isPresent();
+        if (!cloneable(origin, inside)) {
+            // 볼 수 없는 방은 403 NOT_CLONEABLE 이다. 존재 은닉은 <b>상세 조회</b>의 규칙이고, 복제는
+            // id 를 이미 아는 사람만 부를 수 있는 경로다 — 여기서 404 를 섞으면 클라가 「없는 방」과
+            // 「복제만 안 되는 방」을 구분하지 못해, 사전 비활성 + 토스트라는 명세의 처리 방식을 그릴 수 없다.
             throw new BusinessException(ErrorCode.NOT_CLONEABLE);
         }
 
@@ -84,9 +83,9 @@ public class ChallengeCloneService {
                 origin.publicTitle(),
                 origin.publicDescription(),
                 origin.getCategory(),
-                ParticipationType.SOLO.name(),                 // 생성 기본값
-                null,                                          // 솔로는 공개 범위 없음
-                Boolean.TRUE,                                  // 솔로 랭킹 노출 기본 true
+                ParticipationType.GROUP.name(),                // 복제 기본값 — 그룹·공개·정원 30(09-28 결정)
+                "PUBLIC",
+                null,                                          // 랭킹 노출은 솔로 전용 설정
                 DEFAULT_CAPACITY,
                 displayTier(userId).name(),                    // 내 표시 티어로 리셋
                 new DraftView.Period(start.toString(), end == null ? null : end.toString()),
@@ -98,14 +97,24 @@ public class ChallengeCloneService {
                         (origin.getVerificationConfig() != null
                                 && origin.getVerificationConfig().requiredPermissions() != null)
                                 ? origin.getVerificationConfig().requiredPermissions() : List.of()),
-                // 솔로로 리셋되므로 그룹 공유는 off. 점수 패널티는 인증 방식을 따라간다
-                new DraftView.Penalties(auto, false, false));
+                // 그룹이므로 그룹 공유 ON 고정. 점수 패널티는 인증 방식을 따라간다(생성 규칙과 같다)
+                new DraftView.Penalties(auto, true, false));
 
         ChallengeDraft saved = draftRepository.save(ChallengeDraft.of(
                 userId, ChallengeDraft.Origin.CLONE, origin.getTemplateId(), challengeId,
                 view, weeklyCount, Instant.now()));
 
         return new CloneResponse(saved.getId().toString(), challengeId.toString(), view);
+    }
+
+    /**
+     * 복제할 수 있는가 — 그 방을 볼 수 있으면 된다. 공개 그룹은 누구나, 비공개·솔로 방은 방장과
+     * 참여 중인 멤버만. 비공개 방도 방 정보는 복제할 수 있다(09-28 결정, QA CRE-06).
+     * 상세의 {@code cloneable} 도 이 규칙을 쓴다.
+     */
+    public static boolean cloneable(Challenge c, boolean ownerOrActiveMember) {
+        return ownerOrActiveMember
+                || (c.getParticipationType() == ParticipationType.GROUP && "PUBLIC".equals(c.getVisibility()));
     }
 
     private Tier displayTier(UUID userId) {

@@ -387,6 +387,37 @@ class SignupFlowIT {
         }
 
         @Test
+        @DisplayName("동의한 약관의 버전이 현행과 다르면 400 AGREEMENT_VERSION_MISMATCH — 재동의 제출과 같은 규칙")
+        void stale_agreement_version_rejected() throws Exception {
+            Map<String, Object> body = preparedSignup(uniq(), "옛버전" + SEQ.get());
+            Map<String, Object> ag = allAgreements();
+            Map<String, Object> tos = agreement(true);
+            tos.put("version", "0.9");
+            ag.put("termsOfService", tos);
+            body.put("agreements", ag);
+            expectError(postJson("/api/v1/auth/signup", body), 400, "AGREEMENT_VERSION_MISMATCH");
+        }
+
+        @Test
+        @DisplayName("버전을 빈 문자열로 보내면 현행 버전으로 저장한다 — 가입 직후 재동의 대상이 되지 않는다")
+        void blank_agreement_version_saved_as_current() throws Exception {
+            Map<String, Object> body = preparedSignup(uniq(), "빈버전" + SEQ.get());
+            Map<String, Object> ag = allAgreements();
+            Map<String, Object> tos = agreement(true);
+            tos.put("version", "");
+            ag.put("termsOfService", tos);
+            body.put("agreements", ag);
+            MvcResult res = postJson("/api/v1/auth/signup", body);
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+
+            String at = read(res, "$.data.accessToken");
+            MvcResult status = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                    .get("/api/v1/users/me/agreements").header("Authorization", "Bearer " + at)).andReturn();
+            java.util.List<String> reconsent = read(status, "$.data.reconsentRequired");
+            assertThat(reconsent).isEmpty();
+        }
+
+        @Test
         @DisplayName("agreements 객체 누락은 400 REQUIRED_AGREEMENT_MISSING")
         void agreements_object_missing_rejected() throws Exception {
             Map<String, Object> body = preparedSignup(uniq(), "약관없음" + SEQ.get());

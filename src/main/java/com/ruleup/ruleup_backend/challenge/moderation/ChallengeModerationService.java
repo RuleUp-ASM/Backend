@@ -85,7 +85,8 @@ public class ChallengeModerationService {
                 ? NotificationType.CHALLENGE_IMAGE_REMOVED : NotificationType.MODERATION_REJECTED;
         notificationPublisher.publish(NotificationEvent.forChallenge(current.ownerId(), type, snapshot.id(),
                 Map.of(NotificationParams.VARIANT, "CHALLENGE_TEXT",
-                        NotificationParams.CHALLENGE_TITLE, "챌린지",
+                        // 받는 사람은 방장 본인이다 — 자기가 지은 제목이라야 어느 방인지 알아본다(QA CRE-18).
+                        NotificationParams.CHALLENGE_TITLE, current.title() == null ? "챌린지" : current.title(),
                         NotificationParams.CHALLENGE_ID, snapshot.id().toString(),
                         NotificationParams.TARGET_KEY, "challenge_" + target.name().toLowerCase(java.util.Locale.ROOT),
                         NotificationParams.EVENT_KEY, UUID.randomUUID().toString()))

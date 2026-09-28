@@ -584,7 +584,7 @@ public class VerificationSyncService {
             daily.recordResult(outcome.status(), contributing, null, verifiedAt);
             eventPublisher.publishEvent(new VerificationScoreEvents.Confirmed(daily));
             if (config.isFrequency() && outcome.status() == VerificationStatus.SUCCESS) {
-                member.incrementPeriodCompleted();   // 빈도형: 주기 완료 +1 (미확정 상태에서 첫 SUCCESS 전이 1회)
+                member.incrementPeriodCompleted(daily.getTargetDate());   // 빈도형: 주기 완료 +1 (미확정 상태에서 첫 SUCCESS 전이 1회)
             }
             if (outcome.status() == VerificationStatus.SUCCESS) {
                 // 판정에서 뺀 신호를 배제 로그로 옮긴다 — **확정 시 한 번**이다. evidence 는

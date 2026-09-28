@@ -638,7 +638,8 @@ public class VerificationFinalizeService {
         int guard = 0;
         boolean changed = false;
         while (m.getCurPeriodEnd() != null && m.getCurPeriodEnd().isBefore(today) && guard++ < 400) {
-            int need = (m.getPeriodTarget() != null) ? m.getPeriodTarget() : 0;
+            // 판정 구간과 겹친 날만큼만 요구한다 — 가입 전 날짜를 미달로 정산하지 않는다(QA JOIN-14).
+            int need = VerificationTargetDays.periodNeed(ch, m, m.getCurPeriodStart(), m.getCurPeriodEnd());
             int done = (m.getCurPeriodCompleted() != null) ? m.getCurPeriodCompleted() : 0;
             int shortfall = Math.max(need - done, 0);
 
@@ -652,9 +653,15 @@ public class VerificationFinalizeService {
             int periodDays = (m.getPeriodUnit() == PeriodUnit.WEEK) ? 7 : 30;
             LocalDate nextEnd = nextStart.plusDays(periodDays - 1L);
             if (ch.getEndDate() != null && nextEnd.isAfter(ch.getEndDate())) nextEnd = ch.getEndDate();
-            if (ch.getEndDate() == null) m.extendTargetDays(need);
+            // 종료일 없는 방은 다음 주기 몫만큼 분모를 늘린다 — 판정 구간과 겹친 날만큼이라 가입 전 주기는 0 이다.
+            if (ch.getEndDate() == null) m.extendTargetDays(VerificationTargetDays.periodNeed(ch, m, nextStart, nextEnd));
             m.rolloverPeriod(nextStart, nextEnd, shortfall);
             changed = true;
+        }
+        if (changed) {
+            // 자정~롤오버 사이에 난 새 주기 성공은 지난 주기 카운터에 들어가지 않았다 — 판정 행으로 다시 센다.
+            m.resetPeriodCompleted((int) dailyRepo.countByChallengeMemberIdAndStatusAndTargetDateBetween(
+                    m.getId(), VerificationStatus.SUCCESS, m.getCurPeriodStart(), m.getCurPeriodEnd()));
         }
         return changed;
     }

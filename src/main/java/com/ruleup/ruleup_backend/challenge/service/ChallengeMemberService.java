@@ -150,7 +150,7 @@ public class ChallengeMemberService {
 
         // 즉시 ACTIVE 등록. uq_member 로 동시 INSERT는 1건만 성공, 나머지는 중복으로 변환.
         if (existing != null) {
-            existing.rejoin();
+            existing.rejoin(Instant.now());
             recordJoinEvent(challengeId, userId);
         } else {
             try {
@@ -167,8 +167,8 @@ public class ChallengeMemberService {
         // 통계도 같은 자리에서 다시 센다 — 실패해도 가입을 되돌리지 않는다
         eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, "JOIN"));
 
-        // 사이클은 1주 고정 — 주 중간에 들어오면 판정은 다음 사이클 경계부터.
-        LocalDate countFrom = ChallengeCycle.countFrom(c.getStartDate(), LocalDate.now(KST));
+        // 진행 중에 들어오면 판정은 가입 다음 날부터(점수는 다음 사이클 경계부터).
+        LocalDate countFrom = ChallengeCycle.judgeFrom(c.getStartDate(), LocalDate.now(KST));
         log.info("challenge_join_result success=true challengeId={} userId={}", challengeId, userId);
         return JoinResponse.of(countFrom.toString(), c.getVerificationConfig());
     }

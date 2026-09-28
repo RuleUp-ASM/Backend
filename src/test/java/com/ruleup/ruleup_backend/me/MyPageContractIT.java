@@ -1022,6 +1022,10 @@ class MyPageContractIT extends ChallengeApiSupport {
             Map<String, Object> appeal = (Map<String, Object>) failedItem.get("appeal");
             assertThat(appeal).containsOnlyKeys("eligible", "ineligibleReason", "eligibleUntil");
             assertThat(appeal).containsEntry("eligible", true).containsEntry("ineligibleReason", null);
+            // 마감은 today·접수와 같은 정의 — 귀속일 D+2 00:00 KST(QA APL-05)
+            assertThat(java.time.Instant.parse((String) appeal.get("eligibleUntil"))).isEqualTo(
+                    com.ruleup.ruleup_backend.verification.domain.VerificationDeadlines.appealClosesAt(
+                            java.time.LocalDate.parse(daysAgo(1))));
             assertThat(doneItem.get("appeal")).isNull();
         }
 
