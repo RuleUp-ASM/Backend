@@ -30,7 +30,8 @@ public class DevLogConfig {
         // 시큐리티 체인(-100)보다 바깥이라 401/403 으로 튕긴 요청도 로그에 남는다.
         // 다만 CharacterEncodingFilter(HIGHEST_PRECEDENCE)보다는 한 칸 뒤 — 같은 순위로 두면 둘 중
         // 누가 먼저인지가 정해지지 않고, 인코딩 필터가 뒤로 밀리면 응답 한글이 깨진다.
-        reg.setOrder(Ordered.HIGHEST_PRECEDENCE + 1);
+        // RequestIdFilter(+1) 보다도 뒤 — 요청 로그 줄에 requestId 가 찍혀야 한다.
+        reg.setOrder(Ordered.HIGHEST_PRECEDENCE + 2);
         reg.addUrlPatterns("/*");
         return reg;
     }
