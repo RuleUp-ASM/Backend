@@ -86,17 +86,25 @@ public class MySanctionService {
      * 영구 여부는 {@code rejoin_banned} 로 본다 — 재입장 시각이 비어 있다는 것만으로는 판단할 수 없다.
      */
     private List<MySanctionsResponse.AutoItem> autoTrack(UUID userId) {
-        return jdbc.query("SELECT k.challenge_id, COALESCE(CASE WHEN c.moderation_title IN ('APPROVED','EXEMPT') THEN c.title ELSE c.ai_title END," +
+        return jdbc.query("SELECT k.id,k.challenge_id, COALESCE(CASE WHEN c.moderation_title IN ('APPROVED','EXEMPT') THEN c.title ELSE c.ai_title END," +
                         " h.title_snapshot),k.reason,k.is_permanent,k.rejoin_available_at,k.kicked_at FROM challenge_kicks k " +
                         "LEFT JOIN challenges c ON c.id=k.challenge_id LEFT JOIN challenge_history h ON h.challenge_id=k.challenge_id " +
                         "WHERE k.user_id=? ORDER BY k.kicked_at DESC,k.id DESC",
-                (rs, row) -> {
-                    java.nio.ByteBuffer id = java.nio.ByteBuffer.wrap(rs.getBytes(1));
-                    return new MySanctionsResponse.AutoItem(new UUID(id.getLong(), id.getLong()).toString(),
-                            rs.getString(2),rs.getString(3),rs.getBoolean(4),
-                            rs.getTimestamp(5) == null ? null : rs.getTimestamp(5).toInstant().toString(),
-                            rs.getTimestamp(6).toInstant().toString());
-                }, java.nio.ByteBuffer.allocate(16).putLong(userId.getMostSignificantBits()).putLong(userId.getLeastSignificantBits()).array());
+                (rs, row) -> new MySanctionsResponse.AutoItem(
+                        uuid(rs.getBytes(1)).toString(), AUTO_TYPE,
+                        uuid(rs.getBytes(2)).toString(),
+                        rs.getString(3),rs.getString(4),rs.getBoolean(5),
+                        rs.getTimestamp(6) == null ? null : rs.getTimestamp(6).toInstant().toString(),
+                        rs.getTimestamp(7).toInstant().toString()),
+                java.nio.ByteBuffer.allocate(16).putLong(userId.getMostSignificantBits()).putLong(userId.getLeastSignificantBits()).array());
+    }
+
+    /** 자동 제재는 전부 방 단위 강퇴다 — 계정 제재 유형과 섞이지 않게 고정값으로 구분한다. */
+    private static final String AUTO_TYPE = "CHALLENGE_KICK";
+
+    private static UUID uuid(byte[] raw) {
+        java.nio.ByteBuffer b = java.nio.ByteBuffer.wrap(raw);
+        return new UUID(b.getLong(), b.getLong());
     }
 
     private int compareNullable(Instant a, Instant b) {

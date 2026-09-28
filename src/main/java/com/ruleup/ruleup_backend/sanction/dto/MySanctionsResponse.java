@@ -57,6 +57,8 @@ public record MySanctionsResponse(
 
     @Schema(name = "AutoSanctionItem", description = "챌린지 강퇴 — 계정 제재가 아니라 방 단위 집행이다")
     public record AutoItem(
+            @Schema(description = "강퇴 기록 식별자 — 알림 딥링크·목록 키로 쓴다") String sanctionId,
+            @Schema(description = "항상 CHALLENGE_KICK", example = "CHALLENGE_KICK") String type,
             String challengeId,
             String challengeTitle,
             @Schema(description = "CHEAT_DETECTED / CONSECUTIVE_FAILURE / PERMISSION_MISSING")
