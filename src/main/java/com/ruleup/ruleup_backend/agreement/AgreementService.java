@@ -7,6 +7,8 @@ import com.ruleup.ruleup_backend.agreement.dto.AgreementDtos;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.config.AppProperties;
+import com.ruleup.ruleup_backend.notification.domain.NotificationToggleGroup;
+import com.ruleup.ruleup_backend.notification.repository.NotificationSettingRepository;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import com.ruleup.ruleup_backend.user.domain.User;
 import lombok.RequiredArgsConstructor;
@@ -35,6 +37,7 @@ public class AgreementService {
     private final UserAgreementStateRepository stateRepository;
     private final UserAgreementEventRepository eventRepository;
     private final AppProperties props;
+    private final NotificationSettingRepository notificationSettingRepository;
 
     // ===== 조회 =====
 
@@ -92,6 +95,7 @@ public class AgreementService {
                 throw new BusinessException(ErrorCode.AGREEMENT_VERSION_MISMATCH);
 
             record(user, type, item.agreed(), current, now);
+            if (type == AgreementType.MARKETING) syncMarketingGroup(userId, item.agreed(), now);
             updated.add(new AgreementDtos.StatusResponse.Item(
                     type.name(), type.isRequired(), item.agreed(), current, now.toString()));
         }
@@ -118,6 +122,17 @@ public class AgreementService {
                         () -> stateRepository.save(
                                 UserAgreementState.of(user.getId(), type, agreed, version, at)));
         eventRepository.save(UserAgreementEvent.of(user, type, agreed, version));
+    }
+
+    /**
+     * 마케팅 수신 동의 ↔ 알림 설정 마케팅 그룹은 한 값이다(알림 정책 §2·테크 스펙 §4). 토글 → 동의 방향은
+     * 알림 설정이 맞추고, 동의 → 토글 방향은 여기서 맞춘다 — 약관 화면에서 철회했는데 토글이 켜진 채
+     * 남으면 사용자는 어느 쪽이 진짜인지 알 수 없다(QA NOTI-06).
+     * 설정 행이 아직 없으면 조회가 동의 상태로 기본값을 만들므로 건드리지 않는다.
+     */
+    private void syncMarketingGroup(UUID userId, boolean agreed, Instant at) {
+        notificationSettingRepository.findById(userId)
+                .ifPresent(s -> s.applyGroup(NotificationToggleGroup.MARKETING, agreed, at));
     }
 
     // ===== 게이트 =====
