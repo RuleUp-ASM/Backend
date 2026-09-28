@@ -1,10 +1,12 @@
 package com.ruleup.ruleup_backend.verification.service;
 
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
+import com.ruleup.ruleup_backend.challenge.domain.ChallengeCycle;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.verification.domain.VerificationConfig;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 
 /**
@@ -22,6 +24,8 @@ public final class VerificationTargetDays {
         NOT_REQUIRED
     }
 
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+
     private VerificationTargetDays() {}
 
     public static Disposition of(VerificationConfig config, Challenge challenge,
@@ -29,6 +33,10 @@ public final class VerificationTargetDays {
         if (challenge == null) return Disposition.NOT_TARGET;
         if (date.isBefore(challenge.getStartDate()) || (challenge.getEndDate() != null && date.isAfter(challenge.getEndDate()))) {
             return Disposition.NOT_TARGET;   // 챌린지 기간 밖
+        }
+        if (member != null && member.getJoinedAt() != null && date.isBefore(ChallengeCycle.judgeFrom(
+                challenge.getStartDate(), LocalDate.ofInstant(member.getJoinedAt(), KST)))) {
+            return Disposition.NOT_TARGET;   // 진행 중 입장 — 가입 당일은 판정하지 않는다(QA JOIN-14)
         }
         if (config.isFrequency()) {
             Integer done = member.getCurPeriodCompleted();

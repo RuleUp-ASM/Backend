@@ -79,8 +79,8 @@ public class RoomService {
 
     /**
      * 이번 주 사이클의 내 진행도. 사이클 1주차는 챌린지 시작일에 열리고 이후 7일 단위로 굴러간다
-     * (정책 §1 — 요일 지정은 없다). 사이클 중간에 들어온 사람은 그 주를 통째로 평가받으면 불리하므로
-     * 다음 경계부터 판정되며({@link ChallengeCycle#countFrom}), 그때까지는 {@code judging=false · done=0} 이다.
+     * (정책 §1 — 요일 지정은 없다). 진행 중에 들어온 사람은 가입 다음 날부터 판정되며
+     * ({@link ChallengeCycle#judgeFrom}), 가입 당일은 {@code judging=false · done=0} 이다.
      */
     private RoomDtos.RoomResponse.MyWeekly myWeekly(Challenge challenge, ChallengeMember me, LocalDate today) {
         LocalDate start = challenge.getStartDate();
@@ -91,10 +91,10 @@ public class RoomService {
                         * ChallengeCycle.CYCLE_DAYS)
                 : start;
         LocalDate weekEnd = weekStart.plusDays(ChallengeCycle.CYCLE_DAYS - 1L);
-        LocalDate countFrom = ChallengeCycle.countFrom(start, LocalDate.ofInstant(me.getJoinedAt(), KST));
+        LocalDate judgeFrom = ChallengeCycle.judgeFrom(start, LocalDate.ofInstant(me.getJoinedAt(), KST));
         boolean judging = started
                 && challenge.getStatus() == ChallengeStatus.ACTIVE
-                && !today.isBefore(countFrom);
+                && !today.isBefore(judgeFrom);
         int done = judging
                 ? (int) verificationRepository.countByChallengeMemberIdAndStatusAndTargetDateBetween(
                         me.getId(), VerificationStatus.SUCCESS, weekStart, weekEnd)

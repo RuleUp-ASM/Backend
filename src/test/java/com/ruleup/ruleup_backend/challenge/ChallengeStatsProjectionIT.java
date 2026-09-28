@@ -222,6 +222,9 @@ class ChallengeStatsProjectionIT extends ChallengeApiSupport {
             Member member = member(uniq("stats-manual"));
             UUID challengeId = activeChallenge(member.id());
             insertActiveMembership(challengeId, member.id(), "MEMBER");
+            // 시작 전에 가입한 멤버 — 진행 중 입장은 가입 당일 판정 대상이 아니다(QA JOIN-14).
+            jdbcTemplate.update("UPDATE challenge_members SET joined_at = DATE_SUB(UTC_TIMESTAMP(), INTERVAL 3 DAY) " +
+                    "WHERE challenge_id = ?", (Object) bytes(challengeId));
             jdbcTemplate.update("UPDATE challenges SET participant_count = 1, " +
                     "start_date = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 1 DAY), " +
                     "end_date = DATE_ADD(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 14 DAY) WHERE id = ?", (Object) bytes(challengeId));

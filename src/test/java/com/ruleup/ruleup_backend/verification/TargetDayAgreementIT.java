@@ -94,6 +94,29 @@ class TargetDayAgreementIT extends ChallengeApiSupport {
         assertThat(todayStatus(challengeId, me)).isEqualTo("IN_PROGRESS");
     }
 
+    @Test
+    @DisplayName("진행 중인 방에 들어온 날은 방·today·수동 제출이 모두 「오늘은 아니다」, 다음 날부터 판정한다(QA JOIN-14)")
+    void midJoinStartsNextDay() throws Exception {
+        Member me = member(uniq("tda-midjoin"));
+        UUID challengeId = manualWeeklyRoom(me, 7);
+        // 방은 3일 전에 시작했고 나는 방금 들어왔다.
+        jdbcTemplate.update("UPDATE challenge_members SET role='MEMBER', joined_at = UTC_TIMESTAMP(6) " +
+                "WHERE challenge_id=? AND user_id=?", bytes(challengeId), bytes(me.id()));
+        jdbcTemplate.update("UPDATE challenges SET owner_id = ? WHERE id = ?",
+                bytes(member(uniq("tda-midjoin-owner")).id()), bytes(challengeId));
+
+        assertThat(roomTodayStatus(challengeId, me)).isEqualTo("NOT_TARGET");
+        assertThat(todayStatus(challengeId, me)).isEqualTo("NOT_TARGET");
+        expectError(postJsonAuth("/api/v1/challenges/" + challengeId + "/verifications", me.token(), Map.of()),
+                409, "NOT_TARGET_DATE");
+
+        // 어제 들어왔다면 오늘은 판정 대상이다.
+        jdbcTemplate.update("UPDATE challenge_members SET joined_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 DAY) " +
+                "WHERE challenge_id=? AND user_id=?", bytes(challengeId), bytes(me.id()));
+        assertThat(roomTodayStatus(challengeId, me)).isEqualTo("IN_PROGRESS");
+        assertThat(todayStatus(challengeId, me)).isEqualTo("IN_PROGRESS");
+    }
+
     // ===== 헬퍼 =====
 
     /** 3일 전 시작한 수동·빈도형 방. 주기 필드는 셋업이 채우는 모양 그대로 둔다. */

@@ -95,10 +95,13 @@ public abstract class VerificationApiSupport extends ChallengeApiSupport {
      */
     protected UUID insertReadyMember(UUID challengeId, UUID userId, String anchorsJson, String screenAppsJson) {
         UUID memberId = UUID.randomUUID();
+        // 가입 시각은 넉넉히 과거로 둔다. 진행 중 입장은 가입 다음 날부터 판정되므로(QA JOIN-14) 「지금」
+        // 가입한 멤버로는 시작일을 과거로 돌린 방의 어제·그제를 판정할 수 없다.
         jdbc().update("INSERT INTO challenge_members " +
                         "(id, challenge_id, user_id, role, status, schedule_type, target_days, setup_status, " +
-                        " anchors, screen_apps, screen_apps_applied_from) " +
-                        "VALUES (?, ?, ?, 'OWNER', 'ACTIVE', 'FIXED_DAYS', 14, 'READY', ?, ?, ?)",
+                        " anchors, screen_apps, screen_apps_applied_from, joined_at) " +
+                        "VALUES (?, ?, ?, 'OWNER', 'ACTIVE', 'FIXED_DAYS', 14, 'READY', ?, ?, ?, " +
+                        " DATE_SUB(UTC_TIMESTAMP(), INTERVAL 60 DAY))",
                 bytes(memberId), bytes(challengeId), bytes(userId), anchorsJson, screenAppsJson,
                 (screenAppsJson != null) ? java.sql.Timestamp.from(Instant.now().minusSeconds(86_400)) : null);
         return memberId;

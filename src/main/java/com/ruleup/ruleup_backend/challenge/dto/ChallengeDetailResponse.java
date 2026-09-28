@@ -11,7 +11,7 @@ import java.util.List;
  * @param owner       봇방장이면 null
  * @param moderation  <b>방장 본인이 조회할 때만</b> 채운다 — 남의 화면에는 심사 상태를 노출하지 않는다
  * @param cloneable   템플릿 복제 가능 여부 — 볼 수 있는 방이면 true(비공개·솔로는 방장·참여자만 볼 수 있다)
- * @param joinNote    {@code NEXT_CYCLE}(사이클 중간 입장 → 다음 주 경계부터 판정) / {@code IMMEDIATE}
+ * @param joinNote    {@code NEXT_DAY}(진행 중 입장 → 가입 다음 날부터 판정) / {@code IMMEDIATE}
  * @param joined      <b>내가 이미 들어가 있는 방인가</b>(방장·시작 전 방 포함). 참여 버튼을 그릴지 말지는
  *                    이 값 하나로 정한다 — {@code joinBlockReason} 은 종료가 우선순위라 종료된 방에서는
  *                    참여 중이어도 {@code CHALLENGE_COMPLETED} 가 내려가므로 참여 여부 판단에 쓰면 안 된다

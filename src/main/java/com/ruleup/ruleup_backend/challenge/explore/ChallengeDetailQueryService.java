@@ -114,7 +114,7 @@ public class ChallengeDetailQueryService {
                 (blockReason != null) ? blockReason.name() : null,
                 (blockReason == JoinBlockReason.REJOIN_COOLDOWN)
                         ? rejoinPolicy.availableAt(challengeId, viewerId, myMembership).toString() : null,
-                ChallengeCycle.startsNextCycle(c.getStartDate(), today) ? "NEXT_CYCLE" : "IMMEDIATE",
+                ChallengeCycle.startsNextDay(c.getStartDate(), today) ? "NEXT_DAY" : "IMMEDIATE",
                 ChallengeCloneService.cloneable(c, isOwner || isActiveMember),
                 // 방장은 멤버 행과 무관하게 참여 중이다(솔로 방·시작 전 방도 마찬가지).
                 isOwner || isActiveMember,

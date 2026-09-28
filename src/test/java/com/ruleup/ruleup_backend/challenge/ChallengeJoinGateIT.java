@@ -105,8 +105,8 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("사이클은 1주 고정 — 주 중간 입장이면 판정은 다음 사이클 경계부터")
-        void countFromNextCycleBoundary() throws Exception {
+        @DisplayName("진행 중 입장이면 판정은 가입 다음 날부터다 — 가입 당일은 성공·실패로 잡지 않는다(QA JOIN-14)")
+        void countFromNextDay() throws Exception {
             Member owner = member(uniq("cycle-owner"));
             Member joiner = member(uniq("cycle-joiner"));
             UUID challengeId = openGroup(owner.id());
@@ -115,7 +115,7 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
             jdbcTemplate.update("UPDATE challenges SET start_date = ? WHERE id = ?", start, bytes(challengeId));
 
             MvcResult res = join(joiner.token(), challengeId);
-            assertThat((String) read(res, "$.data.countFromCycle")).isEqualTo(start.plusDays(7).toString());
+            assertThat((String) read(res, "$.data.countFromCycle")).isEqualTo(start.plusDays(4).toString());
         }
 
         @Test
