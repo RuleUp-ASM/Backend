@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.verification.service;
 
+import com.ruleup.ruleup_backend.common.DbTime;
 import com.ruleup.ruleup_backend.common.UuidGenerator;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -9,7 +10,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.ByteBuffer;
-import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -38,7 +38,7 @@ public class VerificationSyncSessionStore {
             jdbc.update("INSERT INTO verification_sync_sessions "
                             + "(id, userId, deviceId, appVersion, sdkInt, issuedAt) VALUES (?, ?, ?, ?, ?, ?)",
                     bytes(sessionId), bytes(userId), trim(deviceId, 64), trim(appVersion, 32), sdkInt,
-                    Timestamp.from(at));
+                    DbTime.utc(at));
         } catch (RuntimeException e) {
             log.warn("sync 세션 발급 기록 실패 — 인트로는 계속한다. userId={} err={}", userId, e.toString());
         }
@@ -55,7 +55,7 @@ public class VerificationSyncSessionStore {
         if (parsed == null) return;
         try {
             jdbc.update("UPDATE verification_sync_sessions SET lastSeenAt = ? WHERE id = ? AND userId = ?",
-                    Timestamp.from(at), bytes(parsed), bytes(userId));
+                    DbTime.utc(at), bytes(parsed), bytes(userId));
         } catch (RuntimeException e) {
             log.warn("sync 세션 갱신 실패 — 판정은 계속한다. userId={} err={}", userId, e.toString());
         }

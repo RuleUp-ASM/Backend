@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.room.service;
 
+import com.ruleup.ruleup_backend.common.DbTime;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.room.dto.CrossRankingDtos;
@@ -10,7 +11,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.sql.Timestamp;
 import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
@@ -52,10 +52,10 @@ public class CrossRankingService {
                     return new CrossRankingDtos.MyChallenge(uuid(rs.getBytes(1)).toString(), rank, rank != null,
                             rs.getInt(4) == 0 ? null : rs.getBigDecimal(3), rs.getInt(4));
                 }, mode, bytes(challengeId));
-        Timestamp updated = jdbc.query("SELECT MAX(snapshot_at) FROM challenge_cross_ranking_snapshot WHERE mode=?",
-                rs -> rs.next() ? rs.getTimestamp(1) : null, mode);
+        java.time.Instant updated = jdbc.query("SELECT MAX(snapshot_at) FROM challenge_cross_ranking_snapshot WHERE mode=?",
+                rs -> rs.next() ? DbTime.read(rs, 1) : null, mode);
         return new CrossRankingDtos.Response(mine, items,
-                updated == null ? null : updated.toInstant().toString(), next);
+                updated == null ? null : updated.toString(), next);
     }
 
     private String validateMode(String raw) {

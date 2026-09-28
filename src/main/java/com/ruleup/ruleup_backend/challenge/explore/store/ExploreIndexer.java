@@ -656,6 +656,9 @@ public class ExploreIndexer {
                 && ("UPCOMING".equals(status) || "ACTIVE".equals(status))
                 && rs.getTimestamp("deleted_at") == null;
 
+        // 이 값들은 DbTime 규약(UTC 벽시계)으로 옮기지 않는다. 리비전·정렬 점수는 Redis 에 이미 들어간 값과
+        // 크기를 비교하는 데만 쓰이고, 전부 같은 방식(접속 시간대)으로 읽혀 서로 어긋나지 않는다. 기준을 바꾸면
+        // 새 리비전이 기존 값보다 9시간 과거로 보여 갱신이 무시된다 — 바꾸려면 인덱스를 다시 세워야 한다.
         Timestamp created = rs.getTimestamp("created_at");
         Timestamp lastJoined = rs.getTimestamp("last_joined");
         Timestamp revision = rs.getTimestamp("source_revision");

@@ -11,7 +11,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
-import java.sql.Timestamp;
+import com.ruleup.ruleup_backend.common.DbTime;
 import java.time.LocalDate;
 import java.util.UUID;
 
@@ -40,7 +40,7 @@ class VerificationIntegrityCheckIT extends VerificationApiSupport {
         return ((Number) integrity.check().get(key)).longValue();
     }
 
-    private void insert(String status, LocalDate date, Timestamp deadline, Timestamp verifiedAt) throws Exception {
+    private void insert(String status, LocalDate date, java.time.LocalDateTime deadline, java.time.LocalDateTime verifiedAt) throws Exception {
         Member me = member(uniq("integrity"));
         UUID challengeId = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", "{\"duration_min\":30}");
         UUID memberId = insertReadyMember(challengeId, me.id(), null, null);
@@ -54,7 +54,7 @@ class VerificationIntegrityCheckIT extends VerificationApiSupport {
     @DisplayName("확정 시각 없는 FAILED 와 자정이 아닌 기한만 센다")
     void countsOnlyBrokenRows() throws Exception {
         LocalDate date = LocalDate.now(KST).minusDays(5);
-        Timestamp midnight = Timestamp.from(VerificationDeadlines.appealClosesAt(date));
+        java.time.LocalDateTime midnight = DbTime.utc(VerificationDeadlines.appealClosesAt(date));   // 운영 규약(UTC 벽시계)대로 적는다
         long failedBefore = count("failed_unconfirmed");
         long deadlineBefore = count("appeal_deadline_off");
 
@@ -62,10 +62,10 @@ class VerificationIntegrityCheckIT extends VerificationApiSupport {
         assertThat(count("failed_unconfirmed")).isEqualTo(failedBefore);
         assertThat(count("appeal_deadline_off")).isEqualTo(deadlineBefore);
 
-        insert("FAILED", date.minusDays(1), Timestamp.from(VerificationDeadlines.appealClosesAt(date.minusDays(1))), null);
+        insert("FAILED", date.minusDays(1), DbTime.utc(VerificationDeadlines.appealClosesAt(date.minusDays(1))), null);
         assertThat(count("failed_unconfirmed")).isEqualTo(failedBefore + 1);
 
-        insert("PENDING", date.minusDays(2), Timestamp.from(midnight.toInstant().plusSeconds(3 * 3600 + 17)), null);
+        insert("PENDING", date.minusDays(2), midnight.plusSeconds(3 * 3600 + 17), null);
         assertThat(count("appeal_deadline_off")).isEqualTo(deadlineBefore + 1);
     }
 }

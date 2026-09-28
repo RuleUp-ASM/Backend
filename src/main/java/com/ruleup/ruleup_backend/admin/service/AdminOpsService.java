@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.admin.service;
 
+import com.ruleup.ruleup_backend.common.DbTime;
 import com.ruleup.ruleup_backend.admin.domain.*;
 import com.ruleup.ruleup_backend.admin.dto.AdminDtos;
 import com.ruleup.ruleup_backend.admin.repository.AnomalySignalRepository;
@@ -121,11 +122,11 @@ public class AdminOpsService {
             // 활성 판정은 세 경우다 — 동결·영구를 빠뜨리면 목록에서 조용히 사라진다.
             where.append(" AND s.revoked_at IS NULL AND (s.frozen_remaining_sec IS NOT NULL"
                     + " OR s.ends_at IS NULL OR s.ends_at > ?)");
-            args.add(java.sql.Timestamp.from(now));
+            args.add(DbTime.utc(now));
         }
         if (before != null) {
             where.append(" AND s.starts_at < ?");
-            args.add(java.sql.Timestamp.from(before));
+            args.add(DbTime.utc(before));
         }
         args.add(limit + 1);
 
@@ -353,7 +354,7 @@ public class AdminOpsService {
 
         Long affected = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM VerificationDaily WHERE verifiedAt BETWEEN ? AND ?",
-                Long.class, java.sql.Timestamp.from(start), java.sql.Timestamp.from(end));
+                Long.class, DbTime.utc(start), DbTime.utc(end));
         int affectedCount = (affected == null) ? 0 : affected.intValue();
 
         String payload = request.periodStart() + "|" + request.periodEnd() + "|" + scope;

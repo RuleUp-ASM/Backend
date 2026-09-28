@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.auth.service;
 
+import com.ruleup.ruleup_backend.common.DbTime;
 import com.ruleup.ruleup_backend.config.AppProperties;
 import org.springframework.jdbc.core.JdbcTemplate;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
@@ -8,7 +9,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.sql.Timestamp;
 import java.time.Instant;
 
 /** Shared one-use marker, including across processes and application restarts. */
@@ -25,7 +25,7 @@ public class SignupTokenStore {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public boolean consume(String jti) {
         return jdbc.update("INSERT IGNORE INTO signup_token_consumptions(jti,expires_at) VALUES(?,?)",
-                jti, Timestamp.from(Instant.now().plusSeconds(retentionSeconds))) == 1;
+                jti, DbTime.utc(Instant.now().plusSeconds(retentionSeconds))) == 1;
     }
 
     public boolean isUsed(String jti) {
@@ -35,6 +35,6 @@ public class SignupTokenStore {
     @SchedulerLock(name = "SignupTokenStore.cleanup", lockAtMostFor = "PT1H", lockAtLeastFor = "PT1M")
     @Scheduled(cron = "0 30 4 * * *", zone = "Asia/Seoul")
     public void cleanup() {
-        jdbc.update("DELETE FROM signup_token_consumptions WHERE expires_at<?", Timestamp.from(Instant.now()));
+        jdbc.update("DELETE FROM signup_token_consumptions WHERE expires_at<?", DbTime.utc(Instant.now()));
     }
 }

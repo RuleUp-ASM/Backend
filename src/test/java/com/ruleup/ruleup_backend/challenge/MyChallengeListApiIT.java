@@ -117,6 +117,8 @@ class MyChallengeListApiIT extends ChallengeApiSupport {
             MvcResult res = list(me, "?filter=LEFT");
             assertThat((String) read(res, "$.data.challenges[0].leftType")).isEqualTo("SELF");
             assertThat((String) read(res, "$.data.challenges[0].leftAt")).isNotNull();
+            // 접속이 KST 여도 실제 나간 시각이다 — getTimestamp 로 읽으면 9시간 이르게 나왔다
+            assertThat(java.time.Duration.between(java.time.Instant.parse((String) read(res, "$.data.challenges[0].leftAt")), java.time.Instant.now()).abs()).isLessThan(java.time.Duration.ofMinutes(5));
         }
 
         @Test

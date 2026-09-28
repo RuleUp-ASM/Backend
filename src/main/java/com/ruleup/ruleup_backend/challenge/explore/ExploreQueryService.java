@@ -517,7 +517,8 @@ public class ExploreQueryService {
                 rs.getString("category"), rs.getString("verification_type"), rs.getString("status"),
                 0, (Integer) rs.getObject("capacity"), rs.getString("min_tier"),
                 String.valueOf(rs.getDate("start_date")), rs.getDate("end_date") == null ? null : rs.getDate("end_date").toString(),
-                String.valueOf(rs.getTimestamp("created_at")),
+                // 커서로 되돌아와 SQL 에서 created_at 과 문자열로 비교된다 — 저장된 벽시계 그대로(접속 시간대 변환 없이) 싣는다.
+                String.valueOf(java.sql.Timestamp.valueOf(rs.getObject("created_at", java.time.LocalDateTime.class))),
                 null, null, 0, null);
     }
 

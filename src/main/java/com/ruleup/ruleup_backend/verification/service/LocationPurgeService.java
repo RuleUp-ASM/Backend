@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.verification.service;
 
+import com.ruleup.ruleup_backend.common.DbTime;
 import com.ruleup.ruleup_backend.verification.config.VerificationProperties;
 import com.ruleup.ruleup_backend.verification.domain.VerificationDeadlines;
 import com.ruleup.ruleup_backend.verification.signal.SignalDomain;
@@ -14,7 +15,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.ByteBuffer;
 import java.sql.Date;
-import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -88,7 +88,7 @@ public class LocationPurgeService {
                             + "     purgeAfter = COALESCE(purgeAfter, ?)"
                             + " WHERE observedDate = ? AND userId = ?",
                     (verificationId != null) ? bytes(verificationId) : null,
-                    Timestamp.from(purgeAfterFor(targetDate)),
+                    DbTime.utc(purgeAfterFor(targetDate)),
                     Date.valueOf(targetDate), bytes(userId));
         } catch (RuntimeException e) {
             // 판정은 이미 끝났다. 추적 id 한 줄 때문에 되돌리지 않는다.
@@ -181,7 +181,7 @@ public class LocationPurgeService {
                             + "        OR s.observedDate < ?"
                             + "   )"
                             + " LIMIT " + PURGE_BATCH,
-                    PURGED_PAYLOAD, Timestamp.from(now), Timestamp.from(now), Date.valueOf(dropBoundary));
+                    PURGED_PAYLOAD, DbTime.utc(now), DbTime.utc(now), Date.valueOf(dropBoundary));
         } catch (RuntimeException e) {
             // 이 배치가 밀리면 위치정보법 위반이다 — 조용히 넘기지 않고 에러로 남긴다.
             log.error("GPS 원본 좌표 파기 실패 — 지연이 쌓이면 안 된다. err={}", e.toString(), e);

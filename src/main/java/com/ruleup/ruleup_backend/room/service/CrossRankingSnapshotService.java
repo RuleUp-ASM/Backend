@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.room.service;
 
+import com.ruleup.ruleup_backend.common.DbTime;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
@@ -17,7 +18,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.ByteBuffer;
-import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -68,7 +68,7 @@ public class CrossRankingSnapshotService {
             for (Aggregate row : rows) {
                 Integer assignedRank = row.total() >= minimum ? ++rank : null;
                 batch.add(new Object[]{row.mode(), bytes(row.challengeId()), assignedRank, row.title(), row.members(),
-                        row.success(), row.total(), row.rate(), Timestamp.from(snapshotAt)});
+                        row.success(), row.total(), row.rate(), DbTime.utc(snapshotAt)});
             }
         }
         jdbc.update("DELETE FROM challenge_cross_ranking_snapshot");

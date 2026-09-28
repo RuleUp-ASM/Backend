@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.verification.service;
 
+import com.ruleup.ruleup_backend.common.DbTime;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeCycle;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.common.ClockSkew;
@@ -21,7 +22,6 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.nio.ByteBuffer;
-import java.sql.Timestamp;
 import java.time.*;
 import java.util.Map;
 import java.util.UUID;
@@ -67,7 +67,7 @@ public class PermissionWaitService {
                 "first_observed_at=IF(resolved_at IS NOT NULL,VALUES(first_observed_at),first_observed_at)," +
                 "waiting_from_on=IF(resolved_at IS NOT NULL,VALUES(waiting_from_on),waiting_from_on)," +
                 "dispatched_at=IF(resolved_at IS NOT NULL,NULL,dispatched_at),resolved_at=NULL",
-                bytes(event.challengeId()),bytes(event.userId()),event.signalType(),bytes(UuidGenerator.generate()),Timestamp.from(event.detectedAt()),from);
+                bytes(event.challengeId()),bytes(event.userId()),event.signalType(),bytes(UuidGenerator.generate()),DbTime.utc(event.detectedAt()),from);
     }
 
     public record MeasurementReceived(UUID challengeId, UUID userId, String method, Instant measuredAt) {}
@@ -77,7 +77,7 @@ public class PermissionWaitService {
     public void received(MeasurementReceived event) {
         jdbc.update("UPDATE verification_permission_waits SET resolved_at=UTC_TIMESTAMP(6) WHERE challenge_id=? AND user_id=? " +
                 "AND signal_type=? AND resolved_at IS NULL AND first_observed_at<?",
-                bytes(event.challengeId()),bytes(event.userId()),event.method(),Timestamp.from(event.measuredAt()));
+                bytes(event.challengeId()),bytes(event.userId()),event.method(),DbTime.utc(event.measuredAt()));
     }
 
     @SchedulerLock(name = "PermissionWaitService.publishDue", lockAtMostFor = "PT10M", lockAtLeastFor = "PT30S")

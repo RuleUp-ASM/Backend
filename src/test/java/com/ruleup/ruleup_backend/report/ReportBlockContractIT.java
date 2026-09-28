@@ -373,6 +373,9 @@ class ReportBlockContractIT extends ChallengeApiSupport {
             assertThat(res.getResponse().getStatus()).isEqualTo(200);
             assertThat((List<?>) read(res, "$.data.users")).hasSize(1);
             assertThat((List<?>) read(res, "$.data.challenges")).hasSize(1);
+            // 차단 시각은 실제 시각이다 — KST 접속에서 getTimestamp 로 읽으면 9시간 이르게 나왔다(QA REP-07 류)
+            assertThat(java.time.Duration.between(java.time.Instant.parse((String) read(res, "$.data.users[0].blockedAt")), java.time.Instant.now()).abs()).isLessThan(java.time.Duration.ofMinutes(5));
+            assertThat(java.time.Duration.between(java.time.Instant.parse((String) read(res, "$.data.challenges[0].blockedAt")), java.time.Instant.now()).abs()).isLessThan(java.time.Duration.ofMinutes(5));
         }
 
         @Test

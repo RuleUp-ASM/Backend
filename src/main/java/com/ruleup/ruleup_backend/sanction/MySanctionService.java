@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.sanction;
 
+import com.ruleup.ruleup_backend.common.DbTime;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.challenge.domain.MemberStatus;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
@@ -94,8 +95,8 @@ public class MySanctionService {
                         uuid(rs.getBytes(1)).toString(), AUTO_TYPE,
                         uuid(rs.getBytes(2)).toString(),
                         rs.getString(3),rs.getString(4),rs.getBoolean(5),
-                        rs.getTimestamp(6) == null ? null : rs.getTimestamp(6).toInstant().toString(),
-                        rs.getTimestamp(7).toInstant().toString()),
+                        java.util.Objects.toString(DbTime.read(rs, 6), null),
+                        DbTime.read(rs, 7).toString()),
                 java.nio.ByteBuffer.allocate(16).putLong(userId.getMostSignificantBits()).putLong(userId.getLeastSignificantBits()).array());
     }
 
