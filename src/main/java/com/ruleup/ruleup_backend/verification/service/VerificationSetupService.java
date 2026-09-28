@@ -266,6 +266,9 @@ public class VerificationSetupService {
         Instant now = Instant.now();
         LocalDate today = LocalDate.now(KST);
         member.promoteScreenAppsIfDue(today, KST);     // 도래한 대기 세트를 먼저 승격(pending 판정 정확도)
+        // 수정 전 첫 저장이 대기 세트로만 들어간 계정은 승격 뒤에도 PENDING_SETUP 에 남아 평가가 건너뛰어진다.
+        // 바인딩이 차 있으면 어느 분기로 끝나든 READY 로 올린다(리뷰 지적, QA SETUP-05).
+        markReadyIfBound(member, config);
 
         // 아직 적용 중인 세트가 없으면 이 저장이 첫 설정이다 — setup 과 같은 규칙으로 즉시 적용하고
         // 월 1회를 쓰지 않는다. 대기 세트로 넘기면 오늘은 조회가 SCREENTIME_NOT_CONFIGURED, setup 은
@@ -284,6 +287,7 @@ public class VerificationSetupService {
         boolean staged = member.hasPendingScreenApps(today);
         List<ScreenApp> latest = staged ? member.getPendingScreenApps() : current;
         if (samePackages(latest, apps)) {
+            challengeQuery.saveMember(member);   // 승격·READY 전환을 남긴다
             String appliedFrom = staged
                     ? member.getPendingScreenAppsEffectiveDate().atStartOfDay(KST).format(ISO_OFFSET)
                     : formatKst(member.getScreenAppsAppliedFrom());

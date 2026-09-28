@@ -81,6 +81,23 @@ class ScreenAppsFirstSetIT extends VerificationApiSupport {
     }
 
     @Test
+    @DisplayName("수정 전 첫 저장이 대기 세트로만 들어간 계정도 적용일 뒤 같은 앱을 다시 저장하면 READY 가 된다")
+    void legacyPendingFirstSaveRecovers() throws Exception {
+        Member me = member(uniq("apps-legacy"));
+        UUID challenge = insertAutoChallenge(me.id(), "SCREEN_TIME_MIN", "USAGE", "{\"duration_min\":30}");
+        UUID memberId = pendingSetupMember(challenge, me.id());
+        // 수정 전 동작이 남긴 상태: 현재 세트 없음, 대기 세트는 적용일이 지났고 한도는 이번 달에 소진됐다.
+        jdbc().update("UPDATE challenge_members SET pending_screen_apps = ?, " +
+                        "pending_screen_apps_effective_date = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 1 DAY), " +
+                        "screen_apps_changed_at = UTC_TIMESTAMP(6) WHERE id = ?",
+                screenApps("com.android.chrome"), bytes(memberId));
+
+        assertThat(putApps(me.token(), challenge, "com.android.chrome").getResponse().getStatus()).isEqualTo(200);
+        MvcResult setup = getAuth("/api/v1/challenges/" + challenge + "/setup", me.token());
+        assertThat((String) read(setup, "$.data.setupStatus")).isEqualTo("READY");
+    }
+
+    @Test
     @DisplayName("같은 앱으로 다시 저장하면 한도를 쓰지 않는다 — 다른 앱으로의 변경만 월 1회를 쓴다")
     void sameAppsResaveDoesNotConsumeLimit() throws Exception {
         Member me = member(uniq("apps-same"));
