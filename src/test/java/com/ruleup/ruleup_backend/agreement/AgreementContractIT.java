@@ -160,6 +160,32 @@ class AgreementContractIT extends AuthApiSupport {
         }
 
         @Test
+        @DisplayName("가입 때 미동의한 선택 약관도 version·agreedAt 이 null 이다 — 동의 후 철회와 구분된다")
+        @SuppressWarnings("unchecked")
+        void declined_at_signup_is_never_agreed() throws Exception {
+            String at = join("가입미동의");   // 가입 때 EVENT 는 거부, MARKETING 은 동의
+            Map<String, Object> event = pick(getAgreements(at), "EVENT");
+            assertThat((Boolean) event.get("agreed")).isFalse();
+            assertThat(event.get("version")).as("QA ONB-17").isNull();
+            assertThat(event.get("agreedAt")).as("QA ONB-17").isNull();
+
+            // 동의한 적 없는 항목을 다시 거부해도 여전히 「동의한 적 없음」이다.
+            String v = props.client().termsVersions().event();
+            MvcResult declined = postJsonAuth(PATH, at, body(item("EVENT", false, v)));
+            assertThat(declined.getResponse().getStatus()).isEqualTo(200);
+            assertThat(((List<Map<String, Object>>) read(declined, "$.data.agreements")).getFirst().get("agreedAt")).isNull();
+            assertThat(pick(getAgreements(at), "EVENT").get("version")).isNull();
+
+            // 동의했다가 철회하면 버전·시각이 남는다.
+            String mv = props.client().termsVersions().marketing();
+            assertThat(postJsonAuth(PATH, at, body(item("MARKETING", false, mv))).getResponse().getStatus()).isEqualTo(200);
+            Map<String, Object> marketing = pick(getAgreements(at), "MARKETING");
+            assertThat((Boolean) marketing.get("agreed")).isFalse();
+            assertThat(marketing.get("version")).isEqualTo(mv);
+            assertThat(marketing.get("agreedAt")).isNotNull();
+        }
+
+        @Test
         @DisplayName("가입 직후에는 현행 버전으로 동의했으므로 reconsentRequired 가 비어 있다")
         void no_reconsent_right_after_signup() throws Exception {
             String at = join("재동의없음");

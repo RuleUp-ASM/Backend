@@ -105,8 +105,8 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("사이클은 1주 고정 — 주 중간 입장이면 판정은 다음 사이클 경계부터")
-        void countFromNextCycleBoundary() throws Exception {
+        @DisplayName("진행 중 입장이면 판정은 가입 다음 날부터다 — 가입 당일은 성공·실패로 잡지 않는다(QA JOIN-14)")
+        void countFromNextDay() throws Exception {
             Member owner = member(uniq("cycle-owner"));
             Member joiner = member(uniq("cycle-joiner"));
             UUID challengeId = openGroup(owner.id());
@@ -115,7 +115,7 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
             jdbcTemplate.update("UPDATE challenges SET start_date = ? WHERE id = ?", start, bytes(challengeId));
 
             MvcResult res = join(joiner.token(), challengeId);
-            assertThat((String) read(res, "$.data.countFromCycle")).isEqualTo(start.plusDays(7).toString());
+            assertThat((String) read(res, "$.data.countFromCycle")).isEqualTo(start.plusDays(4).toString());
         }
 
         @Test
@@ -267,6 +267,33 @@ class ChallengeJoinGateIT extends ChallengeApiSupport {
 
             // 벌크 UPDATE(clearAutomatically) 뒤에서 bumpVersion 을 부르면 준영속이라 조용히 사라진다.
             assertThat(versionOf(challengeId)).isGreaterThan(before);
+        }
+
+        @Test
+        @DisplayName("재입장한 날도 판정하지 않는다 — 가입 응답과 today 가 같은 참여 경계(재입장 다음 날)를 본다(QA JOIN-14)")
+        void rejoinStartsNextDay() throws Exception {
+            Member owner = member(uniq("rejoin-owner"));
+            Member joiner = member(uniq("rejoin-joiner"));
+            UUID challengeId = openGroup(owner.id());
+            java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Seoul"));
+            jdbcTemplate.update("UPDATE challenges SET start_date = ? WHERE id = ?", today.minusDays(20), bytes(challengeId));
+            join(joiner.token(), challengeId);
+            // 처음 들어온 건 14일 전이다.
+            jdbcTemplate.update("UPDATE challenge_members SET joined_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 14 DAY) " +
+                    "WHERE challenge_id = ? AND user_id = ?", bytes(challengeId), bytes(joiner.id()));
+            assertThat(leave(joiner.token(), challengeId).getResponse().getStatus()).isEqualTo(200);
+            // 대기 기간이 끝났다고 친다.
+            jdbcTemplate.update("UPDATE challenge_members SET rejoin_available_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 HOUR) " +
+                    "WHERE challenge_id = ? AND user_id = ?", bytes(challengeId), bytes(joiner.id()));
+            jdbcTemplate.update("UPDATE challenge_rejoin_backoffs SET available_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 HOUR) " +
+                    "WHERE challenge_id = ? AND user_id = ?", bytes(challengeId), bytes(joiner.id()));
+
+            MvcResult rejoined = join(joiner.token(), challengeId);
+            assertThat(rejoined.getResponse().getStatus()).isEqualTo(200);
+            assertThat((String) read(rejoined, "$.data.countFromCycle")).isEqualTo(today.plusDays(1).toString());
+
+            MvcResult todayRes = getAuth("/api/v1/challenges/" + challengeId + "/verifications/today", joiner.token());
+            assertThat((String) read(todayRes, "$.data.status")).isEqualTo("NOT_TARGET");
         }
 
         @Test

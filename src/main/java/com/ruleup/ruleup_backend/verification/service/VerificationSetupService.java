@@ -253,8 +253,9 @@ public class VerificationSetupService {
         Challenge ch = challengeQuery.findActiveChallenge(challengeId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
         ChallengeMember member = activeMember(challengeId, userId);
+        VerificationConfig config = configFactory.build(ch);
 
-        if (!configFactory.build(ch).hasMethod(VerificationMethod.SCREEN_TIME)) {
+        if (!config.hasMethod(VerificationMethod.SCREEN_TIME)) {
             throw new BusinessException(ErrorCode.SCREENTIME_NOT_CONFIGURED);   // 스크린 타임 인증 챌린지가 아님
         }
         if (req == null || req.apps() == null || req.apps().isEmpty()) {
@@ -263,12 +264,41 @@ public class VerificationSetupService {
         List<ScreenApp> apps = toScreenApps(req.apps());
 
         Instant now = Instant.now();
+        LocalDate today = LocalDate.now(KST);
+        member.promoteScreenAppsIfDue(today, KST);     // 도래한 대기 세트를 먼저 승격(pending 판정 정확도)
+        // 수정 전 첫 저장이 대기 세트로만 들어간 계정은 승격 뒤에도 PENDING_SETUP 에 남아 평가가 건너뛰어진다.
+        // 바인딩이 차 있으면 어느 분기로 끝나든 READY 로 올린다(리뷰 지적, QA SETUP-05).
+        markReadyIfBound(member, config);
+
+        // 아직 적용 중인 세트가 없으면 이 저장이 첫 설정이다 — setup 과 같은 규칙으로 즉시 적용하고
+        // 월 1회를 쓰지 않는다. 대기 세트로 넘기면 오늘은 조회가 SCREENTIME_NOT_CONFIGURED, setup 은
+        // PENDING_SETUP 그대로이고 한도만 소진된다(QA SETUP-05).
+        List<ScreenApp> current = member.getScreenApps();
+        if (current == null || current.isEmpty()) {
+            member.setScreenAppsInitial(apps, now);
+            settingHistory.record(member.getId(), SettingKind.SCREEN_APPS, today, apps);
+            markReadyIfBound(member, config);
+            challengeQuery.saveMember(member);
+            return new ScreenAppsUpdateResponse(toAppDtos(apps), formatKst(now),
+                    MonthlyChangeLimit.nextChangeAvailableAtOrNull(member.getScreenAppsChangedAt(), now));
+        }
+
+        // 이미 적용(또는 적용 대기) 중인 세트와 같으면 바꿀 것이 없다 — 한도를 쓰지 않고 현재 상태를 돌려준다.
+        boolean staged = member.hasPendingScreenApps(today);
+        List<ScreenApp> latest = staged ? member.getPendingScreenApps() : current;
+        if (samePackages(latest, apps)) {
+            challengeQuery.saveMember(member);   // 승격·READY 전환을 남긴다
+            String appliedFrom = staged
+                    ? member.getPendingScreenAppsEffectiveDate().atStartOfDay(KST).format(ISO_OFFSET)
+                    : formatKst(member.getScreenAppsAppliedFrom());
+            return new ScreenAppsUpdateResponse(toAppDtos(latest), appliedFrom,
+                    MonthlyChangeLimit.nextChangeAvailableAtOrNull(member.getScreenAppsChangedAt(), now));
+        }
+
         if (!MonthlyChangeLimit.available(member.getScreenAppsChangedAt(), now)) {
             throw BusinessException.settingChangeLimit(MonthlyChangeLimit.nextChangeAvailableAt(now));
         }
 
-        LocalDate today = LocalDate.now(KST);
-        member.promoteScreenAppsIfDue(today, KST);     // 도래한 대기 세트를 먼저 승격(pending 판정 정확도)
         LocalDate effectiveDate = today.plusDays(1);   // 익일 00:00부터 적용
         member.stagePendingScreenApps(apps, effectiveDate, now);
         settingHistory.record(member.getId(), SettingKind.SCREEN_APPS, effectiveDate, apps);
@@ -281,6 +311,25 @@ public class VerificationSetupService {
     }
 
     // ===== 헬퍼 =====
+
+    /** 인증 방식이 요구하는 바인딩이 모두 채워졌으면 READY. */
+    private void markReadyIfBound(ChallengeMember member, VerificationConfig config) {
+        if (member.isSetupReady()) return;
+        boolean anchorsOk = !config.hasMethod(VerificationMethod.GPS_PRESENCE)
+                || (member.getAnchors() != null && !member.getAnchors().isEmpty());
+        boolean appsOk = !config.hasMethod(VerificationMethod.SCREEN_TIME)
+                || (member.getScreenApps() != null && !member.getScreenApps().isEmpty());
+        if (anchorsOk && appsOk) member.markSetupReady();
+    }
+
+    /** 패키지 집합이 같은가 — 순서·표시 이름은 따지지 않는다. */
+    private static boolean samePackages(List<ScreenApp> a, List<ScreenApp> b) {
+        if (a == null || b == null) return false;
+        Set<String> left = new java.util.HashSet<>(), right = new java.util.HashSet<>();
+        a.forEach(app -> left.add(app.packageName()));
+        b.forEach(app -> right.add(app.packageName()));
+        return left.equals(right);
+    }
     private ChallengeMember activeMember(UUID challengeId, UUID userId) {
         ChallengeMember member = challengeQuery.findMembership(challengeId, userId).orElse(null);
         if (member == null || !member.isActive()) {

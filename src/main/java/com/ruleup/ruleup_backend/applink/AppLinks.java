@@ -35,6 +35,11 @@ public class AppLinks {
         return baseUrl + "/" + type.segment() + "/" + token;
     }
 
+    /** 커스텀 스킴 링크({@code ruleup://c/{token}}) — 알림 딥링크처럼 앱 안에서만 여는 경로에 쓴다. */
+    public String buildScheme(AppLinkType type, String token) {
+        return scheme + "://" + type.segment() + "/" + token;
+    }
+
     /**
      * 링크를 해석한다. 우리 링크가 아니거나 경로 모양이 다르면 {@link Parsed#malformed()},
      * 우리 링크지만 모르는 타입이면 {@link Parsed#unsupported()} 다.

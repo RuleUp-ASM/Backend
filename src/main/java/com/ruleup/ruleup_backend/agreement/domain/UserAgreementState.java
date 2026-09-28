@@ -43,10 +43,10 @@ public class UserAgreementState {
     private boolean agreed;
 
     /** 현재 동의한 버전. 개정 재동의 판정이 이 값 하나로 끝난다. */
-    @Column(name = "version", nullable = false)
+    @Column(name = "version")
     private String version;
 
-    @Column(name = "agreed_at", nullable = false)
+    @Column(name = "agreed_at")
     private Instant agreedAt;
 
     public static UserAgreementState of(UUID userId, AgreementType type, boolean agreed,

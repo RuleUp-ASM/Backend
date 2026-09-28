@@ -37,6 +37,7 @@ class TargetDayAgreementIT extends ChallengeApiSupport {
 
     @Autowired WebApplicationContext wac;
     @Autowired JdbcTemplate jdbcTemplate;
+    @Autowired com.ruleup.ruleup_backend.verification.service.VerificationFinalizeService finalizeService;
     MockMvc mvc;
 
     @Override protected MockMvc mvc() { return mvc; }
@@ -94,6 +95,141 @@ class TargetDayAgreementIT extends ChallengeApiSupport {
         assertThat(todayStatus(challengeId, me)).isEqualTo("IN_PROGRESS");
     }
 
+    @Test
+    @DisplayName("진행 중인 방에 들어온 날은 방·today·수동 제출이 모두 「오늘은 아니다」, 다음 날부터 판정한다(QA JOIN-14)")
+    void midJoinStartsNextDay() throws Exception {
+        Member me = member(uniq("tda-midjoin"));
+        UUID challengeId = manualWeeklyRoom(me, 7);
+        // 방은 3일 전에 시작했고 나는 방금 들어왔다.
+        jdbcTemplate.update("UPDATE challenge_members SET role='MEMBER', joined_at = UTC_TIMESTAMP(6) " +
+                "WHERE challenge_id=? AND user_id=?", bytes(challengeId), bytes(me.id()));
+        jdbcTemplate.update("UPDATE challenges SET owner_id = ? WHERE id = ?",
+                bytes(member(uniq("tda-midjoin-owner")).id()), bytes(challengeId));
+
+        assertThat(roomTodayStatus(challengeId, me)).isEqualTo("NOT_TARGET");
+        assertThat(todayStatus(challengeId, me)).isEqualTo("NOT_TARGET");
+        expectError(postJsonAuth("/api/v1/challenges/" + challengeId + "/verifications", me.token(), Map.of()),
+                409, "NOT_TARGET_DATE");
+
+        // 어제 들어왔다면 오늘은 판정 대상이다.
+        jdbcTemplate.update("UPDATE challenge_members SET joined_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 DAY) " +
+                "WHERE challenge_id=? AND user_id=?", bytes(challengeId), bytes(me.id()));
+        assertThat(roomTodayStatus(challengeId, me)).isEqualTo("IN_PROGRESS");
+        assertThat(todayStatus(challengeId, me)).isEqualTo("IN_PROGRESS");
+    }
+
+    @Test
+    @DisplayName("자정~롤오버(00:05) 사이 새 주기 첫날은 지난주 몫과 무관하게 판정 대상이고, 그날 성공은 새 주기로 넘어간다(QA VER-13)")
+    void newPeriodBeforeRollover() throws Exception {
+        Member me = member(uniq("tda-rollover"));
+        UUID challengeId = manualWeeklyRoom(me, 2);
+        // 지난 주기(9일 전~어제)는 몫을 채웠고, 롤오버는 아직 돌지 않았다.
+        jdbcTemplate.update("UPDATE challenges SET start_date = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 7 DAY) WHERE id = ?",
+                bytes(challengeId));
+        // 지난주 마지막 sync 가 남긴 캐시(today_status=NOT_REQUIRED)도 그대로 둔다 — 방 홈이 이 값을 날짜 확인 없이 쓰면 안 된다.
+        jdbcTemplate.update("UPDATE challenge_members SET joined_at = DATE_SUB(NOW(6), INTERVAL 8 DAY), cur_period_completed = 2," +
+                        " today_status = 'NOT_REQUIRED', last_synced_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 DAY)," +
+                        " cur_period_start = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 7 DAY)," +
+                        " cur_period_end = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 1 DAY)" +
+                        " WHERE challenge_id=? AND user_id=?", bytes(challengeId), bytes(me.id()));
+
+        assertThat(roomTodayStatus(challengeId, me)).isEqualTo("IN_PROGRESS");
+        assertThat(todayStatus(challengeId, me)).isEqualTo("IN_PROGRESS");
+
+        assertThat(postJsonAuth("/api/v1/challenges/" + challengeId + "/verifications", me.token(), Map.of())
+                .getResponse().getStatus()).isEqualTo(200);
+        assertThat(periodCompleted(challengeId, me)).as("새 주기 성공을 지난 주기 카운터에 더하지 않는다").isEqualTo(2);
+
+        finalizeService.rolloverFrequencyPeriods();
+        assertThat(periodCompleted(challengeId, me)).as("롤오버가 새 주기 성공을 판정 행으로 다시 센다").isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("마지막 하루만 판정 대상인 중간 가입자가 그 하루를 성공하면 롤오버 뒤 실패가 0 이다(리뷰 지적, QA JOIN-14)")
+    void midJoinLastDayOnlyHasNoFailures() throws Exception {
+        Member me = member(uniq("tda-lastday"));
+        UUID challengeId = manualWeeklyRoom(me, 7);
+        // 방은 7일 전~어제 한 주짜리, 나는 그제 들어왔으니 판정은 어제 하루뿐이다.
+        jdbcTemplate.update("UPDATE challenges SET start_date = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 7 DAY)," +
+                " end_date = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 1 DAY) WHERE id = ?", bytes(challengeId));
+        jdbcTemplate.update("UPDATE challenge_members SET joined_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 2 DAY), cur_period_completed = 0," +
+                        " cur_period_start = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 7 DAY)," +
+                        " cur_period_end = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 1 DAY)," +
+                        " fail_days = 0, success_days = 0 WHERE challenge_id=? AND user_id=?", bytes(challengeId), bytes(me.id()));
+        seedSuccess(me, challengeId, 1);
+
+        finalizeService.rolloverFrequencyPeriods();
+
+        assertThat(failDays(challengeId, me)).as("가입 전 6일을 미달로 정산하면 안 된다").isZero();
+    }
+
+    @Test
+    @DisplayName("20일째 방에 어제 들어와 오늘 성공하면 롤오버가 가입 전 주기를 미달로 따라잡지 않는다(리뷰 지적, QA JOIN-14)")
+    void midJoinDoesNotCatchUpPreJoinPeriods() throws Exception {
+        Member me = member(uniq("tda-catchup"));
+        UUID challengeId = manualWeeklyRoom(me, 7);
+        jdbcTemplate.update("UPDATE challenges SET start_date = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 20 DAY)," +
+                " end_date = DATE_ADD(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 20 DAY) WHERE id = ?", bytes(challengeId));
+        // 수정 전 셋업처럼 현재 주기가 챌린지 첫 주기로 잡혀 있는 상태.
+        jdbcTemplate.update("UPDATE challenge_members SET joined_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 DAY), cur_period_completed = 0," +
+                        " cur_period_start = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 20 DAY)," +
+                        " cur_period_end = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 14 DAY)," +
+                        " fail_days = 0, success_days = 0 WHERE challenge_id=? AND user_id=?", bytes(challengeId), bytes(me.id()));
+        assertThat(postJsonAuth("/api/v1/challenges/" + challengeId + "/verifications", me.token(), Map.of())
+                .getResponse().getStatus()).isEqualTo(200);
+
+        finalizeService.rolloverFrequencyPeriods();
+
+        assertThat(failDays(challengeId, me)).as("가입 전 두 주를 미달로 쌓으면 안 된다").isZero();
+        assertThat(periodCompleted(challengeId, me)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("종료일 없는 방에 늦게 들어오면 현재 참여 주기부터 셋업하고, 가입 전 주기로 분모를 늘리지 않는다(리뷰 지적)")
+    void unlimitedLateJoinTargetsOnlyParticipation() throws Exception {
+        Member me = member(uniq("tda-unlimited"));
+        UUID challengeId = lateJoinRoom(me, 20, null);
+
+        assertThat(postJsonAuth("/api/v1/challenges/" + challengeId + "/verifications", me.token(), Map.of())
+                .getResponse().getStatus()).isEqualTo(200);
+        finalizeService.rolloverFrequencyPeriods();
+
+        assertThat(jdbcTemplate.queryForObject("SELECT target_days FROM challenge_members WHERE challenge_id=? AND user_id=?",
+                Integer.class, bytes(challengeId), bytes(me.id())))
+                .as("현재 주기에 남은 대상일은 오늘 하루다 — 가입 전 2주가 분모에 들어가면 안 된다").isEqualTo(1);
+        assertThat(failDays(challengeId, me)).isZero();
+    }
+
+    @Test
+    @DisplayName("잘린 주기의 진행 표시(period.target/remaining)도 판정과 같은 몫을 쓴다(리뷰 지적)")
+    void partialPeriodProgressUsesActualQuota() throws Exception {
+        Member me = member(uniq("tda-progress"));
+        UUID challengeId = lateJoinRoom(me, 6, 0);   // 6일 전~오늘 한 주, 어제 가입 → 오늘 하루만 대상
+
+        assertThat(postJsonAuth("/api/v1/challenges/" + challengeId + "/verifications", me.token(), Map.of())
+                .getResponse().getStatus()).isEqualTo(200);
+
+        MvcResult progress = getAuth("/api/v1/verifications/progress", me.token());
+        java.util.List<Map<String, Object>> rows = read(progress, "$.data.challenges");
+        Map<String, Object> period = rows.stream().filter(r -> challengeId.toString().equals(r.get("challengeId")))
+                .findFirst().map(r -> (Map<String, Object>) r.get("period")).orElseThrow();
+        assertThat(period).containsEntry("target", 1).containsEntry("completed", 1).containsEntry("remaining", 0);
+    }
+
+    /** 주 7회 수동 방. 어제 가입했고 셋업 전(target_days=0)이라 첫 체크가 셋업을 부른다. */
+    private UUID lateJoinRoom(Member me, int startDaysAgo, Integer endDaysFromNow) {
+        UUID challengeId = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
+        insertActiveMembership(challengeId, me.id(), "MEMBER");
+        jdbcTemplate.update("UPDATE challenges SET weekly_count = 7," +
+                        " start_date = DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL ? DAY)," +
+                        " end_date = " + (endDaysFromNow == null ? "NULL, duration_days = NULL"
+                        : "DATE_ADD(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL " + endDaysFromNow + " DAY)") +
+                        " WHERE id = ?", startDaysAgo, bytes(challengeId));
+        jdbcTemplate.update("UPDATE challenge_members SET joined_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 DAY)," +
+                " setup_status = 'READY', target_days = 0 WHERE challenge_id = ? AND user_id = ?", bytes(challengeId), bytes(me.id()));
+        return challengeId;
+    }
+
     // ===== 헬퍼 =====
 
     /** 3일 전 시작한 수동·빈도형 방. 주기 필드는 셋업이 채우는 모양 그대로 둔다. */
@@ -131,6 +267,12 @@ class TargetDayAgreementIT extends ChallengeApiSupport {
         return jdbcTemplate.queryForObject(
                 "SELECT id FROM challenge_members WHERE challenge_id=? AND user_id=?",
                 (rs, i) -> uuidOf(rs.getBytes(1)), bytes(challengeId), bytes(me.id()));
+    }
+
+    private int failDays(UUID challengeId, Member me) {
+        return jdbcTemplate.queryForObject(
+                "SELECT fail_days FROM challenge_members WHERE challenge_id=? AND user_id=?",
+                Integer.class, bytes(challengeId), bytes(me.id()));
     }
 
     private int periodCompleted(UUID challengeId, Member me) {

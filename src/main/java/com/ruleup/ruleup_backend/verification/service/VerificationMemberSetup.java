@@ -1,6 +1,7 @@
 package com.ruleup.ruleup_backend.verification.service;
 
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
+import com.ruleup.ruleup_backend.challenge.domain.ChallengeCycle;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.verification.domain.Frequency;
 import com.ruleup.ruleup_backend.common.verification.PeriodUnit;
@@ -8,16 +9,19 @@ import com.ruleup.ruleup_backend.verification.domain.VerificationConfig;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 
 /**
  * 멤버 진행률 비정규화 초기 셋업(§4.2). 멤버가 활성화되면(또는 최초 sync 시) 챌린지 config로 1회 계산.
- *  - FIXED_DAYS: targetDays = 기간 내 대상 요일 수.
- *  - FREQUENCY : 주기 경계(시작일 기준 롤링) + 필요 완료 횟수(중간 주기=N, 마지막 부분 주기=ceil(N×남은/주기)).
+ *  - FIXED_DAYS: targetDays = 판정 구간(시작일 또는 진행 중 입장이면 가입 다음 날 ~ 종료일) 내 대상 요일 수.
+ *  - FREQUENCY : 주기 경계(시작일 기준 롤링) + 필요 완료 횟수(온전한 주기=N, 잘린 주기=ceil(N×겹친 날/주기)).
  */
 @Component
 public class VerificationMemberSetup {
+
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     public void apply(ChallengeMember member, Challenge challenge, VerificationConfig config) {
         if (config != null && config.isFrequency() && config.frequency() != null) {
@@ -27,10 +31,19 @@ public class VerificationMemberSetup {
         }
     }
 
+    /**
+     * 이 멤버의 판정 시작일. 진행 중에 들어온 멤버는 가입 다음 날부터 판정되므로 그 전 날짜를 대상일에
+     * 넣으면 성공률의 분모가 부풀어 통계가 실제보다 낮게 나온다(QA JOIN-14).
+     */
+    private static LocalDate judgeFrom(ChallengeMember member, Challenge challenge) {
+        if (member.participationStart() == null) return challenge.getStartDate();
+        return ChallengeCycle.judgeFrom(challenge.getStartDate(), LocalDate.ofInstant(member.participationStart(), KST));
+    }
+
     private void applyFixedDays(ChallengeMember member, Challenge challenge) {
         List<String> repeat = challenge.getRepeatDays();
         int target = 0;
-        for (LocalDate d = challenge.getStartDate(); !d.isAfter(challenge.getEndDate() == null ? challenge.getStartDate().plusDays(6) : challenge.getEndDate()); d = d.plusDays(1)) {
+        for (LocalDate d = judgeFrom(member, challenge); !d.isAfter(challenge.getEndDate() == null ? challenge.getStartDate().plusDays(6) : challenge.getEndDate()); d = d.plusDays(1)) {
             if (repeat != null && repeat.contains(WeekdayCodes.code(d.getDayOfWeek()))) target++;
         }
         member.setupFixedDays(Math.max(target, 1));   // 최소 1 (재셋업 루프 방지)
@@ -40,17 +53,29 @@ public class VerificationMemberSetup {
         int n = f.count();
         int periodDays = (f.unit() == PeriodUnit.WEEK) ? 7 : 30;
         LocalDate start = challenge.getStartDate();
-        LocalDate end = challenge.getEndDate() == null ? start.plusDays(periodDays - 1L) : challenge.getEndDate();
-        long totalDays = ChronoUnit.DAYS.between(start, end) + 1;
+        // 주기마다 판정 구간과 겹치는 날만큼 필요 횟수를 준다 — 온전한 주기는 N, 잘린 주기(진행 중 입장의
+        // 첫 주기·마지막 부분 주기)는 ceil(N×겹친 날/주기).
+        LocalDate from = judgeFrom(member, challenge);
+        // 종료일 없는 방은 판정 시작일이 든 주기까지만 잡고 이후는 롤오버가 한 주기씩 늘린다. 첫 주기로
+        // 고정하면 늦게 들어온 멤버의 현재 주기가 가입 전 주기가 되고, 롤오버가 따라잡을 때마다 분모에
+        // N 을 더해 진행률이 무너진다(리뷰 지적 — 20일째 방에 어제 가입하면 target_days 15).
+        LocalDate end = challenge.getEndDate() != null ? challenge.getEndDate()
+                : start.plusDays((Math.max(ChronoUnit.DAYS.between(start, from), 0) / periodDays + 1) * periodDays - 1);
+        int targetCompletions = 0;
+        LocalDate curStart = null, curEnd = null;
+        for (LocalDate p = start; !p.isAfter(end); p = p.plusDays(periodDays)) {
+            LocalDate pEnd = p.plusDays(periodDays - 1L).isAfter(end) ? end : p.plusDays(periodDays - 1L);
+            targetCompletions += VerificationTargetDays.periodNeed(n, periodDays, p, pEnd, from);
+            // 현재 주기는 판정 시작일이 든 주기다 — 챌린지 첫 주기로 두면 롤오버가 가입 전 주기들을
+            // 미달로 따라잡아 실패를 쌓는다(리뷰 지적, QA JOIN-14).
+            if (curStart == null && !pEnd.isBefore(from)) { curStart = p; curEnd = pEnd; }
+        }
+        if (curStart == null) {   // 판정 구간이 남지 않았다 — 마지막 주기에 둔다(롤오버가 정산할 몫은 0)
+            long last = ChronoUnit.DAYS.between(start, end) / periodDays;
+            curStart = start.plusDays(last * periodDays);
+            curEnd = end;
+        }
 
-        int fullPeriods = (int) (totalDays / periodDays);
-        int remainder = (int) (totalDays % periodDays);
-        int lastPartial = (remainder > 0) ? (int) Math.ceil((double) n * remainder / periodDays) : 0;
-        int targetCompletions = n * fullPeriods + lastPartial;
-
-        LocalDate curEnd = start.plusDays(periodDays - 1L);
-        if (curEnd.isAfter(end)) curEnd = end;
-
-        member.setupFrequency(f.unit(), n, start, curEnd, Math.max(targetCompletions, 1));
+        member.setupFrequency(f.unit(), n, curStart, curEnd, Math.max(targetCompletions, 1));
     }
 }

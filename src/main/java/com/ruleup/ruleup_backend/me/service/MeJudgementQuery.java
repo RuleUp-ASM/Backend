@@ -58,7 +58,15 @@ public class MeJudgementQuery {
                 r.appealClosesAt(),r.appealed(),r.title(),r.category(),missing.getOrDefault(r.challengeId(),Polarity.ACHIEVEMENT))).toList();
     }
 
-    private static Instant instant(ResultSet rs,int index) throws SQLException { var at=rs.getTimestamp(index);return at==null ? null : at.toInstant(); }
+    /**
+     * DATETIME → Instant. 이 컬럼들은 JPA 가 <b>UTC 벽시계</b>로 쓴다. {@code getTimestamp} 는 접속 시간대로
+     * 해석해 접속이 KST 인 환경에서 9시간 이른 시각이 되고, 캘린더가 이의 마감(D+2 00:00 KST)을
+     * D+1 15:00 으로 보고 접수 API 와 다르게 WINDOW_CLOSED 를 냈다(QA APL-05). 벽시계를 그대로 UTC 로 읽는다.
+     */
+    private static Instant instant(ResultSet rs,int index) throws SQLException {
+        var at=rs.getObject(index,java.time.LocalDateTime.class);
+        return at==null ? null : at.toInstant(java.time.ZoneOffset.UTC);
+    }
     static byte[] bytes(UUID id) { return ByteBuffer.allocate(16).putLong(id.getMostSignificantBits()).putLong(id.getLeastSignificantBits()).array(); }
     private static UUID uuid(byte[] bytes) { if(bytes==null)return null;var b=ByteBuffer.wrap(bytes);return new UUID(b.getLong(),b.getLong()); }
 }

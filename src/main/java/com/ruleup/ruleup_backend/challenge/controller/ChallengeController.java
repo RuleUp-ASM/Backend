@@ -144,8 +144,9 @@ public class ChallengeController {
     }
 
     @Operation(summary = "템플릿 복제해서 만들기",
-            description = "공개 그룹 방만 복제 가능(비공개·솔로는 403). 원본 설정을 프리필한 초안을 발급하고 "
-                    + "확인 화면·생성 API 를 그대로 재사용한다. 시작일은 생성일+1, mode·정원·티어는 생성 기본값으로 리셋, "
+            description = "볼 수 있는 방이면 복제 가능 — 공개 그룹은 누구나, 비공개·솔로는 방장·참여자만(그 외 403). "
+                    + "원본 설정을 프리필한 초안을 발급하고 확인 화면·생성 API 를 그대로 재사용한다. "
+                    + "시작일은 생성일+1, mode·공개 범위·정원은 그룹·공개·30, 최소 티어는 내 표시 티어로 리셋, "
                     + "이미지는 복사하지 않는다. 출처(origin=CLONE)는 서버가 draft 행에 기록한다.")
     @PostMapping("/{challengeId}/clone")
     public ApiResponse<CloneResponse> clone(@AuthenticationPrincipal String userId,

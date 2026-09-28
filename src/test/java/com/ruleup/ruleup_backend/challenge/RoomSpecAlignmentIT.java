@@ -73,6 +73,11 @@ class RoomSpecAlignmentIT extends ChallengeApiSupport {
         var response=getAuth("/api/v1/users/me/sanctions",owner.token());
         assertThat(response.getResponse().getStatus()).isEqualTo(200);
         assertThat((String)read(response,"$.data.auto[0].reasonCode")).isEqualTo("CHEAT_DETECTED");
+        // 앱은 sanctionId 없는 항목을 버린다 — 강퇴 기록 id 와 유형이 함께 내려가야 목록에 보인다
+        assertThat((String)read(response,"$.data.auto[0].type")).isEqualTo("CHALLENGE_KICK");
+        byte[] kickId=jdbc.queryForObject("SELECT id FROM challenge_kicks WHERE challenge_id=?",byte[].class,bytes(id));
+        java.nio.ByteBuffer b=java.nio.ByteBuffer.wrap(kickId);
+        assertThat((String)read(response,"$.data.auto[0].sanctionId")).isEqualTo(new UUID(b.getLong(),b.getLong()).toString());
     }
 
     @Test void leavingRemovesOnlyTheDepartingContributionFromTheDailySnapshot() throws Exception {

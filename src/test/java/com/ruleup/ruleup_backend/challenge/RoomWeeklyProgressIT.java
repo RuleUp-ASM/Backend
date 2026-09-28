@@ -152,9 +152,17 @@ class RoomWeeklyProgressIT extends ChallengeApiSupport {
                 bytes(challengeId), bytes(me.id()));
     }
 
+    /** 오늘 판정 행의 상태 — 방 홈은 멤버 행 캐시가 아니라 오늘 판정 행을 읽는다(QA VER-13). */
     private void setTodayStatus(UUID challengeId, Member me, String status) {
-        jdbcTemplate.update("UPDATE challenge_members SET today_status=? WHERE challenge_id=? AND user_id=?",
-                status, bytes(challengeId), bytes(me.id()));
+        UUID memberId = jdbcTemplate.queryForObject(
+                "SELECT id FROM challenge_members WHERE challenge_id=? AND user_id=?",
+                (rs, i) -> uuidOf(rs.getBytes(1)), bytes(challengeId), bytes(me.id()));
+        jdbcTemplate.update("INSERT INTO VerificationDaily (id, challengeMemberId, challengeId, userId, targetDate, status) " +
+                        "VALUES (?, ?, ?, ?, DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), ?) " +
+                        "ON DUPLICATE KEY UPDATE status = VALUES(status)",
+                bytes(UUID.randomUUID()), bytes(memberId), bytes(challengeId), bytes(me.id()), status);
+        // 캐시는 반대 값으로 둔다 — 방 홈이 캐시를 읽으면 드러난다.
+        jdbcTemplate.update("UPDATE challenge_members SET today_status='NOT_REQUIRED' WHERE id=?", bytes(memberId));
     }
 
     private void insertSuccess(UUID challengeId, Member me, int daysAgo) {

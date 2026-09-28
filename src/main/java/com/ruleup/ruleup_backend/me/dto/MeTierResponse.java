@@ -56,7 +56,7 @@ public record MeTierResponse(
             @Schema(description = "변동일 (KST)", example = "2026-07-21") String date,
             @Schema(description = """
                     CYCLE_SUCCESS / CYCLE_FAIL / LEAVE / KICK_FAIL / KICK_PERMISSION /
-                    CHEAT / APPEAL_RESTORE""", example = "CYCLE_SUCCESS") String reason,
+                    CHEAT / APPEAL_RESTORE. 원장 사유를 서버가 모르면 UNKNOWN — 사유 없이 변동폭만 그린다.""", example = "CYCLE_SUCCESS") String reason,
             @Schema(description = "변동을 일으킨 챌린지. 계정 단위 변동이면 null") String challengeId,
             @Schema(description = """
                     챌린지명 — 화면이 「아침 6:30 기상 · 사이클 성공 +8」로 그린다.

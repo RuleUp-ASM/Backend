@@ -99,6 +99,20 @@ class MeTierLedgerGuardIT extends ChallengeApiSupport {
         assertThat(status("/api/v1/me/tier/changes", me)).isEqualTo(200);
     }
 
+    @Test
+    @DisplayName("원장 사유가 코드가 모르는 값이어도 티어 API 3개가 500 이 되지 않는다 — 그 줄은 UNKNOWN 으로 남는다")
+    void unknown_ledger_reason_is_not_fatal() throws Exception {
+        Member me = member("guard-unknown-reason");
+        insertRow(me.id(), "DAILY_SUCCESS", null, 8, 18);
+        insertRow(me.id(), "QA_UNKNOWN_REASON", null, -3, 15);   // enum 에 없는 사유(QA TIER-06)
+
+        assertThat(status("/api/v1/me/tier", me)).isEqualTo(200);
+        assertThat(reasons("/api/v1/me/tier", me)).containsExactlyInAnyOrder("UNKNOWN", "CYCLE_SUCCESS");
+        assertThat(status("/api/v1/me/tier/changes", me)).isEqualTo(200);
+        assertThat(reasons("/api/v1/me/tier/changes", me)).containsExactlyInAnyOrder("UNKNOWN", "CYCLE_SUCCESS");
+        assertThat(status("/api/v1/me/tier/history", me)).isEqualTo(200);
+    }
+
     // ===== 도구 =====
 
     private int status(String url, Member me) throws Exception {

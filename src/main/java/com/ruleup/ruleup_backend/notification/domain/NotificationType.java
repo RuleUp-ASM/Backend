@@ -9,9 +9,10 @@ import java.util.UUID;
 import static com.ruleup.ruleup_backend.notification.domain.NotificationParams.*;
 
 /**
- * 알림 타입 레지스트리 <b>24종</b> — 백엔드 테크 스펙 5절, 공통 8절.
+ * 알림 타입 레지스트리 <b>25종</b> — 백엔드 테크 스펙 5절, 공통 8절.
  *
- * <p>2026-09-19 {@link #VERIFICATION_FAIL_EXPECTED}(이의 필요) 가 추가돼 24종이다(QA NOTI-16).
+ * <p>2026-09-19 {@link #VERIFICATION_FAIL_EXPECTED}(이의 필요) 가 추가돼 24종, 2026-09-28
+ * {@link #INVITATION_RECEIVED}(설치 후 가입한 사람이 받은 초대, QA NAV-06) 가 추가돼 25종이다.
  *
  * <h4>23종 — 문서와 맞다</h4>
  * 한동안 코드가 문서보다 한 종 앞서 있었다. {@code CS_ANSWERED} 가 앱 운영 정책 §5.5 에만 있고
@@ -46,7 +47,7 @@ import static com.ruleup.ruleup_backend.notification.domain.NotificationParams.*
  */
 public enum NotificationType {
 
-    // ===== 계정 그룹 12종 =====
+    // ===== 계정 그룹 13종 =====
 
     /** 강퇴 확정. 이미 나간 방으로 보낼 수 없어 제재 이력으로 보낸다. */
     CHALLENGE_KICKED(NotificationToggleGroup.ACCOUNT, "ruleup://me/sanctions",
@@ -121,6 +122,14 @@ public enum NotificationType {
      * 어디로 보내도 로그인 벽에 막힌다. 탭하면 클라이언트가 알림함으로 폴백한다.
      */
     DEVICE_LOGGED_OUT(NotificationToggleGroup.ACCOUNT, null,
+            new String[]{EVENT_KEY}),
+
+    /**
+     * 받은 초대 — 앱이 없던 사람이 초대 링크로 설치·가입하면 그 초대를 알림함에 남긴다(09-28 결정, QA NAV-06).
+     * 가입 화면 흐름은 일반 가입과 같으므로, 받은 초대로 돌아갈 자리가 알림함뿐이다.
+     * 딥링크는 발행부가 받은 초대 링크(챌린지·감시자·친구)로 재정의한다. 가입당 한 번이다.
+     */
+    INVITATION_RECEIVED(NotificationToggleGroup.ACCOUNT, "ruleup://home",
             new String[]{EVENT_KEY}),
 
     /**

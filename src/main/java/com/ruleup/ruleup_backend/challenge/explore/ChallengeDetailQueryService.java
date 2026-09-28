@@ -114,8 +114,8 @@ public class ChallengeDetailQueryService {
                 (blockReason != null) ? blockReason.name() : null,
                 (blockReason == JoinBlockReason.REJOIN_COOLDOWN)
                         ? rejoinPolicy.availableAt(challengeId, viewerId, myMembership).toString() : null,
-                ChallengeCycle.startsNextCycle(c.getStartDate(), today) ? "NEXT_CYCLE" : "IMMEDIATE",
-                cloneable(c),
+                ChallengeCycle.startsNextDay(c.getStartDate(), today) ? "NEXT_DAY" : "IMMEDIATE",
+                ChallengeCloneService.cloneable(c, isOwner || isActiveMember),
                 // 방장은 멤버 행과 무관하게 참여 중이다(솔로 방·시작 전 방도 마찬가지).
                 isOwner || isActiveMember,
                 myRole(c, viewerId, myMembership, isOwner, isActiveMember),
@@ -130,11 +130,6 @@ public class ChallengeDetailQueryService {
         boolean solo = c.getParticipationType() != ParticipationType.GROUP;
         boolean privateRoom = "PRIVATE".equals(c.getVisibility());
         if (solo || privateRoom) throw new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND);
-    }
-
-    /** 복제 가능 여부 — 공개 그룹만. 비공개·솔로는 남의 설정을 가져갈 대상이 아니다. */
-    private boolean cloneable(Challenge c) {
-        return c.getParticipationType() == ParticipationType.GROUP && "PUBLIC".equals(c.getVisibility());
     }
 
     private JoinBlockReason blockReason(Challenge c, UUID viewerId, ChallengeMember myMembership,
