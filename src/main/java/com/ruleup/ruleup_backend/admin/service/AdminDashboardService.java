@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.admin.service;
 
+import com.ruleup.ruleup_backend.common.DbTime;
 import com.ruleup.ruleup_backend.admin.domain.AdminAction;
 import com.ruleup.ruleup_backend.admin.dto.AdminDtos;
 import com.ruleup.ruleup_backend.admin.repository.AnomalySignalRepository;
@@ -14,7 +15,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -197,7 +197,7 @@ public class AdminDashboardService {
         return value == null ? 0 : value;
     }
 
-    private Timestamp ts(Instant at) {
-        return Timestamp.from(at);
+    private java.time.LocalDateTime ts(Instant at) {
+        return DbTime.utc(at);
     }
 }

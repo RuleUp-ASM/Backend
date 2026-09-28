@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.verification.service;
 
+import com.ruleup.ruleup_backend.common.DbTime;
 import com.ruleup.ruleup_backend.common.UuidGenerator;
 import com.ruleup.ruleup_backend.verification.domain.SignalExclusion;
 import com.ruleup.ruleup_backend.verification.domain.VerificationMethod;
@@ -13,7 +14,6 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.nio.ByteBuffer;
 import java.sql.Date;
-import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -102,7 +102,7 @@ public class AnomalyEventRecorder {
                     (verificationId != null) ? bytes(verificationId) : null,
                     eventType, signalType, anomalyType, signalCount,
                     (features != null && !features.isEmpty()) ? JSON.writeValueAsString(features) : null,
-                    Timestamp.from(observedAt));
+                    DbTime.utc(observedAt));
         } catch (RuntimeException e) {
             // 판정은 이미 끝났다. 탐지 입력 한 줄 때문에 되돌리지 않는다.
             log.warn("이상탐지 입력 적재 실패 — 판정은 유지한다. table={} err={}",

@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.report;
 
+import com.ruleup.ruleup_backend.common.DbTime;
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.common.UuidGenerator;
@@ -223,7 +224,7 @@ public class BlockService {
         List<Blocked> users = jdbc.query(
                 "SELECT target_id, blocked_at FROM user_blocks WHERE blocker_id = ? AND target_type = 'USER' "
                         + "ORDER BY blocked_at DESC",
-                (rs, row) -> new Blocked(uuid(rs.getBytes(1)), rs.getTimestamp(2).toInstant()),
+                (rs, row) -> new Blocked(uuid(rs.getBytes(1)), DbTime.read(rs, 2)),
                 bytes(blockerId));
 
         Map<UUID, User> userMap = userRepository.findAllById(users.stream().map(Blocked::id).toList())
@@ -242,7 +243,7 @@ public class BlockService {
                         + "FROM user_blocks b WHERE b.blocker_id = ? AND b.target_type = 'CHALLENGE' "
                         + "ORDER BY b.blocked_at DESC",
                 (rs, row) -> new ReportDtos.ChallengeItem(uuid(rs.getBytes(1)).toString(),
-                        com.ruleup.ruleup_backend.challenge.view.ChallengeView.REPORTED_TITLE, rs.getBoolean(3), rs.getTimestamp(2).toInstant().toString()),
+                        com.ruleup.ruleup_backend.challenge.view.ChallengeView.REPORTED_TITLE, rs.getBoolean(3), DbTime.read(rs, 2).toString()),
                 bytes(blockerId));
 
         return new ReportDtos.BlockListResponse(userItems, challengeItems);

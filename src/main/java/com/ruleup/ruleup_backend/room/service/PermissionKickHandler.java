@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.room.service;
 
+import com.ruleup.ruleup_backend.common.DbTime;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.common.outbox.OutboxHandler;
 import com.ruleup.ruleup_backend.common.outbox.OutboxService;
@@ -26,7 +27,7 @@ public class PermissionKickHandler implements OutboxHandler {
         if (challenges.findByIdForUpdate(event.challengeId()).isEmpty()) return;
         var firstObserved = jdbc.query("SELECT first_observed_at FROM verification_permission_waits WHERE challenge_id=? AND user_id=? " +
                 "AND signal_type=? AND source_event_id=? AND resolved_at IS NULL FOR UPDATE",
-                rs -> rs.next() ? rs.getTimestamp(1).toInstant() : null,
+                rs -> rs.next() ? DbTime.read(rs, 1) : null,
                 bytes(event.challengeId()),bytes(event.userId()),event.method(),bytes(event.sourceEventId()));
         if (firstObserved == null) return;
         if (LocalDate.now(ZoneId.of("Asia/Seoul")).isBefore(event.waitingFromOn().plusDays(14)))

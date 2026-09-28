@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.room.service;
 
+import com.ruleup.ruleup_backend.common.DbTime;
 import com.ruleup.ruleup_backend.challenge.domain.RejoinBackoff;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
@@ -20,7 +21,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.json.JsonMapper;
 
-import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -80,10 +80,10 @@ public class AutomaticKickService {
         snapshot.put("effectiveAt", effectiveAt == null ? null : effectiveAt.toString());
         jdbc.update("INSERT INTO challenge_kicks(id,challenge_id,user_id,reason,source_event_id,evidence,is_permanent,kicked_at,rejoin_available_at) " +
                 "VALUES(?,?,?,?,?,?,?,?,?)", bytes(UuidGenerator.generate()), bytes(challengeId), bytes(userId), reason.name(),
-                bytes(sourceEventId), JSON.writeValueAsString(snapshot), permanent, Timestamp.from(now),
-                availableAt == null ? null : Timestamp.from(availableAt));
+                bytes(sourceEventId), JSON.writeValueAsString(snapshot), permanent, DbTime.utc(now),
+                availableAt == null ? null : DbTime.utc(availableAt));
         if (!permanent) jdbc.update("INSERT INTO challenge_rejoin_backoffs VALUES(?,?,?,?) ON DUPLICATE KEY UPDATE " +
-                "kick_count=VALUES(kick_count),available_at=VALUES(available_at)", bytes(challengeId), bytes(userId), count + 1, Timestamp.from(availableAt));
+                "kick_count=VALUES(kick_count),available_at=VALUES(available_at)", bytes(challengeId), bytes(userId), count + 1, DbTime.utc(availableAt));
 
         if (member != null && member.isActive() && challenge != null) {
             if (challenge.isOwner(userId)) challenge.convertToBotOwner(now);
@@ -122,7 +122,7 @@ public class AutomaticKickService {
         return jdbc.query("SELECT COALESCE("
                         + "(SELECT MAX(joined_at) FROM challenge_join_events WHERE challenge_id=? AND user_id=?),"
                         + "(SELECT joined_at FROM challenge_members WHERE challenge_id=? AND user_id=?))",
-                rs -> rs.next() && rs.getTimestamp(1) != null ? rs.getTimestamp(1).toInstant() : Instant.MIN,
+                rs -> { Instant at = rs.next() ? DbTime.read(rs, 1) : null; return at != null ? at : Instant.MIN; },
                 bytes(challengeId), bytes(userId), bytes(challengeId), bytes(userId));
     }
 }

@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.room.service;
 
+import com.ruleup.ruleup_backend.common.DbTime;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -19,7 +20,7 @@ public class ChallengeRejoinPolicy {
 
     public Instant availableAt(UUID challenge, UUID user) {
         return jdbc.query("SELECT available_at FROM challenge_rejoin_backoffs WHERE challenge_id=? AND user_id=?",
-                rs -> rs.next() ? rs.getTimestamp(1).toInstant() : null, bytes(challenge), bytes(user));
+                rs -> rs.next() ? DbTime.read(rs, 1) : null, bytes(challenge), bytes(user));
     }
 
     public Instant availableAt(UUID challenge, UUID user, com.ruleup.ruleup_backend.challenge.domain.ChallengeMember member) {
@@ -30,7 +31,7 @@ public class ChallengeRejoinPolicy {
 
     public void voluntaryLeave(UUID challenge, UUID user, Instant availableAt) {
         jdbc.update("INSERT INTO challenge_rejoin_backoffs VALUES(?,?,0,?) ON DUPLICATE KEY UPDATE available_at=VALUES(available_at)",
-                bytes(challenge), bytes(user), java.sql.Timestamp.from(availableAt));
+                bytes(challenge), bytes(user), DbTime.utc(availableAt));
     }
 
     static byte[] bytes(UUID id) {

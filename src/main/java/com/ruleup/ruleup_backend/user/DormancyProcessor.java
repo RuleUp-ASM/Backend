@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.user;
 
+import com.ruleup.ruleup_backend.common.DbTime;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeMemberService;
 import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.service.NotificationPublisher;
@@ -11,7 +12,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.ByteBuffer;
-import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -75,7 +75,7 @@ public class DormancyProcessor {
 
     private boolean noticeMatured(UUID id, LocalDate last, String stage, int leadDays) {
         return jdbc.queryForObject("SELECT COUNT(*) FROM notifications WHERE dedup_key=? AND created_at<=?",
-                Integer.class, event(id, last, stage).dedupKey(), Timestamp.from(Instant.now().minus(leadDays, ChronoUnit.DAYS))) > 0;
+                Integer.class, event(id, last, stage).dedupKey(), DbTime.utc(Instant.now().minus(leadDays, ChronoUnit.DAYS))) > 0;
     }
 
     private static byte[] bytes(UUID id) {

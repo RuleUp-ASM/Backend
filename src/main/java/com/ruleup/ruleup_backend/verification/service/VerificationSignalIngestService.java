@@ -1,5 +1,6 @@
 package com.ruleup.ruleup_backend.verification.service;
 
+import com.ruleup.ruleup_backend.common.DbTime;
 import com.ruleup.ruleup_backend.common.UuidGenerator;
 import com.ruleup.ruleup_backend.verification.domain.SignalExclusionReason;
 import com.ruleup.ruleup_backend.verification.evaluator.TimeWindows;
@@ -18,7 +19,6 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.sql.Date;
-import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -273,8 +273,8 @@ public class VerificationSignalIngestService {
         if (resent.isEmpty()) return;
         List<Object[]> args = resent.stream().map(c -> new Object[]{
                 deviceId,
-                (c.occurredAt() != null) ? Timestamp.from(c.occurredAt()) : null,
-                Timestamp.from(receivedAt),
+                (c.occurredAt() != null) ? DbTime.utc(c.occurredAt()) : null,
+                DbTime.utc(receivedAt),
                 JSON.writeValueAsString(c.signal()),
                 Date.valueOf(observedDate),
                 bytes(userId),
@@ -299,11 +299,11 @@ public class VerificationSignalIngestService {
             List<String> chunk = dedupKeys.subList(from, Math.min(from + INSERT_BATCH, dedupKeys.size()));
             String placeholders = String.join(",", Collections.nCopies(chunk.size(), "?"));
             List<Object> args = new ArrayList<>();
-            args.add(Timestamp.from(receivedAt));
+            args.add(DbTime.utc(receivedAt));
             args.add(Date.valueOf(observedDate));
             args.add(bytes(userId));
             args.addAll(chunk);
-            args.add(Timestamp.from(receivedAt));
+            args.add(DbTime.utc(receivedAt));
             jdbc.update("UPDATE " + domain.table() + " SET receivedAt = ?"
                             + " WHERE observedDate = ? AND userId = ? AND dedupKey IN (" + placeholders + ")"
                             + " AND receivedAt < ?",
@@ -399,14 +399,14 @@ public class VerificationSignalIngestService {
                 deviceId,
                 (c.signal().type() != null) ? c.signal().type() : "UNKNOWN",
                 (c.excludeReason() != null) ? c.excludeReason().name() : null,
-                (c.occurredAt() != null) ? Timestamp.from(c.occurredAt()) : null,
-                Timestamp.from(receivedAt),
+                (c.occurredAt() != null) ? DbTime.utc(c.occurredAt()) : null,
+                DbTime.utc(receivedAt),
                 JSON.writeValueAsString(c.signal()),
                 c.dedupKey()};
         if (domain != SignalDomain.LOCATION) return base;
 
         Object[] withPurge = java.util.Arrays.copyOf(base, base.length + 1);
-        withPurge[base.length] = Timestamp.from(locationPurge.purgeAfterFor(observedDate));
+        withPurge[base.length] = DbTime.utc(locationPurge.purgeAfterFor(observedDate));
         return withPurge;
     }
 
