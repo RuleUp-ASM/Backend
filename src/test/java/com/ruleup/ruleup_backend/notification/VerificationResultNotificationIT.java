@@ -159,8 +159,8 @@ class VerificationResultNotificationIT extends VerificationApiSupport {
                             "(id, challengeMemberId, challengeId, userId, targetDate, status, method, failureReason, " +
                             " finalizeAfter, appealClosesAt) VALUES (?, ?, ?, ?, ?, 'PENDING', 'GPS_PRESENCE', ?, ?, ?)",
                     bytes(id), bytes(memberId), bytes(challengeId), bytes(me.id()), yesterday, failureReason,
-                    java.sql.Timestamp.from(com.ruleup.ruleup_backend.verification.domain.VerificationDeadlines.finalizeAfter(yesterday)),
-                    java.sql.Timestamp.from(com.ruleup.ruleup_backend.verification.domain.VerificationDeadlines.appealClosesAt(yesterday)));
+                    com.ruleup.ruleup_backend.common.DbTime.utc(com.ruleup.ruleup_backend.verification.domain.VerificationDeadlines.finalizeAfter(yesterday)),
+                    com.ruleup.ruleup_backend.common.DbTime.utc(com.ruleup.ruleup_backend.verification.domain.VerificationDeadlines.appealClosesAt(yesterday)));
             return id;
         }
 

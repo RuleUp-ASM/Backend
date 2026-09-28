@@ -44,7 +44,10 @@ public class TestcontainersConfiguration {
 
     /** JVM 당 하나. 정적 초기화에서 띄워, 어느 컨텍스트가 먼저 오든 이미 준비돼 있다. */
     private static final MySQLContainer<?> MYSQL =
-            new MySQLContainer<>(DockerImageName.parse("mysql:8.4"));
+            new MySQLContainer<>(DockerImageName.parse("mysql:8.4"))
+                    // 운영(stg·prod)은 serverTimezone=Asia/Seoul 로 접속한다. 테스트도 같은 접속으로 돌려야
+                    // JDBC 직접 읽기·쓰기와 JPA(UTC 벽시계)가 어긋나는 결함이 테스트에서 드러난다.
+                    .withUrlParam("serverTimezone", System.getProperty("ruleup.test.db-timezone", "Asia/Seoul"));
 
     static {
         MYSQL.start();
