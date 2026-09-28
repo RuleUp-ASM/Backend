@@ -36,8 +36,8 @@ public class VerificationMemberSetup {
      * 넣으면 성공률의 분모가 부풀어 통계가 실제보다 낮게 나온다(QA JOIN-14).
      */
     private static LocalDate judgeFrom(ChallengeMember member, Challenge challenge) {
-        if (member.getJoinedAt() == null) return challenge.getStartDate();
-        return ChallengeCycle.judgeFrom(challenge.getStartDate(), LocalDate.ofInstant(member.getJoinedAt(), KST));
+        if (member.participationStart() == null) return challenge.getStartDate();
+        return ChallengeCycle.judgeFrom(challenge.getStartDate(), LocalDate.ofInstant(member.participationStart(), KST));
     }
 
     private void applyFixedDays(ChallengeMember member, Challenge challenge) {

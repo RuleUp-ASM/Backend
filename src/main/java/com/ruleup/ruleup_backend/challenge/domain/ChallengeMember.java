@@ -72,6 +72,10 @@ public class ChallengeMember extends AssignedIdEntity {
     @Column(name = "joined_at", nullable = false, updatable = false)
     private Instant joinedAt;
 
+    /** 재입장 시각. null 이면 {@link #joinedAt} 이 이번 참여의 시작이다. */
+    @Column(name = "participation_started_at")
+    private Instant participationStartedAt;
+
     // ===== 진행률 비정규화 (인증 스펙 §4.2) — 인증 sync·확정 배치가 유지 =====
     @Enumerated(EnumType.STRING)
     @Column(name = "schedule_type", nullable = false)
@@ -265,8 +269,18 @@ public class ChallengeMember extends AssignedIdEntity {
      *
      * <p>{@code joinedAt} 은 건드리지 않는다 — 그건 <b>처음</b> 들어온 날이다. 이번 재입장이라는
      * 사건은 {@code challenge_join_events} 에 한 줄로 쌓이며, 인기 점수는 그쪽을 센다.
+     * 판정 경계는 {@link #participationStart()} 로 이번 참여의 시작을 본다.
      */
-    public void rejoin() {
+    /**
+     * 이번 참여의 시작 시각 — 판정 시작일({@code ChallengeCycle.judgeFrom})의 기준이다.
+     * 재입장했으면 재입장 시각, 아니면 처음 들어온 시각.
+     */
+    public Instant participationStart() {
+        return participationStartedAt != null ? participationStartedAt : joinedAt;
+    }
+
+    public void rejoin(Instant at) {
+        this.participationStartedAt = at;
         this.status = MemberStatus.ACTIVE;
         this.role = MemberRole.MEMBER;
         this.leftType = null;

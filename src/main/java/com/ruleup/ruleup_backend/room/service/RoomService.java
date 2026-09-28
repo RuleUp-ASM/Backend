@@ -91,7 +91,7 @@ public class RoomService {
                         * ChallengeCycle.CYCLE_DAYS)
                 : start;
         LocalDate weekEnd = weekStart.plusDays(ChallengeCycle.CYCLE_DAYS - 1L);
-        LocalDate judgeFrom = ChallengeCycle.judgeFrom(start, LocalDate.ofInstant(me.getJoinedAt(), KST));
+        LocalDate judgeFrom = ChallengeCycle.judgeFrom(start, LocalDate.ofInstant(me.participationStart(), KST));
         boolean judging = started
                 && challenge.getStatus() == ChallengeStatus.ACTIVE
                 && !today.isBefore(judgeFrom);

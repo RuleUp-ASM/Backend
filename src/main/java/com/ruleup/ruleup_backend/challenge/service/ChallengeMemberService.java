@@ -150,7 +150,7 @@ public class ChallengeMemberService {
 
         // 즉시 ACTIVE 등록. uq_member 로 동시 INSERT는 1건만 성공, 나머지는 중복으로 변환.
         if (existing != null) {
-            existing.rejoin();
+            existing.rejoin(Instant.now());
             recordJoinEvent(challengeId, userId);
         } else {
             try {

@@ -34,8 +34,8 @@ public final class VerificationTargetDays {
         if (date.isBefore(challenge.getStartDate()) || (challenge.getEndDate() != null && date.isAfter(challenge.getEndDate()))) {
             return Disposition.NOT_TARGET;   // 챌린지 기간 밖
         }
-        if (member != null && member.getJoinedAt() != null && date.isBefore(ChallengeCycle.judgeFrom(
-                challenge.getStartDate(), LocalDate.ofInstant(member.getJoinedAt(), KST)))) {
+        if (member != null && member.participationStart() != null && date.isBefore(ChallengeCycle.judgeFrom(
+                challenge.getStartDate(), LocalDate.ofInstant(member.participationStart(), KST)))) {
             return Disposition.NOT_TARGET;   // 진행 중 입장 — 가입 당일은 판정하지 않는다(QA JOIN-14)
         }
         if (config.isFrequency()) {
