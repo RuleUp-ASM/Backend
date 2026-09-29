@@ -40,8 +40,8 @@ for env in ['prod','stg']:
           ops, (ns,'verification.finalize.failed.count',{}))
     alarm(f'{p}-P1-verification-materialize-failed', '무신호 귀속일 채우기 실패 — 해당 멤버·날짜 판정 행이 열리지 않음.',
           ops, (ns,'verification.materialize.failed.count',{}))
-    alarm(f'{p}-P1-verification-finalize-late', '확정 배치가 03:30 reconciliation 이후까지 밀림.',
-          ops, (ns,'verification.finalize.late.count',{}))
+    # 03:30 이후 확정(finalize-late)은 없앴다 — 확정은 1분 폴링이라 지연은 finalize-overdue 가 잡는다.
+    cw.delete_alarms(AlarmNames=[f'{p}-P1-verification-finalize-late'])
     # --- Outbox
     alarm(f'{p}-P1-outbox-pending-age', 'Outbox 에서 15분 넘게 못 나간 작업이 10분째 있음.',
           ops, (ns,'outbox.pending.oldest_age_seconds.value',{}), stat='Maximum', evals=2, dta=2, threshold=900, op='GreaterThanThreshold')

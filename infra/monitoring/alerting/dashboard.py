@@ -33,8 +33,11 @@ text('## 자동 인증 · 배치 · 처리 대기 작업')
 app=lambda m,s='Sum',**o:[NS,m,{'stat':s,**o}]
 sqs=lambda q,m,s='Maximum':['AWS/SQS',m,'QueueName',q,{'stat':s,'label':f'{q}'}]
 row(('인증 접수 실패(sync 5xx)',[app('verification.sync.failed.count')],None),
-    ('확정 배치: 미확정·실패·지연',[app('verification.finalize.overdue.value','Maximum',label='1시간 넘게 미확정'),app('verification.finalize.failed.count',label='확정 실패'),
-                                    app('verification.materialize.failed.count',label='채우기 실패'),app('verification.finalize.late.count',label='03:30 이후 확정')],None),
+    # 확정 오류 = 건별 확정 실패 + 무신호 귀속일 채우기 실패(채우기가 실패하면 그날 판정 자체가 없어 다른 선에 안 잡힌다).
+    ('확정 배치',[app('verification.finalize.overdue.value','Maximum',label='1시간 넘게 미확정'),
+                 [{'expression':'FILL(ff,0)+FILL(mf,0)','label':'확정 오류','id':'err'}],
+                 app('verification.finalize.failed.count',id='ff',visible=False),app('verification.materialize.failed.count',id='mf',visible=False),
+                 app('verification.finalize.no_signal.count',label='신호 없이 실패',yAxis='right')],None),
     ('Outbox',[app('outbox.pending.oldest_age_seconds.value','Maximum',label='가장 오래된 대기(초)'),app('outbox.dead_lettered.count.value','Maximum',label='포기 누적',yAxis='right')],None),
     ('SQS 가장 오래된 메시지(초)·DLQ',[sqs('ruleup-prod-moderation','ApproximateAgeOfOldestMessage'),sqs('ruleup-prod-notifications','ApproximateAgeOfOldestMessage'),
                                        sqs('ruleup-prod-moderation-dlq','ApproximateNumberOfMessagesVisible')[:-1]+[{'stat':'Maximum','label':'moderation DLQ','yAxis':'right'}],
