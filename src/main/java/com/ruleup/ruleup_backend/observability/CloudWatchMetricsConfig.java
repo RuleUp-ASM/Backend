@@ -42,7 +42,7 @@ public class CloudWatchMetricsConfig {
             "outbox.pending.oldest_age_seconds",       // Outbox 적체 — 가장 오래 못 나간 작업
             "outbox.dead_lettered.count",              // Outbox 재시도 끝에 포기한 작업
             "verification.finalize.overdue",           // 확정 시각이 한참 지났는데 남은 판정
-            "verification.finalize.late",              // 03:30 reconciliation 이후까지 밀린 확정 배치
+            "verification.finalize.no_signal",         // 신호 없이 실패로 확정된 판정
             "verification.finalize.failed",            // 건별 확정 실패
             "verification.materialize.failed",         // 무신호 귀속일 채우기 실패
             "verification.sync.failed",                // 인증 데이터 접수(sync) 서버 오류

@@ -360,6 +360,20 @@ public class VerificationFinalizeService {
         return LocalDate.now(clock.withZone(KST)).minusDays(1L + VerificationDeadlines.GRACE_DAYS);
     }
 
+    /**
+     * 커밋된 확정만 센다. 청크가 롤백되면 같은 건을 건별 격리로 다시 확정하므로, 바로 세면 두 번 세어진다.
+     */
+    private static void countAfterCommit(Runnable count) {
+        if (!org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+            count.run();
+            return;
+        }
+        org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                new org.springframework.transaction.support.TransactionSynchronization() {
+                    @Override public void afterCommit() { count.run(); }
+                });
+    }
+
     /** 실패한 행을 뒤로 민다. 이 UPDATE 마저 실패하면 다음 tick 이 같은 자리에서 다시 시도한다. */
     private void defer(UUID id) {
         metrics.finalizeFailed();
@@ -462,6 +476,9 @@ public class VerificationFinalizeService {
             // 실패 상세는 **확정된 실패에만** 남긴다. 실패 예정은 뒤집힐 수 있는 계산 상태라
             // 행을 만들면 이의로 완료가 된 뒤에도 「실패했다는 기록」이 남는다.
             recordFailureDetail(daily, reasonCode, evidence, now);
+            if ("NO_SIGNAL_RECEIVED".equals(reasonCode) || "PERMISSION_MISSING".equals(reasonCode)) {
+                countAfterCommit(metrics::finalizeNoSignal);
+            }
             confirmedFail = true;
         }
 

@@ -2,6 +2,7 @@ package com.ruleup.ruleup_backend.verification;
 
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
 import com.ruleup.ruleup_backend.verification.service.VerificationFinalizeService;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -42,6 +43,7 @@ class VerificationGraceWindowIT extends VerificationApiSupport {
     @Autowired WebApplicationContext wac;
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired VerificationFinalizeService finalizeService;
+    @Autowired MeterRegistry meterRegistry;
 
     private MockMvc mvc;
 
@@ -121,6 +123,7 @@ class VerificationGraceWindowIT extends VerificationApiSupport {
         LocalDate twoDaysAgo = LocalDate.now(KST).minusDays(2);
         assertThat(statusOn(memberId, twoDaysAgo)).as("행 자체가 없다").isNull();
 
+        double noSignalBefore = meterRegistry.counter("verification.finalize.no_signal").count();
         finalizeService.materializeDueTargets();
         finalizeService.finalizeDue();
 
@@ -128,6 +131,9 @@ class VerificationGraceWindowIT extends VerificationApiSupport {
                 .as("확정되지 않으면 통계에서 통째로 사라진다")
                 .isEqualTo("FAILED");
         assertThat(failureReasonOn(memberId, twoDaysAgo)).isEqualTo("NO_SIGNAL_RECEIVED");
+        assertThat(meterRegistry.counter("verification.finalize.no_signal").count())
+                .as("무신호 실패 확정은 대시보드 지표로 세어진다")
+                .isGreaterThan(noSignalBefore);
     }
 
     @Test

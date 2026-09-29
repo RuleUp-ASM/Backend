@@ -17,9 +17,8 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * 「처리되지 않은 인증」 — 확정 시각이 {@link #OVERDUE_AFTER} 넘게 지났는데 아직 확정되지 않은 판정 수.
  *
- * <p>확정 배치는 1분마다 돈다. {@code verification.finalize.late} 는 배치가 <b>돌았는데 늦은</b> 경우만
- * 세고, {@code finalize.failed} 는 건별 실패만 센다. 배치가 아예 돌지 않으면(락 고착·스케줄러 정지)
- * 둘 다 0 으로 조용하다 — 그 경우를 잡는 게 이 게이지다.
+ * <p>확정 배치는 1분마다 돈다. {@code finalize.failed} 는 건별 실패만 센다. 배치가 아예 돌지 않으면
+ * (락 고착·스케줄러 정지) 그 카운터는 0 으로 조용하다 — 그 경우를 잡는 게 이 게이지다.
  *
  * <p>{@link com.ruleup.ruleup_backend.common.outbox.OutboxMetrics} 처럼 5분마다 미리 세어 두고 게이지는
  * 그 값만 읽는다.
