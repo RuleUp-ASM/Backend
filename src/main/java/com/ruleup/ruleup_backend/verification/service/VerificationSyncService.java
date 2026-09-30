@@ -157,12 +157,14 @@ public class VerificationSyncService {
         // 복구 전송은 레이트리밋 허용치가 다르다. 「구간당 요청 수」를 볼 때 이 값이 분자다 —
         // 세지 않으면 복구가 정상 주기 전송을 밀어내고 있는지 밖에서 알 수 없다.
         if (backlog) metrics.backlogRequest();
-        rateLimiter.check(userId.toString(), backlog);
+        // 봉투·크기 검증이 간격 검사보다 먼저다. 반려될 요청이 슬롯을 먼저 차지하면 고쳐서 곧바로
+        // 다시 보낸 요청이 429 로 튕긴다(QA: 동기화 버튼 → sync 실패).
         validateEnvelope(userId, req);
         List<SyncSignal> signals = (req.signals() != null) ? req.signals() : List.of();
         if (signals.size() > MAX_SIGNALS_PER_SYNC) {
             throw new BusinessException(ErrorCode.SYNC_PAYLOAD_TOO_LARGE);   // 413 — 클라는 분할 재전송
         }
+        rateLimiter.check(userId.toString(), backlog);
         List<String> ignored = signals.stream()
                 .map(SyncSignal::type)
                 .filter(t -> t == null || !KNOWN_SIGNAL_TYPES.contains(t))

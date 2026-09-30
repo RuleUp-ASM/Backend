@@ -4,6 +4,8 @@ import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.verification.config.VerificationProperties;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Instant;
 import java.util.Map;
@@ -38,5 +40,23 @@ public class SyncRateLimiter {
             lastSyncAt.put(userId, prev);   // 거부된 호출은 마지막 시각 갱신 안 함
             throw new BusinessException(ErrorCode.SYNC_TOO_FREQUENT);
         }
+        releaseOnRollback(userId, now, prev);
+    }
+
+    /**
+     * 처리에 실패한 sync 는 간격을 쓰지 않은 것으로 되돌린다. 되돌리지 않으면 500 으로 끝난 요청이
+     * 슬롯을 차지해, 사용자가 곧바로 다시 누른 「동기화」가 429 로 튕긴다 — 실패가 두 번 보인다.
+     * 그 사이 다른 요청이 시각을 갱신했으면 건드리지 않는다.
+     */
+    private void releaseOnRollback(String userId, long stamp, Long prev) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) return;
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                if (status == STATUS_COMMITTED) return;
+                if (prev == null) lastSyncAt.remove(userId, stamp);
+                else lastSyncAt.replace(userId, stamp, prev);
+            }
+        });
     }
 }
