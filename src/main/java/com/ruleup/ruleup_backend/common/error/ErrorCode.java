@@ -213,9 +213,9 @@ public enum ErrorCode {
     INVALID_SETTING_KEY(HttpStatus.BAD_REQUEST, "알림 설정 항목이 올바르지 않습니다."),
 
     // ===== 인증 sync (§3.1) =====
-    SYNC_TOO_FREQUENT(HttpStatus.TOO_MANY_REQUESTS, "sync 요청 간격이 너무 짧습니다."),
-    INVALID_SIGNAL_PAYLOAD(HttpStatus.BAD_REQUEST, "인증 신호 페이로드가 올바르지 않습니다."),
-    SYNC_PAYLOAD_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "sync 누적 일괄 상한을 초과했습니다. 분할 재전송하세요."),
+    SYNC_TOO_FREQUENT(HttpStatus.TOO_MANY_REQUESTS, "방금 기록을 보냈어요. 잠시 후 다시 시도해주세요."),
+    INVALID_SIGNAL_PAYLOAD(HttpStatus.BAD_REQUEST, "기록을 보내지 못했어요. 잠시 후 다시 시도해주세요."),
+    SYNC_PAYLOAD_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "한 번에 보낼 기록이 너무 많아요. 잠시 후 다시 시도해주세요."),
 
     NOT_CHALLENGE_MEMBER(HttpStatus.FORBIDDEN, "챌린지 참여자만 접근할 수 있습니다."),
     ALREADY_VERIFIED(HttpStatus.CONFLICT, "이미 인증된 날짜입니다."),

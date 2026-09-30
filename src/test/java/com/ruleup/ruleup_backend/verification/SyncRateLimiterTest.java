@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -38,7 +39,9 @@ class SyncRateLimiterTest {
         limiter.check("u1", false);
         complete(TransactionSynchronization.STATUS_COMMITTED);
 
-        assertThatThrownBy(() -> limiter.check("u1", false)).isInstanceOf(BusinessException.class);
+        assertThatThrownBy(() -> limiter.check("u1", false))
+                .isInstanceOfSatisfying(BusinessException.class, e ->
+                        assertThat(e.getRetryAfterSeconds()).as("남은 대기 초").isBetween(299, 300));
     }
 
     @Test

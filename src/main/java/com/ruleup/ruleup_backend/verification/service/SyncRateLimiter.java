@@ -38,7 +38,9 @@ public class SyncRateLimiter {
         Long prev = lastSyncAt.put(userId, now);
         if (prev != null && now - prev < minInterval) {
             lastSyncAt.put(userId, prev);   // 거부된 호출은 마지막 시각 갱신 안 함
-            throw new BusinessException(ErrorCode.SYNC_TOO_FREQUENT);
+            // 남은 초를 함께 준다 — 앱의 「동기화」 버튼이 실패 대신 「n초 뒤 다시」를 안내할 수 있게.
+            throw BusinessException.rateLimited(ErrorCode.SYNC_TOO_FREQUENT,
+                    (minInterval - (now - prev) + 999) / 1000);
         }
         releaseOnRollback(userId, now, prev);
     }
