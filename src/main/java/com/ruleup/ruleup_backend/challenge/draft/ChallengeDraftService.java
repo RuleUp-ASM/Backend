@@ -269,7 +269,7 @@ public class ChallengeDraftService {
                 new DraftView.Penalties(auto, group, false));
     }
 
-    /** 목표값: 템플릿 스펙 순서대로, LLM 값이 유효하면 그 값·아니면 기본값(문자열 표기). */
+    /** 목표값: 템플릿 스펙 순서대로, LLM 값이 유효하면 그 값·범위 밖이면 경계값·형식 오류면 기본값(문자열 표기). */
     private List<DraftView.DraftParam> buildParams(RoutineTemplate template, Map<String, Object> provided) {
         if (template == null) return List.of();
         List<DraftView.DraftParam> params = new ArrayList<>();

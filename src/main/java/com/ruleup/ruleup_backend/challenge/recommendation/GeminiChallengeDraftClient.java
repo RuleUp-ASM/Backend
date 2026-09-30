@@ -80,7 +80,10 @@ public class GeminiChallengeDraftClient implements ChallengeDraftClient {
         Map<String, Object> m = new LinkedHashMap<>();
         for (ParamKV kv : list) {
             if (kv != null && kv.key() != null && !kv.key().isBlank()) {
-                m.put(kv.key().trim(), kv.value());
+                // 표에 "steps(1000~100000)"로 실었으니 범위 표기를 그대로 베껴 와도 키로 읽는다.
+                String key = kv.key().trim();
+                int paren = key.indexOf('(');
+                m.put((paren > 0 ? key.substring(0, paren) : key).trim(), kv.value());
             }
         }
         return m;
@@ -105,11 +108,11 @@ public class GeminiChallengeDraftClient implements ChallengeDraftClient {
 
     /**
      * 자동 인증 가능 루틴 전체(<100개)를 목업 룩업 테이블로 렌더링해 프롬프트에 싣는다.
-     * 컬럼: id | 이름 | 카테고리 | 목표값키 | 설명. 카탈로그 순서가 고정이라 이 블록은 요청마다 동일 →
+     * 컬럼: id | 이름 | 카테고리 | 목표값키(허용 범위) | 설명. 카탈로그 순서가 고정이라 이 블록은 요청마다 동일 →
      * 고정 프리픽스로 캐시된다(민감한 인증/권한 필드는 넣지 않는다).
      */
     private String buildPrompt(String description, List<RoutineCandidate> candidates) {
-        StringBuilder table = new StringBuilder("id | 이름 | 카테고리 | 목표값키 | 설명");
+        StringBuilder table = new StringBuilder("id | 이름 | 카테고리 | 목표값키(허용 범위) | 설명");
         for (RoutineCandidate c : candidates) {
             String keys = c.paramKeys().isEmpty() ? "-" : String.join(",", c.paramKeys());
             String desc = (c.description() == null || c.description().isBlank()) ? "-" : c.description();

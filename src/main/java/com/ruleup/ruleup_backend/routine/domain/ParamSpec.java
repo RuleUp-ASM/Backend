@@ -12,7 +12,7 @@ import java.util.regex.Pattern;
  *
  * 시드에는 min/max 가 없을 수 있다 → 그 경우 NUMBER 는 "양수"만 확인한다.
  * 값 검증은 두 갈래:
- *   - clampOrDefault : LLM 이 뽑은 값(신뢰 못 함) → 범위 벗어나면 기본값으로 대체
+ *   - clampOrDefault : LLM 이 뽑은 값(신뢰 못 함) → 범위 벗어난 숫자는 가까운 경계로, 형식이 틀리면 기본값
  *   - validate       : 사용자가 보낸 값(피드백 줘야 함) → 잘못되면 예외
  */
 public record ParamSpec(
@@ -44,13 +44,34 @@ public record ParamSpec(
                 toBigDecimal(spec.get("min")), toBigDecimal(spec.get("max")));
     }
 
-    /** LLM 값 보정: 유효하면 그 값, 아니면 기본값(없으면 null). 예외 던지지 않음. */
+    /**
+     * LLM 값 보정: 유효하면 그 값, 범위를 벗어난 숫자는 가까운 경계값, 형식이 틀리면 기본값(없으면 null).
+     * 예외 던지지 않음.
+     *
+     * <p>범위 밖을 기본값으로 바꾸면 "매일 20보 걷기"가 목표 10000보가 된다 — 사용자가 말한 방향과
+     * 정반대로 튄다. 경계값이면 적어도 사용자 의도에 가장 가까운 허용값이다.
+     */
     public Object clampOrDefault(Object raw) {
+        if (raw == null) return defaultValue;
+        if (kind == Kind.NUMBER) {
+            BigDecimal v = toBigDecimal(raw);
+            if (v != null && v.compareTo(BigDecimal.ZERO) > 0) {
+                if (min != null && v.compareTo(min) < 0) return min;
+                if (max != null && v.compareTo(max) > 0) return max;
+            }
+        }
         try {
-            return (raw != null) ? validate(raw) : defaultValue;
+            return validate(raw);
         } catch (RuntimeException e) {
             return defaultValue;
         }
+    }
+
+    /** 프롬프트 표기용 — "steps(1000~100000)". 범위가 없으면 키만. */
+    public String rangeLabel() {
+        if (kind != Kind.NUMBER || (min == null && max == null)) return key;
+        return key + "(" + (min != null ? min.toPlainString() : "") + "~"
+                + (max != null ? max.toPlainString() : "") + ")";
     }
 
     /** 사용자 값 검증: 유효하면 정규화한 값 반환, 아니면 IllegalArgumentException. */
