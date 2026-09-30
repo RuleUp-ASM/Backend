@@ -121,6 +121,22 @@ class VerificationAndroidWireIT extends VerificationApiSupport {
     }
 
     @Test
+    @DisplayName("위치를 다시 켜고 신호가 오면 권한 대기가 풀린다 — 앱은 신호 단위 observedAt 을 안 보낸다")
+    void measurementResolvesPermissionWait() throws Exception {
+        Member me = member(uniq("wire-regrant"));
+        UUID ch = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", "{\"duration_min\":30,\"radius_m\":100}");
+        insertReadyMember(ch, me.id(), anchor(CAFE_LAT, CAFE_LNG, 100, "스터디카페"), null);
+        jdbc().update("INSERT INTO verification_permission_waits(challenge_id,user_id,signal_type,source_event_id," +
+                        "first_observed_at,waiting_from_on) VALUES(?,?,'GPS_PRESENCE',?,DATE_SUB(UTC_TIMESTAMP(6),INTERVAL 1 HOUR),?)",
+                bytes(ch), bytes(me.id()), bytes(UUID.randomUUID()), LocalDate.now(KST));
+
+        sync(me.token(), List.of(androidGeofence(anchorId(me.id(), ch), "ENTER", todayAt(13, 0))));
+
+        assertThat(jdbc().queryForObject("SELECT resolved_at IS NOT NULL FROM verification_permission_waits " +
+                "WHERE challenge_id=? AND user_id=?", Boolean.class, bytes(ch), bytes(me.id()))).isTrue();
+    }
+
+    @Test
     @DisplayName("장소 피하기 — 앱 형식 ENTER 가 위반으로 잡힌다(거짓 통과 없음)")
     void avoidWithAndroidGeofence() throws Exception {
         Member me = member(uniq("wire-avoid"));

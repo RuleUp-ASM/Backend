@@ -378,6 +378,14 @@ public class VerificationSyncService {
         return new BusinessException(ErrorCode.INVALID_SIGNAL_PAYLOAD, reason.name());
     }
 
+    private static Instant measuredAt(SyncSignal signal, Instant now) {
+        Instant observed = com.ruleup.ruleup_backend.verification.evaluator.TimeWindows.parseInstant(signal.observedAt());
+        if (observed != null) return observed;
+        // 수신 시각은 저장 때 찍혀 이 요청의 now 보다 몇 ms 늦을 수 있다 — 둘 중 이른 값(SyncSignal#receivedAt).
+        Instant received = signal.receivedAt();
+        return (received == null || received.isAfter(now)) ? now : received;
+    }
+
     private static boolean blank(String value) {
         return value == null || value.isBlank();
     }
@@ -559,11 +567,13 @@ public class VerificationSyncService {
         }
 
         if (!gap) {
+            // 측정 시각: 신호의 observedAt(ISO·epoch millis 모두) → 없으면 서버 수신 시각 → 이번 요청이면 지금.
+            // 앱은 신호 단위 observedAt 을 보내지 않아 ISO 만 읽던 때는 이 이벤트가 한 번도 나가지 않았다.
+            // 위치를 다시 켜도 권한 대기가 풀리지 않아 홈 경고가 남고 14일 뒤 강퇴까지 갔다.
             ofDay.stream().filter(signal -> MethodSignalTypes.anyFor(method, List.of(signal)))
-                    .map(SyncSignal::observedAt).filter(Objects::nonNull).map(value -> {
-                        try { return Instant.parse(value); } catch (RuntimeException invalid) { return Instant.MIN; }
-                    }).filter(at -> !at.isAfter(now)).max(Instant::compareTo)
-                    .filter(at -> !Instant.MIN.equals(at)).ifPresent(at -> eventPublisher.publishEvent(
+                    .map(signal -> measuredAt(signal, now))
+                    .filter(at -> !at.isAfter(now)).max(Instant::compareTo)
+                    .ifPresent(at -> eventPublisher.publishEvent(
                             new PermissionWaitService.MeasurementReceived(member.getChallengeId(),member.getUserId(),method.name(),at)));
         }
         if (mr == null) {
