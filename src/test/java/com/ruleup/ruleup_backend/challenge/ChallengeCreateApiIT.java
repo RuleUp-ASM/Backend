@@ -243,6 +243,20 @@ class ChallengeCreateApiIT extends ChallengeApiSupport {
         }
 
         @Test
+        @DisplayName("상세 조회에 방의 목표값이 실린다 — 멤버는 /settings(방장 전용)를 못 본다")
+        void detailCarriesParams() throws Exception {
+            String token = memberToken(uniq("cr-params"));
+            MvcResult res = create(token, UUID.randomUUID().toString(), createBodyFrom(templateDraft(token)));
+            assertThat(res.getResponse().getStatus()).isEqualTo(201);
+            String challengeId = read(res, "$.data.challengeId");
+
+            MvcResult detail = getAuth("/api/v1/challenges/" + challengeId, token);
+            assertThat(detail.getResponse().getStatus()).isEqualTo(200);
+            assertThat((String) read(detail, "$.data.verification.params[0].key")).isEqualTo("duration_min");
+            assertThat((String) read(detail, "$.data.verification.params[0].value")).isEqualTo("60");
+        }
+
+        @Test
         @DisplayName("제목을 직접 수정 → moderation.title=IN_REVIEW (설명은 EXEMPT), ai_title 은 원본 유지")
         void titleEditedGoesToReview() throws Exception {
             String token = memberToken(uniq("cr-edit"));

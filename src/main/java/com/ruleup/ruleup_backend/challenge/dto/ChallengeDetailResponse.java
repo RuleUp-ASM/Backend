@@ -1,6 +1,7 @@
 package com.ruleup.ruleup_backend.challenge.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.ruleup.ruleup_backend.challenge.draft.DraftView;
 
 import java.util.List;
 
@@ -49,9 +50,14 @@ public record ChallengeDetailResponse(
 
     public record Period(String start, String end, Integer remainingDays) {}
 
-    /** @param detail 표시 문구(예: "기상 06:00 ±10분") */
+    /**
+     * @param detail 표시 문구(예: "기상 06:00 ±10분")
+     * @param params 방의 목표값(예: steps=10000). 설정 조회({@code /settings})는 방장 전용이라 멤버는
+     *               목표값을 볼 길이 없었다. 초안·설정과 같은 모양이다.
+     */
     public record Verification(String type, String method, String detail,
-                               List<String> requiredPermissions) {}
+                               List<String> requiredPermissions,
+                               List<DraftView.DraftParam> params) {}
 
     /** 표본이 모자라면 둘 다 null — "아직 참여자가 적어 값을 낼 수 없어요"로 표시한다. */
     public record Stats(Double completionRate, Double retentionRate) {}

@@ -7,6 +7,7 @@ import com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus;
 import com.ruleup.ruleup_backend.challenge.domain.JoinBlockReason;
 import com.ruleup.ruleup_backend.challenge.domain.MemberStatus;
 import com.ruleup.ruleup_backend.challenge.domain.ParticipationType;
+import com.ruleup.ruleup_backend.challenge.draft.DraftView;
 import com.ruleup.ruleup_backend.challenge.dto.ChallengeDetailResponse;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeMemberRepository;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
@@ -23,12 +24,14 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -181,7 +184,25 @@ public class ChallengeDetailQueryService {
                 auto && template != null ? template.getVerificationMethod() : "SELF_CHECK",
                 template != null ? template.getDescription() : null,
                 (config != null && config.requiredPermissions() != null)
-                        ? config.requiredPermissions() : List.of());
+                        ? config.requiredPermissions() : List.of(),
+                params(c));
+    }
+
+    /** 스펙 순서대로, 값은 실제 저장값(params)이 우선 — 스펙 행의 value 는 생성 당시 표기다. */
+    private List<DraftView.DraftParam> params(Challenge c) {
+        if (c.getParamSpecs() == null) return List.of();
+        Map<String, Object> values = (c.getParams() != null) ? c.getParams() : Map.of();
+        return c.getParamSpecs().stream()
+                .map(p -> {
+                    Object v = values.get(p.key());
+                    return new DraftView.DraftParam(p.key(),
+                            v != null ? (v instanceof Number n
+                                            ? new BigDecimal(n.toString()).stripTrailingZeros().toPlainString()
+                                            : v.toString())
+                                    : p.value(),
+                            p.defaultValue(), p.kind(), p.unit(), p.min(), p.max());
+                })
+                .toList();
     }
 
     /** 표본 미달이면 두 값 모두 null 로 내려간다 — 판정은 Projection 이 이미 끝냈다. */
