@@ -38,16 +38,17 @@ public class ChallengeTitleResolver {
     private final ChallengeRepository challengeRepository;
     private final JdbcTemplate jdbc;
     private final com.ruleup.ruleup_backend.challenge.view.ChallengeMasking masking;
+    private final com.ruleup.ruleup_backend.challenge.view.ReportedChallengeLabels reportedLabels;
 
     /**
-     * 보는 사람 기준 이름. 신고해 가린 방은 {@link com.ruleup.ruleup_backend.challenge.view.ChallengeView#REPORTED_TITLE}
-     * 로 내린다 — 내 화면(이의 내역·점수 이력)도 방 상세와 같은 규칙이어야 한다(REP-06).
+     * 보는 사람 기준 이름. 신고해 가린 방은 루틴 기본 추천 이름({@link com.ruleup.ruleup_backend.challenge.view.ReportedChallengeLabels})
+     * 으로 내린다 — 내 화면(이의 내역·점수 이력)도 방 상세와 같은 규칙이어야 한다(REP-06).
      */
     @Transactional(readOnly = true)
     public Map<UUID, String> titlesOf(UUID viewerId, Collection<UUID> challengeIds) {
         Map<UUID, String> titles = new HashMap<>(titlesOf(challengeIds));
         for (UUID id : masking.maskedFor(viewerId)) {
-            if (titles.containsKey(id)) titles.put(id, com.ruleup.ruleup_backend.challenge.view.ChallengeView.REPORTED_TITLE);
+            if (titles.containsKey(id)) titles.put(id, reportedLabels.forChallenge(id).title());
         }
         return titles;
     }

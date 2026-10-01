@@ -58,6 +58,7 @@ public class ChallengeDetailQueryService {
     private final com.ruleup.ruleup_backend.room.service.ChallengeRejoinPolicy rejoinPolicy;
     private final com.ruleup.ruleup_backend.challenge.lifecycle.ChallengeHistoryQueryService history;
     private final com.ruleup.ruleup_backend.challenge.view.ChallengeMasking masking;
+    private final com.ruleup.ruleup_backend.challenge.view.ReportedChallengeLabels reportedLabels;
     private final com.ruleup.ruleup_backend.report.BlockService blocks;
 
     @Transactional(readOnly = true)
@@ -88,7 +89,7 @@ public class ChallengeDetailQueryService {
         LocalDate today = LocalDate.now(KST);
 
         var view = com.ruleup.ruleup_backend.challenge.view.ChallengeView.of(
-                c, isOwner, masking.isMasked(viewerId, challengeId));
+                c, isOwner, masking.isMasked(viewerId, challengeId), reportedLabels);
 
         return new ChallengeDetailResponse(
                 c.getId().toString(),

@@ -43,6 +43,7 @@ public class ChallengeInvitationService {
     private final ChallengeMemberService memberService;
     private final UserRepository userRepository;
     private final com.ruleup.ruleup_backend.challenge.view.ChallengeMasking masking;
+    private final com.ruleup.ruleup_backend.challenge.view.ReportedChallengeLabels reportedLabels;
     private final com.ruleup.ruleup_backend.report.BlockService blocks;
 
     @Transactional(readOnly = true)
@@ -56,7 +57,7 @@ public class ChallengeInvitationService {
         // 심사에 걸려 다른 화면에서는 임시 제목으로 가려진 방이 초대 미리보기로는 원문 그대로 보였다.
         // 신고해 차단한 방도 마찬가지였다 — 탐색·상세에서 가려 놓고 초대 링크로 다시 새는 셈이다.
         var view = com.ruleup.ruleup_backend.challenge.view.ChallengeView.of(
-                challenge, challenge.isOwner(viewerId), masking.isMasked(viewerId, challenge.getId()));
+                challenge, challenge.isOwner(viewerId), masking.isMasked(viewerId, challenge.getId()), reportedLabels);
 
         return new InvitationDtos.PreviewResponse(
                 invitation.getId().toString(),

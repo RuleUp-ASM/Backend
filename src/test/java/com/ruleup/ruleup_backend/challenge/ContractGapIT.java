@@ -122,6 +122,40 @@ class ContractGapIT extends ChallengeApiSupport {
                     "$.data.challenges[0].title"))
                     .as("진행률 목록도 같다").isEqualTo(ChallengeView.REPORTED_TITLE);
         }
+
+        @Test
+        @DisplayName("템플릿으로 만든 방을 신고하면 나가지 않고, 제목·설명은 루틴 기본 추천값으로 보인다")
+        void reportedTemplateRoomShowsRecommendedLabelAndKeepsMembership() throws Exception {
+            Member me = member(uniq("gap-mask-tpl"));
+            Member owner = member(uniq("gap-mask-tpl-o"));
+            UUID id = insertChallenge(owner.id(), "EXERCISE", "ACTIVE", "GROUP");
+            insertActiveMembership(id, owner.id(), "OWNER");
+            insertActiveMembership(id, me.id(), "MEMBER");
+            Map<String, Object> template = jdbc.queryForMap(
+                    "SELECT id, name, description FROM RoutineTemplate WHERE description IS NOT NULL ORDER BY id LIMIT 1");
+            jdbc.update("UPDATE challenges SET template_id=?, title='원래 제목', ai_title='원래 제목', " +
+                    "description='원래 설명', image_url='https://cdn.example/a.png' WHERE id=?",
+                    ((Number) template.get("id")).longValue(), bytes(id));
+
+            var reported = postJsonAuth("/api/v1/reports", me.token(),
+                    Map.of("targetType", "CHALLENGE", "targetChallengeId", id.toString(),
+                            "reason", "INAPPROPRIATE", "contextType", "CHALLENGE_DETAIL"));
+            assertThat((String) read(reported, "$.data.hiddenEffect")).isEqualTo("CHALLENGE_MASKED");
+            assertThat(jdbc.queryForObject("SELECT status FROM challenge_members WHERE challenge_id=? AND user_id=?",
+                    String.class, bytes(id), bytes(me.id()))).as("신고해도 나가지 않는다").isEqualTo("ACTIVE");
+
+            var detail = getAuth("/api/v1/challenges/" + id, me.token());
+            assertThat((String) read(detail, "$.data.title")).isEqualTo(template.get("name"));
+            assertThat((String) read(detail, "$.data.description")).isEqualTo(template.get("description"));
+            assertThat((String) read(detail, "$.data.imageUrl")).isNull();
+            assertThat(detail.getResponse().getContentAsString()).doesNotContain("원래 제목", "원래 설명");
+
+            var list = getAuth("/api/v1/challenges", me.token());
+            assertThat((String) read(list, "$.data.challenges[0].title")).isEqualTo(template.get("name"));
+            assertThat((String) read(list, "$.data.challenges[0].description")).isEqualTo(template.get("description"));
+            assertThat((String) read(getAuth("/api/v1/challenges/" + id + "/room", me.token()),
+                    "$.data.summary.title")).isEqualTo(template.get("name"));
+        }
     }
 
     @Nested
