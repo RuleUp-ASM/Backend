@@ -124,6 +124,34 @@ class ContractGapIT extends ChallengeApiSupport {
         }
 
         @Test
+        @DisplayName("참여하지 않은 방을 신고하면 직접 참여·초대 링크로도 열리지 않는다(없는 방처럼 404)")
+        void reportedRoomIsUnreachableForNonMember() throws Exception {
+            Member me = member(uniq("gap-hide"));
+            Member owner = member(uniq("gap-hide-o"));
+            UUID open = insertChallenge(owner.id(), "EXERCISE", "ACTIVE", "GROUP");
+            insertActiveMembership(open, owner.id(), "OWNER");
+            UUID invite = insertChallenge(owner.id(), "EXERCISE", "ACTIVE", "GROUP");
+            insertActiveMembership(invite, owner.id(), "OWNER");
+            jdbc.update("UPDATE challenges SET visibility='PRIVATE' WHERE id=?", bytes(invite));
+            String token = read(postJsonAuth("/api/v1/challenges/" + invite + "/invitations", owner.token(), Map.of()),
+                    "$.data.token");
+
+            for (UUID id : List.of(open, invite)) {
+                assertThat((String) read(postJsonAuth("/api/v1/reports", me.token(),
+                        Map.of("targetType", "CHALLENGE", "targetChallengeId", id.toString(),
+                                "reason", "INAPPROPRIATE", "contextType", "CHALLENGE_DETAIL")),
+                        "$.data.hiddenEffect")).isEqualTo("CHALLENGE_HIDDEN");
+            }
+
+            assertThat(postJsonAuth("/api/v1/challenges/" + open + "/members", me.token(), Map.of())
+                    .getResponse().getStatus()).as("직접 참여").isEqualTo(404);
+            assertThat(getAuth("/api/v1/challenges/invitations/" + token, me.token())
+                    .getResponse().getStatus()).as("초대 미리보기").isEqualTo(404);
+            assertThat(postJsonAuth("/api/v1/challenges/invitations/" + token + "/accept", me.token(), Map.of())
+                    .getResponse().getStatus()).as("초대 수락").isEqualTo(404);
+        }
+
+        @Test
         @DisplayName("템플릿으로 만든 방을 신고하면 나가지 않고, 제목·설명은 루틴 기본 추천값으로 보인다")
         void reportedTemplateRoomShowsRecommendedLabelAndKeepsMembership() throws Exception {
             Member me = member(uniq("gap-mask-tpl"));

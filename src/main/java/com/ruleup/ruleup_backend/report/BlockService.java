@@ -112,6 +112,10 @@ public class BlockService {
         Optional<UUID> previous = previousReport(reporterId, TARGET_CHALLENGE, targetId);
         Challenge challenge = challengeRepository.findById(targetId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
+        // 참여 중인 방은 한 번만 신고할 수 있다 — 차단을 풀었어도 다시 신고하지 못한다.
+        // 참여를 유지한 채 해제·재신고를 반복해 같은 방을 거듭 겨냥하는 경로를 막는다.
+        if (previous.isPresent() && participating(reporterId, targetId))
+            throw new BusinessException(ErrorCode.ALREADY_REPORTED);
 
         UUID reportId;
         if (previous.isPresent()) {
@@ -132,6 +136,7 @@ public class BlockService {
      * 같은 신고자의 기존 신고. 차단이 걸려 있으면 409 {@code ALREADY_REPORTED} — 재진입·재전송이다.
      *
      * <p>스스로 차단을 해제한 대상은 다시 신고할 수 있고, 그러면 차단이 재등재된다(신고 정책 §2.1, QA REP-09).
+     * 단 <b>참여 중인 챌린지</b>는 예외다 — 한 번 신고했으면 차단을 풀어도 다시 신고할 수 없다.
      * 다만 <b>신고 건은 늘리지 않는다</b> — 차단 해제는 신고 취소가 아니라 원본 신고가 그대로 남아 있고,
      * 해제·재신고를 반복해 같은 대상의 신고 수를 부풀리는 경로가 생기면 안 된다. 원본 신고 id 를 돌려준다.
      */

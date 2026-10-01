@@ -51,13 +51,17 @@ public class ChallengeInvitationService {
         ChallengeInvitation invitation = liveInvitation(token);
         Challenge challenge = challengeRepository.findByIdAndDeletedAtIsNull(invitation.getChallengeId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND));
+        // 신고해 숨긴 방은 참여 중이 아니면 초대 링크로도 열리지 않는다 — 상세 조회(REP-05)와 같은 404.
+        boolean masked = masking.isMasked(viewerId, challenge.getId());
+        if (masked && !challenge.isOwner(viewerId) && !memberService.isActiveMember(viewerId, challenge.getId()))
+            throw new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND);
         JoinBlockReason blockReason = memberService.previewBlockReason(viewerId, challenge, true);
 
         // 표시값은 <b>한 곳</b>에서 정한다. 여기만 getTitle()·getImageUrl() 원본을 쓰고 있어서,
         // 심사에 걸려 다른 화면에서는 임시 제목으로 가려진 방이 초대 미리보기로는 원문 그대로 보였다.
         // 신고해 차단한 방도 마찬가지였다 — 탐색·상세에서 가려 놓고 초대 링크로 다시 새는 셈이다.
         var view = com.ruleup.ruleup_backend.challenge.view.ChallengeView.of(
-                challenge, challenge.isOwner(viewerId), masking.isMasked(viewerId, challenge.getId()), reportedLabels);
+                challenge, challenge.isOwner(viewerId), masked, reportedLabels);
 
         return new InvitationDtos.PreviewResponse(
                 invitation.getId().toString(),

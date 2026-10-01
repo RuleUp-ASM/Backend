@@ -310,6 +310,22 @@ class ReportBlockContractIT extends ChallengeApiSupport {
         }
 
         @Test
+        @DisplayName("참여 중인 챌린지는 한 번만 신고할 수 있다 — 차단을 풀어도 다시 신고하면 409")
+        void participating_challenge_cannot_be_reported_twice() throws Exception {
+            Member reporter = member(uniq("r"));
+            Member owner = member(uniq("o"));
+            UUID challenge = insertChallenge(owner.id(), "EXERCISE", "ACTIVE", "GROUP");
+            insertActiveMembership(challenge, reporter.id(), "MEMBER");
+            assertThat(postAuth("/api/v1/reports", reporter.token(), challengeReport(challenge))
+                    .getResponse().getStatus()).isEqualTo(201);
+            deleteAuth("/api/v1/users/me/blocks/challenges/" + challenge, reporter.token());
+
+            expectError(postAuth("/api/v1/reports", reporter.token(), challengeReport(challenge)),
+                    409, "ALREADY_REPORTED");
+            assertSingleReport(reporter.id(), "CHALLENGE", challenge);
+        }
+
+        @Test
         @DisplayName("같은 신고를 동시에 보내도 한 건만 접수되고 나머지는 409다")
         void simultaneous_reports_create_one_record() throws Exception {
             Member reporter = member(uniq("r"));
