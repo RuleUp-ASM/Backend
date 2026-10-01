@@ -33,6 +33,7 @@ public class RoomService {
 
     private final RoomAuthority authority;
     private final com.ruleup.ruleup_backend.challenge.view.ChallengeMasking masking;
+    private final com.ruleup.ruleup_backend.challenge.view.ReportedChallengeLabels reportedLabels;
     private final com.ruleup.ruleup_backend.challenge.lifecycle.ChallengeHistoryQueryService history;
     private final RankingService rankingService;
     private final ChallengeMemberRepository memberRepository;
@@ -64,7 +65,7 @@ public class RoomService {
         ZonedDateTime now = ZonedDateTime.now(KST);
         // 참여 중인 방을 신고하면 나가지 않고 가려서 본다 — 그 규칙이 방 안에서도 같아야 한다.
         String title = com.ruleup.ruleup_backend.challenge.view.ChallengeView
-                .of(challenge, challenge.isOwner(userId), masking.isMasked(userId, challengeId)).title();
+                .of(challenge, challenge.isOwner(userId), masking.isMasked(userId, challengeId), reportedLabels).title();
         RoomDtos.RoomResponse.Summary summary = new RoomDtos.RoomResponse.Summary(
                 title, challenge.getWeeklyCount(), roomRate(active),
                 remainingDays(challenge, now.toLocalDate()), active.size(), challenge.getMaxParticipants());

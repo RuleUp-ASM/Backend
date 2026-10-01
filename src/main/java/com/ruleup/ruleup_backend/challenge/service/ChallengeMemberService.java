@@ -120,6 +120,10 @@ public class ChallengeMemberService {
         ChallengeMember existing = memberRepository.findByChallengeIdAndUserId(challengeId, userId).orElse(null);
         if (existing != null && existing.isActive()) throw blocked(JoinBlockReason.ALREADY_JOINED);
 
+        // 신고해 숨긴 방은 미참여자에게 없는 방이다 — 탐색·상세에서 숨겨 놓고 id·초대 링크로 들어오게 두지 않는다.
+        if (!c.isOwner(userId) && blockService.blockedChallenges(userId).contains(challengeId))
+            throw new BusinessException(ErrorCode.CHALLENGE_NOT_FOUND);
+
         // ② 비공개 방은 초대 링크로만 입장 — 직접 가입 불가
         if (!invited && c.isGroup() && "PRIVATE".equals(c.getVisibility()))
             throw blocked(JoinBlockReason.PRIVATE_INVITE_ONLY);
@@ -171,6 +175,13 @@ public class ChallengeMemberService {
         LocalDate countFrom = ChallengeCycle.judgeFrom(c.getStartDate(), LocalDate.now(KST));
         log.info("challenge_join_result success=true challengeId={} userId={}", challengeId, userId);
         return JoinResponse.of(countFrom.toString(), c.getVerificationConfig());
+    }
+
+    /** 지금 참여 중인가(활성 멤버). */
+    @Transactional(readOnly = true)
+    public boolean isActiveMember(UUID userId, UUID challengeId) {
+        return memberRepository.findByChallengeIdAndUserId(challengeId, userId)
+                .filter(ChallengeMember::isActive).isPresent();
     }
 
     /**

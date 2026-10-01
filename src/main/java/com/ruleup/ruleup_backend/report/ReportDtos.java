@@ -55,8 +55,9 @@ public final class ReportDtos {
             @Schema(description = """
                     내 화면 즉시 효과 —
                     `USER_CONTENT_MASKED`(임시 닉네임·기본 이미지·글 미노출) /
-                    `CHALLENGE_HIDDEN`(미참여 — 탐색 미노출. 참여 중이던 방은 신고와 함께 나간다) /
-                    `CHALLENGE_MASKED`(종료된 참여 방 — 기본 이미지·제목 "숨김 처리된 챌린지"·설명 빈칸)""",
+                    `CHALLENGE_HIDDEN`(미참여 — 탐색 미노출) /
+                    `CHALLENGE_MASKED`(참여 중 — 나가지 않고 계속 참여. 제목·설명은 루틴 기본 추천값,
+                    템플릿 없는 방은 제목 "숨김 처리된 챌린지"·설명 빈칸. 이미지는 기본 이미지)""",
                     example = "USER_CONTENT_MASKED")
             String hiddenEffect) {}
 
