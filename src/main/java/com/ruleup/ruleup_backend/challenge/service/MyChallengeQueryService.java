@@ -39,6 +39,7 @@ public class MyChallengeQueryService {
 
     private final JdbcTemplate jdbc;
     private final com.ruleup.ruleup_backend.challenge.view.ChallengeMasking masking;
+    private final com.ruleup.ruleup_backend.challenge.view.ReportedChallengeLabels reportedLabels;
 
     @Transactional(readOnly = true)
     public ChallengeListResponse myChallenges(UUID userId, String filterRaw, String cursorRaw, Integer sizeRaw) {
@@ -137,12 +138,15 @@ public class MyChallengeQueryService {
         // 방장은 심사 중이어도 자기가 넣은 값을 본다 — 상세(ChallengeView.forOwner)와 같은 규칙이다.
         // 목록만 가려 사진을 넣자마자 내 목록에서 기본 이미지로 돌아가 보였다.
         boolean owner = "OWNER".equals(r.myRole);
+        // 신고해 가린 방은 루틴 기본 추천 이름·설명으로 — 나가지 않고 계속 참여하는 방이다.
+        var label = hidden ? reportedLabels.forChallenge(r.challengeId) : null;
         return new ChallengeListResponse.Item(
                 r.challengeId.toString(),
                 // 심사 중·거부면 AI 임시 제목 / 빈 설명 / 기본 이미지로 대체 표시한다.
-                hidden ? com.ruleup.ruleup_backend.challenge.view.ChallengeView.REPORTED_TITLE
+                hidden ? label.title()
                         : (!owner && !publicVisible(r.moderationTitle)) ? r.aiTitle : r.title,
-                (hidden || (!owner && !publicVisible(r.moderationDescription))) ? null : r.description,
+                hidden ? label.description()
+                        : (!owner && !publicVisible(r.moderationDescription)) ? null : r.description,
                 (hidden || (!owner && !publicVisible(r.moderationImage))) ? null : r.imageUrl,
                 r.category,
                 r.mode,

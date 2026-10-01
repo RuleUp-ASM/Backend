@@ -53,6 +53,7 @@ public class VerificationReadService {
 
     private final ChallengeQueryService challengeQuery;
     private final com.ruleup.ruleup_backend.challenge.view.ChallengeMasking masking;
+    private final com.ruleup.ruleup_backend.challenge.view.ReportedChallengeLabels reportedLabels;
     private final VerificationDailyRepository dailyRepo;
     private final VerificationMethodResultRepository methodResultRepo;
     private final VerificationFailureDetailRepository failureDetailRepo;
@@ -233,7 +234,7 @@ public class VerificationReadService {
                 : Math.max(m.getTargetDays() - m.getSuccessDays() - m.getFailDays(), 0);
         return new ChallengeProgress(
                 ch.getId().toString(),
-                com.ruleup.ruleup_backend.challenge.view.ChallengeView.of(ch, viewerIsOwner, masked).title(),
+                com.ruleup.ruleup_backend.challenge.view.ChallengeView.of(ch, viewerIsOwner, masked, reportedLabels).title(),
                 ch.getCategory(), ch.getParticipationType().name(),
                 ch.getStatus().name(), m.getScheduleType().name(), m.getProgressRate(),
                 m.getSuccessDays(), m.getTargetDays(), remaining,

@@ -28,6 +28,7 @@ public class ChallengeHistoryQueryService {
     private final JdbcTemplate jdbc;
     private final UserRepository users;
     private final BlockService blocks;
+    private final com.ruleup.ruleup_backend.challenge.view.ReportedChallengeLabels reportedLabels;
     private final UserScoreSummaryRepository scores;
 
     /**
@@ -56,10 +57,13 @@ public class ChallengeHistoryQueryService {
         Map<?,?> config = json(h.get("verification_config"));
         boolean auto = "AUTO".equals(config.get("selectedMethod"));
         // 참여 중이던 방을 신고한 경우 — 방은 남기고 표시값만 가린다. 살아 있는 방의
-        // ChallengeView.hidden 과 같은 모양(임시 제목 · 빈 설명 · 기본 이미지)이라 앱이 새 분기를 만들 필요가 없다.
+        // ChallengeView.hidden 과 같은 모양(루틴 추천 이름·설명 · 기본 이미지)이라 앱이 새 분기를 만들 필요가 없다.
+        // AI 제목 스냅샷은 원문과 같을 수 있어 쓰지 않는다(REP-06).
+        var label = hidden ? reportedLabels.of(h.get("template_id") == null ? null
+                : ((Number) h.get("template_id")).longValue()) : null;
         return new ChallengeDetailResponse(id.toString(),
-                hidden ? str(h,"ai_title_snapshot") : str(h,"title_snapshot"),
-                hidden ? null : str(h,"description_snapshot"),
+                hidden ? label.title() : str(h,"title_snapshot"),
+                hidden ? label.description() : str(h,"description_snapshot"),
                 hidden ? null : str(h,"image_snapshot"),
                 str(h,"category"),str(h,"mode"),str(h,"visibility"),"COMPLETED",owner,
                 str(h,"owner_type_snapshot"),number(h,"final_member_count",0),number(h,"capacity",null),

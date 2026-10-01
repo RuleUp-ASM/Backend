@@ -17,15 +17,15 @@ import com.ruleup.ruleup_backend.challenge.domain.Challenge;
  * 이미 있고, 클라이언트는 그 세 값을 그릴 줄 안다. 신고 차단에만 쓰는 네 번째 표현을 만들면
  * 안드로이드가 분기를 하나 더 구현해야 하고, 그 분기는 <b>신고자에게만</b> 보이므로 검증도 어렵다.
  *
- * <h4>제목만은 AI 임시 제목이 아니라 고정 문구다</h4>
+ * <h4>제목·설명은 AI 임시 제목이 아니라 루틴 기본 추천값이다</h4>
  * AI 제목을 그대로 받아 만든 방은 {@code ai_title == title} 이다(심사 면제의 조건이 바로 그것이다).
  * 그런 방에서 신고자에게 AI 제목을 내리면 가린 것이 아니라 <b>원문을 그대로</b> 보여 준다(REP-06).
- * 심사 가려짐은 "사용자가 바꾼 원문"을 가리는 것이라 AI 제목으로 충분하지만, 신고 가려짐은 방 자체를
- * 안 보고 싶다는 뜻이므로 어떤 이름도 내리지 않는다. 자리는 그대로(문자열 하나)라 클라 분기는 늘지 않는다.
+ * 신고해도 방에서 나가지 않고 계속 인증하므로, 사용자가 쓴 글이 아닌 <b>템플릿 이름·설명</b>으로
+ * 무엇을 하는 방인지만 알려 준다({@link ReportedChallengeLabels}). 이미지는 기본 이미지로 둔다.
  */
 public record ChallengeView(String title, String description, String imageUrl) {
 
-    /** 신고해 가린 방의 표시 제목. 차단 목록 화면과 같은 문구다. */
+    /** 템플릿이 없는 방을 신고해 가렸을 때의 표시 제목. 차단 목록 화면도 이 문구다. */
     public static final String REPORTED_TITLE = "숨김 처리된 챌린지";
 
     /**
@@ -33,8 +33,8 @@ public record ChallengeView(String title, String description, String imageUrl) {
      *
      * @param masked 이 뷰어가 신고해 차단한 방인가
      */
-    public static ChallengeView of(Challenge c, boolean masked) {
-        if (masked) return hidden(c);
+    public static ChallengeView of(Challenge c, boolean masked, ReportedChallengeLabels labels) {
+        if (masked) return hidden(c, labels);
         return new ChallengeView(c.publicTitle(), c.publicDescription(), c.publicImageUrl());
     }
 
@@ -42,17 +42,19 @@ public record ChallengeView(String title, String description, String imageUrl) {
      * 방장 본인 화면. 심사 중이어도 <b>자기가 넣은 값</b>을 본다 — 남에게 어떻게 보이는지는
      * 심사 상태로 알린다. 다만 자기 방을 신고해 차단했다면 그 선택이 우선한다.
      */
-    public static ChallengeView forOwner(Challenge c, boolean masked) {
-        if (masked) return hidden(c);
+    public static ChallengeView forOwner(Challenge c, boolean masked, ReportedChallengeLabels labels) {
+        if (masked) return hidden(c, labels);
         return new ChallengeView(c.getTitle(), c.getDescription(), c.getImageUrl());
     }
 
     /** 보는 사람이 방장인지에 따라 갈라 준다. */
-    public static ChallengeView of(Challenge c, boolean viewerIsOwner, boolean masked) {
-        return viewerIsOwner ? forOwner(c, masked) : of(c, masked);
+    public static ChallengeView of(Challenge c, boolean viewerIsOwner, boolean masked,
+                                   ReportedChallengeLabels labels) {
+        return viewerIsOwner ? forOwner(c, masked, labels) : of(c, masked, labels);
     }
 
-    private static ChallengeView hidden(Challenge c) {
-        return new ChallengeView(REPORTED_TITLE, null, null);
+    private static ChallengeView hidden(Challenge c, ReportedChallengeLabels labels) {
+        ReportedChallengeLabels.Label label = labels.of(c.getTemplateId());
+        return new ChallengeView(label.title(), label.description(), null);
     }
 }
