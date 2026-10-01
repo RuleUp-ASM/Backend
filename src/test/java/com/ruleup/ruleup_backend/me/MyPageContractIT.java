@@ -179,6 +179,15 @@ class MyPageContractIT extends ChallengeApiSupport {
         return java.time.YearMonth.now(java.time.ZoneId.of("Asia/Seoul")).toString();
     }
 
+    /**
+     * 픽스처 날짜(daysAgo)가 속한 KST 월. 「어제」 판정을 넣고 이번 달을 조회하면 매달 1일에
+     * 지난달로 넘어가 빈 캘린더가 나온다 — 조회 월은 픽스처 날짜를 따라간다.
+     */
+    private static String monthOf(int daysAgo) {
+        return java.time.YearMonth.from(java.time.LocalDate.now(java.time.ZoneId.of("Asia/Seoul"))
+                .minusDays(daysAgo)).toString();
+    }
+
     private static UUID uuid(byte[] b) {
         java.nio.ByteBuffer bb = java.nio.ByteBuffer.wrap(b);
         return new UUID(bb.getLong(), bb.getLong());
@@ -382,7 +391,7 @@ class MyPageContractIT extends ChallengeApiSupport {
             insertDaily(other, me.id(), 1, "FAILED", true);
 
             Map<String, Object> d = data(getAuth(
-                    "/api/v1/challenges/" + mine + "/calendar?month=" + thisMonth(), me.token()));
+                    "/api/v1/challenges/" + mine + "/calendar?month=" + monthOf(1), me.token()));
 
             assertThat(d).containsOnlyKeys("challengeId", "month", "days")
                     .containsEntry("challengeId", mine.toString());
@@ -402,7 +411,7 @@ class MyPageContractIT extends ChallengeApiSupport {
             insertDaily(ch, me.id(), 1, "SUCCESS", false);
 
             List<Map<String, Object>> days = (List<Map<String, Object>>) data(getAuth(
-                    "/api/v1/challenges/" + ch + "/calendar?month=" + thisMonth(), me.token())).get("days");
+                    "/api/v1/challenges/" + ch + "/calendar?month=" + monthOf(1), me.token())).get("days");
 
             assertThat(days).extracting(day -> day.get("status"))
                     .doesNotContain("ALL_DONE", "PARTIAL")
@@ -417,7 +426,7 @@ class MyPageContractIT extends ChallengeApiSupport {
             insertDaily(ch, me.id(), 1, "FAILED", true);
 
             List<Map<String, Object>> days = (List<Map<String, Object>>) data(getAuth(
-                    "/api/v1/challenges/" + ch + "/calendar?month=" + thisMonth(), me.token())).get("days");
+                    "/api/v1/challenges/" + ch + "/calendar?month=" + monthOf(1), me.token())).get("days");
 
             assertThat(days).singleElement()
                     .satisfies(day -> assertThat(day).containsEntry("status", "FAILED")
@@ -430,7 +439,7 @@ class MyPageContractIT extends ChallengeApiSupport {
             Member closed = member("cc-appeal-closed");
             UUID c1 = insertChallenge(closed.id(), "EXERCISE", "ACTIVE", "SOLO");
             insertDaily(c1, closed.id(), 3, "FAILED", false);   // 기한 지남
-            assertThat(firstDay(closed, c1)).containsEntry("appealable", false);
+            assertThat(firstDay(closed, c1, 3)).containsEntry("appealable", false);
 
             Member already = member("cc-appeal-done");
             UUID c2 = insertChallenge(already.id(), "EXERCISE", "ACTIVE", "SOLO");
@@ -495,7 +504,7 @@ class MyPageContractIT extends ChallengeApiSupport {
             jdbc().update("UPDATE challenge_members SET status = 'LEFT', left_type = 'LEAVE', " +
                     "left_at = NOW(6) WHERE challenge_id = ? AND user_id = ?", bytes(ch), bytes(me.id()));
 
-            assertThat(getAuth("/api/v1/challenges/" + ch + "/calendar?month=" + thisMonth(),
+            assertThat(getAuth("/api/v1/challenges/" + ch + "/calendar?month=" + monthOf(1),
                     me.token()).getResponse().getStatus()).isEqualTo(200);
         }
 
@@ -507,7 +516,7 @@ class MyPageContractIT extends ChallengeApiSupport {
             UUID ch = insertChallenge(owner.id(), "EXERCISE", "ACTIVE", "SOLO");
             insertDaily(ch, owner.id(), 1, "SUCCESS", false);
 
-            expectError(getAuth("/api/v1/challenges/" + ch + "/calendar?month=" + thisMonth(),
+            expectError(getAuth("/api/v1/challenges/" + ch + "/calendar?month=" + monthOf(1),
                     stranger.token()), 403, "NOT_CHALLENGE_MEMBER");
         }
 
@@ -519,15 +528,20 @@ class MyPageContractIT extends ChallengeApiSupport {
             insertDaily(ch, me.id(), 1, "SUCCESS", false);
 
             expectError(getAuth("/api/v1/challenges/" + UUID.randomUUID() + "/calendar?month="
-                    + thisMonth(), me.token()), 404, "CHALLENGE_NOT_FOUND");
+                    + monthOf(1), me.token()), 404, "CHALLENGE_NOT_FOUND");
             expectError(getAuth("/api/v1/challenges/" + ch + "/calendar?month=2026-13", me.token()),
                     400, "INVALID_CALENDAR_MONTH");
         }
 
         @SuppressWarnings("unchecked")
         private Map<String, Object> firstDay(Member me, UUID challengeId) throws Exception {
+            return firstDay(me, challengeId, 1);
+        }
+
+        @SuppressWarnings("unchecked")
+        private Map<String, Object> firstDay(Member me, UUID challengeId, int daysAgo) throws Exception {
             List<Map<String, Object>> days = (List<Map<String, Object>>) data(getAuth(
-                    "/api/v1/challenges/" + challengeId + "/calendar?month=" + thisMonth(),
+                    "/api/v1/challenges/" + challengeId + "/calendar?month=" + monthOf(daysAgo),
                     me.token())).get("days");
             return days.getFirst();
         }
