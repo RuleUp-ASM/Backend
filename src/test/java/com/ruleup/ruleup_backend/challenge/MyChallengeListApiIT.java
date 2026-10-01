@@ -122,19 +122,26 @@ class MyChallengeListApiIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("심사 중이면 제목은 AI 임시 제목, 설명·이미지는 빈 값으로 대체된다")
+        @DisplayName("심사 중이면 멤버에겐 AI 임시 제목·빈 설명·기본 이미지, 방장에겐 자기가 넣은 값")
         void moderationFallbackApplies() throws Exception {
             Member me = member(uniq("list-moderation"));
+            Member other = member(uniq("list-moderation-m"));
             UUID challengeId = joined(me, "ACTIVE");
+            insertActiveMembership(challengeId, other.id(), "MEMBER");
             jdbcTemplate.update("UPDATE challenges SET title=?, ai_title=?, description=?, image_url=?, " +
                             " moderation_title='IN_REVIEW', moderation_description='IN_REVIEW', " +
                             " moderation_image='IN_REVIEW' WHERE id=?",
                     "원본 제목", "AI 임시 제목", "원본 설명", "https://cdn.ruleup.co.kr/c/x.png", bytes(challengeId));
 
-            MvcResult res = list(me, null);
+            MvcResult res = list(other, null);
             assertThat((String) read(res, "$.data.challenges[0].title")).isEqualTo("AI 임시 제목");
             assertThat((String) read(res, "$.data.challenges[0].description")).isNull();
             assertThat((String) read(res, "$.data.challenges[0].imageUrl")).isNull();
+
+            MvcResult mine = list(me, null);
+            assertThat((String) read(mine, "$.data.challenges[0].title"))
+                    .as("상세와 같이 방장은 자기 값을 본다").isEqualTo("원본 제목");
+            assertThat((String) read(mine, "$.data.challenges[0].imageUrl")).isEqualTo("https://cdn.ruleup.co.kr/c/x.png");
         }
     }
 

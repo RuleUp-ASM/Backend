@@ -157,12 +157,14 @@ public class VerificationSyncService {
         // 복구 전송은 레이트리밋 허용치가 다르다. 「구간당 요청 수」를 볼 때 이 값이 분자다 —
         // 세지 않으면 복구가 정상 주기 전송을 밀어내고 있는지 밖에서 알 수 없다.
         if (backlog) metrics.backlogRequest();
-        rateLimiter.check(userId.toString(), backlog);
+        // 봉투·크기 검증이 간격 검사보다 먼저다. 반려될 요청이 슬롯을 먼저 차지하면 고쳐서 곧바로
+        // 다시 보낸 요청이 429 로 튕긴다(QA: 동기화 버튼 → sync 실패).
         validateEnvelope(userId, req);
         List<SyncSignal> signals = (req.signals() != null) ? req.signals() : List.of();
         if (signals.size() > MAX_SIGNALS_PER_SYNC) {
             throw new BusinessException(ErrorCode.SYNC_PAYLOAD_TOO_LARGE);   // 413 — 클라는 분할 재전송
         }
+        rateLimiter.check(userId.toString(), backlog);
         List<String> ignored = signals.stream()
                 .map(SyncSignal::type)
                 .filter(t -> t == null || !KNOWN_SIGNAL_TYPES.contains(t))
@@ -376,6 +378,14 @@ public class VerificationSyncService {
         return new BusinessException(ErrorCode.INVALID_SIGNAL_PAYLOAD, reason.name());
     }
 
+    private static Instant measuredAt(SyncSignal signal, Instant now) {
+        Instant observed = com.ruleup.ruleup_backend.verification.evaluator.TimeWindows.parseInstant(signal.observedAt());
+        if (observed != null) return observed;
+        // 수신 시각은 저장 때 찍혀 이 요청의 now 보다 몇 ms 늦을 수 있다 — 둘 중 이른 값(SyncSignal#receivedAt).
+        Instant received = signal.receivedAt();
+        return (received == null || received.isAfter(now)) ? now : received;
+    }
+
     private static boolean blank(String value) {
         return value == null || value.isBlank();
     }
@@ -557,11 +567,13 @@ public class VerificationSyncService {
         }
 
         if (!gap) {
+            // 측정 시각: 신호의 observedAt(ISO·epoch millis 모두) → 없으면 서버 수신 시각 → 이번 요청이면 지금.
+            // 앱은 신호 단위 observedAt 을 보내지 않아 ISO 만 읽던 때는 이 이벤트가 한 번도 나가지 않았다.
+            // 위치를 다시 켜도 권한 대기가 풀리지 않아 홈 경고가 남고 14일 뒤 강퇴까지 갔다.
             ofDay.stream().filter(signal -> MethodSignalTypes.anyFor(method, List.of(signal)))
-                    .map(SyncSignal::observedAt).filter(Objects::nonNull).map(value -> {
-                        try { return Instant.parse(value); } catch (RuntimeException invalid) { return Instant.MIN; }
-                    }).filter(at -> !at.isAfter(now)).max(Instant::compareTo)
-                    .filter(at -> !Instant.MIN.equals(at)).ifPresent(at -> eventPublisher.publishEvent(
+                    .map(signal -> measuredAt(signal, now))
+                    .filter(at -> !at.isAfter(now)).max(Instant::compareTo)
+                    .ifPresent(at -> eventPublisher.publishEvent(
                             new PermissionWaitService.MeasurementReceived(member.getChallengeId(),member.getUserId(),method.name(),at)));
         }
         if (mr == null) {

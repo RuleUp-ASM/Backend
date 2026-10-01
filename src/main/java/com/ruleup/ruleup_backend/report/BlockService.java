@@ -8,7 +8,10 @@ import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import com.ruleup.ruleup_backend.user.domain.User;
+import com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus;
+import com.ruleup.ruleup_backend.challenge.service.ChallengeMemberService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,6 +50,8 @@ public class BlockService {
     private final JdbcTemplate jdbc;
     private final UserRepository userRepository;
     private final ChallengeRepository challengeRepository;
+    /** ChallengeMemberService 가 이 서비스를 쓰므로 순환을 지연 조회로 끊는다. */
+    private final ObjectProvider<ChallengeMemberService> memberService;
 
     // ===== 접수 =====
 
@@ -123,8 +128,15 @@ public class BlockService {
             block(reporterId, TARGET_CHALLENGE, targetId);
         }
 
-        // 참여 중이면 방을 없애지 않는다 — 방 자체가 보기 싫으면 직접 나가야 한다.
-        String effect = participating(reporterId, targetId) ? "CHALLENGE_MASKED" : "CHALLENGE_HIDDEN";
+        // 참여 중이면 그 방에서 나간다 — 신고한 방에 계속 남아 인증하라는 건 말이 안 된다(QA 9/30).
+        // 자진 탈퇴와 같은 규칙(감점·재입장 대기·방장 승계)이다. 신고를 감점 없는 탈출구로 쓰지 못하게.
+        // 종료된 방은 나갈 수 없으니 표시값만 가린다.
+        boolean participating = participating(reporterId, targetId);
+        if (participating && challenge.getStatus() != ChallengeStatus.COMPLETED) {
+            memberService.getObject().leave(reporterId, targetId);
+            participating = false;   // 탈퇴는 JPA 쓰기라 아직 flush 전 — 다시 세지 않는다
+        }
+        String effect = participating ? "CHALLENGE_MASKED" : "CHALLENGE_HIDDEN";
         return new ReportDtos.CreateResponse(reportId.toString(), true, effect);
     }
 
