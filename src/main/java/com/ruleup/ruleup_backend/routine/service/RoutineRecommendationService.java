@@ -110,7 +110,7 @@ public class RoutineRecommendationService {
                 "자동 인증이 가능한 루틴이 아니에요. 직접 체크(수동 인증)로만 진행할 수 있어요.");
     }
 
-    // ===== 목표값: LLM 값이 범위 안이면 그 값, 아니면 템플릿 기본값(신뢰 경계 보정) =====
+    // ===== 목표값: LLM 값이 범위 안이면 그 값, 범위 밖이면 경계값, 형식 오류면 템플릿 기본값(신뢰 경계 보정) =====
     // 탈락 사유(존재하지 않는 키·타입/범위 불일치)는 llm_fail class=VALIDATION 으로 남겨 집계한다.
     private List<RoutineParam> resolveParams(RoutineTemplate template, RoutineMatch match) {
         Map<String, Object> provided = match.paramsOrEmpty();

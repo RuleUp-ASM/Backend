@@ -45,7 +45,7 @@ public class RoutineCatalog {
                 .filter(RoutineTemplate::supportsAuto)
                 .map(t -> new RoutineCandidate(
                         t.getId(), t.getName(), t.getCategory().name(), t.getDescription(),
-                        t.paramSpecs().stream().map(s -> s.key()).toList()))
+                        t.paramSpecs().stream().map(s -> s.rangeLabel()).toList()))
                 .toList();
     }
 

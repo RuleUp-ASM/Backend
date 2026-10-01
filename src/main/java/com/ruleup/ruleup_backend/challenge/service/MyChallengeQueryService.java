@@ -134,13 +134,16 @@ public class MyChallengeQueryService {
         boolean leftTab = filter == MyChallengeFilter.LEFT;
         // 신고해 차단한 방은 심사 가려짐과 같은 자리로 내린다 — 표시 규칙은 ChallengeView 와 하나다.
         boolean hidden = masked.contains(r.challengeId);
+        // 방장은 심사 중이어도 자기가 넣은 값을 본다 — 상세(ChallengeView.forOwner)와 같은 규칙이다.
+        // 목록만 가려 사진을 넣자마자 내 목록에서 기본 이미지로 돌아가 보였다.
+        boolean owner = "OWNER".equals(r.myRole);
         return new ChallengeListResponse.Item(
                 r.challengeId.toString(),
                 // 심사 중·거부면 AI 임시 제목 / 빈 설명 / 기본 이미지로 대체 표시한다.
                 hidden ? com.ruleup.ruleup_backend.challenge.view.ChallengeView.REPORTED_TITLE
-                        : !publicVisible(r.moderationTitle) ? r.aiTitle : r.title,
-                (hidden || !publicVisible(r.moderationDescription)) ? null : r.description,
-                (hidden || !publicVisible(r.moderationImage)) ? null : r.imageUrl,
+                        : (!owner && !publicVisible(r.moderationTitle)) ? r.aiTitle : r.title,
+                (hidden || (!owner && !publicVisible(r.moderationDescription))) ? null : r.description,
+                (hidden || (!owner && !publicVisible(r.moderationImage))) ? null : r.imageUrl,
                 r.category,
                 r.mode,
                 r.visibility,

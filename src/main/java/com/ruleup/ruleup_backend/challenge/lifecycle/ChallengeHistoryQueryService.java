@@ -65,7 +65,7 @@ public class ChallengeHistoryQueryService {
                 str(h,"owner_type_snapshot"),number(h,"final_member_count",0),number(h,"capacity",null),
                 number(h,"weekly_count",null),false,
                 new ChallengeDetailResponse.Period(str(h,"start_date"),str(h,"end_date"),0),
-                new ChallengeDetailResponse.Verification(auto?"AUTO":"MANUAL", auto?str(config,"signalSource"):"SELF_CHECK",null,permissions(config)),
+                new ChallengeDetailResponse.Verification(auto?"AUTO":"MANUAL", auto?str(config,"signalSource"):"SELF_CHECK",null,permissions(config),java.util.List.of()),
                 new ChallengeDetailResponse.Stats(null,null),new ChallengeDetailResponse.Gate(str(h,"min_tier"),myTier,false),
                 "CHALLENGE_COMPLETED",null,"IMMEDIATE",false,false,
                 viewer.equals(ownerId)?"OWNER":member?"MEMBER":"NONE",null);
