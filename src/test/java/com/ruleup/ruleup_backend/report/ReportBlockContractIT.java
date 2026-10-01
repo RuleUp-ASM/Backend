@@ -116,25 +116,18 @@ class ReportBlockContractIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("미참여 챌린지 신고는 탐색에서 숨기고, 참여 중이면 나가서 숨기고, 종료된 참여 방은 가린다")
+        @DisplayName("미참여 챌린지 신고는 탐색에서 숨기고, 참여 중이면 방은 두고 가린다")
         void challenge_hidden_effect_depends_on_participation() throws Exception {
             Member reporter = member(uniq("r"));
             Member owner = member(uniq("o"));
             UUID outside = insertChallenge(owner.id(), "EXERCISE", "ACTIVE", "GROUP");
             UUID joined = insertChallenge(owner.id(), "EXERCISE", "ACTIVE", "GROUP");
             insertActiveMembership(joined, reporter.id(), "MEMBER");
-            UUID finished = insertChallenge(owner.id(), "EXERCISE", "COMPLETED", "GROUP");
-            insertActiveMembership(finished, reporter.id(), "MEMBER");
 
             assertThat((String) read(postAuth("/api/v1/reports", reporter.token(),
                     challengeReport(outside)), "$.data.hiddenEffect")).isEqualTo("CHALLENGE_HIDDEN");
             assertThat((String) read(postAuth("/api/v1/reports", reporter.token(),
-                    challengeReport(joined)), "$.data.hiddenEffect")).isEqualTo("CHALLENGE_HIDDEN");
-            assertThat(jdbcTemplate.queryForObject("SELECT status FROM challenge_members WHERE challenge_id=? AND user_id=?",
-                    String.class, bytes(joined), bytes(reporter.id())))
-                    .as("신고한 방에서 나간다").isNotEqualTo("ACTIVE");
-            assertThat((String) read(postAuth("/api/v1/reports", reporter.token(),
-                    challengeReport(finished)), "$.data.hiddenEffect")).isEqualTo("CHALLENGE_MASKED");
+                    challengeReport(joined)), "$.data.hiddenEffect")).isEqualTo("CHALLENGE_MASKED");
         }
 
         @Test

@@ -86,24 +86,41 @@ class ContractGapIT extends ChallengeApiSupport {
     class Masking {
 
         @Test
-        @DisplayName("참여 중인 방을 신고하면 그 방에서 나가고 내 목록에서 사라진다")
-        void reportedRoomIsLeft() throws Exception {
+        @DisplayName("참여 중인 방을 신고하면 상세·방·목록·진행률이 모두 가려진 값으로 내려온다")
+        void reportedRoomIsMaskedEverywhere() throws Exception {
             Member me = member(uniq("gap-mask"));
-            Member owner = member(uniq("gap-mask-o"));
-            UUID id = insertChallenge(owner.id(), "EXERCISE", "ACTIVE", "GROUP");
-            insertActiveMembership(id, owner.id(), "OWNER");
-            insertActiveMembership(id, me.id(), "MEMBER");
+            UUID id = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
+            insertActiveMembership(id, me.id(), "OWNER");
+            // AI 제목을 그대로 받아 만든 방은 ai_title == title 이다 — AI 제목으로 가리면 원문이 그대로 보인다(REP-06).
+            jdbc.update("UPDATE challenges SET title='원래 제목', ai_title='원래 제목', " +
+                    "description='원래 설명', image_url='https://cdn.example/a.png' WHERE id=?", bytes(id));
+
+            assertThat((String) read(getAuth("/api/v1/challenges/" + id, me.token()), "$.data.title"))
+                    .as("신고 전에는 원문이다").isEqualTo("원래 제목");
 
             var reported = postJsonAuth("/api/v1/reports", me.token(),
                     Map.of("targetType", "CHALLENGE", "targetChallengeId", id.toString(),
                             "reason", "INAPPROPRIATE", "contextType", "CHALLENGE_DETAIL"));
             assertThat((String) read(reported, "$.data.hiddenEffect"))
-                    .as("나갔으니 미참여 방처럼 숨긴다").isEqualTo("CHALLENGE_HIDDEN");
+                    .as("참여 중이라 숨기지 않고 가린다").isEqualTo("CHALLENGE_MASKED");
 
-            assertThat(getAuth("/api/v1/challenges/" + id, me.token()).getResponse().getStatus())
-                    .as("숨긴 방은 상세로도 열리지 않는다").isEqualTo(404);
-            assertThat(getAuth("/api/v1/challenges", me.token()).getResponse().getContentAsString())
-                    .as("내 챌린지 목록에서 빠진다").doesNotContain(id.toString());
+            var detail = getAuth("/api/v1/challenges/" + id, me.token());
+            assertThat((String) read(detail, "$.data.title")).isEqualTo(ChallengeView.REPORTED_TITLE);
+            assertThat(detail.getResponse().getContentAsString()).doesNotContain("원래 제목");
+            assertThat((String) read(detail, "$.data.description")).isNull();
+            assertThat((String) read(detail, "$.data.imageUrl")).isNull();
+
+            assertThat((String) read(getAuth("/api/v1/challenges/" + id + "/room", me.token()),
+                    "$.data.summary.title"))
+                    .as("방 안에서도 같은 값이어야 한다").isEqualTo(ChallengeView.REPORTED_TITLE);
+
+            assertThat((String) read(getAuth("/api/v1/challenges", me.token()),
+                    "$.data.challenges[0].title"))
+                    .as("내 챌린지 목록도 같다").isEqualTo(ChallengeView.REPORTED_TITLE);
+
+            assertThat((String) read(getAuth("/api/v1/verifications/progress", me.token()),
+                    "$.data.challenges[0].title"))
+                    .as("진행률 목록도 같다").isEqualTo(ChallengeView.REPORTED_TITLE);
         }
     }
 
