@@ -50,7 +50,7 @@ import java.util.regex.Pattern;
  * 요청에서 radiusM 이 빠졌고, 응답의 serverRadiusM 으로만 내려간다.
  *
  * <p><b>변경은 월 1회</b>(앵커·대상 앱 공통, 매월 1일 00:00 KST 리셋). 첫 설정은 소진하지 않는다.
- * 앵커 변경은 인증 윈도우 중이면 거부(409)하고 평상시엔 즉시 적용, 대상 앱 변경은 항상 익일 00:00부터 적용된다.
+ * 앵커 변경은 인증 윈도우 중이면 익일 00:00부터, 평상시엔 즉시 적용되고, 대상 앱 변경은 항상 익일 00:00부터 적용된다.
  */
 @Service
 @RequiredArgsConstructor
@@ -156,18 +156,26 @@ public class VerificationSetupService {
         }
         Instant now = Instant.now();
         Instant lastChanged = member.getAnchorChangedAt();
+        // 인증 시간 중에 바꾼 세트는 내일부터 적용된다 — 저장 시각이 아니라 그 적용 시각을 내린다.
+        LocalDate pendingFrom = settingHistory.pendingFrom(member.getId(), SettingKind.ANCHORS, LocalDate.now(KST));
+        String appliedFrom = (pendingFrom != null)
+                ? pendingFrom.atStartOfDay(KST).format(ISO_OFFSET)
+                : formatKst(member.getAnchorUpdatedAt());
         return new MemberLocationResponse(
                 toAnchorDtos(stored),
                 properties.geofenceRadiusM(),
-                formatKst(member.getAnchorUpdatedAt()),
+                appliedFrom,
                 MonthlyChangeLimit.available(lastChanged, now),
                 MonthlyChangeLimit.nextChangeAvailableAtOrNull(lastChanged, now));
     }
 
     // ===== PUT /my-location — 내 인증장소 수정 =====
     /**
-     * 보낸 목록으로 앵커 세트 전체를 갈아끼운다(부분 수정 아님). 월 1회, 인증 윈도우 중에는 거부(익일 재시도),
-     * 평상시엔 즉시 적용. 모더레이션은 타지 않는다(앵커는 심사 대상이 아님).
+     * 보낸 목록으로 앵커 세트 전체를 갈아끼운다(부분 수정 아님). 월 1회, 평상시엔 즉시 적용하고
+     * 인증 윈도우 중이면 익일 00:00부터 적용한다. 모더레이션은 타지 않는다(앵커는 심사 대상이 아님).
+     *
+     * <p>윈도우 중 변경을 거부하면 하루 종일 열린 윈도우(예: 회피형)에서는 장소를 영영 바꿀 수 없다.
+     * 막는 대신 적용을 미뤄 그날 판정만 이전 장소로 지킨다.
      */
     @Transactional
     public MemberLocationUpdateResponse updateLocation(UUID userId, UUID challengeId, MemberLocationRequest req) {
@@ -184,27 +192,34 @@ public class VerificationSetupService {
 
         Instant now = Instant.now();
 
-        // 그날 판정을 흔들 수 없게, 인증 윈도우가 진행 중이면 교체를 거부한다(익일 재시도).
-        LocalDate today = LocalDate.now(KST);
-        dailyRepo.findByChallengeMemberIdAndTargetDate(member.getId(), today).ifPresent(d -> {
-            if (d.getWindowClosesAt() != null && now.isBefore(d.getWindowClosesAt()))
-                throw new BusinessException(ErrorCode.LOCATION_LOCKED_IN_WINDOW);
-        });
-
         if (!MonthlyChangeLimit.available(member.getAnchorChangedAt(), now)) {
             throw BusinessException.settingChangeLimit(MonthlyChangeLimit.nextChangeAvailableAt(now));
         }
-
         List<GeoAnchor> anchors = toAnchors(req.anchors());
+
+        // 그날 판정을 흔들 수 없게, 인증 윈도우가 진행 중이면 내일부터 적용한다.
+        LocalDate today = LocalDate.now(KST);
+        boolean inWindow = dailyRepo.findByChallengeMemberIdAndTargetDate(member.getId(), today)
+                .map(d -> d.getWindowClosesAt() != null && now.isBefore(d.getWindowClosesAt()))
+                .orElse(false);
+        LocalDate effectiveFrom = inWindow ? today.plusDays(1) : today;
+        if (inWindow && member.getAnchors() != null && !member.getAnchors().isEmpty()) {
+            // 오늘까지는 지금 장소로 판정해야 한다 — 이력이 없는 멤버는 새 장소로 폴백하지 않게 먼저 남긴다.
+            LocalDate since = (member.getAnchorUpdatedAt() != null)
+                    ? LocalDate.ofInstant(member.getAnchorUpdatedAt(), KST) : today;
+            settingHistory.backfillIfMissing(member.getId(), SettingKind.ANCHORS, today, since, member.getAnchors());
+        }
+
         member.changeAnchors(anchors, now);
-        // 변경 즉시 적용이라 오늘부터다. 어제 이전 판정은 이전 스냅샷을 계속 쓴다.
-        settingHistory.record(member.getId(), SettingKind.ANCHORS, LocalDate.now(KST), anchors);
+        // 어제 이전 판정은 이전 스냅샷을 계속 쓴다. 윈도우 중 변경이면 오늘 판정도 이전 스냅샷이다.
+        settingHistory.record(member.getId(), SettingKind.ANCHORS, effectiveFrom, anchors);
         if (!member.isSetupReady()) member.markSetupReady();
         challengeQuery.saveMember(member);
 
         return new MemberLocationUpdateResponse(
                 toAnchorDtos(anchors), properties.geofenceRadiusM(),
-                "IMMEDIATE", MonthlyChangeLimit.nextChangeAvailableAt(now));
+                inWindow ? effectiveFrom.atStartOfDay(KST).format(ISO_OFFSET) : "IMMEDIATE",
+                MonthlyChangeLimit.nextChangeAvailableAt(now));
     }
 
     // ===== GET /my-screen-apps — 내 스크린타임 앱 조회 =====

@@ -105,11 +105,13 @@ public class VerificationChallengeController {
                     보낸 목록으로 앵커 세트 **전체를 갈아끼운다**(부분 수정 아님). 최대 3개.
 
                     - **변경은 월 1회.** "저장 1회"가 단위라 앵커 하나만 고쳐도 그 달 횟수를 소진한다(매월 1일 00:00 KST 리셋).
-                    - **인증 윈도우가 진행 중이면 거부**한다(그날 판정을 흔들 수 없게) — 익일 재시도. 평상시엔 즉시 적용.
+                    - 평상시엔 **즉시 적용**(`appliedFrom: "IMMEDIATE"`).
+                    - **인증 윈도우가 진행 중이면 다음 날 00:00부터 적용**한다(그날 판정을 흔들 수 없게) —
+                      저장은 받고 `appliedFrom` 에 다음 날 00:00(ISO-8601, KST)을 내린다. 오늘 판정은 이전 장소로 한다.
                     """)
     @ApiErrorCodes({ErrorCode.INVALID_ANCHOR, ErrorCode.ANCHOR_LIMIT_EXCEEDED, ErrorCode.GEOFENCE_NOT_CONFIGURED,
             ErrorCode.LOGIN_REQUIRED, ErrorCode.NOT_CHALLENGE_MEMBER, ErrorCode.CHALLENGE_NOT_FOUND,
-            ErrorCode.LOCATION_LOCKED_IN_WINDOW, ErrorCode.SETTING_CHANGE_LIMIT})
+            ErrorCode.SETTING_CHANGE_LIMIT})
     @PutMapping("/{challengeId}/my-location")
     public ApiResponse<MemberLocationUpdateResponse> updateLocation(
             @AuthenticationPrincipal String userId,

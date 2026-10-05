@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * 인증 도메인 운영 상수. 배포 없이 조정할 수 있게 설정으로 뺀다.
  *
  * @param geofenceRadiusM 지오펜스 반경(m) — 유저가 정하는 값이 아닌 <b>서버 단일값</b>이라
- *                        요청에는 없고 응답의 serverRadiusM으로만 내려간다. 성능 테스트 후 조정
+ *                        요청에는 없고 응답의 serverRadiusM으로만 내려간다. 판정도 앵커에 저장된 반경이 아니라 이 값을 쓴다
  * @param maxPayloadBytes sync 한 번의 본문 상한(bytes). 압축 해제 후 누적 바이트에도 같은 상한을 적용한다
  * @param syncMinIntervalSec 평상시 sync 최소 간격(초). 기기 스펙 기반 flushIntervalSec 보다 짧게 잡아
  *                           정상 주기 전송이 걸리지 않게 한다
@@ -63,7 +63,7 @@ public record VerificationProperties(Integer geofenceRadiusM, Integer maxPayload
                                      Integer materializeCatchupDays,
                                      Boolean requireActiveDevice, Boolean requireSignalOrigin) {
 
-    private static final int DEFAULT_GEOFENCE_RADIUS_M = 500;
+    private static final int DEFAULT_GEOFENCE_RADIUS_M = 200;
     private static final int DEFAULT_MAX_PAYLOAD_BYTES = 1_048_576;
     private static final int DEFAULT_SYNC_MIN_INTERVAL_SEC = 300;
     private static final int DEFAULT_SYNC_BACKLOG_MIN_INTERVAL_SEC = 10;

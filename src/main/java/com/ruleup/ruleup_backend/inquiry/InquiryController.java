@@ -52,6 +52,7 @@ public class InquiryController {
 
     @Operation(summary = "내 문의 내역", description = """
             최신순. 상태 칩(`RECEIVED` · `ANSWERED`)과 새 답변 배지를 이 응답으로 그린다.
+            배지는 `status` 가 아니라 **`hasNewAnswer`** 로 그린다 — 상세를 한 번 열면 꺼진다.
 
             분류는 **현재 분류**를 내린다 — 운영자가 바꿨더라도 그 사실은 알리지 않는다.
             """)
@@ -62,6 +63,8 @@ public class InquiryController {
     }
 
     @Operation(summary = "문의 상세", description = """
+            답변이 달린 문의를 열면 그 답변을 **읽은 것으로 남긴다**(목록의 `hasNewAnswer` 가 꺼진다).
+
             **열람 전용**이다. 답변 이후 이 스레드에 글을 추가하는 경로를 두지 않으며, 같은 사안을
             다시 묻고 싶으면 새 문의로 접수한다 — 새 문의에도 같은 SLA 가 적용된다.
             """)
