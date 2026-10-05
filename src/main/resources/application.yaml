@@ -326,8 +326,9 @@ springdoc:
 
 logging:
   # 같은 요청의 로그를 모아 찾도록 RequestIdFilter 가 넣은 requestId 를 줄마다 찍는다. 요청 밖(배치)은 빈칸.
+  # 뒤의 trace_id 는 ADOT 에이전트(OTEL_ENABLED=true)가 MDC 에 넣는 값 — X-Ray 트레이스와 로그를 잇는다. 꺼져 있으면 빈칸.
   pattern:
-    correlation: "[%X{requestId:-}] "
+    correlation: "[%X{requestId:-} %X{trace_id:-}] "
   level:
     # 기본 유저는 우리 설정상 쓸 수 없으니, 'generated password' 경고만 숨김
     org.springframework.boot.security.autoconfigure: error
