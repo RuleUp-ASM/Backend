@@ -1,0 +1,49 @@
+# 인프라 · 모니터링 구조
+
+노션 「RuleUp 모니터링」의 구성을 그림으로 옮긴 것. prod 기준이고 stg 도 모양은 같다(태스크 1개, P0 긴급 채널 없음).
+
+> 트레이스(ADOT 에이전트 → otel-collector 사이드카 → X-Ray)는 이미지에 에이전트만 들어 있고 **아직 켜지 않았다**.
+> 태스크 정의에 `OTEL_ENABLED=true`·사이드카를 더하는 적용은 따로 한다.
+
+```mermaid
+flowchart LR
+  app[Android 앱] -->|HTTPS| cf[Cloudflare] --> alb[ALB ruleup-prod-alb]
+  subgraph ecs[ECS Fargate ruleup-prod-api · 태스크 2~6]
+    api[api 컨테이너<br/>Spring Boot + ADOT 에이전트]
+    col[otel-collector 사이드카]
+    api -->|OTLP 스팬| col
+  end
+  alb --> api
+  api --> rds[(RDS MySQL)]
+  api --> redis[(ElastiCache Redis)]
+  api --> sqs[[SQS 알림·심사 + DLQ]]
+  api --> ext[외부: FCM · Gemini/Nova · OAuth]
+
+  subgraph obs[관찰]
+    cwm[CloudWatch 지표<br/>AWS/* + RuleUp/App/prod]
+    cwl[CloudWatch Logs<br/>/ecs/ruleup-prod-api]
+    xr[X-Ray 트레이스]
+    dash[대시보드<br/>ruleup-prod-ops · ruleup-prod-business]
+  end
+  api -->|Micrometer 허용 목록| cwm
+  api -->|stdout| cwl
+  cwl -->|메트릭 필터| cwm
+  col --> xr
+  alb & rds & redis & sqs -.-> cwm
+  cwm --> dash
+
+  cwm --> alarm{CloudWatch 경보}
+  alarm -->|P0·P1| sns1[SNS ruleup-prod-alerts] --> q1[Amazon Q] --> s1[Slack #ruleup-alert]
+  alarm -->|P0| eb[EventBridge P0 규칙] --> sns0[SNS ruleup-prod-p0-slack] --> q0[Amazon Q] --> s0[Slack #ruleup-alert-urgent<br/>담당자 멘션]
+  sns1 & sns0 -.전달 실패.-> fb[SNS ruleup-alert-fallback-email] --> mail[이메일]
+```
+
+## 장애 확인 흐름 (노션 4절)
+
+| 단계 | 어디서 |
+|---|---|
+| 1. 감지 | CloudWatch 경보 (`alerting/p0_p1.py`, `alerting/alarms.py`) |
+| 2. 전달 | P0 → 긴급 채널 멘션 + 운영 채널 / P1 → 운영 채널 |
+| 3. 영향 범위 | 대시보드 `ruleup-prod-ops`(서버) · `ruleup-prod-business`(사용자) |
+| 4. 병목 구간 | X-Ray 트레이스 — 요청 하나의 API → DB/Redis → 외부 API 구간별 소요 |
+| 5. 원인 | CloudWatch Logs — 로그 줄의 `[requestId traceId]` 로 트레이스와 잇는다 |

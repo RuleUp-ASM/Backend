@@ -94,6 +94,7 @@ public class AuthService {
     private final com.ruleup.ruleup_backend.invitation.InvitationService invitationService;
     private final com.ruleup.ruleup_backend.applink.InstallReferrerInvitation installReferrerInvitation;
     private final com.ruleup.ruleup_backend.notification.service.NotificationPublisher notificationPublisher;
+    private final com.ruleup.ruleup_backend.observability.BusinessMetrics businessMetrics;
 
     // ===== OAuth 로그인 =====
     // ⚠️ 일부러 @Transactional 을 붙이지 않는다.
@@ -102,6 +103,19 @@ public class AuthService {
     // 그래서 "느린 외부 호출"은 트랜잭션 밖에서 하고,
     // "빠른 DB 쓰기"만 TokenService.issueTokenPair()의 짧은 트랜잭션으로 처리한다.
     public OAuthLoginResponse oauthLogin(OAuthProvider provider, OAuthLoginRequest req) {
+        // 로그인 결과를 서비스 지표로 센다. 예외는 사유와 무관하게 실패 하나로 센다 — 사유별 분해는 로그가 맡는다.
+        try {
+            OAuthLoginResponse res = login(provider, req);
+            if (res.isNewUser()) businessMetrics.loginNewUser();
+            else businessMetrics.loginExisting();
+            return res;
+        } catch (RuntimeException e) {
+            businessMetrics.loginFailed();
+            throw e;
+        }
+    }
+
+    private OAuthLoginResponse login(OAuthProvider provider, OAuthLoginRequest req) {
         // deviceId·deviceInfo는 로그인·가입 양쪽 필수(계약). 외부 호출 전에 빠르게 거부.
         requireValidDevice(req.deviceId(), req.deviceInfo());
         requireValidOAuthRequest(provider, req);
@@ -164,6 +178,20 @@ public class AuthService {
     // UNIQUE 충돌하면(사전 검사와 INSERT 사이의 경합) 같은 트랜잭션에서 복구할 수 없어
     // — 제약 위반이 나면 영속성 컨텍스트가 깨진다 — 트랜잭션을 새로 열어 재시도해야 한다.
     public SignupResponse signup(SignupRequest req) {
+        // 가입 성공은 계정이 새로 생기거나 탈퇴 계정이 돌아온 경우만 센다. 동시 가입 경합으로 기존 계정
+        // 로그인에 수렴한 응답(isNewUser=false·restored=false)은 가입이 아니라 세지 않는다.
+        // 정지 계정 복귀는 복원이 커밋돼도 응답이 403 이라 실패로 센다 — 사용자는 들어오지 못했다.
+        try {
+            SignupResponse res = completeSignup(req);
+            if (res.isNewUser() || res.restored()) businessMetrics.signupSucceeded();
+            return res;
+        } catch (RuntimeException e) {
+            businessMetrics.signupFailed();
+            throw e;
+        }
+    }
+
+    private SignupResponse completeSignup(SignupRequest req) {
         // 토큰 소모는 요청당 한 번만. 재시도로 두 번 소모되면 스스로 INVALID_SIGNUP_TOKEN 이 된다.
         boolean[] tokenConsumed = {false};
 

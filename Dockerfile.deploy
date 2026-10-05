@@ -8,6 +8,11 @@ RUN chmod +x gradlew && ./gradlew clean bootJar -x test --no-daemon
 # 런타임 스테이지: target(arm64) — ECS Fargate ARM64.
 FROM eclipse-temurin:25-jre
 WORKDIR /app
+# 트레이스(X-Ray) 용 ADOT Java 에이전트. 이미지에는 늘 들어 있고, 태스크 정의 env OTEL_ENABLED=true 일 때만 붙는다.
+# 구성: infra/monitoring/tracing/README.md
+ARG ADOT_JAVA_AGENT_VERSION=v2.31.0
+ADD https://github.com/aws-observability/aws-otel-java-instrumentation/releases/download/${ADOT_JAVA_AGENT_VERSION}/aws-opentelemetry-agent.jar /app/otel/aws-opentelemetry-agent.jar
 COPY --from=build /src/build/libs/*.jar app.jar
+COPY infra/monitoring/tracing/entrypoint.sh /app/entrypoint.sh
 EXPOSE 8080
-ENTRYPOINT ["java","-jar","/app/app.jar"]
+ENTRYPOINT ["sh","/app/entrypoint.sh"]

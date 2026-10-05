@@ -27,7 +27,7 @@ import static net.javacrumbs.shedlock.spring.annotation.EnableSchedulerLock.Inte
  * <ul>
  *   <li>SQS 소비자({@code *ModerationQueue.poll}): 메시지는 큐가 한 소비자에게만 준다.</li>
  *   <li>태스크별 지표·게이지({@code SystemMetricsSampler.sample}, {@code OutboxMetrics.refresh},
- *       {@code WatcherHealth.sample}): 락을 걸면 나머지 태스크의 게이지가 멈춘다.</li>
+ *       {@code WatcherHealth.sample}, {@code VerificationRateMetrics.refresh}): 락을 걸면 나머지 태스크의 게이지가 멈춘다.</li>
  *   <li>로컬 캐시 무효화({@code SegmentScoreService.evictLocalCaches}).</li>
  * </ul>
  * 새 {@code @Scheduled} 는 둘 중 하나로 분류돼야 한다 — SchedulerLockCoverageTest 가 강제한다.

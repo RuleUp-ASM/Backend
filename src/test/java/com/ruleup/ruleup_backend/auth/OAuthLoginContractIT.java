@@ -112,6 +112,43 @@ class OAuthLoginContractIT extends AuthApiSupport {
     }
 
     @Nested
+    @DisplayName("서비스 지표 — 가입·로그인 결과가 biz.* 카운터로 세어진다")
+    class BusinessMetricsHooks {
+
+        @Autowired io.micrometer.core.instrument.MeterRegistry meterRegistry;
+
+        private double count(String name, String tag, String value) {
+            return meterRegistry.get(name).tag(tag, value).counter().count();
+        }
+
+        @Test
+        @DisplayName("신규 로그인 → 가입 → 재로그인 → 같은 토큰 재가입 → IdP 실패가 각자의 태그로 한 번씩 세어진다")
+        void login_and_signup_outcomes_are_counted() throws Exception {
+            double newUser = count("biz.login", "outcome", "new_user");
+            double existing = count("biz.login", "outcome", "existing");
+            double loginFailure = count("biz.login", "outcome", "failure");
+            double signupSuccess = count("biz.signup", "result", "success");
+            double signupFailure = count("biz.signup", "result", "failure");
+
+            String tag = uniq("biz");
+            Map<String, Object> body = preparedSignup(tag, "지표" + seq());
+            assertThat(postJson("/api/v1/auth/signup", body).getResponse().getStatus()).isEqualTo(200);
+            assertThat(postJson("/api/v1/auth/oauth/kakao", loginBody(tag, "inst-" + tag, "dev-" + tag))
+                    .getResponse().getStatus()).isEqualTo(200);
+            // 1회용 토큰 재제출 — 400 으로 끝나므로 가입 실패다
+            assertThat(postJson("/api/v1/auth/signup", body).getResponse().getStatus()).isEqualTo(400);
+            String failTag = uniq(MockOAuthClient.FAIL_INVALID_CODE + "-");
+            postJson("/api/v1/auth/oauth/kakao", loginBody(failTag, "inst-" + failTag, "dev-" + failTag));
+
+            assertThat(count("biz.login", "outcome", "new_user")).isEqualTo(newUser + 1);
+            assertThat(count("biz.login", "outcome", "existing")).isEqualTo(existing + 1);
+            assertThat(count("biz.login", "outcome", "failure")).isEqualTo(loginFailure + 1);
+            assertThat(count("biz.signup", "result", "success")).isEqualTo(signupSuccess + 1);
+            assertThat(count("biz.signup", "result", "failure")).isEqualTo(signupFailure + 1);
+        }
+    }
+
+    @Nested
     @DisplayName("만료 세션 재로그인")
     class ExpiredSessionRelogin {
 

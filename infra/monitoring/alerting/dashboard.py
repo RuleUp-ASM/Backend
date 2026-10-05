@@ -16,7 +16,7 @@ def row(*ws):
 alb=lambda m,s,**o:['AWS/ApplicationELB',m,'LoadBalancer',LB,'TargetGroup',TG,{'stat':s,**o}]
 widgets.append({'type':'alarm','x':0,'y':0,'width':24,'height':3,'properties':{'title':'경보 상태 (prod)','alarms':[
     a['AlarmArn'] for pg in cw.get_paginator('describe_alarms').paginate(AlarmNamePrefix='ruleup-prod-') for a in pg['MetricAlarms']][:100],'sortBy':'stateUpdatedTimestamp','states':['ALARM','INSUFFICIENT_DATA','OK']}}); y=3
-text('## API')
+text('## API — 가입·로그인·인증 같은 사용자 지표는 대시보드 `ruleup-prod-business` 에서 따로 본다')
 row(('요청 수',[alb('RequestCount','Sum')],None),
     ('5xx',[alb('HTTPCode_Target_5XX_Count','Sum',label='타깃 5xx'),['AWS/ApplicationELB','HTTPCode_ELB_5XX_Count','LoadBalancer',LB,{'stat':'Sum','label':'ALB 5xx'}]],None),
     ('응답 시간(초)',[alb('TargetResponseTime','p95',label='p95'),alb('TargetResponseTime','p50',label='p50')],None),
@@ -24,11 +24,11 @@ row(('요청 수',[alb('RequestCount','Sum')],None),
 text('## 서버 · DB · Redis')
 ecs=lambda m:['AWS/ECS',m,'ClusterName','ruleup-prod-cluster','ServiceName','ruleup-prod-api',{'stat':'Average'}]
 rds=lambda m,s='Average':['AWS/RDS',m,'DBInstanceIdentifier','ruleup-prod-mysql',{'stat':s}]
-red=lambda m:['AWS/ElastiCache',m,'CacheClusterId','ruleup-prod-redis-001',{'stat':'Average'}]
+red=lambda m,**o:['AWS/ElastiCache',m,'CacheClusterId','ruleup-prod-redis-001',{'stat':'Average',**o}]
 row(('ECS CPU·메모리(%)',[ecs('CPUUtilization'),ecs('MemoryUtilization')],None),
     ('RDS CPU(%)·연결 수',[rds('CPUUtilization'),rds('DatabaseConnections','Maximum')+[]],None),
     ('RDS 남은 저장공간(byte)',[rds('FreeStorageSpace','Minimum')],None),
-    ('Redis CPU·메모리(%)',[red('EngineCPUUtilization'),red('DatabaseMemoryUsagePercentage')],None))
+    ('Redis CPU·메모리·캐시 히트율(%)',[red('EngineCPUUtilization'),red('DatabaseMemoryUsagePercentage'),red('CacheHitRate',label='캐시 히트율')],None))
 text('## 자동 인증 · 배치 · 처리 대기 작업')
 app=lambda m,s='Sum',**o:[NS,m,{'stat':s,**o}]
 sqs=lambda q,m,s='Maximum':['AWS/SQS',m,'QueueName',q,{'stat':s,'label':f'{q}'}]
@@ -43,7 +43,8 @@ row(('인증 접수 실패(sync 5xx)',[app('verification.sync.failed.count')],No
                                        sqs('ruleup-prod-moderation-dlq','ApproximateNumberOfMessagesVisible')[:-1]+[{'stat':'Maximum','label':'moderation DLQ','yAxis':'right'}],
                                        sqs('ruleup-prod-notifications-dlq','ApproximateNumberOfMessagesVisible')[:-1]+[{'stat':'Maximum','label':'notifications DLQ','yAxis':'right'}]],None))
 text('## 외부 연동')
-row(('FCM 푸시 성공·실패',[['RuleUp/Prod/Notification','PushSuccess',{'stat':'Sum'}],['RuleUp/Prod/Notification','PushFailed',{'stat':'Sum'}]],None),
+row(('FCM 푸시 성공·실패·성공률',[['RuleUp/Prod/Notification','PushSuccess',{'stat':'Sum','id':'ok'}],['RuleUp/Prod/Notification','PushFailed',{'stat':'Sum','id':'ng'}],
+                                 [{'expression':'IF(FILL(ok,0)+FILL(ng,0)>0, 100*FILL(ok,0)/(FILL(ok,0)+FILL(ng,0)))','label':'성공률(%)','id':'rate','yAxis':'right'}]],None),
     ('LLM 호출·최종 실패',[app('llm.call.count',label='호출'),app('llm.call.failed.count',label='최종 실패')],None),
     ('LLM 소요 시간(ms)',[app('llm.call.avg','Average',label='평균'),app('llm.call.max','Maximum',label='최대')],None))
 cw.put_dashboard(DashboardName='ruleup-prod-ops',DashboardBody=json.dumps({'widgets':widgets},ensure_ascii=False))
