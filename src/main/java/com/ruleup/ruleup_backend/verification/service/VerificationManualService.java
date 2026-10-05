@@ -63,6 +63,7 @@ public class VerificationManualService {
     private final StreakService streakService;
     private final NotificationPublisher notificationPublisher;
     private final ApplicationEventPublisher eventPublisher;
+    private final com.ruleup.ruleup_backend.observability.BusinessMetrics businessMetrics;
 
     // ===== POST /api/v1/challenges/{challengeId}/verifications =====
     @Transactional
@@ -136,6 +137,8 @@ public class VerificationManualService {
                         NotificationParams.VERIFICATION_ID, daily.getId().toString(),
                         NotificationParams.CHALLENGE_ID, challengeId.toString())));
 
+        // 반려(비대상일·이미 인증·날짜 지남)는 시도로 세지 않는다 — sync 쪽도 접수된 요청만 센다.
+        businessMetrics.manualAttempt();
         return new ManualVerificationResponse(
                 daily.getId().toString(), targetDate.toString(), "DONE",
                 new StreakChange(streakBefore, streakBefore + 1),

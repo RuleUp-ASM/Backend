@@ -47,7 +47,13 @@ public class CloudWatchMetricsConfig {
             "verification.materialize.failed",         // 무신호 귀속일 채우기 실패
             "verification.sync.failed",                // 인증 데이터 접수(sync) 서버 오류
             "llm.call",                                // LLM 호출 수·지연
-            "llm.call.failed");                        // LLM 호출 최종 실패(폴백까지 실패)
+            "llm.call.failed",                         // LLM 호출 최종 실패(폴백까지 실패)
+            // 서비스 지표 — 서버 지표와 섞이지 않게 biz. 로 시작한다. 태그는 고정 열거뿐이다.
+            "biz.signup",                              // 가입 결과(result=success|failure)
+            "biz.login",                               // 로그인 결과(outcome=existing|new_user|failure)
+            "biz.verification.attempt",                // 인증 시도(method=sync|manual)
+            "biz.verification.today",                  // 오늘 귀속분 판정 수(status=success|pending)
+            "biz.verification.finalized");             // 확정 끝난 그제 판정 수(status=success|failed) — 성공률
 
     @Bean
     public SimpleMeterRegistry simpleMeterRegistry() {
