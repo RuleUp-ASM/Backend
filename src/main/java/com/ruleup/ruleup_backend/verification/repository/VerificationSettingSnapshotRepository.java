@@ -25,4 +25,8 @@ public interface VerificationSettingSnapshotRepository extends JpaRepository<Ver
                                                     @Param("kind") SettingKind kind,
                                                     @Param("date") LocalDate date,
                                                     Pageable pageable);
+
+    /** 가장 늦게 적용되는(또는 될) 설정 — 아직 오지 않은 적용일도 포함한다. */
+    java.util.Optional<VerificationSettingSnapshot> findFirstByChallengeMemberIdAndKindOrderByEffectiveFromDescCreatedAtDesc(
+            UUID challengeMemberId, SettingKind kind);
 }

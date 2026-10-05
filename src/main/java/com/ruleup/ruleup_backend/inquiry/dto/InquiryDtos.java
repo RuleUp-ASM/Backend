@@ -50,7 +50,11 @@ public final class InquiryDtos {
             @Schema(description = "RECEIVED / ANSWERED") String status,
             @Schema(description = "목록용 본문 앞부분") String preview,
             String createdAt,
-            @Schema(description = "답변 시각. 미답변이면 null") String answeredAt) {}
+            @Schema(description = "답변 시각. 미답변이면 null") String answeredAt,
+            @Schema(description = """
+                    **새 답변 배지.** 답변이 달렸고 아직 상세를 열지 않았으면 true. 상세(`GET /inquiries/{id}`)를
+                    한 번 열면 false 로 바뀐다 — `status` 가 ANSWERED 인 것만으로 배지를 그리면 읽은 답변도 계속 새 답변으로 보인다.""")
+            boolean hasNewAnswer) {}
 
     @Schema(name = "InquiryDetailResponse", description = """
             문의 상세는 **열람 전용**이다(§ 5.5). 답변 이후 이 스레드에 글을 추가하는 경로를 두지 않고,

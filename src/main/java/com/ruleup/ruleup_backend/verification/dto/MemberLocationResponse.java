@@ -7,7 +7,8 @@ import java.util.List;
  *
  * @param anchors               바인딩된 앵커 목록(1~3개). 반경은 여기 없고 serverRadiusM으로 따로 내려간다
  * @param serverRadiusM         서버 설정 반경(m). 유저가 정하는 값이 아니며 성능 테스트 후 변경될 수 있다
- * @param appliedFrom           현재 앵커 세트가 적용된 시각(ISO-8601, KST)
+ * @param appliedFrom           이 앵커 세트가 적용된(또는 적용될) 시각(ISO-8601, KST). 인증 시간 중에 바꿔
+ *                              내일부터 적용 대기 중이면 미래 시각(다음 날 00:00)이다
  * @param changeAvailable       이번 달 앵커 변경 가능 여부 — 수정 버튼 활성/비활성과 안내 문구용
  * @param nextChangeAvailableAt 변경 권한 소진 시 다음 변경 가능 시각(다음 달 1일 00:00 KST).
  *                              changeAvailable이 true면 null

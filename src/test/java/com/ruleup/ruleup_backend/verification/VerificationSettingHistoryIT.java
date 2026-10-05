@@ -20,6 +20,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 
 /**
  * 과거 날짜는 <b>그 날 적용되던 설정</b>으로 평가한다 (백엔드 테크스펙 §4-1 "당시 적용 설정을 사용한 과거 재판정").
@@ -163,5 +164,63 @@ class VerificationSettingHistoryIT extends VerificationApiSupport {
                 "SELECT COUNT(*) FROM verification_setting_snapshots WHERE challengeMemberId = ? AND kind = 'ANCHORS'",
                 Integer.class, bytes(memberId));
         assertThat(snapshots).as("최초 셋업도 그 시점부터 적용되는 설정이라 이력이 남아야 한다").isEqualTo(1);
+    }
+
+    // ===== 인증 시간 중 장소 변경 — 막지 않고 내일부터 적용 =====
+
+    private MvcResult putLocation(String token, UUID challenge, double lat, double lng, String label) throws Exception {
+        Map<String, Object> body = Map.of("anchors", List.of(Map.of("lat", lat, "lng", lng, "label", label)));
+        return mvc.perform(put("/api/v1/challenges/" + challenge + "/my-location")
+                .header("Authorization", "Bearer " + token)
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content(OM.writeValueAsString(body))).andReturn();
+    }
+
+    /** 오늘 판정 행을 만들고 인증 윈도우가 아직 열려 있게 둔다. */
+    private void openTodaysWindow(String token, UUID challengeMemberId) throws Exception {
+        sync(token, List.of());
+        int updated = jdbc().update("UPDATE VerificationDaily SET windowClosesAt = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 1 HOUR) " +
+                        "WHERE challengeMemberId = ? AND targetDate = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00'))",
+                bytes(challengeMemberId));
+        assertThat(updated).as("빈 sync 로도 오늘 판정 행이 생긴다").isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("인증 시간 중에도 장소를 바꿀 수 있고, 새 장소는 내일부터 — 오늘은 이전 장소로 판정한다")
+    void changingAnchorsInWindowAppliesFromTomorrow() throws Exception {
+        Member me = member(uniq("hist-window"));
+        UUID challenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
+        // 이력 없이 들어온 기존 멤버 — 새 장소를 멤버에 먼저 써도 오늘 판정이 새 장소로 폴백하면 안 된다.
+        UUID memberId = insertReadyMember(challenge, me.id(), anchor(GYM_LAT, GYM_LNG, 200, "헬스장"), null);
+        startedDaysAgo(challenge, 5);
+        openTodaysWindow(me.token(), memberId);
+
+        MvcResult res = putLocation(me.token(), challenge, LIBRARY_LAT, LIBRARY_LNG, "도서관");
+        assertThat(res.getResponse().getStatus()).as("윈도우 중이라고 거부하지 않는다").isEqualTo(200);
+        String tomorrow = LocalDate.now(KST).plusDays(1).atStartOfDay(KST)
+                .format(java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+        assertThat((String) read(res, "$.data.appliedFrom")).isEqualTo(tomorrow);
+        assertThat((String) read(getAuth("/api/v1/challenges/" + challenge + "/my-location", me.token()),
+                "$.data.appliedFrom")).as("조회도 저장 시각이 아니라 적용 시각을 내린다").isEqualTo(tomorrow);
+
+        // 오늘 헬스장에 40분 — 오늘은 아직 헬스장이 인증 장소다.
+        java.time.Instant now = java.time.Instant.now();
+        List<java.time.Instant> times = List.of(now.minusSeconds(2_400), now.minusSeconds(1_800),
+                now.minusSeconds(1_200), now.minusSeconds(600), now.minusSeconds(5));
+        sync(me.token(), List.of(locationSignal(GYM_LAT, GYM_LNG, times)));
+
+        assertThat(statusOn(memberId, LocalDate.now(KST))).isEqualTo("SUCCESS");
+    }
+
+    @Test
+    @DisplayName("인증 시간 밖이면 장소 변경은 바로 적용된다")
+    void changingAnchorsOutsideWindowAppliesImmediately() throws Exception {
+        Member me = member(uniq("hist-now"));
+        UUID challenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
+        insertReadyMember(challenge, me.id(), anchor(GYM_LAT, GYM_LNG, 200, "헬스장"), null);
+
+        MvcResult res = putLocation(me.token(), challenge, LIBRARY_LAT, LIBRARY_LNG, "도서관");
+        assertThat(res.getResponse().getStatus()).isEqualTo(200);
+        assertThat((String) read(res, "$.data.appliedFrom")).isEqualTo("IMMEDIATE");
     }
 }

@@ -249,7 +249,6 @@ public enum ErrorCode {
 
     // ===== 인증 셋업 — 내 인증 장소 / 측정 대상 앱 =====
     GEOFENCE_NOT_CONFIGURED(HttpStatus.BAD_REQUEST, "인증 장소가 아직 설정되지 않았어요."),
-    LOCATION_LOCKED_IN_WINDOW(HttpStatus.CONFLICT, "인증 시간 중에는 장소를 바꿀 수 없어요. 내일 다시 시도해 주세요."),
     INVALID_ANCHOR(HttpStatus.BAD_REQUEST, "인증 장소가 올바르지 않아요. 지도에서 다시 선택해 주세요."),
     ANCHOR_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "인증 장소는 최대 3개까지 등록할 수 있어요."),
     SCREENTIME_NOT_CONFIGURED(HttpStatus.BAD_REQUEST, "측정할 앱이 아직 설정되지 않았어요."),

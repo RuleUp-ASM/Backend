@@ -98,6 +98,10 @@ public class Inquiry {
     @Column(name = "answered_by")
     private UUID answeredBy;
 
+    /** 유저가 상세에서 답변을 처음 열어 본 시각. 답변돼 있고 이 값이 없으면 새 답변이다. */
+    @Column(name = "answer_read_at")
+    private Instant answerReadAt;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -135,6 +139,21 @@ public class Inquiry {
 
     public boolean isAnswered() {
         return status == InquiryStatus.ANSWERED;
+    }
+
+    /** 답변이 달렸는데 유저가 아직 상세를 열지 않았다. */
+    public boolean hasNewAnswer() {
+        return isAnswered() && answerReadAt == null;
+    }
+
+    /**
+     * 유저가 상세를 열었다 — 답변이 있을 때 처음 한 번만 남긴다.
+     * @return 이번에 읽음으로 바뀌었으면 true
+     */
+    public boolean markAnswerRead(Instant at) {
+        if (!hasNewAnswer()) return false;
+        this.answerReadAt = at;
+        return true;
     }
 
     public List<String> imageUrlsOrEmpty() {

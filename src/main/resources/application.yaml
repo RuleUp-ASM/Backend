@@ -104,7 +104,7 @@ app:
     signup-token-ttl: ${SIGNUP_TOKEN_TTL:1800}   # 30분
   # 인증 운영 상수. 반경은 유저가 정하는 값이 아니라 서버 단일값이라 요청에 없고 응답의 serverRadiusM으로만 내려간다.
   verification:
-    geofence-radius-m: ${VERIFICATION_GEOFENCE_RADIUS_M:500}     # 잠정 500m — 성능 테스트 후 조정
+    geofence-radius-m: ${VERIFICATION_GEOFENCE_RADIUS_M:200}     # 실내 측위 오차(수십~100m)는 흡수하고 옆 건물·옆 블록은 걸러지는 값
     max-payload-bytes: ${VERIFICATION_MAX_PAYLOAD_BYTES:1048576} # sync 1회 상한(클라가 이 값으로 구간을 쪼갠다)
 
     # --- 신호 신뢰 게이트 (기본 꺼짐) --------------------------------------
