@@ -287,6 +287,26 @@ class InquiryFlowIT extends ChallengeApiSupport {
         }
 
         @Test
+        @DisplayName("새 답변 배지는 상세를 한 번 열면 꺼진다 — 읽은 답변이 계속 새 답변으로 보이지 않는다")
+        void new_answer_badge_clears_after_detail() throws Exception {
+            Member op = operator("badge");
+            Member user = member(uniq("b"));
+            String inquiryId = submit(user, "ERROR_ETC");
+
+            assertThat((Boolean) read(getAuth("/api/v1/inquiries", user.token()), "$.data.items[0].hasNewAnswer"))
+                    .as("답변 전에는 새 답변이 아니다").isFalse();
+
+            postAuth("/api/v1/admin/inquiries/" + inquiryId + "/answer",
+                    op.token(), Map.of("answerText", "확인했습니다."));
+            assertThat((Boolean) read(getAuth("/api/v1/inquiries", user.token()), "$.data.items[0].hasNewAnswer"))
+                    .isTrue();
+
+            getAuth("/api/v1/inquiries/" + inquiryId, user.token());
+            assertThat((Boolean) read(getAuth("/api/v1/inquiries", user.token()), "$.data.items[0].hasNewAnswer"))
+                    .as("열어 본 답변은 다시 새 답변으로 뜨지 않는다").isFalse();
+        }
+
+        @Test
         @DisplayName("답변 재등록은 409 ALREADY_ANSWERED — 재문의 경로가 없다")
         void answer_is_once() throws Exception {
             Member op = operator("once");

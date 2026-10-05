@@ -88,16 +88,22 @@ public class InquiryService {
                                 i.getStatus().name(),
                                 preview(i.getBody()),
                                 i.getCreatedAt().toString(),
-                                i.getAnsweredAt() == null ? null : i.getAnsweredAt().toString()))
+                                i.getAnsweredAt() == null ? null : i.getAnsweredAt().toString(),
+                                i.hasNewAnswer()))
                         .toList());
     }
 
-    /** 남의 문의는 없는 것과 같다 — 소유자가 아니면 404 다. */
-    @Transactional(readOnly = true)
+    /**
+     * 남의 문의는 없는 것과 같다 — 소유자가 아니면 404 다.
+     *
+     * <p>답변이 달린 문의를 열면 그 답변을 읽은 것으로 남긴다. 목록의 새 답변 배지가 이 값으로 꺼진다.
+     */
+    @Transactional
     public InquiryDtos.Detail detail(UUID userId, UUID inquiryId) {
         Inquiry inquiry = repository.findById(inquiryId)
                 .filter(i -> i.getUserId().equals(userId))
                 .orElseThrow(() -> new BusinessException(ErrorCode.INQUIRY_NOT_FOUND));
+        inquiry.markAnswerRead(Instant.now());
 
         return new InquiryDtos.Detail(
                 inquiry.getId().toString(),
