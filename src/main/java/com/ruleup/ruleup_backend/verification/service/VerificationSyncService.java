@@ -96,6 +96,7 @@ public class VerificationSyncService {
     private final VerificationSyncSessionStore sessionStore;
     private final SignalConsentGate consentGate;
     private final VerificationMetrics metrics;
+    private final com.ruleup.ruleup_backend.observability.BusinessMetrics businessMetrics;
     private final Map<VerificationMethod, MethodEvaluator> evaluators;
 
     public VerificationSyncService(DeviceSyncPolicyService syncPolicy, ChallengeQueryService challengeQuery,
@@ -120,6 +121,7 @@ public class VerificationSyncService {
                                    VerificationSyncSessionStore sessionStore,
                                    SignalConsentGate consentGate,
                                    VerificationMetrics metrics,
+                                   com.ruleup.ruleup_backend.observability.BusinessMetrics businessMetrics,
                                    List<MethodEvaluator> evaluatorList) {
         this.syncPolicy = syncPolicy;
         this.challengeQuery = challengeQuery;
@@ -144,6 +146,7 @@ public class VerificationSyncService {
         this.sessionStore = sessionStore;
         this.consentGate = consentGate;
         this.metrics = metrics;
+        this.businessMetrics = businessMetrics;
         this.evaluators = evaluatorList.stream()
                 .collect(Collectors.toMap(MethodEvaluator::method, e -> e, (a, b) -> a));
     }
@@ -266,6 +269,9 @@ public class VerificationSyncService {
         int flushIntervalSec = syncPolicy.forUser(user);
         metrics.sync(System.nanoTime() - startedAt, signals.size(), ingested.droppedCount(),
                 gateDropped, consent.rejectedTypes().size());
+        // 인증 시도는 <b>요청</b> 단위로 센다 — 신호 수는 기기·복구 전송에 따라 들쭉날쭉해 「사람들이 인증하고
+        // 있는가」를 가린다. 봉투·크기·빈도에서 반려된 요청은 여기까지 오지 않는다.
+        businessMetrics.syncAttempt();
         // 봉투의 모양 — 압축·요약 전송 도입 판단의 근거다(백엔드 7절).
         metrics.envelope(payloadBytesOf(req), (req.coveredUntil() - req.coveredFrom()) / 1000);
         return new SyncResponse(

@@ -122,6 +122,19 @@ public interface VerificationDailyRepository extends JpaRepository<VerificationD
     long countOverduePending(@Param("overdueBefore") Instant overdueBefore,
                              @Param("maxTargetDate") LocalDate maxTargetDate);
 
+    /**
+     * 한 귀속일의 상태별 판정 수 — 인증 성공률 비즈니스 지표용.
+     *
+     * <p>귀속일이 아니라 {@code finalizeAfter} 로 거른다. targetDate 가 앞선 인덱스가 없어 귀속일로 세면 표를
+     * 전부 훑는데, {@code finalizeAfter} 는 귀속일로 정해지는 값이라(엔티티가 저장 때마다 검증한다) 같은 날짜를
+     * 가리키면서 {@code idxVerificationDailyStatusFinalize} 를 등호로 탄다.
+     *
+     * <p>파생 쿼리로 못 쓴다 — 필드 이름 끝의 {@code After} 를 비교 키워드로 읽는다.
+     */
+    @Query("select count(d) from VerificationDaily d where d.status = :status and d.finalizeAfter = :finalizeAfter")
+    long countByStatusAndFinalizeAfter(@Param("status") VerificationStatus status,
+                                       @Param("finalizeAfter") Instant finalizeAfter);
+
 
     /**
      * 확정에 실패한 한 건을 뒤로 미룬다.
