@@ -3,6 +3,7 @@ package com.ruleup.ruleup_backend.verification.service;
 import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.common.verification.GeoAnchor;
 import com.ruleup.ruleup_backend.common.verification.ScreenApp;
+import com.ruleup.ruleup_backend.verification.config.VerificationProperties;
 import com.ruleup.ruleup_backend.verification.domain.SettingKind;
 import com.ruleup.ruleup_backend.verification.domain.VerificationSettingSnapshot;
 import com.ruleup.ruleup_backend.verification.repository.VerificationSettingSnapshotRepository;
@@ -33,12 +34,23 @@ public class MemberSettingsResolver {
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
     private final VerificationSettingSnapshotRepository snapshotRepo;
+    private final VerificationProperties properties;
 
-    /** 그 날짜에 적용되던 인증 장소. 없으면 현재 값. */
+    /**
+     * 그 날짜에 적용되던 인증 장소. 없으면 현재 값.
+     *
+     * <p>반경은 저장된 값이 아니라 <b>지금 서버 설정값</b>으로 바꿔 내린다. 반경은 유저가 정하는 값이 아닌
+     * 서버 단일값인데 앵커를 저장할 때 그 시점 값이 함께 박힌다 — 그대로 쓰면 설정을 줄여도 이미 장소를
+     * 정한 멤버는 옛 반경으로 계속 판정된다.
+     */
     public List<GeoAnchor> anchorsOn(ChallengeMember member, LocalDate date) {
         List<GeoAnchor> historical = read(member, SettingKind.ANCHORS, date, GeoAnchor.class);
-        if (historical != null) return historical;
-        return (member.getAnchors() != null) ? member.getAnchors() : List.of();
+        List<GeoAnchor> anchors = (historical != null) ? historical
+                : (member.getAnchors() != null) ? member.getAnchors() : List.of();
+        int radiusM = properties.geofenceRadiusM();
+        return anchors.stream()
+                .map(a -> new GeoAnchor(a.lat(), a.lng(), radiusM, a.label()))
+                .toList();
     }
 
     /** 그 날짜에 적용되던 대상 앱 패키지명. 없으면 멤버의 그날 적용 세트. */
