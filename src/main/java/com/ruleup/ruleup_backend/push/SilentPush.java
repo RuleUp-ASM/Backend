@@ -15,6 +15,8 @@ public record SilentPush(String type, Map<String, String> data) {
 
     public static final String TYPE_SETUP_REQUIRED = "SETUP_REQUIRED";
     public static final String TYPE_PERMISSION_REQUIRED = "PERMISSION_REQUIRED";
+    /** sync 가 한동안 오지 않은 사용자의 앱을 깨워 쌓아 둔 신호를 올리게 한다(Doze·앱 미기동 복구). */
+    public static final String TYPE_SYNC_REQUIRED = "SYNC_REQUIRED";
 
     /** 셋업/권한 미완료 멤버에게 앱을 깨워 재설정을 유도하는 무음 푸시. */
     public static SilentPush setupRequired(String challengeId) {
@@ -30,5 +32,13 @@ public record SilentPush(String type, Map<String, String> data) {
         data.put("challengeId", challengeId);
         if (signalType != null) data.put("signalType", signalType);
         return new SilentPush(TYPE_PERMISSION_REQUIRED, data);
+    }
+
+    /**
+     * sync 가 끊긴 사용자의 앱을 깨운다 — 앱은 받으면 expedited WorkManager 로 버퍼에 쌓인 신호를 올린다.
+     * 대상 방이 여럿이어도 sync 는 사용자 단위라 한 번만 보낸다. 부가 데이터는 없다.
+     */
+    public static SilentPush syncRequired() {
+        return new SilentPush(TYPE_SYNC_REQUIRED, Map.of());
     }
 }
