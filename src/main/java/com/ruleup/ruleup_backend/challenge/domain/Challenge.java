@@ -378,7 +378,7 @@ public class Challenge extends AssignedIdEntity {
         if (newMode == ParticipationType.GROUP) {
             this.visibility = (requestedVisibility != null) ? requestedVisibility : "PUBLIC";
             this.rankingVisible = null;
-            if (this.maxParticipants != null && this.maxParticipants <= 1) this.maxParticipants = 50;
+            if (this.maxParticipants != null && this.maxParticipants <= 1) this.maxParticipants = ChallengeCapacity.DEFAULT;   // 선택지 안의 값
         } else {
             this.visibility = null;
             this.rankingVisible = (requestedRankingVisible != null) ? requestedRankingVisible : Boolean.TRUE;

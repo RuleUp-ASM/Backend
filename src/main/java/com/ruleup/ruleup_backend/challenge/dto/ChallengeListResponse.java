@@ -83,10 +83,12 @@ public record ChallengeListResponse(
                     + "`KICK_FAIL` · `KICK_PERMISSION` · `AUTO_TIER` · `AUTO_LOCK`)은 자동 강퇴 배치가 "
                     + "생길 때를 위한 예약 값이고 그 배치는 아직 없다 — 즉 지금은 자동 강퇴 자체가 "
                     + "일어나지 않으므로 값이 뭉개진 이력도 없다. 클라이언트는 값이 늘어나도 깨지지 "
-                    + "않게 처리해두면 된다.",
+                    + "않게 처리해두면 된다.\n\n"
+                    + "`AUTO_CLOSED` — 관리자가 방을 직권 폐쇄했다. 「완료」가 아니라 **중단**이므로 완료 탭에 "
+                    + "나오지 않고 이 탭에 온다. `leftAt` 은 폐쇄 시각이다.",
                     example = "SELF",
                     allowableValues = {"SELF", "KICK_REPORT", "KICK_FAIL", "KICK_PERMISSION",
-                            "KICK_BY_OWNER", "AUTO_TIER", "AUTO_LOCK"})
+                            "KICK_BY_OWNER", "AUTO_TIER", "AUTO_LOCK", "AUTO_CLOSED"})
             String leftType,
 
             @Schema(description = "이탈 시각. LEFT 탭에서만 채워진다.", example = "2026-07-10T21:00:00Z")

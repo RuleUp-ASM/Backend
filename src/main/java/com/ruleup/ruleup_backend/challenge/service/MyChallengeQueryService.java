@@ -81,17 +81,22 @@ public class MyChallengeQueryService {
     // ===== 원천 1: 살아 있는 방 =====
     private String liveSelect(MyChallengeFilter filter, UUID userId, List<Object> args) {
         args.add(toBytes(userId));
+        // 관리자가 폐쇄한 방은 「완료」가 아니라 중단이다 — 이탈 탭에 AUTO_CLOSED 로 둔다. 삭제가 미뤄져
+        // 행이 남아 있는 동안에도 같아야 하므로 폐쇄 의도가 적힌 이력(close_reason='ADMIN')으로 가른다.
+        String adminClosed = "EXISTS (SELECT 1 FROM challenge_history ah WHERE ah.challenge_id = c.id AND ah.close_reason = 'ADMIN')";
         String memberAndChallenge = switch (filter) {
             case IN_PROGRESS -> "m.status = 'ACTIVE' AND c.status IN ('UPCOMING','ACTIVE')";
-            case COMPLETED -> "m.status = 'ACTIVE' AND c.status = 'COMPLETED'";
-            case LEFT -> "m.status IN ('LEFT','REMOVED')";
+            case COMPLETED -> "m.status = 'ACTIVE' AND c.status = 'COMPLETED' AND NOT " + adminClosed;
+            case LEFT -> "(m.status IN ('LEFT','REMOVED') OR (m.status = 'ACTIVE' AND " + adminClosed + "))";
         };
         return "SELECT c.id AS challenge_id, c.title, c.ai_title, c.moderation_title, " +
                 "       c.description, c.moderation_description, c.image_url, c.moderation_image, " +
                 "       c.category, c.mode, c.visibility, c.status, " +
                 "       c.participant_count, c.capacity, c.min_tier, c.weekly_count, " +
                 "       c.start_date, c.end_date, CASE WHEN c.owner_id=m.user_id THEN 'OWNER' ELSE 'MEMBER' END AS my_role, c.owner_type, " +
-                "       COALESCE(m.leave_reason,m.left_type) AS left_type, m.left_at, " +
+                "       CASE WHEN m.status = 'ACTIVE' AND " + adminClosed + " THEN " + text(AUTO_CLOSED) +
+                "            ELSE COALESCE(m.leave_reason,m.left_type) END AS left_type, " +
+                "       COALESCE(m.left_at, (SELECT ah.closed_at FROM challenge_history ah WHERE ah.challenge_id = c.id)) AS left_at, " +
                 // 성공률은 판정 대비다 — progress_rate(목표 대비 진척도)와 다른 값이므로 섞지 않는다.
                 // 판정이 하나도 없으면 NULL: 비율을 만들 수 없는 상태를 0 으로 채우면
                 // 아직 아무것도 하지 않은 사용자에게 「성공률 0%」를 그리게 된다.
@@ -106,9 +111,10 @@ public class MyChallengeQueryService {
     private String historySelect(MyChallengeFilter filter, UUID userId, List<Object> args) {
         args.add(toBytes(userId));
         // 삭제 시점에 ACTIVE 였으면 완료 탭, 그 전에 나갔으면 이탈 탭이다.
+        // 관리자 폐쇄로 지워진 방에 남아 있던 사람은 완료가 아니라 이탈(AUTO_CLOSED)이다.
         String leftTypeCondition = filter == MyChallengeFilter.COMPLETED
-                ? "h.left_type = 'ACTIVE_AT_DELETE'"
-                : "h.left_type IN ('LEFT','REMOVED')";
+                ? "h.left_type = 'ACTIVE_AT_DELETE' AND NOT (ch.close_reason <=> 'ADMIN')"
+                : "(h.left_type IN ('LEFT','REMOVED') OR (h.left_type = 'ACTIVE_AT_DELETE' AND ch.close_reason <=> 'ADMIN'))";
         // 스냅샷에 없는 값은 CAST 로 타입을 못박고 테이블 콜레이션을 붙인다 — 맨 NULL 은 UNION 컬럼 타입이
         // 드라이버마다 갈리고, 문자열 리터럴은 접속 콜레이션을 따라와 컬럼과 섞이면 UNION 이 거절된다.
         return "SELECT h.challenge_id, ch.title_snapshot AS title, ch.ai_title_snapshot AS ai_title, " +
@@ -119,13 +125,18 @@ public class MyChallengeQueryService {
                 "       " + text("COMPLETED") + " AS status, " +
                 "       ch.final_member_count AS participant_count, ch.capacity, ch.min_tier, ch.weekly_count, " +
                 "       ch.start_date, ch.end_date, h.final_role AS my_role, " +
-                "       ch.owner_type_snapshot AS owner_type, COALESCE(h.leave_reason,h.left_type) AS left_type, h.left_at, " +
+                "       ch.owner_type_snapshot AS owner_type, " +
+                "       CASE WHEN h.left_type = 'ACTIVE_AT_DELETE' AND ch.close_reason <=> 'ADMIN' THEN " + text(AUTO_CLOSED) +
+                "            ELSE COALESCE(h.leave_reason,h.left_type) END AS left_type, " +
+                "       COALESCE(h.left_at, ch.closed_at) AS left_at, " +
                 // 이력에는 퍼센트(0~100)로 적재된다 — 계약은 0~1 이라 여기서 되돌린다.
                 "       CAST(h.final_success_rate / 100 AS DECIMAL(6,4)) AS success_rate " +
                 "FROM challenge_member_history h " +
                 "JOIN challenge_history ch ON ch.challenge_id = h.challenge_id " +
                 "WHERE h.user_id = ? AND NOT EXISTS (SELECT 1 FROM challenges c WHERE c.id=h.challenge_id) AND " + leftTypeCondition;
     }
+
+    private static final String AUTO_CLOSED = "AUTO_CLOSED";
 
     private static String text(String literal) {
         return "_utf8mb4'" + literal + "'" + COLLATION;
@@ -184,7 +195,8 @@ public class MyChallengeQueryService {
             case LIVE_KICK, "REMOVED", "KICKED" -> "KICK_BY_OWNER";
             case "SANCTION" -> "AUTO_LOCK";
             case "TIER_GATE" -> "AUTO_TIER";
-            case "DORMANT", "ADMIN_CLOSE" -> raw;
+            case "DORMANT" -> raw;
+            case AUTO_CLOSED, "ADMIN_CLOSE" -> AUTO_CLOSED;   // 관리자 직권 폐쇄 — 앱은 「중단」으로 그린다
             default -> null;                      // ACTIVE_AT_DELETE — 나간 적이 없다
         };
     }
