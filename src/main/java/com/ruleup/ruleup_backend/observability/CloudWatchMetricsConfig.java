@@ -31,6 +31,9 @@ import java.util.Set;
  *
  * <p>네임스페이스는 {@code RuleUp/App/<프로파일>} — 인스턴스 차원이 없어서 두 태스크가 같은 시계열에
  * 쓴다. 경보는 카운터를 Sum, 게이지를 Maximum 으로 본다.
+ *
+ * <p>서비스 지표({@value #BUSINESS_PREFIX}*)는 prod 에서만 보낸다. stg 의 가입·로그인·인증 수는 QA 가 만든
+ * 값이라 볼 일이 없고, 이름마다 과금만 된다. stg 대시보드는 서버 지표(ruleup-stg-ops)만 둔다.
  */
 @Configuration
 @Profile({"prod", "stg"})
@@ -55,6 +58,8 @@ public class CloudWatchMetricsConfig {
             "biz.verification.today",                  // 오늘 귀속분 판정 수(status=success|pending)
             "biz.verification.finalized");             // 확정 끝난 그제 판정 수(status=success|failed) — 성공률
 
+    static final String BUSINESS_PREFIX = "biz.";
+
     @Bean
     public SimpleMeterRegistry simpleMeterRegistry() {
         return new SimpleMeterRegistry();
@@ -75,7 +80,8 @@ public class CloudWatchMetricsConfig {
         CloudWatchConfig config = props::get;
         CloudWatchMeterRegistry registry = new CloudWatchMeterRegistry(config, Clock.SYSTEM, client);
         registry.config()
-                .meterFilter(MeterFilter.denyUnless(id -> EXPORTED.contains(id.getName())));
+                .meterFilter(MeterFilter.denyUnless(id -> EXPORTED.contains(id.getName())
+                        && ("prod".equals(profile) || !id.getName().startsWith(BUSINESS_PREFIX))));
         return registry;
     }
 }

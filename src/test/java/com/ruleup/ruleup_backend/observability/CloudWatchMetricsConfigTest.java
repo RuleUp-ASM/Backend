@@ -12,6 +12,7 @@ import org.springframework.boot.micrometer.metrics.autoconfigure.export.simple.S
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import software.amazon.awssdk.services.cloudwatch.model.PutMetricDataRequest;
 import software.amazon.awssdk.services.cloudwatch.model.PutMetricDataResponse;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.DisplayName;
 import java.nio.file.Files;
@@ -41,6 +42,26 @@ class CloudWatchMetricsConfigTest {
                     .containsExactly("verification.sync.failed");
         } finally {
             registry.stop();   // close() 는 가짜 클라이언트로 마지막 전송을 시도한다
+        }
+    }
+
+    @Test
+    @DisplayName("서비스 지표(biz.*)는 prod 에서만 CloudWatch 로 나간다 — stg 는 서버 지표만")
+    void exportsBusinessMetersOnlyInProd() {
+        for (String profile : new String[]{"stg", "prod"}) {
+            CloudWatchMeterRegistry registry = new CloudWatchMetricsConfig()
+                    .cloudWatchMeterRegistry(mock(CloudWatchAsyncClient.class), profile);
+            try {
+                Counter.builder("biz.signup").register(registry).increment();
+                Counter.builder("verification.sync.failed").register(registry).increment();
+
+                assertThat(registry.getMeters()).extracting(m -> m.getId().getName()).as(profile)
+                        .containsExactlyInAnyOrderElementsOf("prod".equals(profile)
+                                ? List.of("biz.signup", "verification.sync.failed")
+                                : List.of("verification.sync.failed"));
+            } finally {
+                registry.stop();
+            }
         }
     }
 
