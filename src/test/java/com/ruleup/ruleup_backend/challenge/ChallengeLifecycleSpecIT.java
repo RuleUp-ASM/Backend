@@ -94,6 +94,28 @@ class ChallengeLifecycleSpecIT extends ChallengeApiSupport {
         assertThat(jdbc.queryForObject("SELECT close_reason FROM challenge_history WHERE challenge_id=?",String.class,bytes(id))).isEqualTo("EMPTY");
     }
 
+    /** 관리자가 폐쇄한 방은 「완료」가 아니다 — 이탈 탭에 AUTO_CLOSED 로, 지워졌든 삭제가 미뤄졌든 같다. */
+    @Test void adminClosedRoomsAreStoppedNotCompleted() throws Exception {
+        Member member=member(uniq("closed"));Member owner=member(uniq("closed-owner"));
+        UUID deleted=insertChallenge(owner.id(),"EXERCISE","ACTIVE","GROUP");
+        UUID deferred=insertChallenge(owner.id(),"STUDY","ACTIVE","GROUP");
+        UUID finished=insertChallenge(owner.id(),"READING","COMPLETED","GROUP");
+        for(UUID id:List.of(deleted,deferred,finished)){insertActiveMembership(id,owner.id(),"OWNER");insertActiveMembership(id,member.id(),"MEMBER");}
+        // 심사 중이면 폐쇄해도 삭제가 미뤄진다 — 행은 남고 이력에 ADMIN 이 적힌다
+        jdbc.update("UPDATE challenges SET moderation_title='IN_REVIEW', moderation_enqueued_at=UTC_TIMESTAMP(6) WHERE id=?",bytes(deferred));
+        assertThat(archive.closeByAdmin(deleted)).isTrue();
+        assertThat(archive.closeByAdmin(deferred)).isFalse();
+
+        var completed=getAuth("/api/v1/challenges?filter=COMPLETED",member.token());
+        assertThat((List<String>)read(completed,"$.data.challenges[*].challengeId")).containsExactly(finished.toString());
+
+        var left=getAuth("/api/v1/challenges?filter=LEFT",member.token());
+        assertThat((List<String>)read(left,"$.data.challenges[*].challengeId"))
+                .containsExactlyInAnyOrder(deleted.toString(),deferred.toString());
+        assertThat((List<String>)read(left,"$.data.challenges[*].leftType")).containsOnly("AUTO_CLOSED");
+        assertThat((List<String>)read(left,"$.data.challenges[*].leftAt")).doesNotContainNull();
+    }
+
     @Test void deletionPreservesSettingsTimesAndCompletedApiContracts() throws Exception {
         Member owner=member(uniq("snapshot"));Member left=member(uniq("snapshot-left"));
         UUID id=insertChallenge(owner.id(),"EXERCISE","COMPLETED","GROUP");
