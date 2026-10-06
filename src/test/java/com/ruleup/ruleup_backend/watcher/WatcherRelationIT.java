@@ -596,6 +596,27 @@ class WatcherRelationIT extends ChallengeApiSupport {
         }
 
         @Test
+        @DisplayName("링크를 연 회원의 닉네임이 INVITED 줄에 보인다 — 「수락 대기 중인 초대」 대신 누구를 기다리는지 알 수 있다")
+        void invited_row_shows_opener_nickname() throws Exception {
+            Target t = target("opened");
+            String token = invite(t);
+            Member opener = member(uniq("opener"));
+            String nickname = jdbcTemplate.queryForObject(
+                    "SELECT approved_nickname FROM users WHERE id=?", String.class, bytes(opener.id()));
+
+            assertThat(getAuth("/api/v1/watchers/invitations/" + token, opener.token())
+                    .getResponse().getStatus()).isEqualTo(200);
+            // 방장이 자기 링크를 열어 본 것은 기다리는 사람이 아니다 — 덮어쓰지 않는다
+            getAuth("/api/v1/watchers/invitations/" + token, t.owner().token());
+
+            List<Map<String, Object>> invited = read(getAuth("/api/v1/challenges/" + t.challengeId()
+                    + "/watchers?status=INVITED", t.owner().token()), "$.data.watchers");
+            assertThat(invited).singleElement().satisfies(w -> assertThat(w)
+                    .containsEntry("status", "INVITED")
+                    .containsEntry("displayName", nickname));
+        }
+
+        @Test
         @DisplayName("status=ALL 은 수락·미수락을 함께 내린다")
         void status_all() throws Exception {
             Target t = target("all");

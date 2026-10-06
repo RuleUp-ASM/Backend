@@ -13,6 +13,7 @@ public record ChallengePenalties(boolean score, boolean groupShare, boolean watc
 
     /** 서버 강제 규칙으로 조립 — 선택 가능한 것은 watcher 뿐. */
     public static ChallengePenalties enforced(boolean autoVerification, boolean group, Boolean watcher) {
-        return new ChallengePenalties(autoVerification, group, Boolean.TRUE.equals(watcher));
+        // 감시자 알림은 허용이 기본이다(2026-10-06) — 앱이 값을 보내지 않으면 켠다. 끄려면 false 를 보낸다.
+        return new ChallengePenalties(autoVerification, group, watcher == null || watcher);
     }
 }

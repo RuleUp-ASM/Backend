@@ -36,8 +36,16 @@ public class WatcherInvitationController {
                     """)
     @ApiErrorCodes({ErrorCode.INVITATION_NOT_FOUND, ErrorCode.INVITATION_EXPIRED})
     @GetMapping("/invitations/{token}")
-    public ApiResponse<InvitationEntryResponse> entry(@PathVariable String token) {
-        return ApiResponse.ok(invitationService.getByToken(token));
+    public ApiResponse<InvitationEntryResponse> entry(@AuthenticationPrincipal String userId,
+                                                      @PathVariable String token) {
+        // 로그인 없이도 열린다(공개 경로). 로그인한 회원이 열었으면 방장 목록에 그 닉네임을 보여 준다.
+        return ApiResponse.ok(invitationService.getByToken(token, viewerId(userId)));
+    }
+
+    /** 익명 요청의 주체는 "anonymousUser" 같은 문자열이라 UUID 가 아니면 비로그인으로 본다. */
+    private static java.util.UUID viewerId(String principal) {
+        if (principal == null) return null;
+        try { return java.util.UUID.fromString(principal); } catch (IllegalArgumentException e) { return null; }
     }
 
     @Operation(

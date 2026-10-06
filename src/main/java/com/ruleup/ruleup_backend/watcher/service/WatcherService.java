@@ -64,7 +64,9 @@ public class WatcherService {
             for (WatcherRelation r : relations) if (r.isDispatchable()) items.add(toItem(r, nicknames));
         }
         if (filter.includesInvitations()) {
-            for (WatcherInvitation i : outstanding) items.add(toItem(i));
+            Map<UUID, String> openers = nicknamesOf(outstanding.stream()
+                    .map(WatcherInvitation::getOpenedByUserId).filter(java.util.Objects::nonNull).distinct().toList());
+            for (WatcherInvitation i : outstanding) items.add(toItem(i, openers));
         }
 
         return new WatcherListResponse(items);
@@ -75,8 +77,10 @@ public class WatcherService {
                 nicknames.getOrDefault(r.getWatcherUserId(), "회원"), r.getInvitedAt().toString(),
                 r.getAcceptedAt().toString(), null);
     }
-    private WatcherListResponse.Item toItem(WatcherInvitation i) {
-        return new WatcherListResponse.Item(null, i.getId().toString(), "USER", null, "INVITED", null,
+    /** displayName — 링크를 연 회원의 닉네임. 아무도 안 열었으면 null(앱은 「수락 대기 중인 초대」로 그린다). */
+    private WatcherListResponse.Item toItem(WatcherInvitation i, Map<UUID, String> openers) {
+        String opener = i.getOpenedByUserId() == null ? null : openers.get(i.getOpenedByUserId());
+        return new WatcherListResponse.Item(null, i.getId().toString(), "USER", null, "INVITED", opener,
                 i.getExpiresAt().minus(WatcherInvitation.TTL).toString(), null, i.getExpiresAt().toString());
     }
 
