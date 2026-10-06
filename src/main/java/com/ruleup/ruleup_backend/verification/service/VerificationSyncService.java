@@ -38,6 +38,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.concurrent.atomic.AtomicLong;
@@ -98,6 +99,8 @@ public class VerificationSyncService {
     private final VerificationMetrics metrics;
     private final com.ruleup.ruleup_backend.observability.BusinessMetrics businessMetrics;
     private final Map<VerificationMethod, MethodEvaluator> evaluators;
+    /** 운영은 시스템 시계. 시험이 「오늘」을 KST 자정 근처에서 떼어 놓을 수 있게 주입받는다. */
+    private final Clock clock;
 
     public VerificationSyncService(DeviceSyncPolicyService syncPolicy, ChallengeQueryService challengeQuery,
                                    VerificationDailyRepository dailyRepo,
@@ -122,7 +125,9 @@ public class VerificationSyncService {
                                    SignalConsentGate consentGate,
                                    VerificationMetrics metrics,
                                    com.ruleup.ruleup_backend.observability.BusinessMetrics businessMetrics,
-                                   List<MethodEvaluator> evaluatorList) {
+                                   List<MethodEvaluator> evaluatorList,
+                                   Clock clock) {
+        this.clock = clock;
         this.syncPolicy = syncPolicy;
         this.challengeQuery = challengeQuery;
         this.dailyRepo = dailyRepo;
@@ -174,8 +179,8 @@ public class VerificationSyncService {
                 .distinct().toList();
         List<SyncRequest.Gap> gaps = (req.gaps() != null) ? req.gaps() : List.of();   // §8.5 권한 공백 소비 입력
 
-        LocalDate today = LocalDate.now(KST);
-        Instant now = Instant.now();
+        Instant now = clock.instant();
+        LocalDate today = LocalDate.ofInstant(now, KST);
 
         com.ruleup.ruleup_backend.user.domain.User user = userRepository.findById(userId).orElse(null);
         sessionStore.touch(userId, req.sessionId(), now);

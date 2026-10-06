@@ -1,6 +1,8 @@
 package com.ruleup.ruleup_backend.verification;
 
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
+import com.ruleup.ruleup_backend.TestcontainersConfiguration.MutableClock;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -41,12 +43,30 @@ class VerificationSettingHistoryIT extends VerificationApiSupport {
 
     @Autowired WebApplicationContext wac;
     @Autowired JdbcTemplate jdbcTemplate;
+    @Autowired MutableClock clock;
 
     private MockMvc mvc;
 
     @BeforeEach
     void setUp() {
         mvc = MockMvcBuilders.webAppContextSetup(wac).apply(springSecurity()).build();
+    }
+
+    @AfterEach
+    void restoreClock() {
+        clock.reset();
+    }
+
+    /**
+     * 오늘 안에서 {@code minutes} 분을 거슬러 올라갈 수 있게, KST 자정 직후라면 시계를 그만큼 앞으로 옮긴다.
+     * 「지금부터 40분 전까지」 신호가 자정을 넘으면 앞부분이 어제로 귀속돼 오늘 체류 시간이 모자란다 —
+     * CI 가 00:00~00:40 KST 에 돌면 늘 실패하던 이유다. 날짜는 바꾸지 않으므로 DB 시각 기준 준비와 어긋나지 않는다.
+     */
+    private java.time.Instant nowWithRoomToday(int minutes) {
+        java.time.Instant earliest = LocalDate.now(KST).atStartOfDay(KST).plusMinutes(minutes + 5L).toInstant();
+        java.time.Instant now = clock.instant();
+        if (now.isBefore(earliest)) clock.advance(java.time.Duration.between(now, earliest));
+        return clock.instant();
     }
 
     @Override protected MockMvc mvc() { return mvc; }
@@ -188,6 +208,7 @@ class VerificationSettingHistoryIT extends VerificationApiSupport {
     @Test
     @DisplayName("인증 시간 중에도 장소를 바꿀 수 있고, 새 장소는 내일부터 — 오늘은 이전 장소로 판정한다")
     void changingAnchorsInWindowAppliesFromTomorrow() throws Exception {
+        java.time.Instant now = nowWithRoomToday(40);
         Member me = member(uniq("hist-window"));
         UUID challenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
         // 이력 없이 들어온 기존 멤버 — 새 장소를 멤버에 먼저 써도 오늘 판정이 새 장소로 폴백하면 안 된다.
@@ -204,7 +225,6 @@ class VerificationSettingHistoryIT extends VerificationApiSupport {
                 "$.data.appliedFrom")).as("조회도 저장 시각이 아니라 적용 시각을 내린다").isEqualTo(tomorrow);
 
         // 오늘 헬스장에 40분 — 오늘은 아직 헬스장이 인증 장소다.
-        java.time.Instant now = java.time.Instant.now();
         List<java.time.Instant> times = List.of(now.minusSeconds(2_400), now.minusSeconds(1_800),
                 now.minusSeconds(1_200), now.minusSeconds(600), now.minusSeconds(5));
         sync(me.token(), List.of(locationSignal(GYM_LAT, GYM_LNG, times)));
