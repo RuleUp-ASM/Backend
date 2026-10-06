@@ -85,6 +85,9 @@ app:
       url: ${MODERATION_QUEUE_URL:}
       region: ${AWS_REGION:ap-northeast-2}
       endpoint: ${MODERATION_QUEUE_ENDPOINT:}
+    # 이미지 심사 1순위 — Google Cloud Vision SafeSearch. 키가 비면 건너뛰고 LLM(Gemini → Nova)으로 간다.
+    safe-search:
+      api-key: ${SAFE_SEARCH_API_KEY:}
 
   auth:
     refresh-token-cleanup:

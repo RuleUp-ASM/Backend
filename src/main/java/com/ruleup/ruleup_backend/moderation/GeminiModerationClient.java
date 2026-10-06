@@ -13,9 +13,9 @@ import java.time.Duration;
 import java.util.Locale;
 
 /**
- * Gemini(멀티모달)로 닉네임과 프로필 사진을 검수하는 클라이언트.
- *  - 닉네임: 텍스트 검수
- *  - 사진  : 이미지 바이트를 받아 멀티모달 검수 (Gemini라 실제로 가능)
+ * 닉네임·챌린지 문구·이미지를 검수하는 클라이언트.
+ *  - 닉네임·문구: LLM 텍스트 검수 (Gemini → Nova, {@link LlmClient} 가 폴백)
+ *  - 이미지     : SafeSearch → Gemini → Nova. SafeSearch 가 판정을 못 내렸을 때만 LLM 멀티모달로 넘긴다.
  * 어떤 실패든 {@link ModerationResult#UNAVAILABLE}로 폴백 → 검수 보류(가입은 이미 끝났으므로 안전).
  */
 @Component
@@ -26,10 +26,12 @@ public class GeminiModerationClient implements ContentModerationClient {
     private static final int MAX_IMAGE_BYTES = 10 * 1024 * 1024;   // 프로필 사진 10MB 제한과 동일
 
     private final LlmClient llm;
+    private final SafeSearchClient safeSearch;
     private final RestClient imageFetcher;
 
-    public GeminiModerationClient(LlmClient llm) {
+    public GeminiModerationClient(LlmClient llm, SafeSearchClient safeSearch) {
         this.llm = llm;
+        this.safeSearch = safeSearch;
         var factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(Duration.ofSeconds(3));
         factory.setReadTimeout(Duration.ofSeconds(5));
@@ -58,9 +60,16 @@ public class GeminiModerationClient implements ContentModerationClient {
             log.warn("이미지가 너무 커서 검수를 보류합니다(size={} bytes).", bytes.length);
             return ModerationResult.UNAVAILABLE;
         }
+        // 1순위 SafeSearch — 판정이 나오면 그대로 쓴다. 못 내렸을 때(미설정·오류)만 LLM 으로 넘긴다.
+        ModerationResult safe = safeSearch.check(bytes);
+        if (safe != ModerationResult.UNAVAILABLE) {
+            log.info("image_moderation provider=safesearch result={}", safe);
+            return safe;
+        }
         String mime = (mimeType != null && !mimeType.isBlank()) ? mimeType : "image/jpeg";
-        String content = llm.generateText(buildImagePrompt(), bytes, mime);
-        return toResult(content);
+        ModerationResult result = toResult(llm.generateText(buildImagePrompt(), bytes, mime));   // Gemini → Nova
+        log.info("image_moderation provider=llm result={}", result);
+        return result;
     }
 
     /** 모델 JSON({"flagged":bool}) → 검수 결과. 파싱 실패/응답 없음은 보류. */
