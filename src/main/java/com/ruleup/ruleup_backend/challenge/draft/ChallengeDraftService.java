@@ -271,7 +271,7 @@ public class ChallengeDraftService {
                 buildParams(template, llmParams),
                 verification,
                 // 점수 패널티 = 자동 방 ON 고정 / 그룹 공유 = 그룹 ON 고정 / 감시자 기본 off
-                new DraftView.Penalties(auto, group, false));
+                new DraftView.Penalties(auto, group, true));
     }
 
     /** 목표값: 템플릿 스펙 순서대로, LLM 값이 유효하면 그 값·범위 밖이면 경계값·형식 오류면 기본값(문자열 표기). */

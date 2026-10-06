@@ -184,10 +184,10 @@ class ChallengeDraftPipelineIT extends ChallengeApiSupport {
             assertThat((List<String>) read(res, "$.data.draft.verification.requiredPermissions"))
                     .contains("PACKAGE_USAGE_STATS");
 
-            // 패널티: score = AUTO 고정 ON, groupShare = 솔로 OFF, watcher 기본 false
+            // 패널티: score = AUTO 고정 ON, groupShare = 솔로 OFF, watcher 기본 ON(2026-10-06 — 감시자 알림 허용이 기본)
             assertThat((Boolean) read(res, "$.data.draft.penalties.score")).isTrue();
             assertThat((Boolean) read(res, "$.data.draft.penalties.groupShare")).isFalse();
-            assertThat((Boolean) read(res, "$.data.draft.penalties.watcher")).isFalse();
+            assertThat((Boolean) read(res, "$.data.draft.penalties.watcher")).isTrue();
 
             // 원본 초안 DB 보관: origin=AI, 24시간 만료, 제목=AI 제목
             Map<String, Object> row = jdbcTemplate.queryForMap(

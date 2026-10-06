@@ -63,6 +63,14 @@ public class WatcherInvitation extends AssignedIdEntity {
     @Column(name = "expiry_notified_at")
     private Instant expiryNotifiedAt;
 
+    /** 링크를 연 회원(방장 제외) — 수락 전 목록에 「누구를 기다리는지」를 보여 준다. 동의가 아니다. */
+    @JdbcTypeCode(SqlTypes.BINARY)
+    @Column(name = "opened_by_user_id")
+    private UUID openedByUserId;
+
+    @Column(name = "opened_at")
+    private Instant openedAt;
+
     public static WatcherInvitation issue(UUID challengeId, UUID inviterUserId,
                                           String tokenHash, Instant now) {
         WatcherInvitation i = new WatcherInvitation();
@@ -80,6 +88,13 @@ public class WatcherInvitation extends AssignedIdEntity {
 
     public void markAccepted(Instant at) {
         if (acceptedAt == null) this.acceptedAt = at;
+    }
+
+    /** 로그인한 회원이 링크를 열었다. 방장 본인·수락 뒤·만료 뒤에는 남기지 않는다. 마지막으로 연 사람으로 덮어쓴다. */
+    public void markOpened(UUID viewerId, Instant at) {
+        if (viewerId == null || viewerId.equals(inviterUserId) || acceptedAt != null || isExpired(at)) return;
+        this.openedByUserId = viewerId;
+        this.openedAt = at;
     }
 
     public void markExpiryNotified(Instant at) {

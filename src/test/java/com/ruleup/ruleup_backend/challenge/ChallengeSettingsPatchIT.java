@@ -60,6 +60,11 @@ class ChallengeSettingsPatchIT extends ChallengeApiSupport {
 
     /** GROUP·PUBLIC 챌린지 생성(미수정 초안 그대로) → challengeId. */
     private String createGroupChallenge(String token) throws Exception {
+        return createGroupChallenge(token, true);
+    }
+
+    /** sendPenalties=false 면 요청에 penalties 를 싣지 않는다 — 서버 기본값을 본다. */
+    private String createGroupChallenge(String token, boolean sendPenalties) throws Exception {
         MvcResult draft = postJsonAuth("/api/v1/challenges/recommendation/by-template", token,
                 Map.of("templateId", TEMPLATE));
         Map<String, Object> body = new LinkedHashMap<>();
@@ -77,7 +82,7 @@ class ChallengeSettingsPatchIT extends ChallengeApiSupport {
         body.put("weeklyCount", (Integer) read(draft, "$.data.draft.weeklyCount"));
         body.put("params", List.of());
         body.put("verification", Map.of("type", "AUTO", "method", "GPS_PRESENCE"));
-        body.put("penalties", Map.of("watcher", false));
+        if (sendPenalties) body.put("penalties", Map.of("watcher", false));
 
         MvcResult res = mvc.perform(post("/api/v1/challenges")
                         .header("Authorization", "Bearer " + token)
@@ -367,6 +372,15 @@ class ChallengeSettingsPatchIT extends ChallengeApiSupport {
     @Nested
     @DisplayName("QA 2026-10-06 — 솔로 정원·감시자 켜기")
     class QaFixes {
+
+        @Test
+        @DisplayName("생성 요청에 감시자 값이 없으면 감시자 알림 허용(ON)이 기본이다")
+        void watcherIsOnByDefault() throws Exception {
+            Member owner = member(uniq("qa-w-default"));
+            String id = createGroupChallenge(owner.token(), false);
+
+            assertThat((Boolean) read(settings(owner.token(), id), "$.data.config.penalties.watcher")).isTrue();
+        }
 
         private void activate(String challengeId) {
             jdbcTemplate.update("UPDATE challenges SET status = 'ACTIVE' WHERE id = UNHEX(REPLACE(?, '-', ''))", challengeId);
