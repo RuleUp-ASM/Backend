@@ -422,6 +422,29 @@ class ReportBlockContractIT extends ChallengeApiSupport {
         }
 
         @Test
+        @DisplayName("숨긴 챌린지는 AI 초안 제목으로 보여 여러 개를 숨겨도 구분된다 — 없으면 고정 문구")
+        void hidden_challenges_show_ai_draft_title() throws Exception {
+            Member reporter = member(uniq("rai"));
+            Member owner = member(uniq("oai"));
+            UUID withAi = insertChallenge(owner.id(), "EXERCISE", "ACTIVE", "GROUP");
+            UUID withoutAi = insertChallenge(owner.id(), "STUDY", "ACTIVE", "GROUP");
+            jdbcTemplate.update("UPDATE challenges SET ai_title='퇴근 후 헬스장 가기' WHERE id=?", bytes(withAi));
+            jdbcTemplate.update("UPDATE challenges SET ai_title=NULL WHERE id=?", bytes(withoutAi));
+            postAuth("/api/v1/reports", reporter.token(), challengeReport(withAi));
+            postAuth("/api/v1/reports", reporter.token(), challengeReport(withoutAi));
+
+            MvcResult res = getAuth("/api/v1/users/me/blocks", reporter.token());
+
+            Map<String, String> titles = new java.util.HashMap<>();
+            List<String> ids = read(res, "$.data.challenges[*].challengeId");
+            List<String> masked = read(res, "$.data.challenges[*].maskedTitle");
+            for (int i = 0; i < ids.size(); i++) titles.put(ids.get(i), masked.get(i));
+            assertThat(titles.get(withAi.toString())).isEqualTo("퇴근 후 헬스장 가기");
+            assertThat(titles.get(withoutAi.toString())).isEqualTo(
+                    com.ruleup.ruleup_backend.challenge.view.ChallengeView.REPORTED_TITLE);
+        }
+
+        @Test
         @DisplayName("구 /blacklist 경로는 사라졌다")
         void legacy_path_is_gone() throws Exception {
             Member m = member(uniq("legacy"));
