@@ -418,6 +418,39 @@ class SanctionGateIT extends AuthApiSupport {
             expectError(postJson("/api/v1/auth/oauth/kakao",
                     loginBody(a.tag(), "inst-" + a.tag(), "dev-" + a.tag())), 403, "ACCOUNT_BANNED");
         }
+
+        @Test
+        @DisplayName("영구 정지를 해제하면 밴리스트에서도 빠져 다시 로그인된다")
+        void revoked_ban_can_log_in_again() throws Exception {
+            Account a = join("밴해제");
+            Sanction ban = impose(a.userId(), SanctionType.BAN, null, null);
+            long before = banEntryRepository.count();
+
+            sanctionService.revoke(ban.getId(), Instant.now());
+
+            // 제재만 풀고 해시를 남기면 로그인 게이트가 계정을 보기도 전에 403 으로 막는다 —
+            // 콘솔에는 「해제」로 보이고 해제 알림까지 나가는데 사용자만 못 들어오는 상태가 된다.
+            assertThat(banEntryRepository.count()).isEqualTo(before - 1);
+            assertThat(statusOf(a.userId())).isEqualTo(UserStatus.ACTIVE);
+            MvcResult res = postJson("/api/v1/auth/oauth/kakao",
+                    loginBody(a.tag(), "inst-" + a.tag(), "dev-" + a.tag()));
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+        }
+
+        @Test
+        @DisplayName("다른 영구 정지가 살아 있으면 하나를 풀어도 밴리스트를 지우지 않는다")
+        void keeps_ban_list_while_another_ban_lives() throws Exception {
+            Account a = join("밴중첩");
+            Sanction first = impose(a.userId(), SanctionType.BAN, null, null);   // 밴리스트 행은 이 제재를 근거로 남는다
+            impose(a.userId(), SanctionType.BAN, null, null);
+            long before = banEntryRepository.count();
+
+            sanctionService.revoke(first.getId(), Instant.now());
+
+            assertThat(banEntryRepository.count()).isEqualTo(before);
+            expectError(postJson("/api/v1/auth/oauth/kakao",
+                    loginBody(a.tag(), "inst-" + a.tag(), "dev-" + a.tag())), 403, "ACCOUNT_BANNED");
+        }
     }
 
     // =====================================================================
