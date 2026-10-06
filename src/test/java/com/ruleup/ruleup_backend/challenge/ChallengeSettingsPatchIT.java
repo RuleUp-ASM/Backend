@@ -157,7 +157,7 @@ class ChallengeSettingsPatchIT extends ChallengeApiSupport {
         }
 
         @Test
-        @DisplayName("다른 참여자가 생기면 editableFields = 제목·설명·정원·이미지만")
+        @DisplayName("다른 참여자가 생기면 editableFields = 제목·설명·정원·이미지 + (꺼져 있으면) 감시자 켜기")
         void limitedWhenMemberJoined() throws Exception {
             Member owner = member(uniq("set-lim"));
             String id = createGroupChallenge(owner.token());
@@ -166,7 +166,8 @@ class ChallengeSettingsPatchIT extends ChallengeApiSupport {
 
             MvcResult res = settings(owner.token(), id);
             List<String> editable = read(res, "$.data.editableFields");
-            assertThat(editable).containsExactlyInAnyOrder("title", "description", "capacity", "imageUrl");
+            assertThat(editable).containsExactlyInAnyOrder("title", "description", "capacity", "imageUrl",
+                    "penalties.watcher");
         }
     }
 
@@ -359,6 +360,93 @@ class ChallengeSettingsPatchIT extends ChallengeApiSupport {
             MvcResult after = settings(owner.token(), id);
             assertThat(after.getResponse().getContentAsString()).doesNotContain("\"repeatDays\"");
             assertThat((Integer) read(after, "$.data.config.weeklyCount")).isEqualTo(3);
+        }
+    }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("QA 2026-10-06 — 솔로 정원·감시자 켜기")
+    class QaFixes {
+
+        private void activate(String challengeId) {
+            jdbcTemplate.update("UPDATE challenges SET status = 'ACTIVE' WHERE id = UNHEX(REPLACE(?, '-', ''))", challengeId);
+        }
+
+        private String createSolo(Member owner) throws Exception {
+            String id = createGroupChallenge(owner.token());
+            assertThat(patchJsonAuth("/api/v1/challenges/" + id, owner.token(),
+                    Map.of("version", currentVersion(owner.token(), id), "mode", "SOLO"))
+                    .getResponse().getStatus()).isEqualTo(200);
+            return id;
+        }
+
+        @Test
+        @DisplayName("솔로 방은 정원을 수정 대상으로 내리지 않고, 보내면 409 — 200 으로 조용히 버리면 앱이 「저장했어요」를 띄운다")
+        void soloCapacityIsRejectedNotIgnored() throws Exception {
+            Member owner = member(uniq("qa-solo"));
+            String id = createSolo(owner);
+
+            List<String> editable = read(settings(owner.token(), id), "$.data.editableFields");
+            assertThat(editable).doesNotContain("capacity");
+            expectError(patchJsonAuth("/api/v1/challenges/" + id, owner.token(),
+                            Map.of("version", currentVersion(owner.token(), id), "capacity", 30)),
+                    409, "CHALLENGE_NOT_EDITABLE");
+        }
+
+        @Test
+        @DisplayName("솔로 → 그룹 전환과 정원을 함께 보내면 둘 다 반영된다")
+        void soloToGroupWithCapacity() throws Exception {
+            Member owner = member(uniq("qa-s2g"));
+            String id = createSolo(owner);
+
+            MvcResult res = patchJsonAuth("/api/v1/challenges/" + id, owner.token(),
+                    Map.of("version", currentVersion(owner.token(), id), "mode", "GROUP", "capacity", 100));
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+            assertThat((Integer) read(settings(owner.token(), id), "$.data.config.capacity")).isEqualTo(100);
+        }
+
+        @Test
+        @DisplayName("솔로 → 그룹 전환만 하면 정원은 기본값 30 — 선택지에 없는 50 이 아니다")
+        void soloToGroupDefaultsToChoice() throws Exception {
+            Member owner = member(uniq("qa-s2g-def"));
+            String id = createSolo(owner);
+
+            assertThat(patchJsonAuth("/api/v1/challenges/" + id, owner.token(),
+                    Map.of("version", currentVersion(owner.token(), id), "mode", "GROUP"))
+                    .getResponse().getStatus()).isEqualTo(200);
+            assertThat((Integer) read(settings(owner.token(), id), "$.data.config.capacity")).isEqualTo(30);
+        }
+
+        @Test
+        @DisplayName("진행 중 · 참여자가 있어도 감시자는 켤 수 있다 — 감시 대상은 방장 본인이라 다른 멤버 조건이 바뀌지 않는다")
+        void watcherCanBeTurnedOnWhileActive() throws Exception {
+            Member owner = member(uniq("qa-w-on"));
+            String id = createGroupChallenge(owner.token());
+            addMember(id, member(uniq("qa-w-on2")).id());
+            activate(id);
+
+            MvcResult res = patchJsonAuth("/api/v1/challenges/" + id, owner.token(),
+                    Map.of("version", currentVersion(owner.token(), id), "penalties", Map.of("watcher", true)));
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+            assertThat((Boolean) read(res, "$.data.updated.penalties.watcher")).isTrue();
+            assertThat((Boolean) read(settings(owner.token(), id), "$.data.config.penalties.watcher")).isTrue();
+            // 켠 뒤에는 수정 대상에서 빠진다 — 진행 중에 끄는 길은 열지 않는다
+            List<String> editable = read(settings(owner.token(), id), "$.data.editableFields");
+            assertThat(editable).doesNotContain("penalties.watcher");
+        }
+
+        @Test
+        @DisplayName("진행 중에는 감시자를 끌 수 없다 — 스스로 건 감시를 도중에 피하는 길이 된다")
+        void watcherCannotBeTurnedOffWhileActive() throws Exception {
+            Member owner = member(uniq("qa-w-off"));
+            String id = createGroupChallenge(owner.token());
+            jdbcTemplate.update("UPDATE challenges SET penalties = JSON_SET(penalties, '$.watcher', true) " +
+                    "WHERE id = UNHEX(REPLACE(?, '-', ''))", id);
+            activate(id);
+
+            expectError(patchJsonAuth("/api/v1/challenges/" + id, owner.token(),
+                            Map.of("version", currentVersion(owner.token(), id), "penalties", Map.of("watcher", false))),
+                    409, "CHALLENGE_NOT_EDITABLE");
         }
     }
 }

@@ -395,6 +395,33 @@ class ReportBlockContractIT extends ChallengeApiSupport {
         }
 
         @Test
+        @DisplayName("관리자가 폐쇄한 방·삭제된 방은 차단 목록에서 빠진다 — 차단 행은 이력 가림에 쓰이므로 남긴다")
+        void closed_or_deleted_challenge_leaves_block_list() throws Exception {
+            Member reporter = member(uniq("rc"));
+            Member owner = member(uniq("oc"));
+            UUID deleted = insertChallenge(owner.id(), "EXERCISE", "ACTIVE", "GROUP");
+            UUID closedPending = insertChallenge(owner.id(), "STUDY", "ACTIVE", "GROUP");
+            UUID alive = insertChallenge(owner.id(), "READING", "ACTIVE", "GROUP");
+            for (UUID id : List.of(deleted, closedPending, alive))
+                postAuth("/api/v1/reports", reporter.token(), challengeReport(id));
+
+            // 직권 폐쇄 → 하드 삭제(남은 심사·판정이 없을 때)
+            jdbcTemplate.update("DELETE FROM challenges WHERE id=?", bytes(deleted));
+            // 직권 폐쇄됐지만 남은 판정 때문에 삭제가 미뤄진 방 — 행은 남고 이력에 ADMIN 이 적힌다
+            jdbcTemplate.update("UPDATE challenges SET status='COMPLETED' WHERE id=?", bytes(closedPending));
+            jdbcTemplate.update("INSERT INTO challenge_history (challenge_id, title_snapshot, category, start_date, deleted_at, close_reason, closed_at) "
+                    + "VALUES (?, '폐쇄된 방', 'STUDY', CURDATE(), UTC_TIMESTAMP(6), 'ADMIN', UTC_TIMESTAMP(6))", bytes(closedPending));
+
+            MvcResult res = getAuth("/api/v1/users/me/blocks", reporter.token());
+
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+            assertThat((List<String>) read(res, "$.data.challenges[*].challengeId")).containsExactly(alive.toString());
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM user_blocks WHERE blocker_id=? AND target_type='CHALLENGE'",
+                    Integer.class, bytes(reporter.id()))).isEqualTo(3);
+        }
+
+        @Test
         @DisplayName("구 /blacklist 경로는 사라졌다")
         void legacy_path_is_gone() throws Exception {
             Member m = member(uniq("legacy"));
