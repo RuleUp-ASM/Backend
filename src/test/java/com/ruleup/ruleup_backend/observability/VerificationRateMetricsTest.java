@@ -59,4 +59,21 @@ class VerificationRateMetricsTest {
         assertThat(gauge("biz.verification.today", "success")).isEqualTo(5);
         assertThat(gauge("biz.verification.finalized", "failed")).isEqualTo(5);
     }
+
+    @Test
+    @DisplayName("확정된 그제 귀속분을 자동·수동으로 나눠 센다 — 자동 성공률과 인증 중 자동 비율을 대시보드가 계산한다")
+    void countsFinalizedByVerificationType() {
+        Instant finalized = VerificationDeadlines.finalizeAfter(LocalDate.of(2026, 10, 3));
+        when(repository.countByChallengeTypeAndStatusAndFinalizeAfter("AUTO", "SUCCESS", finalized)).thenReturn(30L);
+        when(repository.countByChallengeTypeAndStatusAndFinalizeAfter("AUTO", "FAILED", finalized)).thenReturn(10L);
+        when(repository.countByChallengeTypeAndStatusAndFinalizeAfter("MANUAL", "SUCCESS", finalized)).thenReturn(12L);
+        when(repository.countByChallengeTypeAndStatusAndFinalizeAfter("MANUAL", "FAILED", finalized)).thenReturn(0L);
+
+        metrics.refresh();
+
+        assertThat(registry.get("biz.verification.finalized_by_type").tags("type", "auto", "status", "success").gauge().value()).isEqualTo(30);
+        assertThat(registry.get("biz.verification.finalized_by_type").tags("type", "auto", "status", "failed").gauge().value()).isEqualTo(10);
+        assertThat(registry.get("biz.verification.finalized_by_type").tags("type", "manual", "status", "success").gauge().value()).isEqualTo(12);
+        assertThat(registry.get("biz.verification.finalized_by_type").tags("type", "manual", "status", "failed").gauge().value()).isEqualTo(0);
+    }
 }

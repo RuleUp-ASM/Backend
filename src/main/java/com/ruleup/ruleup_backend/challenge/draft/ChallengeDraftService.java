@@ -82,6 +82,7 @@ public class ChallengeDraftService {
     private final RecommendationService recommendationService;
     private final ChallengeMemberRepository memberRepository;
     private final ChallengeRepository challengeRepository;
+    private final com.ruleup.ruleup_backend.observability.BusinessMetrics businessMetrics;
 
     // ===== 경로 B: 설명 입력(LLM 5-Step) =====
 
@@ -97,6 +98,7 @@ public class ChallengeDraftService {
         if (suggestion.unusable()) {
             log.info("draft_result success=false fallback_step={} userId={}",
                     suggestion.blocked() ? "STEP1_2" : "LLM_FAILURE", userId);
+            if (suggestion.blocked()) businessMetrics.aiDraftBlocked(); else businessMetrics.aiDraftFailed();
             return DraftResponse.fallback(suggestion.blocked() ? FALLBACK_MESSAGE : LLM_FAILURE_MESSAGE);
         }
 
@@ -112,6 +114,7 @@ public class ChallengeDraftService {
         ChallengeSettings s = suggestion.settingsOrEmpty();
         if (s.title() == null || s.title().isBlank()) {
             log.info("draft_result success=false fallback_step=INVALID_TITLE userId={}", userId);
+            businessMetrics.aiDraftFailed();
             return DraftResponse.fallback(LLM_FAILURE_MESSAGE);
         }
         String title = sanitizeTitle(s.title(), "");
@@ -131,6 +134,7 @@ public class ChallengeDraftService {
                 view, weeklyCount, Instant.now()));
         log.info("draft_result success=true origin=AI draftId={} templateId={}",
                 saved.getId(), saved.getTemplateId());
+        businessMetrics.draftCreated(ChallengeDraft.Origin.AI);
         return DraftResponse.ok(saved.getId().toString(), view);
     }
 
@@ -149,6 +153,7 @@ public class ChallengeDraftService {
         ChallengeDraft saved = draftRepository.save(ChallengeDraft.of(
                 userId, ChallengeDraft.Origin.TEMPLATE, template.getId(), null,
                 view, DEFAULT_WEEKLY_COUNT, Instant.now()));
+        businessMetrics.draftCreated(ChallengeDraft.Origin.TEMPLATE);
         return new TemplateDraftResponse(saved.getId().toString(), view);
     }
 

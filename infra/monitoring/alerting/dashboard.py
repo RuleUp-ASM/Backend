@@ -38,6 +38,17 @@ row(('요청 수',[alb('RequestCount','Sum')],None),
     ('5xx',[alb('HTTPCode_Target_5XX_Count','Sum',label='타깃 5xx'),['AWS/ApplicationELB','HTTPCode_ELB_5XX_Count','LoadBalancer',LB,{'stat':'Sum','label':'ALB 5xx'}]],None),
     ('응답 시간(초)',[alb('TargetResponseTime','p95',label='p95'),alb('TargetResponseTime','p50',label='p50')],None),
     ('정상 타깃 수',[alb('HealthyHostCount','Minimum')],None))
+text('## 4xx — 어떤 요청이 거절됐나 (앱이 남기는 `client_error` 로그 · 대시보드 기간 기준)')
+row(('4xx 응답 수(ALB)',[alb('HTTPCode_Target_4XX_Count','Sum',label='타깃 4xx'),alb('RequestCount','Sum',label='전체 요청',yAxis='right')],None))
+def logs(title, query, width, x):
+    widgets.append({'type':'log','x':x,'y':y,'width':width,'height':8,'properties':{'title':title,'region':R,'view':'table',
+        'query':f"SOURCE '{LOG}' | filter @message like /client_error / "
+                "| parse @message /client_error status=(?<status>\\d+) code=(?<code>\\S+) method=(?<method>\\S+) route=(?<route>\\S+)/ "
+                + query}})
+# Logs Insights 는 `sort count() desc` 가 문법 오류다 — 별칭으로 정렬한다.
+logs('오류 코드별', "| stats count(*) as n by status, code | sort n desc | limit 30", 10, 0)
+logs('API · 오류 코드별', "| stats count(*) as n by method, route, code | sort n desc | limit 30", 14, 10)
+y+=8
 text('## 서버 · DB · Redis')
 ecs=lambda m:['AWS/ECS',m,'ClusterName',f'{P}-cluster','ServiceName',f'{P}-api',{'stat':'Average'}]
 rds=lambda m,s='Average':['AWS/RDS',m,'DBInstanceIdentifier',C['rds'],{'stat':s}]

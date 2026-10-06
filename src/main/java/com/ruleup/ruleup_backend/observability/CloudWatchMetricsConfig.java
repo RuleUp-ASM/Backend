@@ -56,7 +56,11 @@ public class CloudWatchMetricsConfig {
             "biz.login",                               // 로그인 결과(outcome=existing|new_user|failure)
             "biz.verification.attempt",                // 인증 시도(method=sync|manual)
             "biz.verification.today",                  // 오늘 귀속분 판정 수(status=success|pending)
-            "biz.verification.finalized");             // 확정 끝난 그제 판정 수(status=success|failed) — 성공률
+            "biz.verification.finalized",              // 확정 끝난 그제 판정 수(status=success|failed) — 성공률
+            "biz.verification.finalized_by_type",      // 같은 값을 인증 방식별로(type=auto|manual)
+            "biz.challenge.draft",                     // 초안(origin=ai|template|clone, result=success|blocked|failure)
+            "biz.challenge.created",                   // 생성(origin, edited=yes|no) — 초안 수정률
+            "biz.challenge.joined");                   // 가입(source=explore|invite)
 
     static final String BUSINESS_PREFIX = "biz.";
 

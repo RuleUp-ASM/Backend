@@ -84,6 +84,7 @@ public class ChallengeCreationService {
     private final RoutineCatalog catalog;
     private final UserScoreSummaryRepository scoreSummaryRepository;
     private final ApplicationEventPublisher eventPublisher;
+    private final com.ruleup.ruleup_backend.observability.BusinessMetrics businessMetrics;
 
     @Transactional
     public CreateChallengeResponse create(UUID userId, String idempotencyKey, CreateChallengeRequest req) {
@@ -202,9 +203,28 @@ public class ChallengeCreationService {
                 ZonedDateTime.now(KST).toOffsetDateTime().toString());
 
         keyRow.completeWith(writeSnapshot(response), challenge.getId());
+        // 멱등 재응답(위의 readSnapshot)은 여기까지 오지 않는다 — 같은 생성을 두 번 세지 않는다.
+        businessMetrics.challengeCreated(draft.getOrigin(),
+                !title.equals(draft.getTitle())
+                        || !Objects.equals(blankToNull(description), blankToNull(draft.getDescription()))
+                        || paramsEdited(params.valueMap(), original.params()));
         log.info("challenge_create_result success=true path={} verify_method={} challengeId={}",
                 draft.getOrigin(), response.verification().method(), challenge.getId());
         return response;
+    }
+
+    /** 초안의 목표값을 하나라도 바꿨는가 — 서비스 지표 「초안 수정률」의 입력. */
+    private static boolean paramsEdited(Map<String, Object> submitted, List<DraftView.DraftParam> original) {
+        if (original == null) return false;
+        for (DraftView.DraftParam p : original) {
+            Object value = submitted.get(p.key());
+            if (value != null && !String.valueOf(value).equals(p.value())) return true;
+        }
+        return false;
+    }
+
+    private static String blankToNull(String s) {
+        return s == null || s.isBlank() ? null : s;
     }
 
     // ===== 검증 =====

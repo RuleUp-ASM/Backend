@@ -135,6 +135,16 @@ public interface VerificationDailyRepository extends JpaRepository<VerificationD
     long countByStatusAndFinalizeAfter(@Param("status") VerificationStatus status,
                                        @Param("finalizeAfter") Instant finalizeAfter);
 
+    /**
+     * 한 귀속일의 상태별 판정 수를 방의 인증 방식(AUTO·MANUAL)으로 나눠 센다 — 자동/수동 비교 지표용.
+     * 수동 방은 체크하지 않은 날 행이 생기지 않으므로 MANUAL 의 FAILED 는 0 이 정상이다.
+     */
+    @Query(value = "SELECT COUNT(*) FROM VerificationDaily d JOIN challenges c ON c.id = d.challengeId " +
+            "WHERE c.verification_type = :type AND d.status = :status AND d.finalizeAfter = :finalizeAfter",
+            nativeQuery = true)
+    long countByChallengeTypeAndStatusAndFinalizeAfter(@Param("type") String type, @Param("status") String status,
+                                                        @Param("finalizeAfter") Instant finalizeAfter);
+
 
     /**
      * 확정에 실패한 한 건을 뒤로 미룬다.
