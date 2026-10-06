@@ -61,11 +61,17 @@ public class SanctionService {
         return sanction;
     }
 
-    /** 재검토 인용 해제. 다른 활성 제재가 없으면 계정을 ACTIVE 로 되돌린다. */
+    /**
+     * 재검토 인용 해제. 다른 활성 제재가 없으면 계정을 ACTIVE 로 되돌린다.
+     *
+     * <p>영구 정지면 <b>밴리스트도 함께 비운다</b>. 로그인·가입 게이트는 계정을 보기 전에 해시부터
+     * 대조하므로, 제재만 풀고 해시를 남기면 콘솔에는 「해제」로 보이는데 사용자는 계속 403 이다.
+     */
     @Transactional
     public void revoke(UUID sanctionId, Instant at) {
         Sanction sanction = sanctionRepository.findById(sanctionId).orElseThrow();
         sanction.revoke(at);
+        if (sanction.getType() == SanctionType.BAN) releaseBan(sanction.getUserId(), at);
         syncStatus(sanction.getUserId(), at);
     }
 
@@ -162,6 +168,25 @@ public class SanctionService {
     }
 
     // ===== 밴리스트 =====
+
+    /**
+     * 남은 영구 정지가 없을 때만 밴리스트에서 뺀다.
+     *
+     * <p>행은 <b>처음 집행된 BAN 하나</b>를 근거로만 남는다({@link #recordBan} 이 멱등이라). 그래서 지금
+     * 푸는 제재 id 로만 지우면 겹쳐 걸린 BAN 을 차례로 풀 때 행이 남는다 — 이 사용자의 제재 전부와
+     * 소셜 해시 두 갈래로 지운다. 해시는 개인정보 파기로 subject 가 비면 계산할 수 없다.
+     */
+    private void releaseBan(UUID userId, Instant at) {
+        boolean anotherBan = sanctionRepository.findActive(userId, at).stream()
+                .anyMatch(s -> s.getType() == SanctionType.BAN);
+        if (anotherBan) return;
+        banEntryRepository.deleteBySanctionIdIn(sanctionRepository.findByUserIdOrderByStartsAtDesc(userId)
+                .stream().map(Sanction::getId).toList());
+        userRepository.findById(userId)
+                .filter(u -> u.getOauthSubject() != null)
+                .ifPresent(u -> banEntryRepository.deleteByOauthHash(
+                        hashes.ofOauth(u.getOauthProvider().name(), u.getOauthSubject())));
+    }
 
     private void recordBan(User user, Sanction sanction, Instant at) {
         String oauthHash = hashes.ofOauth(user.getOauthProvider().name(), user.getOauthSubject());
