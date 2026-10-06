@@ -98,8 +98,8 @@ public class ChallengeController {
                     `filter` 로 탭을 가른다. 승인제가 없으므로 대기 상태는 존재하지 않는다.
 
                     - `IN_PROGRESS`(기본) — 시작 전(UPCOMING) + 진행 중(ACTIVE)
-                    - `COMPLETED` — 완주·기간 만료
-                    - `LEFT` — 중도 탈퇴·강퇴·자동 탈퇴. 이 탭에서만 `leftType` · `leftAt` 이 채워진다.
+                    - `COMPLETED` — 완주·기간 만료. 관리자가 폐쇄한 방은 여기 나오지 않는다
+                    - `LEFT` — 중도 탈퇴·강퇴·자동 탈퇴·관리자 폐쇄(`leftType=AUTO_CLOSED`, 중단). 이 탭에서만 `leftType` · `leftAt` 이 채워진다.
 
                     동시 참여 개수 제한 없이
                     커서 페이지네이션을 지원한다. 정렬은 세 탭 공통으로 종료일 내림차순이다.

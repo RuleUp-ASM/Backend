@@ -125,7 +125,7 @@ public class ChallengeSettingsService {
         if (body.has("category")) rejectNotEditable(c);
         if (!fullEditable) {
             for (String field : List.of("mode", "visibility", "rankingVisible", "minTier",
-                    "period", "weeklyCount", "params", "verification", "penalties")) {
+                    "period", "weeklyCount", "params", "verification")) {
                 if (body.has(field)) rejectNotEditable(c);
             }
         }
@@ -147,8 +147,10 @@ public class ChallengeSettingsService {
             applyWeeklyCount(c, body, updated);
             applyParams(c, body, updated);
             applyVerification(c, body, updated);
-            applyWatcher(c, body, updated);
         }
+        // 감시자는 시작 뒤에도 <b>켜는 쪽만</b> 받는다. 감시 대상은 방장 본인이라 켜도 다른 멤버의 조건이
+        // 바뀌지 않고, 끄는 쪽은 스스로 건 감시를 도중에 피하는 길이 된다.
+        applyWatcher(c, body, updated, fullEditable);
 
         if (!updated.isEmpty()) c.bumpVersion();
         if (updated.containsKey("title") || updated.containsKey("description") || updated.containsKey("imageUrl")) {
@@ -231,9 +233,11 @@ public class ChallengeSettingsService {
      */
     private void applyCapacity(Challenge c, JsonNode body, Map<String, Object> updated) {
         if (!body.has("capacity")) return;
+        // 솔로는 정원 1 고정이다. 200 으로 조용히 버리면 앱이 「저장했어요」를 띄우고 값은 그대로라
+        // 「수정이 안 된다」로 보인다(QA 2026-10-06). 같은 요청에 mode=GROUP 이 있으면 위에서 이미 그룹이다.
+        if (!c.isGroup()) rejectNotEditable(c);
         JsonNode node = body.get("capacity");
         if (node.isNull()) {                       // 무제한으로 전환 — 줄이는 게 아니라 푸는 것이라 현재 인원과 무관
-            if (!c.isGroup()) return;              // 솔로는 정원 1 고정
             c.changeMaxParticipants(null);
             updated.put("capacity", null);
             return;
@@ -247,7 +251,6 @@ public class ChallengeSettingsService {
                 c.getId(), com.ruleup.ruleup_backend.challenge.domain.MemberStatus.ACTIVE);
         if (capacity < active)
             throw new BusinessException(ErrorCode.CAPACITY_BELOW_CURRENT);
-        if (!c.isGroup()) return;                 // 솔로는 정원 1 고정 — 적용 대상 아님
         c.changeMaxParticipants(capacity);
         updated.put("capacity", capacity);
     }
@@ -417,7 +420,7 @@ public class ChallengeSettingsService {
         updated.put("verification", Map.of("type", "MANUAL"));
     }
 
-    private void applyWatcher(Challenge c, JsonNode body, Map<String, Object> updated) {
+    private void applyWatcher(Challenge c, JsonNode body, Map<String, Object> updated, boolean fullEditable) {
         if (!body.has("penalties")) return;
         JsonNode node = body.get("penalties");
         if (node.isNull() || !node.isObject()) throw new BusinessException(ErrorCode.INVALID_FIELD_VALUE);
@@ -426,6 +429,7 @@ public class ChallengeSettingsService {
         if (watcher.isNull() || !watcher.isBoolean()) throw new BusinessException(ErrorCode.INVALID_FIELD_VALUE);
         boolean value = watcher.booleanValue();
         if (c.getPenalties() != null && c.getPenalties().watcher() == value) return;
+        if (!fullEditable && !value) rejectNotEditable(c);
         c.changeWatcherPenalty(value);
         updated.put("penalties", Map.of("watcher", value));
     }
@@ -446,9 +450,19 @@ public class ChallengeSettingsService {
         throw new BusinessException(ErrorCode.CHALLENGE_NOT_EDITABLE, String.join(",", editableFields(c)));
     }
 
+    /**
+     * 지금 수정할 수 있는 필드. 앱은 이 목록으로 입력을 켜고 끈다 — 서버가 받지 않는 필드를 여기 두면
+     * 「저장했는데 안 바뀌는」 화면이 된다.
+     *  - 솔로는 정원이 1 고정이라 뺀다(솔로→그룹 전환은 mode 와 함께 보낸다).
+     *  - 시작 뒤에는 감시자가 꺼져 있을 때만 「켜기」로 넣는다.
+     */
     private List<String> editableFields(Challenge c) {
-        return c.getStatus() == ChallengeStatus.COMPLETED ? List.of()
-                : aloneAndUpcoming(c) ? FULL_EDITABLE : LIMITED_EDITABLE;
+        if (c.getStatus() == ChallengeStatus.COMPLETED) return List.of();
+        boolean full = aloneAndUpcoming(c);
+        List<String> fields = new java.util.ArrayList<>(full ? FULL_EDITABLE : LIMITED_EDITABLE);
+        if (!c.isGroup()) fields.remove("capacity");
+        if (!full && (c.getPenalties() == null || !c.getPenalties().watcher())) fields.add("penalties.watcher");
+        return List.copyOf(fields);
     }
 
     /**
