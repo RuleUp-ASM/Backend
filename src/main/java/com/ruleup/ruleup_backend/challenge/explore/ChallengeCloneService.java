@@ -52,6 +52,7 @@ public class ChallengeCloneService {
     private final ChallengeDraftRepository draftRepository;
     private final RoutineCatalog catalog;
     private final UserScoreSummaryRepository scoreSummaryRepository;
+    private final com.ruleup.ruleup_backend.observability.BusinessMetrics businessMetrics;
 
     @Transactional
     public CloneResponse clone(UUID userId, UUID challengeId) {
@@ -103,6 +104,7 @@ public class ChallengeCloneService {
         ChallengeDraft saved = draftRepository.save(ChallengeDraft.of(
                 userId, ChallengeDraft.Origin.CLONE, origin.getTemplateId(), challengeId,
                 view, weeklyCount, Instant.now()));
+        businessMetrics.draftCreated(ChallengeDraft.Origin.CLONE);
 
         return new CloneResponse(saved.getId().toString(), challengeId.toString(), view);
     }

@@ -19,8 +19,8 @@ Slack 전달은 Amazon Q Developer in chat applications(워크스페이스 `ASM 
 | `route_existing_alarms.py` | 기존 prod P0 경보를 긴급 토픽에도 연결, 모든 경보에 복구(OK) 알림, ECS 크래시 알림 형식 |
 | `p0_p1.py` | 노션 3절 P0/P1 임계값의 원본 — 서버 수·ECS CPU/메모리·p95·5xx·RDS·DLQ·FCM 성공률·Redis 히트율, 옛 이름 경보 정리 |
 | `alarms.py` | SQS 적체, 인증 배치·sync, Outbox, LLM 경보 |
-| `dashboard.py [prod\|stg]` | 서버(운영) 대시보드 `ruleup-<env>-ops` — 로그·트레이스 바로가기, 최근 ERROR 로그 포함 |
-| `business_dashboard.py` | 사용자 지표 대시보드 `ruleup-prod-business`(가입·로그인·인증 시도·인증 성공률) — prod 전용 |
+| `dashboard.py [prod\|stg]` | 서버(운영) 대시보드 `ruleup-<env>-ops` — 로그·트레이스 바로가기, 4xx(오류 코드별·API별, 앱의 `client_error` 로그), 최근 ERROR 로그 포함 |
+| `business_dashboard.py` | 사용자 지표 대시보드 `ruleup-prod-business` — ① 로그인·가입 ② 챌린지 참여(초안 경로·생성·초안 수정률·탐색/초대 가입) ③ 인증(자동 vs 수동). 묶음마다 기간 합계·비율 숫자 칸. prod 전용 |
 | `p0_mention.py` | P0 → 긴급 채널 커스텀 알림(멘션)·복구 스레드, 긴급 채널 구성을 `ruleup-prod-p0-slack` 으로 |
 | `slack_fallback.py` | Slack 전달 실패 감지 경보 → 이메일 대체 토픽 |
 

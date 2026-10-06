@@ -18,6 +18,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ApiResponse<Void>> handleBusiness(BusinessException e) {
         ErrorCode code = e.getErrorCode();
+        ClientErrorLog.record(code);
         // 부가 필드(reason·rejoinAvailableAt·nextChangeAvailableAt)는 각각 독립이다 —
         // detail 유무로 분기하면 detail 없이 실린 값이 조용히 사라진다.
         return ResponseEntity.status(code.getStatus()).body(ApiResponse.fail(ErrorResponse.of(e)));
@@ -30,6 +31,7 @@ public class GlobalExceptionHandler {
         // 파서가 우리 신호를 자기 예외로 감싸 올리므로 원인 사슬을 따라가 구분한다.
         if (causedBySyncPayloadTooLarge(e)) {
             ErrorCode tooLarge = ErrorCode.SYNC_PAYLOAD_TOO_LARGE;
+            ClientErrorLog.record(tooLarge);
             return ResponseEntity.status(tooLarge.getStatus()).body(ApiResponse.fail(ErrorResponse.of(tooLarge)));
         }
         return handleNotReadableBody(e);
@@ -44,6 +46,7 @@ public class GlobalExceptionHandler {
 
     private ResponseEntity<ApiResponse<Void>> handleNotReadableBody(HttpMessageNotReadableException e) {
         ErrorCode code = ErrorCode.INVALID_REQUEST;
+        ClientErrorLog.record(code);
         return ResponseEntity.status(code.getStatus()).body(ApiResponse.fail(ErrorResponse.of(code)));
     }
 
@@ -76,6 +79,7 @@ public class GlobalExceptionHandler {
         // 만능 핸들러가 500 으로 삼키면 클라가 "분할 재전송"을 판단할 근거를 잃는다.
         if (causedBySyncPayloadTooLarge(e)) {
             ErrorCode tooLarge = ErrorCode.SYNC_PAYLOAD_TOO_LARGE;
+            ClientErrorLog.record(tooLarge);
             return ResponseEntity.status(tooLarge.getStatus()).body(ApiResponse.fail(ErrorResponse.of(tooLarge)));
         }
         return handleTrulyUnexpected(e);
@@ -105,6 +109,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleMissingPart(Exception e) {
         log.warn("요청 형식 불일치 — {}", e.getMessage());
         ErrorCode code = ErrorCode.INVALID_REQUEST;
+        ClientErrorLog.record(code);
         return ResponseEntity.status(code.getStatus()).body(ApiResponse.fail(ErrorResponse.of(code)));
     }
 
@@ -112,6 +117,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ResponseEntity<ApiResponse<Void>> handleTooLarge(MaxUploadSizeExceededException e) {
         ErrorCode code = ErrorCode.IMAGE_TOO_LARGE;
+        ClientErrorLog.record(code);
         return ResponseEntity.status(code.getStatus()).body(ApiResponse.fail(ErrorResponse.of(code)));
     }
 
@@ -128,6 +134,7 @@ public class GlobalExceptionHandler {
         if (constraint != null && (constraint.contains("uq_users_active_requested_nickname")
                 || constraint.contains("uq_users_active_approved_nickname"))) {
             ErrorCode code = ErrorCode.NICKNAME_DUPLICATED;   // 409
+            ClientErrorLog.record(code);
             return ResponseEntity.status(code.getStatus()).body(ApiResponse.fail(ErrorResponse.of(code)));
         }
         // 닉네임 외의 무결성 위반(예: 같은 소셜계정 동시 가입 uq_users_oauth)은

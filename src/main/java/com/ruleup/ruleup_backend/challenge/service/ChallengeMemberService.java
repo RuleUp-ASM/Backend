@@ -79,6 +79,7 @@ public class ChallengeMemberService {
     private final org.springframework.jdbc.core.JdbcTemplate jdbc;
     private final RoomAuthority roomAuthority;
     private final BlockService blockService;
+    private final com.ruleup.ruleup_backend.observability.BusinessMetrics businessMetrics;
     private final com.ruleup.ruleup_backend.room.service.ChallengeRejoinPolicy rejoinPolicy;
     private final com.ruleup.ruleup_backend.common.outbox.OutboxService outbox;
     private final com.ruleup.ruleup_backend.common.outbox.OutboxDispatcher outboxDispatcher;
@@ -98,7 +99,9 @@ public class ChallengeMemberService {
 
     /** Invitation bypasses only the private-room gate. Membership and settings changes share a room lock. */
     public JoinResponse join(UUID userId, UUID challengeId, boolean invited) {
-        return selfProvider.getObject().joinInTransaction(userId, challengeId, invited);
+        JoinResponse response = selfProvider.getObject().joinInTransaction(userId, challengeId, invited);
+        businessMetrics.joined(invited);   // 트랜잭션 프록시를 빠져나온 뒤 — 커밋된 가입만 센다
+        return response;
     }
 
     @Transactional

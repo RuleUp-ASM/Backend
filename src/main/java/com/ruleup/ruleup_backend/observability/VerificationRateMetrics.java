@@ -42,6 +42,8 @@ public class VerificationRateMetrics {
     private final AtomicLong todayPending = new AtomicLong();
     private final AtomicLong finalizedSuccess = new AtomicLong();
     private final AtomicLong finalizedFailed = new AtomicLong();
+    /** 확정된 그제 귀속분 — 방의 인증 방식(auto·manual) × 상태(success·failed). */
+    private final java.util.Map<String, AtomicLong> byType = new java.util.LinkedHashMap<>();
 
     public VerificationRateMetrics(VerificationDailyRepository repository, Clock clock, MeterRegistry registry) {
         this.repository = repository;
@@ -54,6 +56,16 @@ public class VerificationRateMetrics {
                 "확정이 끝난 최근 귀속일(그제)의 성공 판정 수");
         gauge(registry, "biz.verification.finalized", "failed", finalizedFailed,
                 "확정이 끝난 최근 귀속일(그제)의 실패 판정 수");
+        for (String type : new String[]{"auto", "manual"}) {
+            for (String status : new String[]{"success", "failed"}) {
+                AtomicLong value = new AtomicLong();
+                byType.put(type + ":" + status, value);
+                Gauge.builder("biz.verification.finalized_by_type", value, AtomicLong::doubleValue)
+                        .description("확정이 끝난 최근 귀속일(그제)의 판정 수 — 자동/수동 인증 방식별")
+                        .tag("type", type).tag("status", status)
+                        .register(registry);
+            }
+        }
     }
 
     private static void gauge(MeterRegistry registry, String name, String status, AtomicLong value, String description) {
@@ -75,6 +87,11 @@ public class VerificationRateMetrics {
             Instant finalizedDeadline = VerificationDeadlines.finalizeAfter(today.minusDays(1L + VerificationDeadlines.GRACE_DAYS));
             finalizedSuccess.set(repository.countByStatusAndFinalizeAfter(VerificationStatus.SUCCESS, finalizedDeadline));
             finalizedFailed.set(repository.countByStatusAndFinalizeAfter(VerificationStatus.FAILED, finalizedDeadline));
+            for (var e : byType.entrySet()) {
+                String[] key = e.getKey().split(":");
+                e.getValue().set(repository.countByChallengeTypeAndStatusAndFinalizeAfter(
+                        key[0].toUpperCase(java.util.Locale.ROOT), key[1].toUpperCase(java.util.Locale.ROOT), finalizedDeadline));
+            }
         } catch (RuntimeException e) {
             // 지표 갱신 실패가 아무것도 막으면 안 된다. 다음 주기가 다시 센다.
             log.warn("인증 성공률 지표 갱신 실패: {}", e.toString());
