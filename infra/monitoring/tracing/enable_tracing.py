@@ -34,6 +34,9 @@ processors:
 exporters:
   awsxray:
     region: ap-northeast-2
+    # 어떤 API 였는지를 메타데이터가 아니라 주석(annotation)으로 — 트레이스 상세 상단에 보이고 필터·그룹에 쓸 수 있다.
+    # X-Ray 가 점을 밑줄로 바꿔 annotation.http_route = "/api/v1/verifications/sync" 처럼 찾는다(경로 변수는 {id} 그대로).
+    indexed_attributes: [http.route, http.request.method, http.response.status_code]
 service:
   extensions: [health_check, awsproxy]
   pipelines:
@@ -44,7 +47,7 @@ service:
 '''
 OTEL_ENV={
     'OTEL_ENABLED':'true',
-    'OTEL_SERVICE_NAME':'ruleup-api',
+    'OTEL_SERVICE_NAME':f'ruleup-api-{env}',   # X-Ray 는 서비스 이름으로만 거른다 — 같으면 stg·prod 가 한 노드로 섞인다
     'OTEL_RESOURCE_ATTRIBUTES':f'deployment.environment={env},service.namespace=ruleup',
     'OTEL_EXPORTER_OTLP_PROTOCOL':'http/protobuf',
     'OTEL_EXPORTER_OTLP_TRACES_ENDPOINT':'http://localhost:4318/v1/traces',
