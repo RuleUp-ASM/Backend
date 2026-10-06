@@ -6,8 +6,12 @@ Application Signals 는 조직 SCP 가 막아(application-signals:* explicit den
 
 하는 일
 1) 태스크 역할에 AWSXRayDaemonWriteAccess
-2) X-Ray 샘플링 규칙 ruleup-skip-health — /actuator/* 는 기록하지 않음(ALB 헬스체크가 트레이스 대부분을 차지하지 않게).
-   나머지는 기본 규칙(초당 1건 + 5%) — 트래픽이 적은 지금은 사실상 전부 기록된다.
+2) X-Ray 샘플링 규칙 — 계정 단위라 stg·prod 공통이다.
+   ruleup-skip-health(100) /actuator/* 는 기록하지 않음(ALB 헬스체크).
+   ruleup-api(200)         */api/* 요청은 전부 기록.
+   Default(10000)          그 밖(배치·고아 DB 쿼리·지표 전송·SQS 폴링)은 1%만. 초당 1건+5% 였을 땐 이것들이 트레이스의 98% 였다
+                           (배치 87% — 분당 ~30건이 초당 1건 예약분에 전부 들어갔다).
+   그룹 ruleup-<env>-api   API 트레이스만 보는 필터(콘솔 트레이스 목록·서비스 맵에서 그룹을 고른다).
 3) 서비스가 지금 쓰는 태스크 정의에 OTEL_* env 와 수집기 사이드카(otel-collector)를 더해 새 리비전 등록 → 서비스 전환
 
 전제: 이미지에 에이전트가 들어 있어야 한다(Dockerfile.deploy). 에이전트 없는 이미지에 OTEL_ENABLED=true 를 주면 기동이 실패한다.
@@ -68,10 +72,18 @@ if not DRY and not DISABLE:
     # 에이전트는 경로가 아니라 전체 URL(http://10.1.1.73:8080/actuator/health)로 맞춰 본다 — '/actuator/*' 는 한 번도 안 걸렸다.
     rule=dict(RuleName='ruleup-skip-health',Priority=100,FixedRate=0.0,ReservoirSize=0,ServiceName='*',ServiceType='*',
               Host='*',HTTPMethod='*',URLPath='*/actuator/*',ResourceARN='*')
+    api=dict(RuleName='ruleup-api',Priority=200,FixedRate=1.0,ReservoirSize=10,ServiceName='*',ServiceType='*',
+             Host='*',HTTPMethod='*',URLPath='*/api/*',ResourceARN='*')
     names={r['SamplingRule']['RuleName'] for r in xray.get_sampling_rules()['SamplingRuleRecords']}
-    if rule['RuleName'] in names: xray.update_sampling_rule(SamplingRuleUpdate={k:v for k,v in rule.items() if k!='ResourceARN'})
-    else: xray.create_sampling_rule(SamplingRule={**rule,'Version':1})
-    print('iam + sampling rule ok')
+    for r in (rule,api):
+        if r['RuleName'] in names: xray.update_sampling_rule(SamplingRuleUpdate={k:v for k,v in r.items() if k!='ResourceARN'})
+        else: xray.create_sampling_rule(SamplingRule={**r,'Version':1})
+    xray.update_sampling_rule(SamplingRuleUpdate={'RuleName':'Default','FixedRate':0.01,'ReservoirSize':0})
+    group=f'ruleup-{env}-api'
+    expr=f'service("ruleup-api-{env}") AND annotation.http_route BEGINSWITH "/api/"'
+    if group in {g['GroupName'] for g in xray.get_groups()['Groups']}: xray.update_group(GroupName=group,FilterExpression=expr)
+    else: xray.create_group(GroupName=group,FilterExpression=expr)
+    print('iam + sampling rules + group ok')
 
 current=ecs.describe_services(cluster=cluster,services=[service])['services'][0]['taskDefinition']
 td=ecs.describe_task_definition(taskDefinition=current)['taskDefinition']
