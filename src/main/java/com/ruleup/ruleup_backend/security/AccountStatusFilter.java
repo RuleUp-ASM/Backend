@@ -107,6 +107,7 @@ public class AccountStatusFilter extends OncePerRequestFilter {
         if (userId != null) activity.touch(userId);
         Blocked blocked = blockedReason(request);
         if (blocked != null) {
+            com.ruleup.ruleup_backend.common.error.ClientErrorLog.record(request, blocked.code());
             writeError(response, blocked);
             return;
         }
