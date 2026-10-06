@@ -244,7 +244,10 @@ public class BlockService {
         List<ReportDtos.ChallengeItem> challengeItems = jdbc.query(
                 "SELECT b.target_id, b.blocked_at, EXISTS("
                         + "  SELECT 1 FROM challenge_members m WHERE m.user_id = b.blocker_id "
-                        + "     AND m.challenge_id = b.target_id AND m.status = 'ACTIVE') "
+                        + "     AND m.challenge_id = b.target_id AND m.status = 'ACTIVE'), "
+                        // 여러 개를 숨기면 고정 문구만으로는 무엇이 무엇인지 모른다 — AI 초안 제목으로 가른다
+                        // (2026-10-06 결정. 다른 화면의 템플릿 이름 규칙(REP-06)과 달리 이 목록만 해당).
+                        + "  (SELECT c.ai_title FROM challenges c WHERE c.id = b.target_id) "
                         + "FROM user_blocks b WHERE b.blocker_id = ? AND b.target_type = 'CHALLENGE' "
                         // 관리자가 폐쇄했거나 이미 사라진 방은 목록에서 뺀다 — 풀어 줄 대상이 없다.
                         // 행은 지우지 않는다: 보관 이력·판정 내역의 제목 가림이 이 행을 읽는다(REP-06).
@@ -253,7 +256,9 @@ public class BlockService {
                         + "                   WHERE h.challenge_id = b.target_id AND h.close_reason = 'ADMIN') "
                         + "ORDER BY b.blocked_at DESC",
                 (rs, row) -> new ReportDtos.ChallengeItem(uuid(rs.getBytes(1)).toString(),
-                        com.ruleup.ruleup_backend.challenge.view.ChallengeView.REPORTED_TITLE, rs.getBoolean(3), DbTime.read(rs, 2).toString()),
+                        Optional.ofNullable(rs.getString(4)).filter(t -> !t.isBlank())
+                                .orElse(com.ruleup.ruleup_backend.challenge.view.ChallengeView.REPORTED_TITLE),
+                        rs.getBoolean(3), DbTime.read(rs, 2).toString()),
                 bytes(blockerId));
 
         return new ReportDtos.BlockListResponse(userItems, challengeItems);
