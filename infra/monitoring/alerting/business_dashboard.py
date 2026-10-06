@@ -1,8 +1,9 @@
 """사용자 행동 지표 대시보드 ruleup-<env>-business. 노션 「RuleUp 모니터링」 2절 — 서버 지표(ruleup-prod-ops)와 분리해서 본다.
 지표 원천은 앱 BusinessMetrics(biz.*). 경보는 걸지 않는다 — 추세를 보는 화면이다. 재실행 안전.
-사용: python business_dashboard.py [prod|stg]"""
+prod 전용 — stg 의 가입·로그인 수는 QA 가 만든 값이라 추세로 볼 의미가 없어 stg 는 biz.* 를 내보내지도 않는다(CloudWatchMetricsConfig).
+사용: python business_dashboard.py"""
 import boto3, json, sys
-R='ap-northeast-2'; ENV=sys.argv[1] if len(sys.argv)>1 else 'prod'
+R='ap-northeast-2'; ENV='prod'
 NS=f'RuleUp/App/{ENV}'
 cw=boto3.client('cloudwatch',region_name=R)
 widgets=[]; y=0
