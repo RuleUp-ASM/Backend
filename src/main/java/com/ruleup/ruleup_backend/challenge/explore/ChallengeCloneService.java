@@ -99,7 +99,7 @@ public class ChallengeCloneService {
                                 && origin.getVerificationConfig().requiredPermissions() != null)
                                 ? origin.getVerificationConfig().requiredPermissions() : List.of()),
                 // 그룹이므로 그룹 공유 ON 고정. 점수 패널티는 인증 방식을 따라간다(생성 규칙과 같다)
-                new DraftView.Penalties(auto, true, false));
+                new DraftView.Penalties(auto, true, true));
 
         ChallengeDraft saved = draftRepository.save(ChallengeDraft.of(
                 userId, ChallengeDraft.Origin.CLONE, origin.getTemplateId(), challengeId,

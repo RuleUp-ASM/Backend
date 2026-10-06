@@ -44,9 +44,10 @@ public class WatcherInvitationService {
                 new InvitationCreateResponse.KakaoShare(nickname + "님이 당신을 루틴 감시자로 초대했어요",
                         "[" + c.publicTitle() + "]에서 " + nickname + "님의 실패가 확정되면 알림이 가요.", "수락하기"));
     }
-    @Transactional(readOnly = true)
-    public InvitationEntryResponse getByToken(String token) {
+    @Transactional
+    public InvitationEntryResponse getByToken(String token, UUID viewerId) {
         WatcherInvitation i = invitation(token);
+        i.markOpened(viewerId, Instant.now());
         Challenge c = challenges.findById(i.getChallengeId()).orElseThrow(() -> new BusinessException(ErrorCode.INVITATION_NOT_FOUND));
         // 상태는 <b>행에서</b> 읽는다. "INVITED" 를 박아 두면 이미 수락된 초대도 계속 수락 가능한 것처럼 보인다(QA WAT-06).
         String status = (i.getAcceptedAt() != null) ? "ACCEPTED" : "INVITED";
