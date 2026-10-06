@@ -2,8 +2,8 @@
 
 노션 「RuleUp 모니터링」의 구성을 그림으로 옮긴 것. prod 기준이고 stg 도 모양은 같다(태스크 1개, P0 긴급 채널 없음).
 
-> 트레이스(ADOT 에이전트 → otel-collector 사이드카 → X-Ray)는 이미지에 에이전트만 들어 있고 **아직 켜지 않았다**.
-> 태스크 정의에 `OTEL_ENABLED=true`·사이드카를 더하는 적용은 따로 한다.
+> 트레이스는 2026-10-05 에 stg·prod 모두 켰다(`tracing/enable_tracing.py`). Application Signals 는 조직 SCP 가 막아 X-Ray 로 보낸다.
+> 끄기: `python3 infra/monitoring/tracing/enable_tracing.py <env> --disable`
 
 ```mermaid
 flowchart LR
