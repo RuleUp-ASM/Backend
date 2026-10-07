@@ -158,4 +158,48 @@ class RecommendationDiversityIT extends ChallengeApiSupport {
             assertThat(distinct).hasSizeGreaterThan(1);
         }
     }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("다른 추천 보기 — exclude 로 이미 본 것을 빼고 다음 3개")
+    class Refresh {
+
+        private List<Integer> idsExcluding(String token, List<Integer> exclude) throws Exception {
+            String q = exclude.stream().map(String::valueOf).reduce((a, b) -> a + "," + b).orElse("");
+            MvcResult res = getAuth("/api/v1/challenges/recommendations?exclude=" + q, token);
+            assertThat(res.getResponse().getStatus()).isEqualTo(200);
+            List<Map<String, Object>> items = read(res, "$.data.items");
+            return items.stream().map(i -> (Integer) i.get("templateId")).toList();
+        }
+
+        @Test
+        @DisplayName("이미 받은 3개를 넘기면 겹치지 않는 새 3개가 나온다")
+        void nextThreeDoNotOverlap() throws Exception {
+            Member m = member(uniq("refresh-next"));
+            List<Integer> first = templateIdsOf(m.token());
+
+            List<Integer> second = idsExcluding(m.token(), first);
+
+            assertThat(second).hasSize(3).doesNotContainAnyElementsOf(first);
+        }
+
+        @Test
+        @DisplayName("exclude 없이 부르면 첫 화면과 같다 — 기존 호출부는 그대로 동작한다")
+        void withoutExcludeIsUnchanged() throws Exception {
+            Member m = member(uniq("refresh-compat"));
+
+            assertThat(idsExcluding(m.token(), List.of())).isEqualTo(templateIdsOf(m.token()));
+        }
+
+        @Test
+        @DisplayName("카탈로그를 다 봤으면 제외를 풀어서라도 3개를 채운다")
+        void wrapsAroundWhenExhausted() throws Exception {
+            Member m = member(uniq("refresh-wrap"));
+            List<Integer> all = jdbcTemplate.queryForList(
+                    "SELECT t.id FROM RoutineTemplate t JOIN RoutineVerification v ON v.templateId = t.id "
+                            + "WHERE v.autoVerificationType IS NOT NULL", Integer.class);
+
+            assertThat(idsExcluding(m.token(), all)).hasSize(3);
+        }
+    }
 }

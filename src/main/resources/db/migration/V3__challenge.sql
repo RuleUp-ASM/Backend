@@ -38,6 +38,7 @@ CREATE TABLE `challenges` (
   `trending_score` double NOT NULL DEFAULT '0',
   `fail_count` int NOT NULL DEFAULT '0',
   `verification_type` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `verification_guide` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '인증 방법 안내 — 생성·인증 조건 변경 뒤 비동기로 채운다. NULL 이면 아직 만드는 중',
   `created_at` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   `updated_at` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
   `deleted_at` datetime(6) DEFAULT NULL,
@@ -90,9 +91,10 @@ CREATE TABLE `challenge_members` (
   `id` binary(16) NOT NULL,
   `challenge_id` binary(16) NOT NULL,
   `user_id` binary(16) NOT NULL,
-  `role` enum('OWNER','MEMBER') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'MEMBER',
+  `role` enum('OWNER','MEMBER') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'MEMBER',
   `status` enum('PENDING','ACTIVE','LEFT','REMOVED') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `joined_at` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  `participation_started_at` datetime(6) DEFAULT NULL COMMENT '재입장 시각 — NULL 이면 joined_at 이 이번 참여의 시작',
   `schedule_type` enum('FIXED_DAYS','FREQUENCY') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'FIXED_DAYS',
   `target_days` int NOT NULL DEFAULT '0',
   `success_days` int NOT NULL DEFAULT '0',
@@ -118,14 +120,14 @@ CREATE TABLE `challenge_members` (
   `fallback_used_period_start` date DEFAULT NULL COMMENT 'ì˜ˆë¹„ í´ë°± ì£¼1íšŒ(ë¡¤ë§ 7ì¼) ìœˆë„ìš° ì‹œìž‘ì¼(Â§9.2)',
   `fallback_used_count` int NOT NULL DEFAULT '0' COMMENT 'í˜„ìž¬ í´ë°± ìœˆë„ìš° ë‚´ ì‚¬ìš© íšŸìˆ˜(Â§9.2)',
   `ghost_pushed_at` datetime(6) DEFAULT NULL,
-  `left_type` enum('LEAVE','KICK') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `left_type` enum('LEAVE','KICK') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `left_at` datetime(6) DEFAULT NULL,
-  `kick_reason` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `kick_reason` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `kick_count` int NOT NULL DEFAULT '0',
   `rejoin_available_at` datetime(6) DEFAULT NULL,
   `rejoin_banned` tinyint(1) NOT NULL DEFAULT '0',
   `updated_at` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '행이 마지막으로 바뀐 시각. 5분 보정이 「그 사이 움직인 방」을 찾는 입력',
-  `leave_reason` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `leave_reason` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uqMember` (`challenge_id`,`user_id`),
   KEY `ixMemberUserStatus` (`user_id`,`status`),
@@ -288,13 +290,6 @@ CREATE TABLE `challenge_image_uploads` (
   KEY `idx_image_uploads_cleanup` (`registered_at`,`created_at`),
   CONSTRAINT `fk_image_uploads_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE `user_challenge_counters` (
-  `user_id` binary(16) NOT NULL,
-  `active_join_count` int NOT NULL DEFAULT '0' COMMENT '현재 ACTIVE 참여 수 — 동시 3개 게이트의 락 대상',
-  PRIMARY KEY (`user_id`),
-  CONSTRAINT `fk_user_challenge_counters_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE `InviteCode` (
   `id` binary(16) NOT NULL,

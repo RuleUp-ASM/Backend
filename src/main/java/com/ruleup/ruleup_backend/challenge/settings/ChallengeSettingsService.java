@@ -9,6 +9,8 @@ import com.ruleup.ruleup_backend.challenge.domain.ParticipationType;
 import com.ruleup.ruleup_backend.challenge.draft.DraftView;
 import com.ruleup.ruleup_backend.challenge.dto.ChallengeSettingsResponse;
 import com.ruleup.ruleup_backend.challenge.dto.PatchChallengeResponse;
+import com.ruleup.ruleup_backend.challenge.guide.VerificationGuideRequested;
+import com.ruleup.ruleup_backend.challenge.guide.VerificationGuideService;
 import com.ruleup.ruleup_backend.challenge.moderation.ChallengeModerationRequested;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
@@ -34,6 +36,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -54,6 +57,9 @@ public class ChallengeSettingsService {
     private static final java.util.Set<String> EXPLORE_FIELDS = java.util.Set.of(
             "visibility", "mode", "category", "verification", "minTier", "capacity", "period");
 
+    /** 안내 문구({@code verification_guide})의 재료가 되는 항목. */
+    private static final Set<String> GUIDE_FIELDS = Set.of("weeklyCount", "params", "verification");
+
 
     /** 시작 전 + 방장 혼자일 때 수정 가능한 전체 필드(카테고리 제외 — 어떤 상황에도 불변). */
     private static final List<String> FULL_EDITABLE = List.of(
@@ -70,6 +76,7 @@ public class ChallengeSettingsService {
     private final RoutineCatalog catalog;
     private final UserScoreSummaryRepository scoreSummaryRepository;
     private final ApplicationEventPublisher eventPublisher;
+    private final VerificationGuideService guideService;
 
     // ===== GET /settings =====
 
@@ -158,6 +165,11 @@ public class ChallengeSettingsService {
         }
         if (c.hasPendingModeration() && (updated.containsKey("title") || updated.containsKey("description") || updated.containsKey("imageUrl"))) {
             eventPublisher.publishEvent(new ChallengeModerationRequested(c.getId()));
+        }
+        // 인증 조건(빈도·목표값·방식)이 바뀌면 안내 문구도 옛 조건을 말하게 된다 → 비우고 커밋 뒤 다시 만든다
+        if (updated.keySet().stream().anyMatch(GUIDE_FIELDS::contains)) {
+            guideService.reset(c.getId());
+            eventPublisher.publishEvent(new VerificationGuideRequested(c.getId()));
         }
         // 탐색 노출·필터를 정하는 값이 바뀌었으면 파생 인덱스를 <b>커밋 직후</b> 다시 만든다.
         // 5분 보정만 믿으면 비공개→공개로 바꾼 방이 그동안 목록에 안 뜨고, AUTO→MANUAL 로

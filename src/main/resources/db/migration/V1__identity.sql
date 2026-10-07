@@ -122,8 +122,8 @@ CREATE TABLE `user_agreement_states` (
   `user_id` binary(16) NOT NULL,
   `agreement_type` enum('TOS','PRIVACY','LOCATION','MARKETING','EVENT','LOCATION_INFO','HEALTH_INFO') NOT NULL,
   `agreed` tinyint(1) NOT NULL,
-  `version` varchar(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-  `agreed_at` datetime(3) NOT NULL,
+  `version` varchar(16) CHARACTER SET ascii COLLATE ascii_bin DEFAULT NULL,
+  `agreed_at` datetime(3) DEFAULT NULL,
   PRIMARY KEY (`user_id`,`agreement_type`),
   CONSTRAINT `fk_user_agreement_states_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
   CONSTRAINT `chk_user_agreement_states_agreed` CHECK ((`agreed` in (0,1)))

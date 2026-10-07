@@ -24,6 +24,8 @@ import com.ruleup.ruleup_backend.common.image.UploadRateLimiter;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeImageService;
 import com.ruleup.ruleup_backend.challenge.recommendation.RecommendationRateLimiter;
 
+import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Tag(name = "Challenge", description = "챌린지 추천 · 생성 · 조회 · 수정")
@@ -55,11 +57,22 @@ public class ChallengeController {
 
     @Operation(summary = "추천 3개(지금 시작하기 좋은 루틴)",
             description = "어떤 경우에도 3개 보장. 진행 중 카테고리 루틴 제외(기타 예외)하되 3개 보장이 우선. "
-                    + "탭하면 by-template 호출(LLM 미경유).")
+                    + "탭하면 by-template 호출(LLM 미경유). "
+                    + "**「다른 추천 보기」**: 지금까지 받은 templateId 를 모아 `exclude` 로 보내면 그것을 뺀 다음 3개를 준다"
+                    + "(예: `?exclude=1001,1201,1301`). 생략하면 첫 화면과 같다. 카탈로그를 한 바퀴 다 보면 "
+                    + "제외를 풀어 다시 처음부터 채운다. 최대 " + MAX_RECOMMENDATION_EXCLUDE + "개까지만 반영한다.")
     @GetMapping("/recommendations")
-    public ApiResponse<CreationRecommendationsResponse> recommendations(@AuthenticationPrincipal String userId) {
-        return ApiResponse.ok(challengeDraftService.recommendations(UUID.fromString(userId)));
+    public ApiResponse<CreationRecommendationsResponse> recommendations(
+            @AuthenticationPrincipal String userId,
+            @RequestParam(name = "exclude", required = false) List<Long> exclude) {
+        Set<Long> excluded = (exclude == null) ? Set.of()
+                : exclude.stream().filter(java.util.Objects::nonNull)
+                        .limit(MAX_RECOMMENDATION_EXCLUDE).collect(java.util.stream.Collectors.toSet());
+        return ApiResponse.ok(challengeDraftService.recommendations(UUID.fromString(userId), excluded));
     }
+
+    /** 카탈로그 전체(현재 74건)를 덮는 크기. 그 이상은 의미가 없고 쿼리 문자열만 길어진다. */
+    private static final int MAX_RECOMMENDATION_EXCLUDE = 100;
 
     @Operation(summary = "챌린지 최종 생성",
             description = "확인 화면에서 수정을 마친 초안으로 생성. Idempotency-Key 헤더 필수(DB 유니크 — 재시도 안전). "

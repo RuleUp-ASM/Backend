@@ -19,7 +19,7 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 루틴 카탈로그 시드(V9) 계약 테스트.
+ * 루틴 카탈로그 시드(V2) 계약 테스트.
  *
  * <p>시드는 「루틴 테이블」 문서에서 <b>현재 자동 인증이 가능한 판정 모델(§1~§7)</b>만 담는다.
  * 판정기·신호 확장이 필요한 모델(§8~§13)과 자동 인증에 부적합한 루틴(§14)이 섞이면
@@ -71,10 +71,10 @@ class RoutineCatalogSeedIT {
 
     @Test
     @Transactional(readOnly = true)
-    @DisplayName("문서 §1~§7 의 79건이 전부 자동 인증 가능한 상태로 들어간다")
+    @DisplayName("문서 §1~§7 의 74건이 전부 자동 인증 가능한 상태로 들어간다")
     void seedIsAllAutoVerifiable() {
         List<RoutineTemplate> seeded = seeded();
-        assertThat(seeded).hasSize(79);
+        assertThat(seeded).hasSize(74);
         assertThat(seeded).allSatisfy(t -> {
             assertThat(t.supportsAuto())
                     .withFailMessage("자동 인증 정의가 없는 루틴이 시드에 섞였다: %s", t.getName())
@@ -137,7 +137,9 @@ class RoutineCatalogSeedIT {
         List<String> mustNotExist = List.of(
                 "정시 출근하기", "일찍 귀가하기", "알람 한 번에 일어나기",
                 "물 2L 마시기", "영양제·약 챙겨 먹기", "종이책 30분 읽기",
-                "밤 12시 이후 핸드폰 안 하기", "기상 후 1시간 SNS 안 보기");
+                "밤 12시 이후 핸드폰 안 하기", "기상 후 1시간 SNS 안 보기",
+                // §14 휴대폰 신호가 실제 행동을 증명하지 못한다 — 앱 사용 시간 루틴에 붙이면 오판정
+                "코딩 문제 풀기", "악기 연습하기", "하루 2시간 공부하기", "명상하기");
         List<String> names = seeded().stream().map(RoutineTemplate::getName).toList();
         assertThat(names).doesNotContainAnyElementsOf(mustNotExist);
     }

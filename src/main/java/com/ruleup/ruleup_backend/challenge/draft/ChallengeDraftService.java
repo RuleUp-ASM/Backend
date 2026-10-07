@@ -161,17 +161,27 @@ public class ChallengeDraftService {
 
     @Transactional(readOnly = true)
     public CreationRecommendationsResponse recommendations(UUID userId) {
+        return recommendations(userId, Set.of());
+    }
+
+    /**
+     * @param exclude 이미 보여 준 템플릿 — 「다른 추천 보기」를 누를 때마다 앱이 지금까지 받은 id 를 모아 보낸다.
+     *                후보가 바닥나면(카탈로그를 한 바퀴 다 봤으면) 제외를 풀어서라도 3개를 채운다.
+     */
+    @Transactional(readOnly = true)
+    public CreationRecommendationsResponse recommendations(UUID userId, Set<Long> exclude) {
         // 진행 중(종료 전) 챌린지의 카테고리 — 기타(ETC)는 제외 예외
         Set<String> activeCategories = activeCategories(userId);
 
         List<CreationRecommendationsResponse.Item> items = new ArrayList<>();
-        Set<Long> used = new HashSet<>();
+        // 이미 보여 준 것은 처음부터 「쓴 것」으로 친다 — 채움 단계도 같은 집합으로 거른다
+        Set<Long> used = new HashSet<>(exclude);
 
         // 이미 뽑은 카테고리 — 3건이 같은 결로 몰리지 않게 채움 단계에서도 피한다.
         Set<String> pickedCategories = new HashSet<>();
 
         // 1순위: 세그먼트·관심사 랭킹(진행 중 템플릿 제외 + 카테고리 다양성 내장)
-        for (RecommendedRoutine r : recommendationService.recommendRoutines(userId, 3)) {
+        for (RecommendedRoutine r : recommendationService.recommendRoutines(userId, 3, exclude)) {
             if (items.size() >= 3) break;
             if (activeCategories.contains(r.category())) continue;
             if (used.add(r.templateId())) {
@@ -183,8 +193,14 @@ public class ChallengeDraftService {
         fill(userId, items, used, activeCategories, pickedCategories);
         // 3순위: 카테고리 다양성을 포기하고 진행 중 카테고리만 피해 채움
         fill(userId, items, used, activeCategories, Set.of());
-        // 4순위: 그래도 부족하면 제외를 전부 풀어서라도 3개 보장(스펙 — 3개 보장이 우선)
+        // 4순위: 진행 중 카테고리 제외도 푼다
         fill(userId, items, used, Set.of(), Set.of());
+        // 5순위: 그래도 부족하면(카탈로그를 다 봤다) 이미 보여 준 것까지 다시 — 3개 보장이 우선
+        if (items.size() < 3) {
+            Set<Long> shown = new HashSet<>();
+            items.forEach(i -> shown.add(i.templateId()));
+            fill(userId, items, shown, Set.of(), Set.of());
+        }
 
         return new CreationRecommendationsResponse(items);
     }
@@ -223,13 +239,15 @@ public class ChallengeDraftService {
 
     private Set<String> activeCategories(UUID userId) {
         Set<String> categories = new HashSet<>();
-        for (ChallengeMember m : memberRepository.findByUserIdAndStatus(userId, MemberStatus.ACTIVE)) {
-            challengeRepository.findById(m.getChallengeId()).ifPresent(c -> {
-                if (c.getStatus() != ChallengeStatus.COMPLETED
-                        && !InterestCategory.ETC.name().equals(c.getCategory())) {
-                    categories.add(c.getCategory());
-                }
-            });
+        // 참여 방마다 한 번씩 읽던 것을 한 번에 읽는다 — 「다른 추천 보기」로 호출이 잦아졌다
+        List<UUID> challengeIds = memberRepository.findByUserIdAndStatus(userId, MemberStatus.ACTIVE).stream()
+                .map(ChallengeMember::getChallengeId).toList();
+        if (challengeIds.isEmpty()) return categories;
+        for (var c : challengeRepository.findAllById(challengeIds)) {
+            if (c.getStatus() != ChallengeStatus.COMPLETED
+                    && !InterestCategory.ETC.name().equals(c.getCategory())) {
+                categories.add(c.getCategory());
+            }
         }
         return categories;
     }
