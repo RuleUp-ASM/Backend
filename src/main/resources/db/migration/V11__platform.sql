@@ -59,3 +59,11 @@ CREATE TABLE `SystemMetricSnapshot` (
   PRIMARY KEY (`id`),
   KEY `ixSystemMetricCapturedAt` (`capturedAt`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `shedlock` (
+  `name` varchar(64) NOT NULL COMMENT '배치 이름(클래스.메서드)',
+  `lock_until` timestamp(3) NOT NULL COMMENT '이 시각까지 다른 태스크는 실행하지 않는다',
+  `locked_at` timestamp(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '락을 잡은 시각',
+  `locked_by` varchar(255) NOT NULL COMMENT '락을 잡은 호스트',
+  PRIMARY KEY (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='배치 분산 락(ShedLock)';

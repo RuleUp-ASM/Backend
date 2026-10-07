@@ -40,7 +40,7 @@ CREATE TABLE `RoutineOutcome` (
   `category` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `targetDate` date NOT NULL,
   `status` enum('PENDING','SUCCESS','FAILED','NOT_TARGET','NOT_REQUIRED') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
-  `verifiedVia` enum('AUTO','MANUAL','MANUAL_FALLBACK') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `verifiedVia` enum('AUTO','MANUAL','MANUAL_FALLBACK','APPEAL') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `failureReason` varchar(40) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `confirmedAt` datetime(6) NOT NULL,
   `createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
