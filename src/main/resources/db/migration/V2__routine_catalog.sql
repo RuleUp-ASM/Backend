@@ -81,163 +81,153 @@ CREATE TABLE `SegmentTypeWeight` (
 
 -- 기준 데이터 — 코드가 이 행들의 존재를 전제한다.
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1001, '헬스장 가기', '등록한 헬스장에 머문 시간으로 운동 여부를 확인해요.', 'EXERCISE', '{\"duration_min\": {\"max\": 480, \"min\": 10, \"unit\": \"min\", \"default\": 60}}', '위치 체류 시간으로 방문을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1001, '헬스장 가기', '등록한 헬스장에 머문 시간으로 방문을 확인해요.', 'EXERCISE', '{\"duration_min\": {\"default\": 60, \"max\": 480, \"min\": 10, \"unit\": \"min\"}}', '위치 체류 시간으로 방문을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1002, '스터디 카페 가기', '등록한 스터디 카페에 머문 시간으로 공부 시간을 확인해요.', 'STUDY', '{\"duration_min\": {\"max\": 720, \"min\": 10, \"unit\": \"min\", \"default\": 120}}', '위치 체류 시간으로 방문을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1002, '스터디 카페 가기', '등록한 스터디 카페에 머문 시간으로 방문을 확인해요.', 'STUDY', '{\"duration_min\": {\"default\": 120, \"max\": 720, \"min\": 10, \"unit\": \"min\"}}', '위치 체류 시간으로 방문을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1003, '도서관 가기', '등록한 도서관에 머문 시간으로 방문을 확인해요.', 'STUDY', '{\"duration_min\": {\"max\": 720, \"min\": 10, \"unit\": \"min\", \"default\": 120}}', '위치 체류 시간으로 방문을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1003, '도서관 가기', '등록한 도서관에 머문 시간으로 방문을 확인해요.', 'STUDY', '{\"duration_min\": {\"default\": 120, \"max\": 720, \"min\": 10, \"unit\": \"min\"}}', '위치 체류 시간으로 방문을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1004, '수영장 가기', '등록한 수영장에 머문 시간으로 운동 여부를 확인해요.', 'EXERCISE', '{\"duration_min\": {\"max\": 480, \"min\": 10, \"unit\": \"min\", \"default\": 60}}', '위치 체류 시간으로 방문을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1004, '수영장 가기', '등록한 수영장에 머문 시간으로 방문을 확인해요.', 'EXERCISE', '{\"duration_min\": {\"default\": 60, \"max\": 480, \"min\": 10, \"unit\": \"min\"}}', '위치 체류 시간으로 방문을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1005, '클라이밍장 가기', '등록한 클라이밍장에 머문 시간으로 운동 여부를 확인해요.', 'EXERCISE', '{\"duration_min\": {\"max\": 480, \"min\": 10, \"unit\": \"min\", \"default\": 90}}', '위치 체류 시간으로 방문을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1005, '클라이밍장 가기', '등록한 클라이밍장에 머문 시간으로 방문을 확인해요.', 'EXERCISE', '{\"duration_min\": {\"default\": 90, \"max\": 480, \"min\": 10, \"unit\": \"min\"}}', '위치 체류 시간으로 방문을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1006, '필라테스·요가 수업 참석', '등록한 센터에 머문 시간으로 수업 참석을 확인해요.', 'EXERCISE', '{\"duration_min\": {\"max\": 300, \"min\": 10, \"unit\": \"min\", \"default\": 50}}', '위치 체류 시간으로 방문을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1006, '필라테스·요가 센터 방문하기', '등록한 센터에 머문 시간으로 방문을 확인해요.', 'EXERCISE', '{\"duration_min\": {\"default\": 50, \"max\": 300, \"min\": 10, \"unit\": \"min\"}}', '위치 체류 시간으로 방문을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1007, '학원·과외 빠지지 않기', '등록한 학원에 머문 시간으로 출석을 확인해요.', 'STUDY', '{\"duration_min\": {\"max\": 600, \"min\": 10, \"unit\": \"min\", \"default\": 120}}', '위치 체류 시간으로 방문을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1007, '등록한 학원 방문하기', '등록한 학원에 머문 시간으로 방문을 확인해요.', 'STUDY', '{\"duration_min\": {\"default\": 120, \"max\": 600, \"min\": 10, \"unit\": \"min\"}}', '위치 체류 시간으로 방문을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1008, '러닝 크루 모임 참석', '등록한 공원·트랙에 머문 시간으로 모임 참석을 확인해요.', 'EXERCISE', '{\"duration_min\": {\"max\": 300, \"min\": 10, \"unit\": \"min\", \"default\": 60}}', '위치 체류 시간으로 방문을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1008, '등록한 러닝 모임 장소 방문하기', '등록한 공원·트랙에 머문 시간으로 방문을 확인해요.', 'EXERCISE', '{\"duration_min\": {\"default\": 60, \"max\": 300, \"min\": 10, \"unit\": \"min\"}}', '위치 체류 시간으로 방문을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1009, '공원 산책하기', '등록한 공원에 머문 시간으로 산책을 확인해요.', 'EXERCISE', '{\"duration_min\": {\"max\": 300, \"min\": 5, \"unit\": \"min\", \"default\": 30}}', '위치 체류 시간으로 방문을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1009, '등록한 공원 방문하기', '등록한 공원에 머문 시간으로 방문을 확인해요.', 'EXERCISE', '{\"duration_min\": {\"default\": 30, \"max\": 300, \"min\": 5, \"unit\": \"min\"}}', '위치 체류 시간으로 방문을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1010, '코워킹스페이스 출근하기', '등록한 작업 공간에 머문 시간으로 출근을 확인해요.', 'CAREER_PRODUCTIVITY', '{\"duration_min\": {\"max\": 720, \"min\": 30, \"unit\": \"min\", \"default\": 180}}', '위치 체류 시간으로 방문을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1010, '회사 4시간 이상 체류하기', '등록한 회사에 머문 시간으로 확인해요.', 'CAREER_PRODUCTIVITY', '{\"duration_min\": {\"default\": 240, \"max\": 720, \"min\": 30, \"unit\": \"min\"}}', '위치 체류 시간으로 방문을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1011, '학교 강의 출석하기', '등록한 강의동에 머문 시간으로 출석을 확인해요.', 'STUDY', '{\"duration_min\": {\"max\": 600, \"min\": 10, \"unit\": \"min\", \"default\": 60}}', '위치 체류 시간으로 방문을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1011, '코워킹스페이스 3시간 이상 체류하기', '등록한 작업 공간에 머문 시간으로 확인해요.', 'CAREER_PRODUCTIVITY', '{\"duration_min\": {\"default\": 180, \"max\": 720, \"min\": 30, \"unit\": \"min\"}}', '위치 체류 시간으로 방문을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1012, '병원·재활 치료 다녀오기', '등록한 병원에 머문 시간으로 치료 방문을 확인해요.', 'DIET_HEALTH', '{\"duration_min\": {\"max\": 480, \"min\": 5, \"unit\": \"min\", \"default\": 30}}', '위치 체류 시간으로 방문을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1012, '학교 강의동 1시간 이상 체류하기', '등록한 강의동에 머문 시간으로 확인해요.', 'STUDY', '{\"duration_min\": {\"default\": 60, \"max\": 600, \"min\": 10, \"unit\": \"min\"}}', '위치 체류 시간으로 방문을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1013, '동아리·모임 활동 나가기', '등록한 모임 장소에 머문 시간으로 참석을 확인해요.', 'HOBBY', '{\"duration_min\": {\"max\": 600, \"min\": 10, \"unit\": \"min\", \"default\": 120}}', '위치 체류 시간으로 방문을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1013, '병원·재활센터 방문하기', '등록한 병원에 머문 시간으로 방문을 확인해요.', 'DIET_HEALTH', '{\"duration_min\": {\"default\": 30, \"max\": 480, \"min\": 5, \"unit\": \"min\"}}', '위치 체류 시간으로 방문을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1014, '가족·부모님 집 방문하기', '등록한 가족 집에 머문 시간으로 방문을 확인해요.', 'ETC', '{\"duration_min\": {\"max\": 720, \"min\": 10, \"unit\": \"min\", \"default\": 60}}', '위치 체류 시간으로 방문을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1014, '등록한 동아리·모임 장소 방문하기', '등록한 모임 장소에 머문 시간으로 방문을 확인해요.', 'HOBBY', '{\"duration_min\": {\"default\": 120, \"max\": 600, \"min\": 10, \"unit\": \"min\"}}', '위치 체류 시간으로 방문을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1015, '정기 모임 장소 방문하기', '등록한 모임 공간에 머문 시간으로 참석을 확인해요.', 'HOBBY', '{\"duration_min\": {\"max\": 600, \"min\": 10, \"unit\": \"min\", \"default\": 60}}', '위치 체류 시간으로 방문을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1015, '가족·부모님 집 방문하기', '등록한 가족 집에 머문 시간으로 방문을 확인해요.', 'ETC', '{\"duration_min\": {\"default\": 60, \"max\": 720, \"min\": 10, \"unit\": \"min\"}}', '위치 체류 시간으로 방문을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1101, '술집 안 가기', '등록한 술집에 머물지 않았는지 확인해요.', 'DETOX', '{\"duration_min\": {\"max\": 120, \"min\": 1, \"unit\": \"min\", \"default\": 10}}', '금지 장소 체류로 규칙 위반을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1016, '정기 모임 장소 방문하기', '등록한 모임 공간에 머문 시간으로 방문을 확인해요.', 'HOBBY', '{\"duration_min\": {\"default\": 60, \"max\": 600, \"min\": 10, \"unit\": \"min\"}}', '위치 체류 시간으로 방문을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1102, 'PC방 안 가기', '등록한 PC방에 머물지 않았는지 확인해요.', 'DETOX', '{\"duration_min\": {\"max\": 120, \"min\": 1, \"unit\": \"min\", \"default\": 10}}', '금지 장소 체류로 규칙 위반을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1101, '술집 안 가기', '등록한 술집에 머물지 않았는지 확인해요.', 'DETOX', '{\"duration_min\": {\"default\": 10, \"max\": 120, \"min\": 1, \"unit\": \"min\"}}', '금지 장소 체류로 규칙 위반을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1103, '야식집 안 가기', '등록한 야식집에 머물지 않았는지 확인해요.', 'DIET_HEALTH', '{\"duration_min\": {\"max\": 120, \"min\": 1, \"unit\": \"min\", \"default\": 10}}', '금지 장소 체류로 규칙 위반을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1102, 'PC방 안 가기', '등록한 PC방에 머물지 않았는지 확인해요.', 'DETOX', '{\"duration_min\": {\"default\": 10, \"max\": 120, \"min\": 1, \"unit\": \"min\"}}', '금지 장소 체류로 규칙 위반을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1104, '편의점 들르지 않기', '등록한 편의점에 머물지 않았는지 확인해요.', 'DETOX', '{\"duration_min\": {\"max\": 120, \"min\": 1, \"unit\": \"min\", \"default\": 5}}', '금지 장소 체류로 규칙 위반을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1103, '등록한 야식집 방문하지 않기', '등록한 치킨집·분식집에 머물지 않았는지 확인해요.', 'DIET_HEALTH', '{\"duration_min\": {\"default\": 10, \"max\": 120, \"min\": 1, \"unit\": \"min\"}}', '금지 장소 체류로 규칙 위반을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1105, '카페 커피 안 사 마시기', '자주 가던 카페에 머물지 않았는지 확인해요.', 'FINANCE', '{\"duration_min\": {\"max\": 120, \"min\": 1, \"unit\": \"min\", \"default\": 5}}', '금지 장소 체류로 규칙 위반을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1104, '등록한 편의점 방문하지 않기', '등록한 편의점에 머물지 않았는지 확인해요.', 'DETOX', '{\"duration_min\": {\"default\": 5, \"max\": 120, \"min\": 1, \"unit\": \"min\"}}', '금지 장소 체류로 규칙 위반을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1106, '쇼핑몰 안 가기', '등록한 백화점·아울렛에 머물지 않았는지 확인해요.', 'FINANCE', '{\"duration_min\": {\"max\": 120, \"min\": 1, \"unit\": \"min\", \"default\": 10}}', '금지 장소 체류로 규칙 위반을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1105, '등록한 카페 방문하지 않기', '자주 가던 카페에 머물지 않았는지 확인해요.', 'FINANCE', '{\"duration_min\": {\"default\": 5, \"max\": 120, \"min\": 1, \"unit\": \"min\"}}', '금지 장소 체류로 규칙 위반을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1107, '노래방·클럽 안 가기', '등록한 노래방·클럽에 머물지 않았는지 확인해요.', 'DETOX', '{\"duration_min\": {\"max\": 120, \"min\": 1, \"unit\": \"min\", \"default\": 10}}', '금지 장소 체류로 규칙 위반을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1106, '쇼핑몰 안 가기', '등록한 백화점·아울렛에 머물지 않았는지 확인해요.', 'FINANCE', '{\"duration_min\": {\"default\": 10, \"max\": 120, \"min\": 1, \"unit\": \"min\"}}', '금지 장소 체류로 규칙 위반을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1108, '흡연 구역 피하기', '등록한 흡연 구역에 머물지 않았는지 확인해요.', 'DETOX', '{\"duration_min\": {\"max\": 120, \"min\": 1, \"unit\": \"min\", \"default\": 5}}', '금지 장소 체류로 규칙 위반을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1107, '노래방·클럽 안 가기', '등록한 노래방·클럽에 머물지 않았는지 확인해요.', 'DETOX', '{\"duration_min\": {\"default\": 10, \"max\": 120, \"min\": 1, \"unit\": \"min\"}}', '금지 장소 체류로 규칙 위반을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1109, '뽑기방·오락실 안 가기', '등록한 인형뽑기방·오락실에 머물지 않았는지 확인해요.', 'FINANCE', '{\"duration_min\": {\"max\": 120, \"min\": 1, \"unit\": \"min\", \"default\": 10}}', '금지 장소 체류로 규칙 위반을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1108, '뽑기방·오락실 안 가기', '등록한 인형뽑기방·오락실에 머물지 않았는지 확인해요.', 'FINANCE', '{\"duration_min\": {\"default\": 10, \"max\": 120, \"min\": 1, \"unit\": \"min\"}}', '금지 장소 체류로 규칙 위반을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1110, '야식 배달 픽업 안 가기', '등록한 배달·포장 매장에 머물지 않았는지 확인해요.', 'DIET_HEALTH', '{\"duration_min\": {\"max\": 120, \"min\": 1, \"unit\": \"min\", \"default\": 5}}', '금지 장소 체류로 규칙 위반을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1109, '등록한 야식 매장 방문하지 않기', '등록한 배달·포장 매장에 머물지 않았는지 확인해요.', 'DIET_HEALTH', '{\"duration_min\": {\"default\": 5, \"max\": 120, \"min\": 1, \"unit\": \"min\"}}', '금지 장소 체류로 규칙 위반을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1111, '디저트·베이커리 가게 안 가기', '등록한 디저트 가게에 머물지 않았는지 확인해요.', 'DIET_HEALTH', '{\"duration_min\": {\"max\": 120, \"min\": 1, \"unit\": \"min\", \"default\": 5}}', '금지 장소 체류로 규칙 위반을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1110, '디저트·베이커리 가게 안 가기', '등록한 디저트 가게·베이커리에 머물지 않았는지 확인해요.', 'DIET_HEALTH', '{\"duration_min\": {\"default\": 5, \"max\": 120, \"min\": 1, \"unit\": \"min\"}}', '금지 장소 체류로 규칙 위반을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1112, '카페 들르지 않기', '자주 가던 카페에 머물지 않았는지 확인해요.', 'FINANCE', '{\"duration_min\": {\"max\": 120, \"min\": 1, \"unit\": \"min\", \"default\": 5}}', '금지 장소 체류로 규칙 위반을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1201, '하루 만 보 걷기', '하루 동안 걸은 걸음 수로 확인해요.', 'EXERCISE', '{\"steps\": {\"default\": 10000, \"max\": 100000, \"min\": 1000, \"unit\": \"count\"}}', '건강 기록의 하루 누적 걸음으로 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1201, '하루 만 보 걷기', '하루 동안 걸은 걸음 수로 확인해요.', 'EXERCISE', '{\"steps\": {\"max\": 100000, \"min\": 1000, \"unit\": \"count\", \"default\": 10000}}', '건강 기록의 하루 누적 걸음으로 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1202, '하루 6천 보 걷기 (입문)', '하루 동안 걸은 걸음 수로 확인해요.', 'EXERCISE', '{\"steps\": {\"default\": 6000, \"max\": 100000, \"min\": 1000, \"unit\": \"count\"}}', '건강 기록의 하루 누적 걸음으로 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1202, '하루 6천 보 걷기 (입문)', '하루 동안 걸은 걸음 수로 확인해요.', 'EXERCISE', '{\"steps\": {\"max\": 100000, \"min\": 1000, \"unit\": \"count\", \"default\": 6000}}', '건강 기록의 하루 누적 걸음으로 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1203, '하루 3km 걷기', '하루 동안 이동한 거리로 확인해요.', 'EXERCISE', '{\"distance_km\": {\"default\": 3, \"max\": 100, \"min\": 1, \"unit\": \"km\"}}', '건강 기록의 하루 누적 거리로 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1203, '하루 3km 걷기', '하루 동안 이동한 거리로 확인해요.', 'EXERCISE', '{\"distance_km\": {\"max\": 100, \"min\": 1, \"unit\": \"km\", \"default\": 3}}', '건강 기록의 하루 누적 거리로 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1204, '하루 5km 이동 거리 채우기', '하루 동안 이동한 거리로 확인해요.', 'EXERCISE', '{\"distance_km\": {\"default\": 5, \"max\": 100, \"min\": 1, \"unit\": \"km\"}}', '건강 기록의 하루 누적 거리로 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1204, '5km 러닝하기', '하루 동안 달린 거리로 확인해요.', 'EXERCISE', '{\"distance_km\": {\"max\": 100, \"min\": 1, \"unit\": \"km\", \"default\": 5}}', '건강 기록의 하루 누적 거리로 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1205, '평일 하루 2천 보 걷기', '하루 동안 걸은 걸음 수로 확인해요.', 'EXERCISE', '{\"steps\": {\"default\": 2000, \"max\": 100000, \"min\": 500, \"unit\": \"count\"}}', '건강 기록의 하루 누적 걸음으로 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1205, '한 정거장 먼저 내려 걷기', '하루 동안 걸은 걸음 수로 확인해요.', 'EXERCISE', '{\"steps\": {\"max\": 100000, \"min\": 500, \"unit\": \"count\", \"default\": 2000}}', '건강 기록의 하루 누적 걸음으로 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1206, '평일 하루 3천 보 걷기', '하루 동안 걸은 걸음 수로 확인해요.', 'EXERCISE', '{\"steps\": {\"default\": 3000, \"max\": 100000, \"min\": 500, \"unit\": \"count\"}}', '건강 기록의 하루 누적 걸음으로 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1206, '점심시간 산책하기', '하루 동안 걸은 걸음 수로 확인해요.', 'EXERCISE', '{\"steps\": {\"max\": 100000, \"min\": 500, \"unit\": \"count\", \"default\": 3000}}', '건강 기록의 하루 누적 걸음으로 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1207, '주말 하루 8km 이동 거리 채우기', '하루 동안 이동한 거리로 확인해요.', 'EXERCISE', '{\"distance_km\": {\"default\": 8, \"max\": 100, \"min\": 1, \"unit\": \"km\"}}', '건강 기록의 하루 누적 거리로 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1207, '주말 장거리 걷기', '하루 동안 이동한 거리로 확인해요.', 'EXERCISE', '{\"distance_km\": {\"max\": 100, \"min\": 1, \"unit\": \"km\", \"default\": 8}}', '건강 기록의 하루 누적 거리로 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1208, '하루 2km 이동 거리 채우기', '하루 동안 이동한 거리로 확인해요.', 'EXERCISE', '{\"distance_km\": {\"default\": 2, \"max\": 100, \"min\": 1, \"unit\": \"km\"}}', '건강 기록의 하루 누적 거리로 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1208, '퇴근 후 동네 한 바퀴', '하루 동안 이동한 거리로 확인해요.', 'EXERCISE', '{\"distance_km\": {\"max\": 100, \"min\": 1, \"unit\": \"km\", \"default\": 2}}', '건강 기록의 하루 누적 거리로 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1209, '주 3회 10km 이동 거리 채우기', '하루 동안 이동한 거리로 확인해요.', 'EXERCISE', '{\"distance_km\": {\"default\": 10, \"max\": 100, \"min\": 1, \"unit\": \"km\"}}', '건강 기록의 하루 누적 거리로 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1209, '마라톤 준비 러닝', '하루 동안 달린 거리로 확인해요.', 'EXERCISE', '{\"distance_km\": {\"max\": 100, \"min\": 1, \"unit\": \"km\", \"default\": 10}}', '건강 기록의 하루 누적 거리로 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1210, '하루 15,000보 챌린지', '하루 동안 걸은 걸음 수로 확인해요.', 'EXERCISE', '{\"steps\": {\"default\": 15000, \"max\": 100000, \"min\": 1000, \"unit\": \"count\"}}', '건강 기록의 하루 누적 걸음으로 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1210, '하루 15,000보 챌린지', '하루 동안 걸은 걸음 수로 확인해요.', 'EXERCISE', '{\"steps\": {\"max\": 100000, \"min\": 1000, \"unit\": \"count\", \"default\": 15000}}', '건강 기록의 하루 누적 걸음으로 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1301, '인스타그램 줄이기', '하루 앱 사용 시간이 목표 이하인지 확인해요.', 'DETOX', '{\"duration_min\": {\"default\": 30, \"max\": 1440, \"min\": 0, \"unit\": \"min\"}}', '앱 사용 시간이 목표 이하일 때 성공');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1301, '인스타그램 줄이기', '하루 앱 사용 시간이 목표 이하인지 확인해요.', 'DETOX', '{\"duration_min\": {\"max\": 1440, \"min\": 0, \"unit\": \"min\", \"default\": 30}}', '앱 사용 시간이 목표 이하일 때 성공');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1302, '유튜브 줄이기', '하루 앱 사용 시간이 목표 이하인지 확인해요.', 'DETOX', '{\"duration_min\": {\"default\": 60, \"max\": 1440, \"min\": 0, \"unit\": \"min\"}}', '앱 사용 시간이 목표 이하일 때 성공');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1302, '유튜브 줄이기', '하루 앱 사용 시간이 목표 이하인지 확인해요.', 'DETOX', '{\"duration_min\": {\"max\": 1440, \"min\": 0, \"unit\": \"min\", \"default\": 60}}', '앱 사용 시간이 목표 이하일 때 성공');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1303, '숏폼 전용 앱 사용 줄이기', '하루 앱 사용 시간이 목표 이하인지 확인해요.', 'DETOX', '{\"duration_min\": {\"default\": 20, \"max\": 1440, \"min\": 0, \"unit\": \"min\"}}', '앱 사용 시간이 목표 이하일 때 성공');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1303, '숏폼 끊기', '하루 앱 사용 시간이 목표 이하인지 확인해요.', 'DETOX', '{\"duration_min\": {\"max\": 1440, \"min\": 0, \"unit\": \"min\", \"default\": 20}}', '앱 사용 시간이 목표 이하일 때 성공');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1304, '게임 시간 줄이기', '하루 앱 사용 시간이 목표 이하인지 확인해요.', 'DETOX', '{\"duration_min\": {\"default\": 60, \"max\": 1440, \"min\": 0, \"unit\": \"min\"}}', '앱 사용 시간이 목표 이하일 때 성공');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1304, '게임 시간 줄이기', '하루 앱 사용 시간이 목표 이하인지 확인해요.', 'DETOX', '{\"duration_min\": {\"max\": 1440, \"min\": 0, \"unit\": \"min\", \"default\": 60}}', '앱 사용 시간이 목표 이하일 때 성공');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1305, '커뮤니티 앱 줄이기', '하루 앱 사용 시간이 목표 이하인지 확인해요.', 'DETOX', '{\"duration_min\": {\"default\": 30, \"max\": 1440, \"min\": 0, \"unit\": \"min\"}}', '앱 사용 시간이 목표 이하일 때 성공');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1305, '커뮤니티 앱 줄이기', '하루 앱 사용 시간이 목표 이하인지 확인해요.', 'DETOX', '{\"duration_min\": {\"max\": 1440, \"min\": 0, \"unit\": \"min\", \"default\": 30}}', '앱 사용 시간이 목표 이하일 때 성공');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1306, '쇼핑 앱 사용 줄이기', '하루 앱 사용 시간이 목표 이하인지 확인해요.', 'FINANCE', '{\"duration_min\": {\"default\": 10, \"max\": 1440, \"min\": 0, \"unit\": \"min\"}}', '앱 사용 시간이 목표 이하일 때 성공');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1306, '쇼핑 앱 안 켜기', '하루 앱 사용 시간이 목표 이하인지 확인해요.', 'FINANCE', '{\"duration_min\": {\"max\": 1440, \"min\": 0, \"unit\": \"min\", \"default\": 10}}', '앱 사용 시간이 목표 이하일 때 성공');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1307, '메신저 붙잡고 있지 않기', '하루 앱 사용 시간이 목표 이하인지 확인해요.', 'CAREER_PRODUCTIVITY', '{\"duration_min\": {\"default\": 40, \"max\": 1440, \"min\": 0, \"unit\": \"min\"}}', '앱 사용 시간이 목표 이하일 때 성공');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1307, '메신저 붙잡고 있지 않기', '하루 앱 사용 시간이 목표 이하인지 확인해요.', 'CAREER_PRODUCTIVITY', '{\"duration_min\": {\"max\": 1440, \"min\": 0, \"unit\": \"min\", \"default\": 40}}', '앱 사용 시간이 목표 이하일 때 성공');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1308, '모바일 OTT 앱 사용 줄이기', '하루 앱 사용 시간이 목표 이하인지 확인해요.', 'DETOX', '{\"duration_min\": {\"default\": 60, \"max\": 1440, \"min\": 0, \"unit\": \"min\"}}', '앱 사용 시간이 목표 이하일 때 성공');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1308, 'OTT 정주행 자제하기', '하루 앱 사용 시간이 목표 이하인지 확인해요.', 'DETOX', '{\"duration_min\": {\"max\": 1440, \"min\": 0, \"unit\": \"min\", \"default\": 60}}', '앱 사용 시간이 목표 이하일 때 성공');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1309, '배달 앱 사용 줄이기', '하루 앱 사용 시간이 목표 이하인지 확인해요.', 'DIET_HEALTH', '{\"duration_min\": {\"default\": 5, \"max\": 1440, \"min\": 0, \"unit\": \"min\"}}', '앱 사용 시간이 목표 이하일 때 성공');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1309, '배달 앱 안 켜기', '하루 앱 사용 시간이 목표 이하인지 확인해요.', 'DIET_HEALTH', '{\"duration_min\": {\"max\": 1440, \"min\": 0, \"unit\": \"min\", \"default\": 5}}', '앱 사용 시간이 목표 이하일 때 성공');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1310, '웹툰 몰아보기 줄이기', '하루 앱 사용 시간이 목표 이하인지 확인해요.', 'DETOX', '{\"duration_min\": {\"default\": 30, \"max\": 1440, \"min\": 0, \"unit\": \"min\"}}', '앱 사용 시간이 목표 이하일 때 성공');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1310, '웹툰 몰아보기 줄이기', '하루 앱 사용 시간이 목표 이하인지 확인해요.', 'DETOX', '{\"duration_min\": {\"max\": 1440, \"min\": 0, \"unit\": \"min\", \"default\": 30}}', '앱 사용 시간이 목표 이하일 때 성공');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1311, 'SNS 전체 사용 줄이기', '고른 SNS 앱들의 하루 합산 사용 시간이 목표 이하인지 확인해요.', 'DETOX', '{\"duration_min\": {\"default\": 60, \"max\": 1440, \"min\": 0, \"unit\": \"min\"}}', '앱 사용 시간이 목표 이하일 때 성공');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1311, 'SNS 전체 사용 줄이기', '고른 SNS 앱들의 하루 합산 사용 시간이 목표 이하인지 확인해요.', 'DETOX', '{\"duration_min\": {\"max\": 1440, \"min\": 0, \"unit\": \"min\", \"default\": 60}}', '앱 사용 시간이 목표 이하일 때 성공');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1312, '웹소설 보는 시간 줄이기', '하루 앱 사용 시간이 목표 이하인지 확인해요.', 'DETOX', '{\"duration_min\": {\"default\": 30, \"max\": 1440, \"min\": 0, \"unit\": \"min\"}}', '앱 사용 시간이 목표 이하일 때 성공');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1312, '웹소설 보는 시간 줄이기', '하루 앱 사용 시간이 목표 이하인지 확인해요.', 'DETOX', '{\"duration_min\": {\"max\": 1440, \"min\": 0, \"unit\": \"min\", \"default\": 30}}', '앱 사용 시간이 목표 이하일 때 성공');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1313, '증권·코인 앱 확인 줄이기', '하루 앱 사용 시간이 목표 이하인지 확인해요.', 'FINANCE', '{\"duration_min\": {\"default\": 20, \"max\": 1440, \"min\": 0, \"unit\": \"min\"}}', '앱 사용 시간이 목표 이하일 때 성공');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1313, '증권·코인 앱 확인 줄이기', '하루 앱 사용 시간이 목표 이하인지 확인해요.', 'FINANCE', '{\"duration_min\": {\"max\": 1440, \"min\": 0, \"unit\": \"min\", \"default\": 20}}', '앱 사용 시간이 목표 이하일 때 성공');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1401, '어학 학습 앱 15분 이상 사용하기', '어학 학습 앱을 하루 목표 시간 이상 썼는지 확인해요.', 'STUDY', '{\"duration_min\": {\"default\": 15, \"max\": 1440, \"min\": 1, \"unit\": \"min\"}}', '앱 사용 시간이 목표 이상일 때 성공');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1401, '매일 외국어 공부하기', '어학 앱을 하루 목표 시간 이상 썼는지 확인해요.', 'STUDY', '{\"duration_min\": {\"max\": 1440, \"min\": 1, \"unit\": \"min\", \"default\": 15}}', '앱 사용 시간이 목표 이상일 때 성공');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1402, '전자책 앱 30분 이상 사용하기', '전자책 앱을 하루 목표 시간 이상 썼는지 확인해요.', 'READING', '{\"duration_min\": {\"default\": 30, \"max\": 1440, \"min\": 1, \"unit\": \"min\"}}', '앱 사용 시간이 목표 이상일 때 성공');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1402, '전자책으로 독서하기', '전자책 앱을 하루 목표 시간 이상 썼는지 확인해요.', 'READING', '{\"duration_min\": {\"max\": 1440, \"min\": 1, \"unit\": \"min\", \"default\": 30}}', '앱 사용 시간이 목표 이상일 때 성공');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1403, '강의 앱 1시간 이상 사용하기', '강의 앱을 하루 목표 시간 이상 썼는지 확인해요.', 'STUDY', '{\"duration_min\": {\"default\": 60, \"max\": 1440, \"min\": 1, \"unit\": \"min\"}}', '앱 사용 시간이 목표 이상일 때 성공');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1403, '인강 챙겨 듣기', '강의 앱을 하루 목표 시간 이상 썼는지 확인해요.', 'STUDY', '{\"duration_min\": {\"max\": 1440, \"min\": 1, \"unit\": \"min\", \"default\": 60}}', '앱 사용 시간이 목표 이상일 때 성공');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1404, '가계부 앱 5분 이상 사용하기', '가계부 앱을 하루 목표 시간 이상 썼는지 확인해요.', 'FINANCE', '{\"duration_min\": {\"default\": 5, \"max\": 1440, \"min\": 1, \"unit\": \"min\"}}', '앱 사용 시간이 목표 이상일 때 성공');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1404, '코딩 문제 풀기', '코딩 학습 앱을 하루 목표 시간 이상 썼는지 확인해요.', 'CAREER_PRODUCTIVITY', '{\"duration_min\": {\"max\": 1440, \"min\": 1, \"unit\": \"min\", \"default\": 30}}', '앱 사용 시간이 목표 이상일 때 성공');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1405, '홈트 앱 20분 이상 사용하기', '홈트 앱을 하루 목표 시간 이상 썼는지 확인해요.', 'EXERCISE', '{\"duration_min\": {\"default\": 20, \"max\": 1440, \"min\": 1, \"unit\": \"min\"}}', '앱 사용 시간이 목표 이상일 때 성공');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1405, '명상하기', '명상 앱을 하루 목표 시간 이상 썼는지 확인해요.', 'MIND', '{\"duration_min\": {\"max\": 1440, \"min\": 1, \"unit\": \"min\", \"default\": 10}}', '앱 사용 시간이 목표 이상일 때 성공');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1406, '뉴스 앱 15분 이상 사용하기', '뉴스 앱을 하루 목표 시간 이상 썼는지 확인해요.', 'FINANCE', '{\"duration_min\": {\"default\": 15, \"max\": 1440, \"min\": 1, \"unit\": \"min\"}}', '앱 사용 시간이 목표 이상일 때 성공');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1406, '가계부 쓰기', '가계부 앱을 하루 목표 시간 이상 썼는지 확인해요.', 'FINANCE', '{\"duration_min\": {\"max\": 1440, \"min\": 1, \"unit\": \"min\", \"default\": 5}}', '앱 사용 시간이 목표 이상일 때 성공');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1407, '일기·메모 앱 10분 이상 사용하기', '일기·메모 앱을 하루 목표 시간 이상 썼는지 확인해요.', 'MIND', '{\"duration_min\": {\"default\": 10, \"max\": 1440, \"min\": 1, \"unit\": \"min\"}}', '앱 사용 시간이 목표 이상일 때 성공');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1407, '홈트 따라 하기', '홈트 앱을 하루 목표 시간 이상 썼는지 확인해요.', 'EXERCISE', '{\"duration_min\": {\"max\": 1440, \"min\": 1, \"unit\": \"min\", \"default\": 20}}', '앱 사용 시간이 목표 이상일 때 성공');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1408, '성경 앱 10분 이상 사용하기', '성경 앱을 하루 목표 시간 이상 썼는지 확인해요.', 'MIND', '{\"duration_min\": {\"default\": 10, \"max\": 1440, \"min\": 1, \"unit\": \"min\"}}', '앱 사용 시간이 목표 이상일 때 성공');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1408, '악기 연습하기', '연습·튜너 앱을 하루 목표 시간 이상 썼는지 확인해요.', 'HOBBY', '{\"duration_min\": {\"max\": 1440, \"min\": 1, \"unit\": \"min\", \"default\": 20}}', '앱 사용 시간이 목표 이상일 때 성공');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1409, '캘린더·할 일 앱 10분 이상 사용하기', '캘린더·할 일 앱을 하루 목표 시간 이상 썼는지 확인해요.', 'CAREER_PRODUCTIVITY', '{\"duration_min\": {\"default\": 10, \"max\": 1440, \"min\": 1, \"unit\": \"min\"}}', '앱 사용 시간이 목표 이상일 때 성공');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1409, '뉴스·경제 기사 읽기', '뉴스 앱을 하루 목표 시간 이상 썼는지 확인해요.', 'FINANCE', '{\"duration_min\": {\"max\": 1440, \"min\": 1, \"unit\": \"min\", \"default\": 15}}', '앱 사용 시간이 목표 이상일 때 성공');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1410, '단어장·플래시카드 앱 15분 이상 사용하기', '단어장·플래시카드 앱을 하루 목표 시간 이상 썼는지 확인해요.', 'STUDY', '{\"duration_min\": {\"default\": 15, \"max\": 1440, \"min\": 1, \"unit\": \"min\"}}', '앱 사용 시간이 목표 이상일 때 성공');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1410, '일기 쓰기', '메모·일기 앱을 하루 목표 시간 이상 썼는지 확인해요.', 'MIND', '{\"duration_min\": {\"max\": 1440, \"min\": 1, \"unit\": \"min\", \"default\": 10}}', '앱 사용 시간이 목표 이상일 때 성공');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1501, '아침 7시에 일어나기', '하루 첫 휴대폰 잠금 해제 시각으로 기상을 확인해요.', 'WAKE_SLEEP', '{\"target_time\": {\"default\": \"07:00\", \"unit\": \"hh:mm\"}}', '첫 잠금 해제 시각으로 기상을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1411, '성경 읽기', '성경 앱을 하루 목표 시간 이상 썼는지 확인해요.', 'MIND', '{\"duration_min\": {\"max\": 1440, \"min\": 1, \"unit\": \"min\", \"default\": 10}}', '앱 사용 시간이 목표 이상일 때 성공');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1502, '평일 6시 30분 기상', '하루 첫 휴대폰 잠금 해제 시각으로 기상을 확인해요.', 'WAKE_SLEEP', '{\"target_time\": {\"default\": \"06:30\", \"unit\": \"hh:mm\"}}', '첫 잠금 해제 시각으로 기상을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1412, '하루 계획 정리하기', '캘린더·할 일 앱을 하루 목표 시간 이상 썼는지 확인해요.', 'CAREER_PRODUCTIVITY', '{\"duration_min\": {\"max\": 1440, \"min\": 1, \"unit\": \"min\", \"default\": 10}}', '앱 사용 시간이 목표 이상일 때 성공');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1503, '미라클 모닝 (5시 기상)', '하루 첫 휴대폰 잠금 해제 시각으로 기상을 확인해요.', 'WAKE_SLEEP', '{\"target_time\": {\"default\": \"05:00\", \"unit\": \"hh:mm\"}}', '첫 잠금 해제 시각으로 기상을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1413, '단어 암기하기', '단어장 앱을 하루 목표 시간 이상 썼는지 확인해요.', 'STUDY', '{\"duration_min\": {\"max\": 1440, \"min\": 1, \"unit\": \"min\", \"default\": 15}}', '앱 사용 시간이 목표 이상일 때 성공');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1504, '주말에도 8시 전 일어나기', '하루 첫 휴대폰 잠금 해제 시각으로 기상을 확인해요.', 'WAKE_SLEEP', '{\"target_time\": {\"default\": \"08:00\", \"unit\": \"hh:mm\"}}', '첫 잠금 해제 시각으로 기상을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1414, '자격증 공부하기', '자격증 학습 앱을 하루 목표 시간 이상 썼는지 확인해요.', 'STUDY', '{\"duration_min\": {\"max\": 1440, \"min\": 1, \"unit\": \"min\", \"default\": 30}}', '앱 사용 시간이 목표 이상일 때 성공');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1505, '평일 6시에 일어나기', '하루 첫 휴대폰 잠금 해제 시각으로 기상을 확인해요.', 'CAREER_PRODUCTIVITY', '{\"target_time\": {\"default\": \"06:00\", \"unit\": \"hh:mm\"}}', '첫 잠금 해제 시각으로 기상을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1501, '아침 7시에 일어나기', '하루 첫 휴대폰 잠금 해제 시각으로 기상을 확인해요.', 'WAKE_SLEEP', '{\"target_time\": {\"unit\": \"hh:mm\", \"default\": \"07:00\"}}', '첫 잠금 해제 시각으로 기상을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1506, '아침형 인간 되기 (입문)', '하루 첫 휴대폰 잠금 해제 시각으로 기상을 확인해요.', 'WAKE_SLEEP', '{\"target_time\": {\"default\": \"08:00\", \"unit\": \"hh:mm\"}}', '첫 잠금 해제 시각으로 기상을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1502, '평일 6시 30분 기상', '하루 첫 휴대폰 잠금 해제 시각으로 기상을 확인해요.', 'WAKE_SLEEP', '{\"target_time\": {\"unit\": \"hh:mm\", \"default\": \"06:30\"}}', '첫 잠금 해제 시각으로 기상을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1507, '시험 기간 5시 30분에 일어나기', '하루 첫 휴대폰 잠금 해제 시각으로 기상을 확인해요.', 'STUDY', '{\"target_time\": {\"default\": \"05:30\", \"unit\": \"hh:mm\"}}', '첫 잠금 해제 시각으로 기상을 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1503, '미라클 모닝 (5시 기상)', '하루 첫 휴대폰 잠금 해제 시각으로 기상을 확인해요.', 'WAKE_SLEEP', '{\"target_time\": {\"unit\": \"hh:mm\", \"default\": \"05:00\"}}', '첫 잠금 해제 시각으로 기상을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1601, '12시 전에 자기', '수면 기록의 잠든 시각으로 확인해요.', 'WAKE_SLEEP', '{\"bedtime_before\": {\"default\": \"23:59\", \"unit\": \"hh:mm\"}}', '수면 기록의 취침 시각으로 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1504, '주말에도 8시 전 일어나기', '하루 첫 휴대폰 잠금 해제 시각으로 기상을 확인해요.', 'WAKE_SLEEP', '{\"target_time\": {\"unit\": \"hh:mm\", \"default\": \"08:00\"}}', '첫 잠금 해제 시각으로 기상을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1602, '11시 전에 자기', '수면 기록의 잠든 시각으로 확인해요.', 'WAKE_SLEEP', '{\"bedtime_before\": {\"default\": \"23:00\", \"unit\": \"hh:mm\"}}', '수면 기록의 취침 시각으로 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1505, '출근 전 여유 만들기', '하루 첫 휴대폰 잠금 해제 시각으로 기상을 확인해요.', 'CAREER_PRODUCTIVITY', '{\"target_time\": {\"unit\": \"hh:mm\", \"default\": \"06:00\"}}', '첫 잠금 해제 시각으로 기상을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1603, '새벽 1시 넘기지 않기', '수면 기록의 잠든 시각으로 확인해요.', 'WAKE_SLEEP', '{\"bedtime_before\": {\"default\": \"01:00\", \"unit\": \"hh:mm\"}}', '수면 기록의 취침 시각으로 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1506, '아침형 인간 되기 (입문)', '하루 첫 휴대폰 잠금 해제 시각으로 기상을 확인해요.', 'WAKE_SLEEP', '{\"target_time\": {\"unit\": \"hh:mm\", \"default\": \"08:00\"}}', '첫 잠금 해제 시각으로 기상을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1604, '7시간 이상 자기', '수면 기록의 잔 시간으로 확인해요.', 'WAKE_SLEEP', '{\"sleep_hours\": {\"default\": 7, \"max\": 14, \"min\": 3, \"unit\": \"hour\"}}', '수면 기록의 수면 시간으로 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1507, '시험 기간 새벽 공부', '하루 첫 휴대폰 잠금 해제 시각으로 기상을 확인해요.', 'STUDY', '{\"target_time\": {\"unit\": \"hh:mm\", \"default\": \"05:30\"}}', '첫 잠금 해제 시각으로 기상을 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1605, '6시간은 확보하기', '수면 기록의 잔 시간으로 확인해요.', 'WAKE_SLEEP', '{\"sleep_hours\": {\"default\": 6, \"max\": 14, \"min\": 3, \"unit\": \"hour\"}}', '수면 기록의 수면 시간으로 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1601, '12시 전에 자기', '수면 기록의 잠든 시각으로 확인해요.', 'WAKE_SLEEP', '{\"bedtime_before\": {\"unit\": \"hh:mm\", \"default\": \"23:59\"}}', '수면 기록의 취침 시각으로 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1606, '매일 8시간 이상 자기', '수면 기록의 잔 시간으로 확인해요.', 'WAKE_SLEEP', '{\"sleep_hours\": {\"default\": 8, \"max\": 14, \"min\": 3, \"unit\": \"hour\"}}', '수면 기록의 수면 시간으로 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1602, '11시 전에 자기', '수면 기록의 잠든 시각으로 확인해요.', 'WAKE_SLEEP', '{\"bedtime_before\": {\"unit\": \"hh:mm\", \"default\": \"23:00\"}}', '수면 기록의 취침 시각으로 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1607, '주말에도 자정 전에 자기', '수면 기록의 잠든 시각으로 확인해요.', 'WAKE_SLEEP', '{\"bedtime_before\": {\"default\": \"23:59\", \"unit\": \"hh:mm\"}}', '수면 기록의 취침 시각으로 판정');
 
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1603, '새벽 1시 넘기지 않기', '수면 기록의 잠든 시각으로 확인해요.', 'WAKE_SLEEP', '{\"bedtime_before\": {\"unit\": \"hh:mm\", \"default\": \"01:00\"}}', '수면 기록의 취침 시각으로 판정');
-
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1604, '7시간 이상 자기', '수면 기록의 잔 시간으로 확인해요.', 'WAKE_SLEEP', '{\"sleep_hours\": {\"max\": 14, \"min\": 3, \"unit\": \"hour\", \"default\": 7}}', '수면 기록의 수면 시간으로 판정');
-
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1605, '6시간은 확보하기', '수면 기록의 잔 시간으로 확인해요.', 'WAKE_SLEEP', '{\"sleep_hours\": {\"max\": 14, \"min\": 3, \"unit\": \"hour\", \"default\": 6}}', '수면 기록의 수면 시간으로 판정');
-
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1606, '규칙적인 수면 습관 만들기', '수면 기록의 잔 시간으로 확인해요.', 'WAKE_SLEEP', '{\"sleep_hours\": {\"max\": 14, \"min\": 3, \"unit\": \"hour\", \"default\": 8}}', '수면 기록의 수면 시간으로 판정');
-
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1607, '주말 수면 몰아자기 방지', '수면 기록의 잠든 시각으로 확인해요.', 'WAKE_SLEEP', '{\"bedtime_before\": {\"unit\": \"hh:mm\", \"default\": \"23:59\"}}', '수면 기록의 취침 시각으로 판정');
-
-INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1608, '야근 후에도 6시간 자기', '수면 기록의 잔 시간으로 확인해요.', 'WAKE_SLEEP', '{\"sleep_hours\": {\"max\": 14, \"min\": 3, \"unit\": \"hour\", \"default\": 6}}', '수면 기록의 수면 시간으로 판정');
+INSERT INTO `RoutineTemplate` (`id`, `name`, `description`, `category`, `paramSchema`, `rationale`) VALUES (1608, '매일 7시간 30분 이상 자기', '수면 기록의 잔 시간으로 확인해요.', 'WAKE_SLEEP', '{\"sleep_hours\": {\"default\": 7.5, \"max\": 14, \"min\": 3, \"unit\": \"hour\"}}', '수면 기록의 수면 시간으로 판정');
 
 -- 기준 데이터 — 코드가 이 행들의 존재를 전제한다.
 
@@ -271,6 +261,8 @@ INSERT INTO `RoutineVerification` (`templateId`, `autoVerificationType`, `autoSi
 
 INSERT INTO `RoutineVerification` (`templateId`, `autoVerificationType`, `autoSignalSource`, `autoWearableReq`, `autoExternalService`, `autoRequiredPermissions`, `manualSignalSource`, `verificationMethod`) VALUES (1015, 'PHONE', 'GEOFENCE', 'NONE', NULL, '[\"ACCESS_FINE_LOCATION\", \"ACCESS_BACKGROUND_LOCATION\"]', 'SELF_CHECK', 'GPS_PRESENCE');
 
+INSERT INTO `RoutineVerification` (`templateId`, `autoVerificationType`, `autoSignalSource`, `autoWearableReq`, `autoExternalService`, `autoRequiredPermissions`, `manualSignalSource`, `verificationMethod`) VALUES (1016, 'PHONE', 'GEOFENCE', 'NONE', NULL, '[\"ACCESS_FINE_LOCATION\", \"ACCESS_BACKGROUND_LOCATION\"]', 'SELF_CHECK', 'GPS_PRESENCE');
+
 INSERT INTO `RoutineVerification` (`templateId`, `autoVerificationType`, `autoSignalSource`, `autoWearableReq`, `autoExternalService`, `autoRequiredPermissions`, `manualSignalSource`, `verificationMethod`) VALUES (1101, 'PHONE', 'GEOFENCE', 'NONE', NULL, '[\"ACCESS_FINE_LOCATION\", \"ACCESS_BACKGROUND_LOCATION\"]', 'SELF_CHECK', 'GPS_AVOID');
 
 INSERT INTO `RoutineVerification` (`templateId`, `autoVerificationType`, `autoSignalSource`, `autoWearableReq`, `autoExternalService`, `autoRequiredPermissions`, `manualSignalSource`, `verificationMethod`) VALUES (1102, 'PHONE', 'GEOFENCE', 'NONE', NULL, '[\"ACCESS_FINE_LOCATION\", \"ACCESS_BACKGROUND_LOCATION\"]', 'SELF_CHECK', 'GPS_AVOID');
@@ -290,10 +282,6 @@ INSERT INTO `RoutineVerification` (`templateId`, `autoVerificationType`, `autoSi
 INSERT INTO `RoutineVerification` (`templateId`, `autoVerificationType`, `autoSignalSource`, `autoWearableReq`, `autoExternalService`, `autoRequiredPermissions`, `manualSignalSource`, `verificationMethod`) VALUES (1109, 'PHONE', 'GEOFENCE', 'NONE', NULL, '[\"ACCESS_FINE_LOCATION\", \"ACCESS_BACKGROUND_LOCATION\"]', 'SELF_CHECK', 'GPS_AVOID');
 
 INSERT INTO `RoutineVerification` (`templateId`, `autoVerificationType`, `autoSignalSource`, `autoWearableReq`, `autoExternalService`, `autoRequiredPermissions`, `manualSignalSource`, `verificationMethod`) VALUES (1110, 'PHONE', 'GEOFENCE', 'NONE', NULL, '[\"ACCESS_FINE_LOCATION\", \"ACCESS_BACKGROUND_LOCATION\"]', 'SELF_CHECK', 'GPS_AVOID');
-
-INSERT INTO `RoutineVerification` (`templateId`, `autoVerificationType`, `autoSignalSource`, `autoWearableReq`, `autoExternalService`, `autoRequiredPermissions`, `manualSignalSource`, `verificationMethod`) VALUES (1111, 'PHONE', 'GEOFENCE', 'NONE', NULL, '[\"ACCESS_FINE_LOCATION\", \"ACCESS_BACKGROUND_LOCATION\"]', 'SELF_CHECK', 'GPS_AVOID');
-
-INSERT INTO `RoutineVerification` (`templateId`, `autoVerificationType`, `autoSignalSource`, `autoWearableReq`, `autoExternalService`, `autoRequiredPermissions`, `manualSignalSource`, `verificationMethod`) VALUES (1112, 'PHONE', 'GEOFENCE', 'NONE', NULL, '[\"ACCESS_FINE_LOCATION\", \"ACCESS_BACKGROUND_LOCATION\"]', 'SELF_CHECK', 'GPS_AVOID');
 
 INSERT INTO `RoutineVerification` (`templateId`, `autoVerificationType`, `autoSignalSource`, `autoWearableReq`, `autoExternalService`, `autoRequiredPermissions`, `manualSignalSource`, `verificationMethod`) VALUES (1201, 'HEALTH_CONNECT', 'HC_RECORD', 'NONE', NULL, '[\"android.permission.health.READ_STEPS\", \"android.permission.health.READ_DISTANCE\"]', 'SELF_CHECK', 'HEALTH');
 
@@ -361,14 +349,6 @@ INSERT INTO `RoutineVerification` (`templateId`, `autoVerificationType`, `autoSi
 
 INSERT INTO `RoutineVerification` (`templateId`, `autoVerificationType`, `autoSignalSource`, `autoWearableReq`, `autoExternalService`, `autoRequiredPermissions`, `manualSignalSource`, `verificationMethod`) VALUES (1410, 'PHONE', 'USAGE', 'NONE', NULL, '[\"PACKAGE_USAGE_STATS\"]', 'SELF_CHECK', 'SCREEN_TIME_MIN');
 
-INSERT INTO `RoutineVerification` (`templateId`, `autoVerificationType`, `autoSignalSource`, `autoWearableReq`, `autoExternalService`, `autoRequiredPermissions`, `manualSignalSource`, `verificationMethod`) VALUES (1411, 'PHONE', 'USAGE', 'NONE', NULL, '[\"PACKAGE_USAGE_STATS\"]', 'SELF_CHECK', 'SCREEN_TIME_MIN');
-
-INSERT INTO `RoutineVerification` (`templateId`, `autoVerificationType`, `autoSignalSource`, `autoWearableReq`, `autoExternalService`, `autoRequiredPermissions`, `manualSignalSource`, `verificationMethod`) VALUES (1412, 'PHONE', 'USAGE', 'NONE', NULL, '[\"PACKAGE_USAGE_STATS\"]', 'SELF_CHECK', 'SCREEN_TIME_MIN');
-
-INSERT INTO `RoutineVerification` (`templateId`, `autoVerificationType`, `autoSignalSource`, `autoWearableReq`, `autoExternalService`, `autoRequiredPermissions`, `manualSignalSource`, `verificationMethod`) VALUES (1413, 'PHONE', 'USAGE', 'NONE', NULL, '[\"PACKAGE_USAGE_STATS\"]', 'SELF_CHECK', 'SCREEN_TIME_MIN');
-
-INSERT INTO `RoutineVerification` (`templateId`, `autoVerificationType`, `autoSignalSource`, `autoWearableReq`, `autoExternalService`, `autoRequiredPermissions`, `manualSignalSource`, `verificationMethod`) VALUES (1414, 'PHONE', 'USAGE', 'NONE', NULL, '[\"PACKAGE_USAGE_STATS\"]', 'SELF_CHECK', 'SCREEN_TIME_MIN');
-
 INSERT INTO `RoutineVerification` (`templateId`, `autoVerificationType`, `autoSignalSource`, `autoWearableReq`, `autoExternalService`, `autoRequiredPermissions`, `manualSignalSource`, `verificationMethod`) VALUES (1501, 'PHONE', 'USAGE', 'NONE', NULL, '[\"PACKAGE_USAGE_STATS\"]', 'SELF_CHECK', 'WAKE');
 
 INSERT INTO `RoutineVerification` (`templateId`, `autoVerificationType`, `autoSignalSource`, `autoWearableReq`, `autoExternalService`, `autoRequiredPermissions`, `manualSignalSource`, `verificationMethod`) VALUES (1502, 'PHONE', 'USAGE', 'NONE', NULL, '[\"PACKAGE_USAGE_STATS\"]', 'SELF_CHECK', 'WAKE');
@@ -398,3 +378,4 @@ INSERT INTO `RoutineVerification` (`templateId`, `autoVerificationType`, `autoSi
 INSERT INTO `RoutineVerification` (`templateId`, `autoVerificationType`, `autoSignalSource`, `autoWearableReq`, `autoExternalService`, `autoRequiredPermissions`, `manualSignalSource`, `verificationMethod`) VALUES (1607, 'HEALTH_CONNECT', 'SLEEP', 'NONE', NULL, '[\"android.permission.health.READ_SLEEP\"]', 'SELF_CHECK', 'SLEEP');
 
 INSERT INTO `RoutineVerification` (`templateId`, `autoVerificationType`, `autoSignalSource`, `autoWearableReq`, `autoExternalService`, `autoRequiredPermissions`, `manualSignalSource`, `verificationMethod`) VALUES (1608, 'HEALTH_CONNECT', 'SLEEP', 'NONE', NULL, '[\"android.permission.health.READ_SLEEP\"]', 'SELF_CHECK', 'SLEEP');
+
