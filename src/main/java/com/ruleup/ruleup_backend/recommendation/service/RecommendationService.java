@@ -50,6 +50,14 @@ public class RecommendationService {
     private final ChallengeRepository challengeRepo;
 
     public List<RecommendedRoutine> recommendRoutines(UUID userId, int limit) {
+        return recommendRoutines(userId, limit, Set.of());
+    }
+
+    /**
+     * @param exclude 이번에 빼고 싶은 템플릿(생성 화면 「다른 추천 보기」에서 이미 보여 준 것).
+     *                점수 순서는 그대로라 같은 사용자가 같은 목록을 넘기면 늘 같은 다음 3건이 나온다.
+     */
+    public List<RecommendedRoutine> recommendRoutines(UUID userId, int limit, Set<Long> exclude) {
         User user = userRepo.findById(userId).orElse(null);
         if (user == null) return List.of();
 
@@ -71,6 +79,7 @@ public class RecommendationService {
         // 동점은 사용자별 결정적 키로 깬다(templateId 오름차순이면 전원에게 늘 같은 3건이 나간다 — RecommendationShuffle).
         List<Scored> ranked = catalog.candidates().stream()
                 .filter(c -> !active.contains(c.id()))
+                .filter(c -> !exclude.contains(c.id()))
                 .map(c -> {
                     double seg = segScore.getOrDefault(c.id(), 0.0);
                     boolean interestMatch = interests.contains(c.category());

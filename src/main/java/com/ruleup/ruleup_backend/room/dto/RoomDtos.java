@@ -63,8 +63,26 @@ public final class RoomDtos {
                     allowableValues = {"IN_PROGRESS", "DONE", "FAILED", "NOT_TARGET"})
             String myTodayStatus,
 
+            @Schema(description = "루틴 진행률 — 챌린지 전체 기간 기준의 나와 방 평균")
+            RoutineProgress routineProgress,
+
             @Schema(description = "Phase 1에서는 항상 null. Phase 2 고정 공지 호환 필드.")
             Object pinnedNotice) {
+
+        /**
+         * 진행률 = 성공일 ÷ 목표일 × 100(상한 100). {@code GET /verifications/progress} 의
+         * {@code progressRate} 와 같은 값이다 — 두 화면이 다른 숫자를 보이지 않게 저장값을 그대로 쓴다.
+         */
+        @Schema(name = "RoomRoutineProgress", description = "루틴 진행률(챌린지 전체 기간 기준)")
+        public record RoutineProgress(
+                @Schema(description = "내 진행률(%, 0~100, 소수 둘째 자리까지)", example = "42.86")
+                BigDecimal myProgressRate,
+                @Schema(description = "내 성공 일수", example = "6") int mySuccessDays,
+                @Schema(description = "내 목표 일수. 첫 인증 전이면 아직 계산 전이라 0 일 수 있다.", example = "14")
+                int myTargetDays,
+                @Schema(description = "방 평균 진행률(%) — 지금 참여 중인 멤버의 평균. 혼자면 내 값과 같다.",
+                        example = "37.50")
+                BigDecimal roomAverageProgressRate) {}
 
         @Schema(name = "RoomSummary", description = "방 요약")
         public record Summary(

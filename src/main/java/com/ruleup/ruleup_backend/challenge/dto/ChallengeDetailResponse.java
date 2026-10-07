@@ -54,10 +54,14 @@ public record ChallengeDetailResponse(
      * @param detail 표시 문구(예: "기상 06:00 ±10분")
      * @param params 방의 목표값(예: steps=10000). 설정 조회({@code /settings})는 방장 전용이라 멤버는
      *               목표값을 볼 길이 없었다. 초안·설정과 같은 모양이다.
+     * @param guide  인증 방법 안내(예: "매일 10,000걸음 이상 걸으면 자동 인증됩니다."). 방을 만들거나
+     *               인증 조건을 바꾼 직후에는 서버가 아직 만드는 중이라 <b>null</b> — 앱이
+     *               「아직 입력중입니다.」를 보여 준다. 보통 수 초 안에 채워진다.
      */
     public record Verification(String type, String method, String detail,
                                List<String> requiredPermissions,
-                               List<DraftView.DraftParam> params) {}
+                               List<DraftView.DraftParam> params,
+                               String guide) {}
 
     /** 표본이 모자라면 둘 다 null — "아직 참여자가 적어 값을 낼 수 없어요"로 표시한다. */
     public record Stats(Double completionRate, Double retentionRate) {}

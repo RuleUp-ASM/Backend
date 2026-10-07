@@ -27,6 +27,7 @@ import com.ruleup.ruleup_backend.routine.service.RoutineCatalog;
 import com.ruleup.ruleup_backend.score.repository.UserScoreSummaryRepository;
 import com.ruleup.ruleup_backend.score.domain.Tier;
 import com.ruleup.ruleup_backend.challenge.moderation.ChallengeModerationRequested;
+import com.ruleup.ruleup_backend.challenge.guide.VerificationGuideRequested;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -180,6 +181,9 @@ public class ChallengeCreationService {
         if (challenge.isGroup() && "PUBLIC".equals(challenge.getVisibility())) {
             eventPublisher.publishEvent(ChallengeGridChanged.of("CHALLENGE_CREATED"));
         }
+
+        // 인증 방법 안내는 LLM 을 거치므로 커밋 뒤 비동기로 채운다 — 생성 응답은 기다리지 않는다
+        eventPublisher.publishEvent(new VerificationGuideRequested(challenge.getId()));
 
         if (imageUpload != null) imageUpload.markRegistered(Instant.now());
 

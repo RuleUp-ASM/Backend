@@ -6,7 +6,7 @@ import java.util.Map;
 
 /**
  * LLM 매칭 결과(날것). templateId 가 null 이거나 후보에 없으면 "매칭 실패"로 본다.
- * params 의 값/키 유효성은 서버(RoutineRecommendationService)가 param_schema 로 재검증한다.
+ * params 의 값/키 유효성은 서버(ParamSpec)가 param_schema 로 재검증한다.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record RoutineMatch(

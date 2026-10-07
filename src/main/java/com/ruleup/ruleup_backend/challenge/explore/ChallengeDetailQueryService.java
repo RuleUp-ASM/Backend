@@ -186,7 +186,8 @@ public class ChallengeDetailQueryService {
                 template != null ? template.getDescription() : null,
                 (config != null && config.requiredPermissions() != null)
                         ? config.requiredPermissions() : List.of(),
-                params(c));
+                params(c),
+                c.getVerificationGuide());
     }
 
     /** 스펙 순서대로, 값은 실제 저장값(params)이 우선 — 스펙 행의 value 는 생성 당시 표기다. */

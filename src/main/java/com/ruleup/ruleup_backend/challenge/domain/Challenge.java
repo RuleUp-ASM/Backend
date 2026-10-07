@@ -230,6 +230,14 @@ public class Challenge extends AssignedIdEntity {
     @Column(name = "verification_type", length = 10)
     private String verificationType;       // AUTO / MANUAL — verificationConfig.selectedMethod 승격(정렬·필터용)
 
+    /**
+     * 인증 방법 안내 문구(예: "매일 10,000걸음 걸으면 자동 인증됩니다"). 생성 응답을 붙잡지 않도록
+     * 커밋 뒤 비동기로 채우고, 그 사이에는 null — 앱이 「아직 입력중입니다.」를 보여 준다.
+     * 쓰기는 {@code VerificationGuideService} 의 조건부 UPDATE 만 한다(PATCH 낙관 잠금 version 을 건드리지 않게).
+     */
+    @Column(name = "verification_guide", length = 200, insertable = false, updatable = false)
+    private String verificationGuide;
+
     @Column(name = "deleted_at")
     private Instant deletedAt;
 

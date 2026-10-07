@@ -38,6 +38,7 @@ CREATE TABLE `challenges` (
   `trending_score` double NOT NULL DEFAULT '0',
   `fail_count` int NOT NULL DEFAULT '0',
   `verification_type` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `verification_guide` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '인증 방법 안내 — 생성·인증 조건 변경 뒤 비동기로 채운다. NULL 이면 아직 만드는 중',
   `created_at` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   `updated_at` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
   `deleted_at` datetime(6) DEFAULT NULL,
