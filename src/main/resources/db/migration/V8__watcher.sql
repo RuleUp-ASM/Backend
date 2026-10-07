@@ -35,6 +35,8 @@ CREATE TABLE `watcher_invitations` (
   `accepted_at` datetime(3) DEFAULT NULL,
   `expiry_notified_at` datetime(3) DEFAULT NULL,
   `token_hash` binary(32) NOT NULL,
+  `opened_by_user_id` binary(16) DEFAULT NULL COMMENT '링크를 마지막으로 연 회원(방장 본인 제외)',
+  `opened_at` datetime(3) DEFAULT NULL COMMENT '그 시각',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_watcher_invitation_token` (`token_hash`),
   KEY `ix_watcher_invitation_expiry` (`accepted_at`,`expires_at`,`expiry_notified_at`),

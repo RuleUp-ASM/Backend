@@ -14,7 +14,7 @@ CREATE TABLE `VerificationDaily` (
   `status` enum('PENDING','SUCCESS','FAILED','NOT_TARGET','NOT_REQUIRED') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'PENDING' COMMENT '저장 상태. 진행중·실패 예정·검사중은 저장하지 않고 조회 시 계산한다',
   `method` varchar(40) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `failureReason` varchar(40) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `gapReason` varchar(30) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '판정 불가 사유 — PERMISSION_MISSING / NO_SIGNAL. 실패 사유와 층이 다르다',
+  `gapReason` varchar(30) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '판정 불가 사유 — PERMISSION_MISSING / NO_SIGNAL. 실패 사유와 층이 다르다',
   `windowClosesAt` datetime(6) DEFAULT NULL,
   `finalizeAfter` datetime(6) DEFAULT NULL COMMENT '최종 확정 시각 — 귀속일+2일 00:00 KST. 판정 유형과 무관하게 같다',
   `verifiedAt` datetime(6) DEFAULT NULL,
@@ -25,13 +25,16 @@ CREATE TABLE `VerificationDaily` (
   `appealClosesAt` datetime(6) DEFAULT NULL COMMENT '이의 신청 기한 — 확정 시각과 같은 귀속일+2일 00:00 KST. 확정 전에 받는다(상대 24시간 아님)',
   `shareableAt` datetime(6) DEFAULT NULL,
   `version` bigint NOT NULL DEFAULT '0' COMMENT '낙관적 락 — sync 와 확정 배치가 같은 행을 갱신할 때 덮어쓰기를 막는다',
+  `scoreVersion` bigint NOT NULL DEFAULT '0' COMMENT '판정이 바뀐 횟수 — 점수 반영 기준. version(낙관적 락)과 다르다',
+  `finalizeRetryAt` datetime(6) DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uqVerificationDailyMemberDate` (`challengeMemberId`,`targetDate`),
   KEY `idxVerificationDailyStatusFinalize` (`status`,`finalizeAfter`),
   KEY `ixVerificationDailyThread` (`challengeId`,`status`,`shareableAt`,`verifiedAt`),
   KEY `ixVerificationDailyUserDate` (`userId`,`targetDate`,`status`),
   KEY `idx_verification_user_date_challenge` (`userId`,`targetDate`,`challengeId`),
-  KEY `idx_verification_user_status` (`userId`,`status`)
+  KEY `idx_verification_user_status` (`userId`,`status`),
+  KEY `idx_verification_daily_target_date` (`targetDate`,`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `VerificationMethodResult` (
@@ -324,3 +327,11 @@ INSERT INTO `device_sync_policies` (`id`, `priority`, `match_condition`, `flush_
 INSERT INTO `device_sync_policies` (`id`, `priority`, `match_condition`, `flush_interval_sec`, `is_active`) VALUES (0x01950000000070008000000000000002, 50, '{\"maxSdk\": 25, \"platform\": \"ANDROID\"}', 3600, 1);
 
 INSERT INTO `device_sync_policies` (`id`, `priority`, `match_condition`, `flush_interval_sec`, `is_active`) VALUES (0x01950000000070008000000000000003, 0, '{}', 1800, 1);
+
+CREATE TABLE `verification_integrity_repairs` (
+  `verification_id` binary(16) NOT NULL,
+  `original_version` bigint NOT NULL,
+  `snapshot` json NOT NULL,
+  `repaired_at` datetime(6) NOT NULL DEFAULT (utc_timestamp(6)),
+  PRIMARY KEY (`verification_id`,`original_version`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

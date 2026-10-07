@@ -75,7 +75,22 @@ public class RoomService {
                         r.profileImageUrl(), r.successRate(), r.blocked())).toList();
         RoomDtos.RoomResponse.MyWeekly weekly = myWeekly(challenge, me, now.toLocalDate());
         return new RoomDtos.RoomResponse(challenge.isOwner(userId) ? "OWNER" : "MEMBER", challenge.getOwnerType().name(), summary,
-                top, weekly, todayStatus(challenge, me, weekly, now), null);
+                top, weekly, todayStatus(challenge, me, weekly, now), routineProgress(me, active), null);
+    }
+
+    /** 이미 읽은 ACTIVE 멤버 행의 저장값만 쓴다 — 방 홈에 집계 쿼리를 더하지 않는다. */
+    private RoomDtos.RoomResponse.RoutineProgress routineProgress(ChallengeMember me, List<ChallengeMember> active) {
+        BigDecimal mine = rate(me);
+        BigDecimal average = active.isEmpty() ? mine
+                : active.stream().map(RoomService::rate).reduce(BigDecimal.ZERO, BigDecimal::add)
+                        .divide(BigDecimal.valueOf(active.size()), 2, java.math.RoundingMode.HALF_UP);
+        return new RoomDtos.RoomResponse.RoutineProgress(
+                mine, me.getSuccessDays(), me.getTargetDays(), average);
+    }
+
+    private static BigDecimal rate(ChallengeMember m) {
+        return (m.getProgressRate() != null ? m.getProgressRate() : BigDecimal.ZERO)
+                .setScale(2, java.math.RoundingMode.HALF_UP);
     }
 
     /**

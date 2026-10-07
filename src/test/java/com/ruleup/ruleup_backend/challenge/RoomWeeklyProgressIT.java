@@ -120,6 +120,27 @@ class RoomWeeklyProgressIT extends ChallengeApiSupport {
         assertThat(todayStatus(challengeId, me)).isEqualTo("NOT_TARGET");
     }
 
+    @Test
+    @DisplayName("루틴 진행률 — 내 진행률(성공일/목표일)과 지금 참여 중인 멤버 평균이 함께 내려간다")
+    void routineProgressMineAndRoomAverage() throws Exception {
+        Member me = member(uniq("progress-me"));
+        Member other = member(uniq("progress-other"));
+        UUID challengeId = room(me, 3, 7);
+        insertActiveMembership(challengeId, other.id(), "MEMBER");
+        // 판정 경로가 갱신하는 비정규화 값(VerificationProgressService) 그대로 둔다
+        jdbcTemplate.update("UPDATE challenge_members SET success_days=6, target_days=14, progress_rate=42.86 "
+                + "WHERE challenge_id=? AND user_id=?", bytes(challengeId), bytes(me.id()));
+        jdbcTemplate.update("UPDATE challenge_members SET success_days=2, target_days=14, progress_rate=14.29 "
+                + "WHERE challenge_id=? AND user_id=?", bytes(challengeId), bytes(other.id()));
+
+        JsonNode progress = room(challengeId, me).path("routineProgress");
+
+        assertThat(progress.path("myProgressRate").decimalValue()).isEqualByComparingTo("42.86");
+        assertThat(progress.path("mySuccessDays").asInt()).isEqualTo(6);
+        assertThat(progress.path("myTargetDays").asInt()).isEqualTo(14);
+        assertThat(progress.path("roomAverageProgressRate").decimalValue()).isEqualByComparingTo("28.58");
+    }
+
     // ===== 헬퍼 =====
 
     private LocalDate today() {
