@@ -1,0 +1,40 @@
+name: Deploy admin API (manual)
+
+# 관리자 API 서비스만 따로 배포·롤백한다. 공개 API 는 건드리지 않는다.
+#  · 롤백: 되돌릴 커밋 SHA 를 넣고 실행한다(그 커밋 이미지가 ECR 에 있어야 한다 — 배포된 적 있는 커밋은 남아 있다).
+#  · prod 는 main 브랜치에서 실행해야 한다(OIDC 역할이 main 에만 묶여 있다).
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: stg 또는 prod
+        required: true
+        type: choice
+        options: [stg, prod]
+      sha:
+        description: 배포할 커밋 SHA(ECR ruleup-api:<sha>)
+        required: true
+        type: string
+
+concurrency:
+  group: deploy-admin-${{ inputs.environment }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy-admin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::961178969292:role/ruleup-${{ inputs.environment }}-gha-deploy
+          aws-region: ap-northeast-2
+      - name: Check image exists
+        run: aws ecr describe-images --repository-name ruleup-api --image-ids imageTag=${{ inputs.sha }} --query 'imageDetails[0].imagePushedAt'
+      - name: Deploy admin service
+        run: bash .github/scripts/deploy-admin.sh ${{ inputs.environment }} 961178969292.dkr.ecr.ap-northeast-2.amazonaws.com/ruleup-api:${{ inputs.sha }}
