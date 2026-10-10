@@ -78,6 +78,14 @@ management:
 
 # 우리 앱 전용 설정 (외부에서 받는 값은 전부 .env에서 주입)
 app:
+  # 실행 역할 — api(공개 API, 기본) · admin(관리자 API 전용 서비스) · all(로컬·시험 전용).
+  # 비우면 api 다. 관리자 서비스는 SPRING_PROFILES_ACTIVE=<env>,admin 으로 띄우고
+  # application-admin.yaml 이 role=admin 과 배경 작업 끄기를 함께 정한다.
+  # stg·prod 에서 all 이면 기동이 실패한다(RuntimeRoleGuard) — 관리자 경로가 공개 ALB 뒤에 다시 열리지 않게.
+  runtime:
+    role: ${APP_RUNTIME_ROLE:api}
+    # 전환 기간 전용 — 관리자 서비스가 준비되기 전까지 공개 API 가 관리자 경로를 계속 서빙한다. 전환이 끝나면 지운다.
+    legacy-public-admin: ${APP_RUNTIME_LEGACY_PUBLIC_ADMIN:false}
   moderation:
     local: ${MODERATION_LOCAL:false}
     user-queue-url: ${USER_MODERATION_QUEUE_URL:}
