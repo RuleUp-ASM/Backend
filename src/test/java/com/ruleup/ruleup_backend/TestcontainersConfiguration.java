@@ -1,8 +1,8 @@
 package com.ruleup.ruleup_backend;
 
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
+import org.springframework.test.context.DynamicPropertyRegistrar;
 import org.springframework.context.annotation.Primary;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
@@ -15,7 +15,7 @@ import java.time.ZoneOffset;
 
 /**
  * 테스트용 MySQL 8.4 컨테이너.
- * @ServiceConnection 이 컨테이너의 접속 정보를 DataSource/Flyway에 자동 연결해주므로
+ * 컨테이너의 접속 정보를 DataSource/Flyway 에 연결해 주므로(DynamicPropertyRegistrar)
  * 로컬에 MySQL을 따로 띄우지 않아도 @SpringBootTest가 실제 마이그레이션까지 돌린다.
  * (Docker 런타임 필요 — 로컬은 colima, CI 러너는 기본 제공)
  *
@@ -29,10 +29,12 @@ import java.time.ZoneOffset;
  * {@code ContainerLaunchException → CJCommunicationsException → EOFException}.
  * 열 개의 MySQL 을 동시에 띄울 이유가 애초에 없다.
  *
- * <p>그래서 인스턴스를 <b>공유</b>한다. {@code destroyMethod = ""} 가 필요하다 —
- * 컨테이너는 {@code AutoCloseable} 이라, 그냥 두면 <b>먼저 닫히는 컨텍스트가 컨테이너를
- * 멈춰</b> 아직 캐시에 살아 있는 다른 컨텍스트까지 끊어 버린다. 정리는 JVM 종료 때
- * Testcontainers 의 Ryuk 이 맡는다.
+ * <p>그래서 인스턴스를 <b>공유</b>하고, 컨테이너를 <b>빈으로 노출하지 않는다</b> — 접속 정보만
+ * {@link DynamicPropertyRegistrar} 로 넘긴다. 컨테이너가 빈이면 Spring Boot 가 컨텍스트를 닫을 때
+ * {@code close()} 한다({@code destroyMethod = ""} 로는 막히지 않는다 — 오히려 「프레임워크가 직접
+ * 닫지 않는다」로 읽혀 Boot 가 대신 닫는다). 컨텍스트 캐시(기본 32개)를 넘겨 하나가 밀려나는 순간
+ * 공유 MySQL 이 멈추고, 아직 캐시에 살아 있는 컨텍스트가 사라진 포트를 붙잡고 스위트가 멈췄다.
+ * 정리는 JVM 종료 때 Testcontainers 의 Ryuk 이 맡는다.
  *
  * <p>대신 모든 컨텍스트가 <b>같은 DB</b>를 본다. Flyway 는 두 번째 컨텍스트부터 적용할
  * 마이그레이션이 없어 그대로 지나가고, 테스트는 이미 유저·챌린지를 고유 이름으로 만들고 있어
@@ -53,10 +55,13 @@ public class TestcontainersConfiguration {
         MYSQL.start();
     }
 
-    @Bean(destroyMethod = "")
-    @ServiceConnection
-    MySQLContainer<?> mysqlContainer() {
-        return MYSQL;
+    @Bean
+    DynamicPropertyRegistrar mysqlConnection() {
+        return registry -> {
+            registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
+            registry.add("spring.datasource.username", MYSQL::getUsername);
+            registry.add("spring.datasource.password", MYSQL::getPassword);
+        };
     }
 
     /**
