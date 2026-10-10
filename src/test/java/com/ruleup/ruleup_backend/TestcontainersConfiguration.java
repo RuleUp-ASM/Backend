@@ -3,6 +3,7 @@ package com.ruleup.ruleup_backend;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.test.context.DynamicPropertyRegistrar;
+import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
@@ -42,6 +43,9 @@ import java.time.ZoneOffset;
  * 범위를 좁혀야 한다.
  */
 @TestConfiguration(proxyBeanMethods = false)
+// 관리자 요청의 SQL 을 모은다(관리자 DB 계정 권한 근거). 여기 한 곳에 걸어야 컨텍스트 캐시 키가 갈라지지 않는다 —
+// IT 마다 따로 @Import 하면 컨텍스트가 늘어 캐시 한도를 넘기고, 밀려난 컨텍스트가 공유 MySQL 을 재기동시킨다.
+@Import(com.ruleup.ruleup_backend.admin.access.AdminSqlCapture.class)
 public class TestcontainersConfiguration {
 
     /** JVM 당 하나. 정적 초기화에서 띄워, 어느 컨텍스트가 먼저 오든 이미 준비돼 있다. */
@@ -53,6 +57,11 @@ public class TestcontainersConfiguration {
 
     static {
         MYSQL.start();
+    }
+
+    /** 공유 컨테이너 — 시험이 별도 DB 계정(권한 검증용)을 만들 때 루트로 붙는다. */
+    public static MySQLContainer<?> sharedMysql() {
+        return MYSQL;
     }
 
     @Bean

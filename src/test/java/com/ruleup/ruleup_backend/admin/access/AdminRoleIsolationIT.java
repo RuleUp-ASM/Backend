@@ -34,11 +34,16 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  *   <li>상태 변경 요청은 콘솔 오리진에서 온 것만(CSRF)</li>
  *   <li>배치·스케줄러가 돌지 않는다</li>
  * </ul>
-
+ * DB 는 운영과 같은 제한 계정 {@code ruleup_admin}(grants.sql)으로 붙는다.
  */
 @AdminRoleTest
 class AdminRoleIsolationIT {
 
+    /** 관리자 요청이 쓴 테이블·권한이 관리자 DB 계정의 권한 목록 안에 있는지 — 넘으면 grants 를 갱신하라고 알린다. */
+    @org.junit.jupiter.api.AfterAll
+    static void adminQueriesStayWithinGrants() throws java.io.IOException {
+        com.ruleup.ruleup_backend.admin.access.AdminSqlCapture.assertWithinGrants();
+    }
 
 
 
@@ -141,6 +146,20 @@ class AdminRoleIsolationIT {
                 .header("Sec-Fetch-Site", "cross-site"))).as("브라우저가 교차 사이트라고 표시").isEqualTo(403);
         assertThat(status(asOperator(post(path), "ops@ruleup.co.kr").header("Origin", ORIGIN)
                 .header("Sec-Fetch-Site", "same-origin"))).isEqualTo(200);
+    }
+
+    @Test
+    @DisplayName("관리자 DB 계정은 DDL 도, 권한 밖 테이블 읽기도 못 한다")
+    void admin_db_account_is_least_privilege() {
+        assertThat(jdbc.queryForObject("SELECT CURRENT_USER()", String.class)).startsWith("ruleup_admin@");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> jdbc.queryForObject("SELECT COUNT(*) FROM refresh_tokens", Integer.class))
+                .as("세션 토큰 테이블은 관리자 기능이 쓰지 않는다").isInstanceOf(org.springframework.dao.DataAccessException.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> jdbc.execute("CREATE TABLE admin_probe (id INT)"))
+                .isInstanceOf(org.springframework.dao.DataAccessException.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> jdbc.execute("ALTER TABLE users ADD COLUMN probe INT"))
+                .isInstanceOf(org.springframework.dao.DataAccessException.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> jdbc.update("DELETE FROM sanctions"))
+                .as("제재는 이력이라 지우지 못한다").isInstanceOf(org.springframework.dao.DataAccessException.class);
     }
 
     @Test

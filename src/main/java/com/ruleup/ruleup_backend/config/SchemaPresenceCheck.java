@@ -43,6 +43,14 @@ public class SchemaPresenceCheck implements SmartInitializingSingleton {
     private final EntityManagerFactory emf;
     private final JdbcTemplate jdbc;
 
+    /**
+     * 관리자 서비스는 권한을 받은 테이블만 {@code information_schema} 에서 보인다. 그래서 거기서는 「보이는 테이블의
+     * 컬럼이 맞는가」만 보고 테이블 자체의 부재는 따지지 않는다 — 부재(마이그레이션 미적용)는 전 테이블 권한을 가진
+     * 공개 API 가 기동 때 잡는다.
+     */
+    @org.springframework.beans.factory.annotation.Value("${app.runtime.role:api}")
+    private String runtimeRole = "api";
+
     public SchemaPresenceCheck(EntityManagerFactory emf, JdbcTemplate jdbc) {
         this.emf = emf;
         this.jdbc = jdbc;
@@ -74,7 +82,9 @@ public class SchemaPresenceCheck implements SmartInitializingSingleton {
                     if (selectable.isFormula()) return;
                     String table = unquote(selectable.getContainingTableExpression());
                     Set<String> columns = actual.get(table);
-                    if (columns == null) missing.add(table);
+                    if (columns == null) {
+                        if (!"admin".equalsIgnoreCase(runtimeRole)) missing.add(table);
+                    }
                     else if (!columns.contains(unquote(selectable.getSelectionExpression()))) {
                         missing.add(table + "." + unquote(selectable.getSelectionExpression()));
                     }
