@@ -4,6 +4,7 @@ import com.ruleup.ruleup_backend.challenge.ChallengeApiSupport;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import com.ruleup.ruleup_backend.user.domain.OAuthProvider;
 import com.ruleup.ruleup_backend.user.domain.User;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -16,6 +17,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
+import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,11 +30,19 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 
 /**
  * 관리자 서비스(role=admin)에서 <b>상태를 바꾸는</b> 관리자 기능이 그대로 동작하는지 — 같은 도메인 로직을 쓰므로
- * 결과가 공개 API 에서 돌던 때와 같아야 한다.
+ * 결과가 공개 API 에서 돌던 때와 같아야 한다. 동시에 {@link AdminSqlCapture} 가 실제로 쓴 테이블을 모아
+ * 관리자 DB 계정 권한 목록의 근거가 된다(다른 관리자 시험이 다루지 않는 쓰기 경로를 여기서 채운다).
+ *
+ * <p>DB 는 운영과 같은 제한 계정 {@code ruleup_admin}(grants.sql)으로 붙는다 — 여기서 통과하면 그 권한으로 충분하다.
  */
 @AdminRoleTest
 class AdminWriteFlowsIT extends ChallengeApiSupport {
 
+
+    @AfterAll
+    static void adminQueriesStayWithinGrants() throws IOException {
+        AdminSqlCapture.assertWithinGrants();
+    }
 
     @Autowired WebApplicationContext wac;
     @Autowired JdbcTemplate jdbcTemplate;
@@ -50,9 +60,10 @@ class AdminWriteFlowsIT extends ChallengeApiSupport {
         return mvc;
     }
 
+    /** 시험 데이터 준비는 루트로 — 관리자 계정은 챌린지·참여를 만들 권한이 없다. */
     @Override
     protected JdbcTemplate jdbc() {
-        return jdbcTemplate;
+        return RestrictedAdminDb.root();
     }
 
     private MockHttpServletRequestBuilder admin(MockHttpServletRequestBuilder request) {
@@ -112,7 +123,7 @@ class AdminWriteFlowsIT extends ChallengeApiSupport {
     void anomaly_review() throws Exception {
         UUID target = memberRow("anomaly");
         UUID signal = UUID.randomUUID();
-        jdbcTemplate.update("INSERT INTO anomaly_signals (id, signal_type, target_user_id, score, detected_at) " +
+        RestrictedAdminDb.root().update("INSERT INTO anomaly_signals (id, signal_type, target_user_id, score, detected_at) " +
                 "VALUES (?, 'REPORT_ABUSE', ?, 80, NOW(3))", bytes(signal), bytes(target));
 
         MvcResult res = send(post("/api/v1/admin/anomalies/" + signal + "/review"), Map.of("note", "오탐 확인"));
