@@ -1,5 +1,8 @@
 package com.ruleup.ruleup_backend.verification.service;
 
+import com.ruleup.ruleup_backend.config.runtime.RuntimeRole;
+import org.springframework.beans.factory.annotation.Value;
+
 import com.ruleup.ruleup_backend.verification.config.VerificationProperties;
 import com.ruleup.ruleup_backend.verification.signal.SignalDomain;
 import lombok.RequiredArgsConstructor;
@@ -42,6 +45,10 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class SignalPartitionMaintainer {
 
+    /** 관리자 서비스·마이그레이션 태스크는 기동 작업을 돌지 않는다 — 공개 API 가 서비스당 한 벌만 맡는다. */
+    @Value("${app.runtime.role:api}")
+    private String runtimeRole = "api";
+
     private static final Logger log = LoggerFactory.getLogger(SignalPartitionMaintainer.class);
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
@@ -76,6 +83,7 @@ public class SignalPartitionMaintainer {
     /** 기동 직후 한 번 — 새 DB 는 {@code pFuture} 하나뿐이라 첫 적재 전에 잘라 두어야 한다. */
     @EventListener(ApplicationReadyEvent.class)
     public void onStartup() {
+        if (!RuntimeRole.valueOf(runtimeRole.toUpperCase()).runsBackgroundWork()) return;
         try {
             maintain();
         } catch (RuntimeException e) {

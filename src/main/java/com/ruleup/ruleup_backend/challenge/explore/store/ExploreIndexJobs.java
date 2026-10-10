@@ -1,5 +1,8 @@
 package com.ruleup.ruleup_backend.challenge.explore.store;
 
+import com.ruleup.ruleup_backend.config.runtime.RuntimeRole;
+import org.springframework.beans.factory.annotation.Value;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -30,6 +33,10 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ExploreIndexJobs {
 
+    /** 관리자 서비스·마이그레이션 태스크는 기동 작업을 돌지 않는다 — 공개 API 가 서비스당 한 벌만 맡는다. */
+    @Value("${app.runtime.role:api}")
+    private String runtimeRole = "api";
+
     private final ExploreIndexer indexer;
     private final ExploreRedisStore store;
     private final ExploreCircuitBreaker circuit;
@@ -46,6 +53,7 @@ public class ExploreIndexJobs {
      */
     @EventListener(ApplicationReadyEvent.class)
     public void warmUpOnStartup() {
+        if (!RuntimeRole.valueOf(runtimeRole.toUpperCase()).runsBackgroundWork()) return;
         ensureWarmed("기동");
     }
 

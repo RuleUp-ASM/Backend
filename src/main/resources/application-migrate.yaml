@@ -1,0 +1,34 @@
+# 스키마 마이그레이션 일회성 태스크 — SPRING_PROFILES_ACTIVE=<stg|prod>,migrate
+#
+# Flyway 만 돌리고 끝난다(MigrationTaskRunner). DDL 권한이 있는 마이그레이션 전용 DB 계정은 이 태스크에만 준다 —
+# 상시 서비스(api·admin)의 계정에서는 DDL 을 뺄 수 있게 된다. 절차: infra/admin-split/README.md「마이그레이션 분리」.
+app:
+  runtime:
+    role: migrate
+  scheduling:
+    enabled: false
+    lock:
+      enabled: false
+  notification:
+    queue:
+      consumer-enabled: false
+  request-log:
+    enabled: false
+  jwt:
+    secret: ${random.value}${random.value}
+  oauth:
+    kakao:
+      client-id: unused-in-migrate
+      client-secret: unused-in-migrate
+    google:
+      client-id: unused-in-migrate
+
+spring:
+  main:
+    web-application-type: none
+  flyway:
+    enabled: true
+  datasource:
+    hikari:
+      maximum-pool-size: 2
+      minimum-idle: 0
