@@ -50,12 +50,14 @@ public class CloudflareAccessFilter extends OncePerRequestFilter {
     private final CloudflareAccessVerifier verifier;
     private final AdminAccessProperties properties;
     private final OperatorDirectory operators;
+    private final com.ruleup.ruleup_backend.observability.ops.OpsSignals ops;
 
     public CloudflareAccessFilter(CloudflareAccessVerifier verifier, AdminAccessProperties properties,
-                                  OperatorDirectory operators) {
+                                  OperatorDirectory operators, com.ruleup.ruleup_backend.observability.ops.OpsSignals ops) {
         this.verifier = verifier;
         this.properties = properties;
         this.operators = operators;
+        this.ops = ops;
     }
 
     @Override
@@ -78,12 +80,14 @@ public class CloudflareAccessFilter extends OncePerRequestFilter {
             identity = verifier.verify(request.getHeader(ASSERTION_HEADER));
         } catch (VerificationException e) {
             log.warn("admin_access_denied reason={} method={} path={}", e.failure(), request.getMethod(), request.getRequestURI());
+            ops.adminLoginFailed();   // SEC-01 — 설정 누락(NOT_CONFIGURED)은 침입 시도가 아니라 세지 않는다
             reject(response, HttpStatus.UNAUTHORIZED, "LOGIN_REQUIRED");
             return;
         }
 
         if (!properties.emailSet().contains(identity.email())) {
             log.warn("admin_access_denied reason=NOT_ALLOWLISTED actor={} path={}", identity.email(), request.getRequestURI());
+            ops.adminLoginFailed();
             reject(response, HttpStatus.FORBIDDEN, "ADMIN_FORBIDDEN");
             return;
         }
@@ -98,6 +102,7 @@ public class CloudflareAccessFilter extends OncePerRequestFilter {
         Optional<UUID> operatorId = operators.resolve(identity.email());
         if (operatorId.isEmpty()) {
             log.warn("admin_access_denied reason=OPERATOR_WITHDRAWN actor={}", identity.email());
+            ops.adminLoginFailed();
             reject(response, HttpStatus.FORBIDDEN, "ADMIN_FORBIDDEN");
             return;
         }

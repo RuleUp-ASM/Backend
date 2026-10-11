@@ -76,4 +76,14 @@ class MinuteMetricBufferTest {
         MetricKey b = MetricKey.count("ns", "m", new java.util.LinkedHashMap<>(Map.of("Service", "api", "Env", "prod")));
         assertThat(a).isEqualTo(b);
     }
+
+    @Test
+    @DisplayName("내보내지 않는 환경에서는 오래된 분을 버려 메모리가 쌓이지 않는다")
+    void dropsMinutesBeyondCap() {
+        for (int i = 0; i < MinuteMetricBuffer.MAX_PENDING_MINUTES + 10; i++) {
+            buffer.increment(eligible);
+            clock.advanceSeconds(60);
+        }
+        assertThat(buffer.drainCompleted()).hasSizeLessThanOrEqualTo(MinuteMetricBuffer.MAX_PENDING_MINUTES);
+    }
 }

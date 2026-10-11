@@ -61,7 +61,13 @@ public class FcmBulkPushSender implements BulkPushSender {
             MessagingErrorCode.UNREGISTERED, MessagingErrorCode.INVALID_ARGUMENT,
             MessagingErrorCode.SENDER_ID_MISMATCH);
 
+    /** 서버·자격증명·쿼터 쪽 실패 — EXT-01 의 FCM 기술 실패. 죽은 토큰은 사용자 쪽이라 TOKEN-01 로 따로 본다. */
+    private static final Set<MessagingErrorCode> SERVER_SIDE = Set.of(
+            MessagingErrorCode.UNAVAILABLE, MessagingErrorCode.INTERNAL,
+            MessagingErrorCode.QUOTA_EXCEEDED, MessagingErrorCode.THIRD_PARTY_AUTH_ERROR);
+
     private final FirebaseMessaging firebaseMessaging;
+    private final com.ruleup.ruleup_backend.observability.ops.OpsSignals ops;
 
     /**
      * 묶음 전체를 <b>{@code sendEach} 한 번</b>으로 보낸다.
@@ -90,8 +96,11 @@ public class FcmBulkPushSender implements BulkPushSender {
         if (messages.isEmpty()) return requests.stream().map(FcmBulkPushSender::noToken).toList();
 
         try {
-            return fold(requests, owner, tokenOf, toTokenResults(firebaseMessaging.sendEach(messages)));
+            List<TokenResult> results = toTokenResults(firebaseMessaging.sendEach(messages));
+            countTokens(results);
+            return fold(requests, owner, tokenOf, results);
         } catch (Exception e) {
+            ops.pushTokens(messages.size(), messages.size(), 0);
             // 호출 자체가 실패했다 — 네트워크·타임아웃이라 묶음 전체가 재시도 대상이다.
             log.warn("FCM 묶음 전송 실패 count={}: {}", messages.size(), e.toString());
             return requests.stream().map(r -> PushOutcome.failed(r.notificationId(),
@@ -115,6 +124,16 @@ public class FcmBulkPushSender implements BulkPushSender {
         static TokenResult error(MessagingErrorCode code) {
             return new TokenResult(false, code);
         }
+    }
+
+    private void countTokens(List<TokenResult> results) {
+        int server = 0, dead = 0;
+        for (TokenResult r : results) {
+            if (r.successful()) continue;
+            if (r.errorCode() == null || SERVER_SIDE.contains(r.errorCode())) server++;
+            else if (DEAD_TOKEN.contains(r.errorCode())) dead++;
+        }
+        ops.pushTokens(results.size(), server, dead);
     }
 
     private static List<TokenResult> toTokenResults(BatchResponse response) {

@@ -17,8 +17,10 @@ public class ScoreHealth {
     private final ScoreProcessor scores;
     private final AtomicLong mismatchedUsers=new AtomicLong();
     private final AtomicLong failedChecks=new AtomicLong();
-    public ScoreHealth(JdbcTemplate jdbc,ScoreProcessor scores,MeterRegistry metrics) {
-        this.jdbc=jdbc;this.scores=scores;
+    private final com.ruleup.ruleup_backend.observability.ops.OpsSignals ops;
+    public ScoreHealth(JdbcTemplate jdbc,ScoreProcessor scores,MeterRegistry metrics,
+                       com.ruleup.ruleup_backend.observability.ops.OpsSignals ops) {
+        this.jdbc=jdbc;this.scores=scores;this.ops=ops;
         metrics.gauge("score.integrity.mismatched.users",mismatchedUsers);
         metrics.gauge("score.integrity.failed.checks",failedChecks);
     }
@@ -38,5 +40,7 @@ public class ScoreHealth {
             cursor=page.getLast();
         }
         mismatchedUsers.set(mismatched);failedChecks.set(failed);
+        // INV-01 — 원장에서 다시 만든 점수와 요약이 어긋난 사용자 수. 증거는 고치지 않고 알리기만 한다.
+        ops.invariantViolated(com.ruleup.ruleup_backend.observability.ops.OpsSignals.Invariant.SCORE_LEDGER,mismatched);
     }
 }

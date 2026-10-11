@@ -23,6 +23,9 @@ import java.util.concurrent.atomic.LongAdder;
  */
 public class MinuteMetricBuffer {
 
+    /** 내보내지 않는 환경(로컬·시험)에서 분이 끝없이 쌓이지 않게 — 이보다 오래된 분은 버린다. */
+    static final int MAX_PENDING_MINUTES = 15;
+
     /** 분포 원값을 이 개수 안에서만 구분한다 — PutMetricData 의 Values/Counts 는 데이터포인트당 150개가 상한이다. */
     static final int SIGNIFICANT_DIGITS = 2;
 
@@ -87,8 +90,13 @@ public class MinuteMetricBuffer {
     }
 
     private Cell cell(MetricKey key) {
-        return minutes.computeIfAbsent(currentMinute(), m -> new ConcurrentHashMap<>())
-                .computeIfAbsent(key, k -> new Cell());
+        long minute = currentMinute();
+        Map<MetricKey, Cell> cells = minutes.get(minute);
+        if (cells == null) {
+            cells = minutes.computeIfAbsent(minute, m -> new ConcurrentHashMap<>());
+            while (minutes.size() > MAX_PENDING_MINUTES) minutes.pollFirstEntry();
+        }
+        return cells.computeIfAbsent(key, k -> new Cell());
     }
 
     private long currentMinute() {
