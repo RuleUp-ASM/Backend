@@ -67,8 +67,9 @@ public class AdminSecurityConfig {
 
     @Bean
     SecurityFilterChain adminFilterChain(HttpSecurity http, CloudflareAccessVerifier verifier,
-                                         AdminAccessProperties properties, OperatorDirectory operators) throws Exception {
-        CloudflareAccessFilter accessFilter = new CloudflareAccessFilter(verifier, properties, operators);
+                                         AdminAccessProperties properties, OperatorDirectory operators,
+                                         com.ruleup.ruleup_backend.observability.ops.OpsSignals ops) throws Exception {
+        CloudflareAccessFilter accessFilter = new CloudflareAccessFilter(verifier, properties, operators, ops);
         AdminRequestAuditFilter auditFilter = new AdminRequestAuditFilter();
 
         http

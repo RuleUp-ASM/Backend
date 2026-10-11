@@ -65,6 +65,7 @@ public class AdminAuthService {
     private final UserRepository userRepository;
     private final AdminAuditService auditService;
     private final RuntimeRoleProperties runtimeRole;
+    private final com.ruleup.ruleup_backend.observability.ops.OpsSignals opsSignals;
 
     private final Map<String, Attempts> attempts = new ConcurrentHashMap<>();
 
@@ -216,6 +217,7 @@ public class AdminAuthService {
     }
 
     private void fail(String clientKey) {
+        opsSignals.adminLoginFailed();   // SEC-01
         attempts.compute(clientKey, (key, current) -> {
             Instant now = Instant.now();
             if (current == null || now.isAfter(current.windowStart().plus(WINDOW)))

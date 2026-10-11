@@ -24,6 +24,20 @@ jobs:
       - name: Verify invitation hosting routes
         run: node --test infra/android-links/links.test.js
 
+  # 감시 Lambda·경보 정의·배포 사전 점검의 판정 로직(boto3 없이 도는 순수 시험)
+  monitoring-scripts:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Lambda logic
+        run: python3 -m unittest discover -s infra/monitoring/lambdas/tests -v
+      - name: Alarm catalog
+        run: python3 -c "import sys,types; sys.modules['boto3']=types.ModuleType('boto3'); sys.path.insert(0,'infra/monitoring/alerting'); import unittest; r=unittest.main(module='tests_catalog', argv=['x','-v'], exit=False); sys.exit(not r.result.wasSuccessful())"
+      - name: Deployment preflight
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
+
   build:
     runs-on: ubuntu-latest
 

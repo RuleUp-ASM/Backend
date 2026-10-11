@@ -330,7 +330,8 @@ def iam_roles(env, c):
             {"Effect": "Allow", "Action": ["sqs:SendMessage", "sqs:GetQueueUrl", "sqs:GetQueueAttributes"], "Resource": queue},
             {"Effect": "Allow", "Action": "s3:GetObject", "Resource": f"arn:aws:s3:::{c['media_bucket']}/*"},
             {"Effect": "Allow", "Action": "cloudwatch:PutMetricData", "Resource": "*",
-             "Condition": {"StringLike": {"cloudwatch:namespace": "RuleUp/App/*"}}}]}},
+             # RuleUp/Ops·Security: JVM·풀·로그인 실패(SEC-01) — infra/monitoring 알람 카탈로그
+             "Condition": {"StringLike": {"cloudwatch:namespace": ["RuleUp/App/*", "RuleUp/Ops", "RuleUp/Security"]}}}]}},
         "RuleUp admin API application: notification send, media read, metrics")
     # DB 일회성 태스크(계정 관리·마이그레이션): 마스터·계정 비밀번호를 읽는다. 상시 서비스와 역할을 나눈다 —
     # 공개 API·관리자 서비스의 실행 역할은 이 비밀번호들을 읽지 못한다.
