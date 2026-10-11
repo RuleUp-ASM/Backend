@@ -25,9 +25,13 @@ public final class ClientErrorLog {
     private static final Pattern ID_SEGMENT = Pattern.compile(
             "/(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|\\d+)(?=/|$)");
 
+    /** SLI 필터가 정책 거절과 미분류 4xx 를 가르는 데 읽는다({@code observability.sli.SliFilter}). */
+    public static final String ERROR_CODE_ATTRIBUTE = ClientErrorLog.class.getName() + ".code";
+
     private ClientErrorLog() {}
 
     public static void record(HttpServletRequest request, ErrorCode code) {
+        if (request != null) request.setAttribute(ERROR_CODE_ATTRIBUTE, code);
         int status = code.getStatus().value();
         if (status < 400 || status >= 500) return;
         String method = request == null ? "-" : request.getMethod();
