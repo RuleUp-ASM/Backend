@@ -1,0 +1,60 @@
+# 관리자 API 전용 서비스 — SPRING_PROFILES_ACTIVE=<stg|prod>,admin
+#
+# 같은 jar 를 쓰되 「관리자 엔드포인트 + 그것이 부르는 도메인 로직」만 산다.
+#  · 인증은 Cloudflare Access JWT 뿐이다(admin.access.AdminSecurityConfig). 앱 JWT 는 받지도 내주지도 않는다.
+#  · 배치·SQS 컨슈머·기동 워밍업은 돌지 않는다. 공개 API 서비스가 서비스당 한 벌로 맡는다 —
+#    여기서도 돌면 공지 팬아웃·알림 발송·심사가 두 번 나간다.
+#  · 알림은 저장 + SQS 발행(커밋 후)까지만 한다. FCM 전달은 공개 API 서비스의 컨슈머가 한다.
+#  · 스키마를 바꾸지 않는다. 마이그레이션은 별도 계정·절차로 돈다(infra/admin-split/README.md).
+app:
+  runtime:
+    role: admin
+  scheduling:
+    enabled: false
+    lock:
+      enabled: false
+  notification:
+    queue:
+      consumer-enabled: false
+
+  # 관리자 서비스는 앱 사용자 토큰을 발급·검증하지 않는다. 그런데 JwtProvider 빈은 키를 요구하므로
+  # 기동마다 버려지는 임의 값을 준다 — 공개 API 의 JWT 서명키는 이 서비스에 들어오지 않는다.
+  jwt:
+    secret: ${random.value}${random.value}
+  # 관리자 화면은 소셜 로그인을 쓰지 않는다. 키를 넘기지 않기 위해 자리만 채운다.
+  oauth:
+    kakao:
+      client-id: unused-in-admin
+      client-secret: unused-in-admin
+    google:
+      client-id: unused-in-admin
+
+  admin:
+    passcode: ""      # 비밀번호 진입은 관리자 서비스에서 닫힌다(AdminAuthService)
+    access:
+      team-domain: ${ADMIN_ACCESS_TEAM_DOMAIN:}
+      audiences: ${ADMIN_ACCESS_AUDIENCES:}
+      allowed-emails: ${ADMIN_ACCESS_ALLOWED_EMAILS:}
+      allowed-origins: ${ADMIN_ACCESS_ALLOWED_ORIGINS:https://admin.ruleup.co.kr}
+
+  # 요청 본문·헤더 로그를 끈다. 관리자 요청에는 신고 내용·문의 답변 같은 개인정보와 Access 토큰이 실린다.
+  # 대신 AdminRequestAuditFilter 가 actor·경로·결과만 한 줄로 남긴다.
+  request-log:
+    enabled: false
+  dev-tokens:
+    secret: ""
+
+spring:
+  flyway:
+    enabled: false
+  datasource:
+    hikari:
+      # 관리자는 몇 명이 동시에 쓰는 화면이다. 공개 API(태스크당 15~20)와 RDS 연결 한도를 나눠 쓰므로 작게 잡는다.
+      maximum-pool-size: ${ADMIN_DB_POOL_SIZE:5}
+      minimum-idle: 1
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false

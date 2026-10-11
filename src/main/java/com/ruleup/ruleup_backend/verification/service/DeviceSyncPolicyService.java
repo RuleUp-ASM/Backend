@@ -26,8 +26,15 @@ public class DeviceSyncPolicyService {
 
     public DeviceSyncPolicyService(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
+    /** 동기화 정책을 쓰는 것은 공개 API 다. 관리자 서비스의 DB 계정에는 이 테이블 권한이 없다. */
+    @org.springframework.beans.factory.annotation.Value("${app.runtime.role:api}")
+    private String runtimeRole = "api";
+
     @PostConstruct
-    public void validateFallback() { policies(); }
+    public void validateFallback() {
+        if ("admin".equalsIgnoreCase(runtimeRole)) return;
+        policies();
+    }
 
     public int forUser(User user) {
         Map<String, Object> facts = new HashMap<>();

@@ -69,6 +69,12 @@ jobs:
             ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
             ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
 
+      # 스키마 마이그레이션을 서비스 갱신 전에 별도 태스크(DDL 계정)로 돌린다. 켜기 전에는 공개 API 가 기동 때 돌린다.
+      # 전환 절차: infra/admin-split/README.md「마이그레이션 분리」.
+      - name: Run schema migration (one-off task)
+        if: ${{ vars.MIGRATION_TASK_ENABLED == 'true' }}
+        run: bash .github/scripts/run-migration.sh prod ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+
       # 새 태스크가 뜨지 못하면(마이그레이션 실패·스키마 누락으로 기동 중단) 회로차단기가 이전 태스크로
       # 되돌린다. 그런데 되돌린 뒤에도 services-stable 은 「안정」이라 워크플로가 초록불로 끝난다 —
       # 배포가 실제로 나갔는지는 이번에 만든 deployment 의 rolloutState 로 확인한다.
@@ -107,3 +113,18 @@ jobs:
       - name: Smoke test
         run: |
           curl -fsS --retry 5 --retry-delay 10 --retry-all-errors https://prod.ruleup.co.kr/actuator/health | tee /dev/stderr | grep -q '"status":"UP"'
+
+  # 관리자 API 서비스 — 같은 이미지를 관리자 프로필로. 공개 API 와 따로 배포·롤백된다(실패해도 공개 API 는 그대로).
+  # 서비스가 아직 없으면 건너뛴다. 수동 배포·롤백: deploy-admin.yml
+  deploy-admin:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::961178969292:role/ruleup-prod-gha-deploy
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Deploy admin service
+        run: bash .github/scripts/deploy-admin.sh prod 961178969292.dkr.ecr.ap-northeast-2.amazonaws.com/ruleup-api:${{ github.sha }}

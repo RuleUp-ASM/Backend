@@ -63,7 +63,8 @@ public final class RoomDtos {
                     allowableValues = {"IN_PROGRESS", "DONE", "FAILED", "NOT_TARGET"})
             String myTodayStatus,
 
-            @Schema(description = "루틴 진행률 — 챌린지 전체 기간 기준의 나와 방 평균")
+            @Schema(description = "루틴 진행률 — 챌린지 전체 기간 기준의 나와 방 평균. **항상 내려가며 null 이 아니다.**",
+                    requiredMode = Schema.RequiredMode.REQUIRED)
             RoutineProgress routineProgress,
 
             @Schema(description = "Phase 1에서는 항상 null. Phase 2 고정 공지 호환 필드.")
@@ -72,16 +73,28 @@ public final class RoomDtos {
         /**
          * 진행률 = 성공일 ÷ 목표일 × 100(상한 100). {@code GET /verifications/progress} 의
          * {@code progressRate} 와 같은 값이다 — 두 화면이 다른 숫자를 보이지 않게 저장값을 그대로 쓴다.
+         * 목표일은 가입 시점이 아니라 그 방이 처음 처리될 때(자동 인증 방은 첫 sync, 수동 인증 방은 첫
+         * 수동 인증) 한 번 계산되므로, 그 전에는 목표일·성공일·진행률이 모두 0 이다.
          */
-        @Schema(name = "RoomRoutineProgress", description = "루틴 진행률(챌린지 전체 기간 기준)")
+        @Schema(name = "RoomRoutineProgress", description = "루틴 진행률(챌린지 전체 기간 기준). "
+                + "모든 필드는 null 이 아니다. 진행률 두 값은 **0~100 퍼센트**로, summary.roomSuccessRate(0~1)와 "
+                + "단위도 계산식도 다른 값이다.")
         public record RoutineProgress(
-                @Schema(description = "내 진행률(%, 0~100, 소수 둘째 자리까지)", example = "42.86")
+                @Schema(description = "내 진행률(%, 0~100, 소수 둘째 자리까지) = 성공일 ÷ 목표일 × 100(상한 100). "
+                        + "목표일 계산 전이면 0.00.", example = "42.86", requiredMode = Schema.RequiredMode.REQUIRED)
                 BigDecimal myProgressRate,
-                @Schema(description = "내 성공 일수", example = "6") int mySuccessDays,
-                @Schema(description = "내 목표 일수. 첫 인증 전이면 아직 계산 전이라 0 일 수 있다.", example = "14")
+                @Schema(description = "내 성공 일수. 목표일 계산 전이면 0.", example = "6",
+                        requiredMode = Schema.RequiredMode.REQUIRED)
+                int mySuccessDays,
+                @Schema(description = "내 목표 일수(빈도형은 필요 횟수 합). **목표일 계산 전에만 0** — 자동 인증 방은 "
+                        + "첫 sync, 수동 인증 방은 첫 수동 인증 때 계산된다(시작 전 방·가입 직후 sync 전이 여기에 "
+                        + "해당). 판정 여부와는 무관하며, 한 번 계산되면 최소 1 이고 다시 0 이 되지 않는다.",
+                        example = "14", requiredMode = Schema.RequiredMode.REQUIRED)
                 int myTargetDays,
-                @Schema(description = "방 평균 진행률(%) — 지금 참여 중인 멤버의 평균. 혼자면 내 값과 같다.",
-                        example = "37.50")
+                @Schema(description = "방 평균 진행률(%, 0~100, 소수 둘째 자리까지) — 지금 참여 중인 멤버 각자의 "
+                        + "진행률 평균. 목표일 계산 전인 멤버는 0 으로 평균에 들어간다. 참여 중인 멤버가 나 혼자면"
+                        + "(솔로 방 포함) 항상 myProgressRate 와 같다. summary.roomSuccessRate(판정 대비 성공 비율, "
+                        + "0~1)와는 다른 값이다.", example = "37.50", requiredMode = Schema.RequiredMode.REQUIRED)
                 BigDecimal roomAverageProgressRate) {}
 
         @Schema(name = "RoomSummary", description = "방 요약")
@@ -92,8 +105,10 @@ public final class RoomDtos {
                         + "그 주 어느 날이든 성공 N회를 채우면 된다.", example = "7")
                 Integer weeklyCount,
 
-                @Schema(description = "방 전체 성공률(0~1). **판정이 한 건도 없으면 null** — 0.0 으로 내리면 "
-                        + "갓 만든 방과 전원 실패한 방이 같아 보인다.", example = "0.92")
+                @Schema(description = "방 전체 성공률(0~1) = 참여 중인 멤버 전체의 성공일 ÷ (성공일 + 실패일). "
+                        + "**판정이 한 건도 없으면 null** — 0.0 으로 내리면 갓 만든 방과 전원 실패한 방이 같아 보인다. "
+                        + "routineProgress.roomAverageProgressRate(목표일 대비 진행률 평균, 0~100)와는 다른 값이다.",
+                        example = "0.92")
                 BigDecimal roomSuccessRate,
 
                 @Schema(description = "종료까지 남은 일수", example = "14") Integer remainingDays,

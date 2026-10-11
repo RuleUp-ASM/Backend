@@ -1,0 +1,47 @@
+# 관리자 서비스 DB 계정(ruleup_admin) 권한 — 「테이블: 권한」
+#
+# 근거: 관리자 요청을 처리하는 동안 실제로 실행된 SQL(AdminSqlCapture). 관리자 IT 6종
+# (AdminBackofficeIT·AdminConsoleAuthIT·DailyServiceStatsIT·InquiryFlowIT·AdminRoleIsolationIT·AdminWriteFlowsIT)이
+# 잡은 테이블·작업의 합이다. 관리자 기능이 여기 없는 테이블을 쓰면 그 IT 들이 실패한다 → 이 파일을 고치고
+# `python3 infra/admin-split/db/render_grants.py` 로 grants.sql 을 다시 만든다.
+#
+# UPDATE·DELETE 가 있는 테이블에는 SELECT 를 함께 준다(WHERE 로 행을 고르려면 필요하다).
+# DDL·GRANT·FILE·PROCESS 는 어떤 테이블에도 없다. 테이블명은 대소문자를 구분한다(RDS Linux).
+#
+# 의도적으로 빠진 것: 제재 후 참여 정리(SANCTION_LEAVE)·공지 팬아웃·알림 발송은 공개 API 의 배경 작업이
+# 맡는다 — 관리자 서비스는 아웃박스·공지 원본에 쌓기만 한다. 그래서 score_*·verification_* 쓰기 권한이 없다.
+
+admin_audit_logs: SELECT,INSERT
+announcements: SELECT,INSERT,UPDATE
+anomaly_signals: SELECT,UPDATE
+ban_list: SELECT,INSERT
+challenge_cross_ranking_members: SELECT,DELETE
+challenge_cross_ranking_snapshot: SELECT,UPDATE,DELETE
+challenge_delegations: SELECT,DELETE
+challenge_final_ranking: SELECT,INSERT,UPDATE
+challenge_history: SELECT,INSERT,UPDATE
+challenge_invitations: SELECT,DELETE
+challenge_join_events: SELECT,DELETE
+challenge_member_history: SELECT,INSERT,UPDATE
+challenge_members: SELECT,DELETE
+challenge_stats: SELECT,DELETE
+challenges: SELECT,UPDATE,DELETE
+cycle_score_states: SELECT
+daily_service_stats: SELECT,INSERT,UPDATE
+inquiries: SELECT,UPDATE
+notifications: SELECT,INSERT,UPDATE
+outage_reliefs: INSERT
+outbox_messages: SELECT,INSERT
+report_snapshots: SELECT
+reports: SELECT,UPDATE
+room_job_locks: SELECT,UPDATE
+sanctions: SELECT,INSERT,UPDATE
+user_information: SELECT,INSERT
+user_interests: SELECT
+users: SELECT,INSERT,UPDATE
+verification_appeals: SELECT
+VerificationDaily: SELECT
+watcher_invitations: SELECT,DELETE
+watcher_notices: SELECT,DELETE
+watcher_reactions: SELECT,DELETE
+watcher_relations: SELECT,DELETE

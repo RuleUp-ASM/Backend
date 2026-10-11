@@ -5,6 +5,8 @@ import com.ruleup.ruleup_backend.admin.service.AdminAuditService;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.config.AppProperties;
+import com.ruleup.ruleup_backend.config.runtime.RuntimeRole;
+import com.ruleup.ruleup_backend.config.runtime.RuntimeRoleProperties;
 import com.ruleup.ruleup_backend.security.JwtProvider;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import com.ruleup.ruleup_backend.user.domain.OAuthProvider;
@@ -62,6 +64,7 @@ public class AdminAuthService {
     private final JwtProvider jwtProvider;
     private final UserRepository userRepository;
     private final AdminAuditService auditService;
+    private final RuntimeRoleProperties runtimeRole;
 
     private final Map<String, Attempts> attempts = new ConcurrentHashMap<>();
 
@@ -78,6 +81,12 @@ public class AdminAuthService {
      */
     @Transactional
     public Session login(String passcode, String clientKey) {
+        // 관리자 서비스는 Cloudflare Access 신원으로만 들어온다. 여기서 앱 JWT 를 내주면 그 토큰이
+        // 공개 API 에서도 통하는 운영자 토큰이 된다 — 비밀번호 진입 자체를 닫는다.
+        if (runtimeRole.role() == RuntimeRole.ADMIN) {
+            auditService.denied(null, AdminAction.ADMIN_LOGIN, "passcode-login-disabled");
+            throw new BusinessException(ErrorCode.INVALID_PASSCODE);
+        }
         if (exceeded(clientKey)) {
             auditService.denied(null, AdminAction.ADMIN_LOGIN, "rate-limited");
             throw new BusinessException(ErrorCode.TOO_MANY_ATTEMPTS);
