@@ -10,7 +10,8 @@ JAVA = os.path.join(ROOT, 'src/main/java/com/ruleup/ruleup_backend/observability
 class ContractTest(unittest.TestCase):
 
     def test_java_enum_matches_calculator(self):
-        src = open(JAVA, encoding='utf-8').read()
+        with open(JAVA, encoding='utf-8') as f:
+            src = f.read()
         java = {m.group(1): (m.group(2), int(m.group(3)))
                 for m in re.finditer(r'\w+\("(\w+)", "(C0\d)", HttpMethod\.\w+, "[^"]+", (\d+)\)', src)}
         self.assertEqual(java, slo_core.OPERATIONS)
