@@ -45,7 +45,8 @@ public class SecurityConfig {
             "/api/v1/admin/auth/login",      // 운영자 콘솔 진입 — 토큰을 받으러 오는 경로라 토큰이 없다
             "/files/**",                     // 정적 이미지 서빙
             "/terms/**",                     // 약관 원문 — 개인정보 처리방침은 상시 공개 의무가 있다
-            "/actuator/health"
+            "/actuator/health",
+            "/health/public"                 // 외부 공개 점검·Route 53 — 무인증이어야 사용자와 같은 길을 잰다
     };
 
     // Swagger / OpenAPI 문서 경로
