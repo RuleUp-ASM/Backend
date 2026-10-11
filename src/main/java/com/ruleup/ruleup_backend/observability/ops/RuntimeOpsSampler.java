@@ -116,11 +116,20 @@ public class RuntimeOpsSampler implements MinuteSampler {
         });
     }
 
+    /**
+     * <b>{@code Tomcat#getConnector()} 를 쓰지 않는다.</b> 그 메서드는 커넥터가 없으면 기본 커넥터를 <b>새로 만들어 8080 에
+     * 바인드</b>한다. 스프링 부트는 기동 중 서비스 커넥터를 잠시 떼어 두므로, 그 사이에 이 틱이 돌면 가짜 커넥터가 포트를
+     * 먼저 잡고 진짜 웹서버가 「Port 8080 was already in use」로 기동에 실패한다(2026-10-12 stg 배포 실패).
+     * {@code findConnectors()} 는 있는 것만 돌려준다 — 기동 전이면 비어 있어 건너뛴다.
+     */
     private void threads() {
         if (!(context instanceof WebServerApplicationContext web) || !(web.getWebServer() instanceof TomcatWebServer tomcat)) return;
-        var executor = tomcat.getTomcat().getConnector().getProtocolHandler().getExecutor();
-        if (executor instanceof org.apache.tomcat.util.threads.ThreadPoolExecutor pool && pool.getMaximumPoolSize() > 0) {
-            gauge("MaxBusyThreadPct", MetricKey.Unit.PERCENT, 100.0 * pool.getActiveCount() / pool.getMaximumPoolSize());
+        for (var connector : tomcat.getTomcat().getService().findConnectors()) {
+            var executor = connector.getProtocolHandler().getExecutor();
+            if (executor instanceof org.apache.tomcat.util.threads.ThreadPoolExecutor pool && pool.getMaximumPoolSize() > 0) {
+                gauge("MaxBusyThreadPct", MetricKey.Unit.PERCENT, 100.0 * pool.getActiveCount() / pool.getMaximumPoolSize());
+                return;
+            }
         }
     }
 
