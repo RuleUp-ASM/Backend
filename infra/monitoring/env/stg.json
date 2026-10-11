@@ -40,6 +40,7 @@
   "owner": "이성은",
   "rules": {
     "slo_operations": "all",
+    "slo_rules": ["SLO-01", "API-01", "API-02"],
     "res_enabled": true,
     "detectors_enabled": false,
     "_note": "stg 는 RES 모의 P0 를 먼저 재현하는 곳이라 켠다(시험 Slack 으로만 간다)."

@@ -1,0 +1,342 @@
+# 알람 카탈로그 v2 — 노션 「알람 카탈로그 · SLO 구현 계약」 §9.1 의 저장소 쪽 원장.
+# 경보의 실제 정의(임계값·평가·누락 정책)는 alerting/catalog.py 가 원본이고, 이 파일은 ID 별 「어디까지 왔나」를 적는다.
+# alerting/tests_catalog.py 가 status 가 active·gated 인 ID 가 catalog.py 에 실제로 있는지 대조한다.
+#
+# status
+#   active   p0_p1.py 를 돌리면 만들어진다
+#   gated    원장(env/<env>.json rules.*) 플래그를 켜야 만들어진다 — stg 재현·실수신(G02)·밴드 학습(D+14) 뒤에
+#   rule     catalog.py 밖의 스크립트가 만든다 — EventBridge 규칙(security_events.py)·Slack 전달 실패 경보(slack_fallback.py)
+#   blocked  외부 도구·계약이 없어 아직 못 만든다(PagerDuty·Healthchecks.io·Sentry·Crashlytics 등)
+#   manual   자동 지표가 아니라 사람이 증거를 보고 선언한다
+#   followup 이번 범위 밖 — 이유와 대체 감시를 notes 에 적는다
+# 「활성」은 경보가 만들어졌다는 뜻일 뿐 실수신·오탐 검증(§9.2 G01~G08)이 끝났다는 뜻이 아니다.
+
+schema_version: 2
+status: proposed
+resource_registry: infra/monitoring/env/<env>.json
+pager: PagerDuty            # 미계약 — 원장 sns.pagerduty 가 null 인 동안 P0 는 Slack 긴급 채널 멘션만
+watchdog: Healthchecks.io   # 미계약 — 원장 healthchecks.* 가 null
+slo:
+  window_days: 30
+  availability: 0.995
+  latency_good_fraction: 0.95
+  calculation_period_seconds: 60
+  ingestion_lag_seconds: 120
+  evaluate_windows_and_gates_inside_calculator: true   # lambdas/slo_core.py
+  missing_inputs_action: omit_flag
+  deployment_budget_gate: {complete_window_days: 30, min_eligible_requests: 1000, min_coverage: 0.99,
+                           insufficient_sample_action: review_only}
+
+operations:   # 앱 SliOperation · lambdas/slo_core.OPERATIONS 와 같아야 한다(lambdas/tests/test_contract.py)
+  - {id: oauth_google, cuj: C01, route: "POST /api/v1/auth/oauth/google", latency_ms: 3000}
+  - {id: oauth_kakao, cuj: C01, route: "POST /api/v1/auth/oauth/kakao", latency_ms: 3000}
+  - {id: refresh, cuj: C01, route: "POST /api/v1/auth/refresh", latency_ms: 1000}
+  - {id: explore, cuj: C02, route: "GET /api/v1/challenges/explore", latency_ms: 1000}
+  - {id: detail, cuj: C02, route: "GET /api/v1/challenges/{challengeId}", latency_ms: 1000}
+  - {id: join, cuj: C03, route: "POST /api/v1/challenges/{challengeId}/members", latency_ms: 1500}
+  - {id: sync, cuj: C04, route: "POST /api/v1/verifications/sync", latency_ms: 3000}
+  - {id: manual, cuj: C04, route: "POST /api/v1/challenges/{challengeId}/verifications", latency_ms: 3000}
+  - {id: today, cuj: C05, route: "GET /api/v1/challenges/{challengeId}/verifications/today", latency_ms: 1000}
+  - {id: progress, cuj: C05, route: "GET /api/v1/verifications/progress", latency_ms: 1000}
+
+alarms:
+  # ---- SLO·급성 (RuleUp/SLO AlarmFlag, 버지니아) ----
+  - id: SLO-01
+    status: active
+    severity: P0
+    notes: Operation 별 1개. missing=ignore, 재무장은 정상 Flag=0 또는 lambdas/rearm.py
+  - id: SLO-02
+    status: active
+    severity: P0
+  - id: SLO-03
+    status: active
+    severity: P1
+    notes: stg 는 원장 slo_rules 로 끈다
+  - id: SLO-04
+    status: active
+    severity: P1
+  - id: LAT-01
+    status: active
+    severity: P1
+  - id: API-01
+    status: active
+    severity: P0
+  - id: API-02
+    status: active
+    severity: P1
+
+  # ---- 외부·네이티브 백스톱 ----
+  - id: EDGE-01
+    status: active
+    severity: P0
+    notes: 도쿄·버지니아 leaf(ignore) 의 AND Composite
+  - id: EDGE-02
+    status: active
+    severity: P1
+  - id: TLS-01
+    status: active
+    severity: P1
+  - id: NATIVE-01
+    status: active
+    severity: P0
+    notes: Route 53 헬스체크는 lambdas/deploy.py --only route53 가 만든다
+  - id: NATIVE-02
+    status: active
+    severity: P0
+    notes: prod TargetGroup 만
+  - id: AUTH-01
+    status: followup
+    severity: P1
+    notes: 지점별 격리 시험 계정·기기·Secrets 경로가 필요하다. 그 전까지 C01 SLO(실사용 로그인)가 본다
+
+  # ---- 임박한 자원 고갈 (RuleUp/Ops CriticalCapacityFlag, 버지니아) ----
+  - id: RES-01
+    status: gated
+    severity: P0
+    notes: rules.res_enabled. Flag 는 꺼져 있어도 계산·발행(그림자 평가)
+  - id: RES-02
+    status: gated
+    severity: P0
+  - id: RES-03
+    status: gated
+    severity: P0
+  - id: RES-04
+    status: gated
+    severity: P0
+
+  # ---- ECS ----
+  - id: ECS-01
+    status: active
+    severity: P1
+  - id: ECS-02
+    status: active
+    severity: P1
+  - id: ECS-03
+    status: active
+    severity: P1
+  - id: ECS-04
+    status: active
+    severity: P1
+  - id: ECS-05
+    status: active
+    severity: P1
+  - id: ECS-06
+    status: active
+    severity: P1
+    notes: 태스크가 ECS 메타데이터로 잰 하드 한도 대비 점유율(MaxMemoryHardPct)
+  - id: ECS-07
+    status: active
+    severity: P1
+  - id: ECS-08
+    status: active
+    severity: P1
+    notes: min_expected_tasks ≥2 인 prod 만
+  - id: ECS-09
+    status: active
+    severity: P1
+
+  # ---- JVM·풀·DB·캐시·비동기 ----
+  - id: JVM-01
+    status: active
+    severity: P1
+  - id: JVM-02
+    status: active
+    severity: P1
+  - id: POOL-01
+    status: active
+    severity: P1
+  - id: POOL-02
+    status: active
+    severity: P1
+  - id: POOL-03
+    status: active
+    severity: P1
+  - id: THREAD-01
+    status: active
+    severity: P1
+  - id: DB-01
+    status: active
+    severity: P1
+  - id: DB-02
+    status: active
+    severity: P1
+  - id: DB-03
+    status: active
+    severity: P1
+    notes: 앱 DbOpsCollector(Threads_connected/max_connections) — 노션의 서울 VPC Lambda 대신
+  - id: DB-04
+    status: active
+    severity: P1
+  - id: DB-05
+    status: active
+    severity: P1
+  - id: DB-06
+    status: active
+    severity: P1
+    notes: information_schema.innodb_trx — 앱 DB 계정에 PROCESS 권한이 없으면 OBS-01(db-collector)이 운다
+  - id: DB-07
+    status: active
+    severity: P1
+  - id: DB-08
+    status: active
+    severity: P1
+  - id: DB-09
+    status: followup
+    severity: P1
+    notes: 노션대로 「15분 추세·확장 불가 확인 시만」 켠다. StorageMinutesToFull 은 자원 감시기가 이미 낸다
+  - id: REDIS-01
+    status: active
+    severity: P1
+  - id: REDIS-02
+    status: active
+    severity: P1
+    notes: ElastiCache DatabaseMemoryUsagePercentage(used_memory/maxmemory)
+  - id: CACHE-01
+    status: gated
+    severity: P1
+    notes: rules.detectors_enabled — 탐색 인덱스 적중률 밴드
+  - id: QUEUE-01
+    status: active
+    severity: P1
+  - id: QUEUE-02
+    status: active
+    severity: P1
+  - id: JOB-01
+    status: active
+    severity: P1
+  - id: JOB-02
+    status: active
+    severity: P1
+    notes: 확정 배치 — 예정 완료 시각이 1시간 넘게 지난 미확정(finalize-overdue)·건별 확정 실패·무신호 귀속일 채우기 실패
+  - id: EXT-01
+    status: active
+    severity: P1
+    notes: 공급자 호출 시도 단위(429·쿼터 포함), Feature×Provider 5개
+  - id: EXT-02
+    status: active
+    severity: P1
+
+  # ---- 앱·조용한 장애 ----
+  - id: APP-01
+    status: blocked
+    severity: P1
+    notes: Crashlytics velocity alert → Slack. 앱 SDK·프로젝트 연결 미검증(G06)
+  - id: APP-02
+    status: blocked
+    severity: P1
+  - id: APP-03
+    status: blocked
+    severity: P1
+    notes: 대시보드 항목(자동 경보 아님)
+  - id: APP-04
+    status: blocked
+    severity: P1
+    notes: 앱 네트워크 이벤트 집계기 필요
+  - id: ERR-01
+    status: blocked
+    severity: P1
+    notes: Sentry 미도입. 그 전까지 ops 대시보드 「최근 ERROR 로그」와 SLO 가 본다
+  - id: FLOW-01
+    status: gated
+    severity: P1
+  - id: FLOW-02
+    status: gated
+    severity: P1
+  - id: FLOW-03
+    status: gated
+    severity: P1
+  - id: HTTP-04
+    status: gated
+    severity: P1
+  - id: TOKEN-01
+    status: active
+    severity: P1
+
+  # ---- 보안·비용 ----
+  - id: SEC-01
+    status: active
+    severity: P1
+  - id: SEC-02
+    status: rule
+    severity: P1
+    notes: alerting/security_events.py — GuardDuty 가 켜진 리전에서만 이벤트가 온다(활성화는 §9 승인)
+  - id: SEC-03
+    status: rule
+    severity: P1
+    notes: CloudTrail 관리 이벤트 → EventBridge. 트레일이 없으면 이벤트가 오지 않는다
+  - id: SEC-04
+    status: rule
+    severity: P1
+  - id: SEC-05
+    status: active
+    severity: P1
+  - id: INV-01
+    status: active
+    severity: P1
+    notes: 지금 불변식은 SCORE_LEDGER(점수 원장 재구성 불일치) 하나
+  - id: COST-01
+    status: followup
+    severity: P1
+    notes: 승인된 일 예산(B_day_usd)이 없다(원장 llm_daily_budget_usd=null). 토큰·단가 원장부터 필요
+  - id: COST-02
+    status: followup
+    severity: P1
+    notes: 호출 전 원자적 예산 예약 — COST-01 과 함께
+
+  # ---- 백업·관측·알림망 ----
+  - id: BACKUP-01
+    status: active
+    severity: P1
+  - id: BACKUP-02
+    status: active
+    severity: P1
+  - id: BACKUP-03
+    status: active
+    severity: P1
+  - id: BACKUP-04
+    status: active
+    severity: P1
+  - id: OBS-01
+    status: active
+    severity: P1
+    notes: 컴포넌트별 — slo-calculator·resource-monitor·edge-<origin>·db-collector(·anomaly-detector)
+  - id: OBS-02
+    status: rule
+    severity: P1
+    notes: alerting/slack_fallback.py 의 SNS NumberOfNotificationsFailed(토픽별) — 대체 이메일로
+  - id: OBS-03
+    status: blocked
+    severity: P0
+    notes: PagerDuty 시험 서비스·webhook 수신기·Healthchecks.io 가 모두 필요
+  - id: OBS-04
+    status: blocked
+    severity: P0
+    notes: 계산기는 원장 healthchecks.obs04_ping_url 이 생기면 바로 ping 한다(lambdas/cwio.ping)
+  - id: OBS-05
+    status: blocked
+    severity: P1
+    notes: PagerDuty 미해결 incident 대조 — PagerDuty 개통 후
+  - id: OBS-06
+    status: blocked
+    severity: P1
+
+  # ---- 수동 선언 ----
+  - id: MANUAL-SEC
+    status: manual
+    severity: P0
+    notes: 심각한 침해·민감정보 유출 확인 시(RB-05)
+  - id: MANUAL-DATA
+    status: manual
+    severity: P0
+    notes: 진행 중 오염·복구 불가능한 데이터 피해 확인 시(RB-05·RB-03)
+
+deployment_preflight:   # .github/scripts/monitoring_preflight.py
+  block_states: [ALARM]
+  block_on_stale_source: true
+  require_native_backstops_healthy: true
+  insufficient_data_when_fresh: warn_only
+  raw_operation_counter: {namespace: RuleUp/SLI, metric: EligibleCount, dimensions: [Env, Service, Operation],
+                          statistic: Sum, period_seconds: 60, ingestion_lag_seconds: 120,
+                          check_recent_completed_buckets: 3, require_datapoints: 2, missing_raw_series: block}
+  budget_freeze: block   # RuleUp/SLO BudgetFreeze=1 (완전한 30일·≥1,000건·coverage ≥99% 에서만 1)
+  exception: approved_incident_rollback_only

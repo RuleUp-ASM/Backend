@@ -40,6 +40,7 @@
   "owner": "이성은",
   "rules": {
     "slo_operations": "all",
+    "slo_rules": "all",
     "res_enabled": false,
     "detectors_enabled": false,
     "_note": "res_enabled·detectors_enabled 는 stg 재현·실수신 검증(G02)·밴드 학습(D+14) 뒤에 켠다. 꺼져 있어도 계산은 돌고 Flag·경보만 만들지 않는다."
