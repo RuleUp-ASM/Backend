@@ -15,7 +15,7 @@
   "min_expected_tasks": 1,
   "load_balancer": "app/ruleup-stg-alb/1a2d3584a7aaa2c1",
   "target_group": "targetgroup/ruleup-stg-tg/864594f20fdc7ddd",
-  "rds_instance": "ruleup-stg-mysql-v2",
+  "rds_instance": "ruleup-stg-mysql-v3",
   "redis_nodes": ["ruleup-stg-redis"],
   "queues": ["ruleup-stg-moderation", "ruleup-stg-notifications"],
   "dlqs": ["ruleup-stg-moderation-dlq", "ruleup-stg-notifications-dlq"],

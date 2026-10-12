@@ -15,7 +15,7 @@
   "min_expected_tasks": 2,
   "load_balancer": "app/ruleup-prod-alb/30526d51ec29a005",
   "target_group": "targetgroup/ruleup-prod-tg/d3db371c903b8892",
-  "rds_instance": "ruleup-prod-mysql",
+  "rds_instance": "ruleup-prod-mysql-v2",
   "redis_nodes": ["ruleup-prod-redis-001", "ruleup-prod-redis-002"],
   "queues": ["ruleup-prod-moderation", "ruleup-prod-notifications"],
   "dlqs": ["ruleup-prod-moderation-dlq", "ruleup-prod-notifications-dlq"],
