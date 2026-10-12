@@ -1,6 +1,7 @@
 package com.ruleup.ruleup_backend.security;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -15,9 +16,13 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
  * 시큐리티 설정 (Stateless JWT).
  * 세션/CSRF/formLogin/httpBasic 끔. 공개 경로 외엔 전부 토큰 필요.
  * 경로는 API 명세(/api/v1/...)에 맞췄고, Swagger 문서 경로도 공개로 열어둔다.
+ *
+ * <p>일반 API 역할(api·all)에서만 뜬다. 관리자 서비스는 앱 JWT 를 받지 않고
+ * Cloudflare Access 로만 인증한다 — {@code admin.access.AdminSecurityConfig}.
  */
 @Configuration
 @EnableWebSecurity
+@ConditionalOnExpression("!'${app.runtime.role:api}'.equalsIgnoreCase('admin')")
 @RequiredArgsConstructor
 public class SecurityConfig {
 
@@ -40,7 +45,8 @@ public class SecurityConfig {
             "/api/v1/admin/auth/login",      // 운영자 콘솔 진입 — 토큰을 받으러 오는 경로라 토큰이 없다
             "/files/**",                     // 정적 이미지 서빙
             "/terms/**",                     // 약관 원문 — 개인정보 처리방침은 상시 공개 의무가 있다
-            "/actuator/health"
+            "/actuator/health",
+            "/health/public"                 // 외부 공개 점검·Route 53 — 무인증이어야 사용자와 같은 길을 잰다
     };
 
     // Swagger / OpenAPI 문서 경로

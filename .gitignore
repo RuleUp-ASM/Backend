@@ -247,3 +247,6 @@ sample-data/
 *.orig
 
 uploads/
+# Python (infra/monitoring 스크립트)
+__pycache__/
+*.pyc

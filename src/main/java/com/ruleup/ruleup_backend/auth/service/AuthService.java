@@ -90,6 +90,7 @@ public class AuthService {
     private final SocialTokenService socialTokenService;
     private final AppProperties props;
     private final ApplicationEventPublisher eventPublisher;
+    private final com.ruleup.ruleup_backend.observability.ops.OpsSignals opsSignals;
     private final CountryResolver countryResolver;
     private final com.ruleup.ruleup_backend.invitation.InvitationService invitationService;
     private final com.ruleup.ruleup_backend.applink.InstallReferrerInvitation installReferrerInvitation;
@@ -616,6 +617,7 @@ public class AuthService {
         // 이 메서드는 BusinessException에 대해 롤백하지 않으므로 흔적과 revoke가 401 응답 전에 커밋된다.
         if (stored.isRevoked()) {
             stored.markReuseDetected();
+            opsSignals.refreshReuseDetected();   // SEC-05 — 회전 충돌인지 탈취인지는 RB-05 가 가린다
             refreshTokenRepository.revokeFamily(stored.getFamilyId(), Instant.now());
             throw new BusinessException(ErrorCode.SESSION_EXPIRED);
         }

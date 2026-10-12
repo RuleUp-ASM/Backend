@@ -92,6 +92,7 @@ public class ExploreQueryService {
     private final ExploreRedisStore store;
     private final ExploreCircuitBreaker circuit;
     private final ExploreIndexer indexer;
+    private final com.ruleup.ruleup_backend.observability.ops.OpsSignals opsSignals;
 
     @Transactional(readOnly = true)
     public ExploreResponse explore(UUID userId, String categoriesCsv, String verifyType,
@@ -122,6 +123,7 @@ public class ExploreQueryService {
 
         // 경로를 먼저 정하고 그 경로의 커서만 받는다 — 경로가 바뀌면 커서의 의미가 달라진다.
         ExploreDataSource source = chooseSource();
+        opsSignals.cacheLookup("explore", source == ExploreDataSource.REDIS);   // CACHE-01 — 인덱스로 답했나
         // 준비되지 않았으면 커서를 해석하기 전에 끝낸다. 먼저 해석하면 「경로가 다른 커서」로
         // 읽혀 CURSOR_INVALID 가 나가는데, 그건 클라에게 <b>첫 페이지부터 다시 받으라</b>는
         // 말이라 장애 상황에서 사용자를 목록 맨 위로 돌려보낸다. 사실은 잠시 뒤 이어 받으면 된다.

@@ -1,8 +1,12 @@
 # 테스트 전용 오버라이드. 운영 application.yaml의 ${ENV} 자리들을 더미 값으로 채워
 # 로컬에서 환경변수 없이도 컨텍스트가 뜨게 한다.
-#  · DataSource 접속 정보는 Testcontainers(@ServiceConnection)가 런타임에 덮어쓰므로
+#  · DataSource 접속 정보는 TestcontainersConfiguration(DynamicPropertyRegistrar)이 런타임에 덮어쓰므로
 #    아래 username/password는 플레이스홀더 해소용 더미일 뿐 실제로는 쓰이지 않는다.
 app:
+  # 시험은 공개·관리자 API 를 한 컨텍스트에서 함께 검증한다. 관리자 역할만의 동작은
+  # AdminRoleIsolationIT 가 role 을 덮어써서 따로 본다.
+  runtime:
+    role: all
   # 배치 자동 발화를 끈다. 컨텍스트가 설정별로 열넷 넘게 뜨고 그 하나하나가 스케줄러를 돌리면,
   # 시험과 무관한 배치가 끼어들고 종료 때 이미 닫힌 풀을 건드려 스위트 종료가 늘어진다.
   # 배치의 동작은 각 IT 가 해당 메서드를 <b>직접 불러</b> 검증한다.

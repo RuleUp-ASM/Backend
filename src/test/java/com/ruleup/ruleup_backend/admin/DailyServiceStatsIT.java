@@ -48,6 +48,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 @Import(TestcontainersConfiguration.class)
 class DailyServiceStatsIT extends ChallengeApiSupport {
 
+    /** 관리자 요청이 쓴 테이블·권한이 관리자 DB 계정의 권한 목록 안에 있는지 — 넘으면 grants 를 갱신하라고 알린다. */
+    @org.junit.jupiter.api.AfterAll
+    static void adminQueriesStayWithinGrants() throws java.io.IOException {
+        com.ruleup.ruleup_backend.admin.access.AdminSqlCapture.assertWithinGrants();
+    }
+
+
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     @Autowired WebApplicationContext wac;

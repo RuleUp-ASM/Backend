@@ -1,6 +1,7 @@
 package com.ruleup.ruleup_backend.llm;
 
 import com.ruleup.ruleup_backend.config.AppProperties;
+import com.ruleup.ruleup_backend.observability.ops.OpsSignals;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -24,6 +25,10 @@ import org.springframework.stereotype.Component;
  * <p>지표: {@code llm.call} (폴백까지 포함한 한 번의 호출 시간)과 {@code llm.call.failed} (둘 다 실패해
  * null 을 돌려준 수). 경보가 보는 것은 「사용자가 결국 결과를 못 받았는가」와 「얼마나 기다렸는가」라서
  * 제공자별로 나누지 않는다 — 어느 쪽이 실패했는지는 {@code llm_fail} 로그가 알려 준다.
+ *
+ * <p>운영 경보 EXT-01/02 는 그와 별개로 <b>공급자 호출 시도마다</b>({@link OpsSignals#providerCall}) 본다 —
+ * Gemini 가 429 로 계속 막혀도 Nova 폴백이 받아 내면 위 실패 수는 0 이지만, 공급자 장애는 장애다.
+ * 기능 차원은 부른 쪽 패키지로 정한다(moderation → moderation, 그 밖 → generation).
  */
 @Component
 @ConditionalOnProperty(name = "app.llm.provider", havingValue = "fallback", matchIfMissing = true)
@@ -35,8 +40,10 @@ public class FallbackLlmClient implements LlmClient {
     private final BedrockNovaClient fallback; // Nova 폴백
     private final Timer callTimer;
     private final Counter callFailed;
+    private final OpsSignals ops;
 
-    public FallbackLlmClient(AppProperties props, MeterRegistry registry) {
+    public FallbackLlmClient(AppProperties props, MeterRegistry registry, OpsSignals ops) {
+        this.ops = ops;
         this.primary = new GeminiClient(props);
         this.fallback = new BedrockNovaClient(props);
         this.callTimer = Timer.builder("llm.call")
@@ -56,7 +63,7 @@ public class FallbackLlmClient implements LlmClient {
     @Override
     public String generateText(String prompt) {
         return measured(() -> {
-            String r = primary.isConfigured() ? primary.generateText(prompt) : null;
+            String r = primary.isConfigured() ? attempt("gemini", () -> primary.generateText(prompt)) : null;
             if (r != null) return r;
             return novaFallback("generateText", () -> fallback.generateText(prompt));
         });
@@ -65,7 +72,8 @@ public class FallbackLlmClient implements LlmClient {
     @Override
     public String generateStructured(String prompt, String responseSchemaJson) {
         return measured(() -> {
-            String r = primary.isConfigured() ? primary.generateStructured(prompt, responseSchemaJson) : null;
+            String r = primary.isConfigured()
+                    ? attempt("gemini", () -> primary.generateStructured(prompt, responseSchemaJson)) : null;
             if (r != null) return r;
             return novaFallback("generateStructured", () -> fallback.generateStructured(prompt, responseSchemaJson));
         });
@@ -74,7 +82,8 @@ public class FallbackLlmClient implements LlmClient {
     @Override
     public String generateText(String prompt, byte[] image, String mimeType) {
         return measured(() -> {
-            String r = primary.isConfigured() ? primary.generateText(prompt, image, mimeType) : null;
+            String r = primary.isConfigured()
+                    ? attempt("gemini", () -> primary.generateText(prompt, image, mimeType)) : null;
             if (r != null) return r;
             return novaFallback("generateText(image)", () -> fallback.generateText(prompt, image, mimeType));
         });
@@ -94,6 +103,24 @@ public class FallbackLlmClient implements LlmClient {
     private String novaFallback(String op, java.util.function.Supplier<String> novaCall) {
         if (!fallback.isConfigured()) return null;
         log.debug("Gemini {} 실패/미설정 → Nova 폴백", op);
-        return novaCall.get();
+        return attempt("nova", novaCall);
+    }
+
+    /** 공급자 한 번 — null 이면(키 없음 제외) 실패다. 429·timeout·빈 응답이 모두 여기로 온다. */
+    private String attempt(String provider, java.util.function.Supplier<String> call) {
+        String feature = callerFeature();
+        long started = System.nanoTime();
+        String r = call.get();
+        ops.providerCall(feature, provider, r == null, (System.nanoTime() - started) / 1_000_000L);
+        return r;
+    }
+
+    private static String callerFeature() {
+        return StackWalker.getInstance().walk(frames -> frames
+                .map(StackWalker.StackFrame::getClassName)
+                .filter(name -> !name.startsWith("com.ruleup.ruleup_backend.llm."))
+                .findFirst()
+                .map(name -> name.contains(".moderation.") ? "moderation" : "generation")
+                .orElse("generation"));
     }
 }

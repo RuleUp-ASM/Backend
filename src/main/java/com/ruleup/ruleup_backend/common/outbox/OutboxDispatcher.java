@@ -80,6 +80,14 @@ public class OutboxDispatcher {
     private final ObjectProvider<OutboxHandler> handlerProvider;
     private final OutboxDispatcher self;
 
+    /**
+     * 관리자 서비스(role=admin)는 아웃박스에 <b>쌓기만</b> 하고 흘리지 않는다. 흘리는 것은 공개 API 의 스윕이다.
+     * 핸들러(제재 후 참여 정리 등)는 관리자 DB 계정이 쓸 일이 없는 테이블까지 건드리므로, 여기서 돌리면
+     * 그 권한을 관리자 계정에 줘야 한다. 대가는 지연 — 즉시 경로가 원래 최적화였으므로 유실은 없고 스윕 주기만큼 늦다.
+     */
+    @org.springframework.beans.factory.annotation.Value("${app.runtime.role:api}")
+    private String runtimeRole = "api";
+
     /** 첫 사용 시 한 번만 만든다. 핸들러 집합은 기동 후 바뀌지 않는다. */
     private volatile Map<String, OutboxHandler> handlers;
 
@@ -118,6 +126,7 @@ public class OutboxDispatcher {
      * 지연을 줄이는 최적화일 뿐이다. 그래서 여기서 실패해도 조용히 넘어간다.
      */
     public void requestFlush() {
+        if (!com.ruleup.ruleup_backend.config.runtime.RuntimeRole.valueOf(runtimeRole.toUpperCase()).runsBackgroundWork()) return;
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             submitFlush();
             return;

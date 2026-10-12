@@ -9,6 +9,7 @@ import boto3, json
 R='ap-northeast-2'; US='us-east-1'; A='961178969292'; MAIL='se021012@naver.com'
 FB='ruleup-alert-fallback-email'
 SLACK_TOPICS=['ruleup-prod-p0-slack','ruleup-prod-alerts','ruleup-stg-alerts']
+# 중앙 감시 리전(us-east-1) 토픽 — routing.py 가 만든다(노션 OBS-02: SNS 전송 실패 ≥1건/5분)
 RULES=['ruleup-prod-p0-alarm','ruleup-prod-p0-recovered','ruleup-prod-ecs-task-crashed','ruleup-stg-ecs-task-crashed']
 CHATBOT_CONFIGS=['ruleup-p0-urgent','ruleup-ops']
 
@@ -38,6 +39,12 @@ for t in SLACK_TOPICS:
 for r in RULES:
     alarm(cw,f'ruleup-slack-fallback-events-{r}',f'EventBridge 규칙 {r} 이 SNS 로 알림을 넘기지 못함. '+HINT,
           'AWS/Events','FailedInvocations',[{'Name':'RuleName','Value':r}],fb)
+for t in SLACK_TOPICS:
+    alarm(cw_us,f'ruleup-slack-fallback-sns-{t}',f'SNS(us-east-1) 가 {t} 알림을 Amazon Q 로 전달하지 못함. '+HINT.replace('ap-northeast-2','us-east-1'),
+          'AWS/SNS','NumberOfNotificationsFailed',[{'Name':'TopicName','Value':t}],fb_us)
+for r in ['ruleup-prod-p0-alarm','ruleup-prod-p0-recovered']:
+    alarm(cw_us,f'ruleup-slack-fallback-events-{r}',f'EventBridge(us-east-1) 규칙 {r} 이 SNS 로 알림을 넘기지 못함. '+HINT.replace('ap-northeast-2','us-east-1'),
+          'AWS/Events','FailedInvocations',[{'Name':'RuleName','Value':r}],fb_us)
 logs=boto3.client('logs',region_name=US)
 for c in CHATBOT_CONFIGS:
     g=f'/aws/chatbot/{c}'

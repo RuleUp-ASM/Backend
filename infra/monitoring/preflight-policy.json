@@ -1,0 +1,11 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "MonitoringPreflightRead",
+      "Effect": "Allow",
+      "Action": ["cloudwatch:DescribeAlarms", "cloudwatch:GetMetricData", "ecs:DescribeServices"],
+      "Resource": "*"
+    }
+  ]
+}
