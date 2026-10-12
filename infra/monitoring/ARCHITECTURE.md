@@ -40,7 +40,7 @@ flowchart LR
     r53[Route 53 헬스체크 /health/public]
     sns2[SNS us-east-1]
   end
-  probe1[λ edge-probe 도쿄] -->|ProbeFailure| cwv
+  probe1[λ edge-probe 오리건] -->|ProbeFailure| cwv
   probe1 & probe2 -->|GET /health/public| cf
   r53 --> cf
   slo -->|GetMetricData 72h| cwm

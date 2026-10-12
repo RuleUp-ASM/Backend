@@ -27,7 +27,7 @@ def load(env):
 def rule(region, name, pattern, topic, title, fields):
     ev = boto3.client('events', region_name=region)
     ev.put_rule(Name=name, EventPattern=json.dumps(pattern), State='ENABLED',
-                Description='RuleUp 보안 P1 — infra/monitoring/alerting/security_events.py')
+                Description='RuleUp security P1 - infra/monitoring/alerting/security_events.py')
     paths = {k: v for k, v in fields.items()}
     body = '\\n'.join(f'{k}=<{k}>' for k in fields) + '\\n런북 RB-05 — 탐지는 침해 확정이 아니다'
     template = '{"version":"1.0","source":"custom","content":{"textType":"client-markdown","title":"' + title + '","description":"' + body + '"}}'
