@@ -25,7 +25,7 @@
     "pagerduty": null
   },
   "slack_p0_mention_member": "U0AVBAWH05Q",
-  "route53_health_check_id": null,
+  "route53_health_check_id": "26710503-030a-4b93-8df5-e7339b675632",
   "healthchecks": {"obs03_ping_url": null, "obs04_ping_url": null},
   "pagerduty": {"service_id": null, "api_key_secret": null},
   "dashboards": {"ops": "ruleup-prod-ops", "observe": "ruleup-prod-observe", "business": "ruleup-prod-business"},
