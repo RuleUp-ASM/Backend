@@ -162,8 +162,8 @@ def network(env, c):
                 act(f"관리자 SG 아웃바운드 {w['IpProtocol']}/{w['FromPort']} 추가",
                     lambda w=w: ec2.authorize_security_group_egress(GroupId=admin_sg, IpPermissions=[w]))
 
-    ensure_ingress_from_sg(c["rds_sg"], 3306, admin_sg, f"ruleup-{env}-admin -> RDS")
-    ensure_ingress_from_sg(c["redis_sg"], 6379, admin_sg, f"ruleup-{env}-admin -> Redis")
+    ensure_ingress_from_sg(c["rds_sg"], 3306, admin_sg, f"ruleup-{env}-admin to RDS")
+    ensure_ingress_from_sg(c["redis_sg"], 6379, admin_sg, f"ruleup-{env}-admin to Redis")
 
     # NAT 인스턴스 SG: 관리자 SG 에서 오는 것만 받는다(공개 API 태스크는 public 서브넷이라 NAT 를 쓰지 않는다).
     if nat_sg:
