@@ -69,7 +69,7 @@ alarms:
   - id: EDGE-01
     status: active
     severity: P0
-    notes: 도쿄·버지니아 leaf(ignore) 의 AND Composite
+    notes: 오리건·버지니아 leaf(ignore) 의 AND Composite
   - id: EDGE-02
     status: active
     severity: P1

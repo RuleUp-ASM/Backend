@@ -5,7 +5,7 @@
 들어가지 않는다(원천 RuleUp/SLI 는 건드리지 않는다). 감사 기록은 /ruleup/<env>/monitoring-audit 로그 그룹에 남긴다.
 
     python3 infra/monitoring/lambdas/rearm.py prod --operation sync --rule API-01 \\
-        --incident INC-20261011-01 --approver 이성은 --evidence "stg 격리 sync 10건 성공·도쿄/버지니아 점검 정상"
+        --incident INC-20261011-01 --approver 이성은 --evidence "stg 격리 sync 10건 성공·오리건/버지니아 점검 정상"
 
 재무장 뒤 다음 2회 60초 평가에서도 OK 인지, PagerDuty 가 의도한 사건만 닫혔는지 확인한다(RB-01/07).
 계산기가 죽어 있거나 증거가 없으면 쓰지 않는다. set-alarm-state 는 영구 재무장 수단이 아니다.

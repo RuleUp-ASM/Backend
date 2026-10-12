@@ -5,7 +5,7 @@
 
 하는 일(노션 「알람 카탈로그」 §0 실행 위치)
   iam        함수별 최소 권한 역할 3개 + Scheduler 역할. PutMetricData 는 자기 네임스페이스만.
-  lambdas    slo-calculator·resource-monitor(버지니아), edge-probe(도쿄·버지니아). 예약 동시성 1·비동기 재시도 1·
+  lambdas    slo-calculator·resource-monitor(버지니아), edge-probe(오리건·버지니아). 예약 동시성 1·비동기 재시도 1·
              이벤트 최대 120초 — 늦은 재시도가 최신 하트비트를 만들지 않게. 로그 14일.
   schedules  EventBridge Scheduler 1분, flexible window OFF, 예정 시각을 입력으로 넘긴다(멱등), 실패는 DLQ.
   taskrole   공개 API 태스크 역할에 RuleUp/SLI·Ops·Traffic·Security·DB·Observe PutMetricData 를 더한다.
@@ -70,7 +70,7 @@ def iam(reg):
     }
     for role, statements in policies.items():
         name = f'ruleup-{env}-mon-{role}'
-        ensure_role(client, name, trust, f'RuleUp {env} monitoring Lambda ({role}) — infra/monitoring/lambdas')
+        ensure_role(client, name, trust, f'RuleUp {env} monitoring Lambda ({role}) - infra/monitoring/lambdas')
         client.put_role_policy(RoleName=name, PolicyName='monitor', PolicyDocument=json.dumps(
             {'Version': '2012-10-17', 'Statement': statements}))
         print('  role', name)
@@ -146,7 +146,7 @@ def schedules(reg):
         dlq_arn = sqs.get_queue_attributes(QueueUrl=dlq_url, AttributeNames=['QueueArn'])['Attributes']['QueueArn']
         sch = boto3.client('scheduler', region_name=f['region'])
         kw = dict(Name=f['name'], ScheduleExpression='rate(1 minute)', FlexibleTimeWindow={'Mode': 'OFF'}, State='ENABLED',
-                  Description='RuleUp monitoring — infra/monitoring/lambdas',
+                  Description='RuleUp monitoring - infra/monitoring/lambdas',
                   Target={'Arn': f"arn:aws:lambda:{f['region']}:{acct}:function:{f['name']}", 'RoleArn': role,
                           'Input': json.dumps({'time': '<aws.scheduler.scheduled-time>'}),
                           'RetryPolicy': {'MaximumEventAgeInSeconds': 120, 'MaximumRetryAttempts': 1},

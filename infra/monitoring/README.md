@@ -13,7 +13,7 @@
 |---|---|---|
 | 앱 원천 | `observability/sli` · `observability/ops` · `observability/metric` | CUJ 10개 Operation 의 `RuleUp/SLI`(Eligible·Bad·LatencyBad·DurationMs, **0 포함 매분**), `RuleUp/Ops`(JVM·Hikari·Tomcat·하드 메모리·공급자 호출·토큰·캐시·불변식), `RuleUp/DB`(연결·락·데드락·장기 트랜잭션), `RuleUp/Traffic`(FLOW·4xx), `RuleUp/Security`. 태스크마다 1분 버퍼 → PutMetricData |
 | 공개 점검 경로 | `GET /health/public` | 무인증·고정 본문 `ruleup-ok`·no-store. DB·Redis 를 묻지 않는다 |
-| 감시 Lambda | `lambdas/` | 버지니아 `slo-calculator`(Rule Flag·버짓·이상 탐지) · `resource-monitor`(ECS·RES·RDS·백업), 도쿄·버지니아 `edge-probe` |
+| 감시 Lambda | `lambdas/` | 버지니아 `slo-calculator`(Rule Flag·버짓·이상 탐지) · `resource-monitor`(ECS·RES·RDS·백업), 오리건·버지니아 `edge-probe` |
 | 경보 | `alerting/catalog.py` → `p0_p1.py` | 카탈로그 ID 그대로. P0 = SLO-01/02·API-01·EDGE-01·NATIVE-01/02·RES-01~04 |
 | 전달 | `alerting/routing.py` · `slack_channels.py` · `p0_mention.py` · `slack_fallback.py` · `security_events.py` | 서울·버지니아 토픽 → Amazon Q Slack, P0 멘션, 전달 실패 → 이메일, 보안 이벤트 |
 | 대시보드 | `alerting/dashboard.py` · `observe_dashboard.py` · `business_dashboard.py` | `ruleup-<env>-ops`(OPS-1~5) · `ruleup-<env>-observe`(OBS-1~4) · `ruleup-prod-business` |
@@ -44,6 +44,7 @@
 
 - **분 버킷 DynamoDB 없음** — CloudWatch 가 1분 해상도를 15일 보관하고 GetMetricData 는 지표 개수로 과금돼, 72시간을 매분 다시 읽는 비용이 노션 추정(월 약 130만 조회 단위)과 같다. 30일 버짓은 1시간 해상도로 15분마다.
 - **DB 수집기는 앱 안**(ShedLock 1분) — 서울 전용 VPC Lambda·읽기 계정 대신. 앱과 함께 멈추는 한계는 DB 지표가 전부 P1 이라 받아들인다. `information_schema.innodb_trx`·`INNODB_METRICS` 는 PROCESS 권한이 필요하다 — 없으면 db-collector 하트비트가 빠져 OBS-01 이 운다.
+- **외부 점검은 도쿄 대신 오리건(us-west-2)** — 조직 SCP 가 아시아 리전(ap-northeast-1·3, ap-southeast-1)을 전부 막는다. 버지니아와 다른 리전이라 EDGE-01 의 「두 지점 독립 확인」은 그대로다.
 - **점검 릴레이 함수 없음** — edge-probe 가 결과를 검증하고 버지니아로 직접 PutMetricData.
 - **하드 메모리는 태스크가 직접 잰다**(ECS 메타데이터 v4) — Container Insights 태스크 지표 대신. TaskId 차원 없이 같은 시계열에 쓰고 Maximum/Minimum/SampleCount 로 「가장 찬·가장 여유 있는·보고한 태스크 수」를 본다.
 - **EXT-01·TOKEN-01·EXT-02 는 경보 metric math**(10분 창·표본 게이트) — 별도 Flag 계산기 없이 같은 의미.

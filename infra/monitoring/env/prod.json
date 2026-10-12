@@ -4,7 +4,7 @@
   "account_id": "961178969292",
   "api_region": "ap-northeast-2",
   "monitor_region": "us-east-1",
-  "probe_origins": {"tokyo": "ap-northeast-1", "virginia": "us-east-1"},
+  "probe_origins": {"oregon": "us-west-2", "virginia": "us-east-1"},
   "public_domain": "prod.ruleup.co.kr",
   "public_health_path": "/health/public",
   "public_health_token": "ruleup-ok",
