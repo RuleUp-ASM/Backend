@@ -68,6 +68,10 @@ public final class NotificationParams {
     public static final String CHALLENGE_TITLE = "challenge_title";
     /** 문구에 들어가는 루틴 이름. 억제 키의 {@link #ROUTINE_ID} 와 다르다 — 이쪽은 표시용이다. */
     public static final String ROUTINE_NAME = "routine_name";
+    /** 문구에 들어가는 남은 루틴 목록 — 「물 마시기, 러닝 외 1개」. 리마인더가 쓴다. */
+    public static final String ROUTINE_SUMMARY = "routine_summary";
+    /** 문구에 들어가는 남은 루틴 수. */
+    public static final String PENDING_COUNT = "pending_count";
     /** 강퇴 사유 — 방장이 직접 쓴 문장이라 템플릿이 아니라 값으로 들어간다. */
     public static final String REASON = "reason";
 }

@@ -5,6 +5,7 @@ import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
 import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
+import com.ruleup.ruleup_backend.notification.domain.RoutineLabels;
 import com.ruleup.ruleup_backend.notification.service.NotificationPublisher;
 import com.ruleup.ruleup_backend.verification.domain.VerificationConfig;
 import com.ruleup.ruleup_backend.verification.domain.FailExpectation;
@@ -72,13 +73,14 @@ public class FailExpectedNoticeJob {
      *
      * <p>{@code date} 는 딥링크가 쓴다(캘린더 일자 상세). 멱등 키에는 들어가지 않는다.
      */
-    public static NotificationEvent event(VerificationDaily daily) {
+    public static NotificationEvent event(VerificationDaily daily, String routineLabel) {
         return NotificationEvent.forChallenge(daily.getUserId(),
                 NotificationType.VERIFICATION_FAIL_EXPECTED,
                 daily.getChallengeId(),
                 Map.of(NotificationParams.VERIFICATION_ID, daily.getId().toString(),
                         NotificationParams.CHALLENGE_ID, daily.getChallengeId().toString(),
-                        NotificationParams.DATE, daily.getTargetDate().toString()));
+                        NotificationParams.DATE, daily.getTargetDate().toString(),
+                        NotificationParams.CHALLENGE_TITLE, routineLabel));
     }
 
     @SchedulerLock(name = "FailExpectedNoticeJob.runIfNeeded", lockAtMostFor = "PT10M", lockAtLeastFor = "PT30S")
@@ -100,6 +102,7 @@ public class FailExpectedNoticeJob {
         Instant now = clock.instant();
         Instant finalizeAfter = VerificationDeadlines.finalizeAfter(targetDate);
         Map<UUID, Optional<Polarity>> polarityByChallenge = new HashMap<>();
+        Map<UUID, String> labels = new HashMap<>();
         UUID after = new UUID(0, 0);
         int total = 0;
         while (true) {
@@ -115,7 +118,8 @@ public class FailExpectedNoticeJob {
                 // 그 사이 방을 나갔으면 이의를 낼 자리가 없다.
                 if (challengeQuery.findMember(daily.getChallengeMemberId())
                         .filter(com.ruleup.ruleup_backend.challenge.domain.ChallengeMember::isActive).isEmpty()) continue;
-                events.add(event(daily));
+                events.add(event(daily, labels.computeIfAbsent(daily.getChallengeId(),
+                        id -> RoutineLabels.of(challengeQuery.findChallenge(id).orElse(null)))));
             }
             if (!events.isEmpty()) transactionTemplate.executeWithoutResult(tx -> notificationPublisher.publishAll(events));
             total += events.size();

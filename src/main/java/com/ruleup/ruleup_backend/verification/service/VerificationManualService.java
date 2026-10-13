@@ -12,6 +12,7 @@ import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.service.NotificationPublisher;
 import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
+import com.ruleup.ruleup_backend.notification.domain.RoutineLabels;
 import com.ruleup.ruleup_backend.verification.domain.VerificationConfig;
 import com.ruleup.ruleup_backend.verification.domain.VerificationDaily;
 import com.ruleup.ruleup_backend.verification.domain.VerificationMethod;
@@ -135,7 +136,9 @@ public class VerificationManualService {
                 challengeId,
                 Map.of(NotificationParams.VARIANT, "MANUAL_SUCCESS",
                         NotificationParams.VERIFICATION_ID, daily.getId().toString(),
-                        NotificationParams.CHALLENGE_ID, challengeId.toString())));
+                        NotificationParams.CHALLENGE_ID, challengeId.toString(),
+                        NotificationParams.CHALLENGE_TITLE,
+                        RoutineLabels.of(challengeQuery.findChallenge(challengeId).orElse(null)))));
 
         // 반려(비대상일·이미 인증·날짜 지남)는 시도로 세지 않는다 — sync 쪽도 접수된 요청만 센다.
         businessMetrics.manualAttempt();

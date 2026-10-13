@@ -22,6 +22,7 @@ import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.service.NotificationPublisher;
 import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
+import com.ruleup.ruleup_backend.notification.domain.RoutineLabels;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -517,7 +518,9 @@ public class VerificationFinalizeService {
                     Map.of(NotificationParams.VARIANT,
                                     confirmedFail ? "CONFIRMED_FAILURE" : "CONFIRMED_SUCCESS",
                             NotificationParams.VERIFICATION_ID, daily.getId().toString(),
-                            NotificationParams.CHALLENGE_ID, daily.getChallengeId().toString())));
+                            NotificationParams.CHALLENGE_ID, daily.getChallengeId().toString(),
+                            NotificationParams.CHALLENGE_TITLE,
+                            RoutineLabels.of(challengeQuery.findChallenge(daily.getChallengeId()).orElse(null)))));
         }
         return member != null;
     }

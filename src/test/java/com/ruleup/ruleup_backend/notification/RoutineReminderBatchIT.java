@@ -144,6 +144,28 @@ class RoutineReminderBatchIT extends ChallengeApiSupport {
     }
 
     @Test
+    @DisplayName("남은 루틴의 이름과 개수가 문구에 실린다 — 넷 이상이면 셋까지 이름, 나머지는 「외 N개」")
+    void listsPendingRoutineNames() throws Exception {
+        Member me = member(uniq("rm9"));
+        List<String> titles = List.of("물 마시기", "러닝", "독서", "명상");
+        java.util.TreeMap<UUID, String> byId = new java.util.TreeMap<>();
+        for (String title : titles) {
+            UUID id = joinedRoom(me.id());
+            jdbcTemplate.update("UPDATE challenges SET title = ?, ai_title = ? WHERE id = ?", title, title, bytes(id));
+            byId.put(id, title);
+        }
+        List<String> ordered = List.copyOf(byId.values());
+
+        batch.send(slotTime(ReminderSlot.EVENING));
+
+        assertThat(reminders(me.id())).singleElement().satisfies(n -> {
+            assertThat(n.getTitle()).isEqualTo("오늘 인증할 루틴이 4개 남았어요");
+            assertThat(n.getBody()).isEqualTo("남은 루틴: " + String.join(", ", ordered.subList(0, 3))
+                    + " 외 1개. 오늘이 지나기 전에 인증해주세요.");
+        });
+    }
+
+    @Test
     @DisplayName("참여 방을 전부 음소거해도 알림 센터에는 쌓인다 — 푸시만 발송 단계 음소거 판정이 막는다")
     void allMutedStillStoredInInbox() throws Exception {
         Member me = member(uniq("rm5"));
