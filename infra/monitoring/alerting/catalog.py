@@ -31,7 +31,10 @@ RETIRED = {
              'ruleup-prod-P1-llm-failed', 'ruleup-prod-P1-llm-latency',
              'ruleup-prod-P1-verification-finalize-overdue', 'ruleup-prod-P1-verification-finalize-failed',
              'ruleup-prod-P1-verification-materialize-failed', 'ruleup-prod-P1-outbox-dead-lettered',
-             'ruleup-prod-P1-verification-finalize-late', 'ruleup-prod-rds-connections'],
+             'ruleup-prod-P1-verification-finalize-late', 'ruleup-prod-rds-connections',
+             # v1 자원 경보 — DB-01~07·REDIS-01/02 로 대체. RDS 쪽은 이미 없는 인스턴스(ruleup-prod-mysql)를 봐서 울릴 수 없었다.
+             'ruleup-prod-P1-rds-ruleup-prod-mysql-cpu-high', 'ruleup-prod-P1-redis-ruleup-prod-redis-001-cpu-high',
+             'ruleup-prod-P1-redis-ruleup-prod-redis-001-memory-high'],
     'stg': ['ruleup-stg-P0-api-no-healthy-target', 'ruleup-stg-P0-ecs-cpu-critical', 'ruleup-stg-P0-ecs-memory-critical',
             'ruleup-stg-P0-api-latency-p95-critical', 'ruleup-stg-P0-rds-ruleup-stg-mysql-v2-storage-low', 'ruleup-stg-P0-api-5xx-ratio',
             'ruleup-stg-P0-api-5xx-alb', 'ruleup-stg-P1-ecs-cpu-high', 'ruleup-stg-P1-ecs-memory-high', 'ruleup-stg-P1-api-latency-p95',
@@ -41,7 +44,9 @@ RETIRED = {
             'ruleup-stg-P1-verification-sync-failed', 'ruleup-stg-P1-outbox-pending-age', 'ruleup-stg-P1-llm-failed', 'ruleup-stg-P1-llm-latency',
              'ruleup-stg-P1-verification-finalize-overdue', 'ruleup-stg-P1-verification-finalize-failed',
              'ruleup-stg-P1-verification-materialize-failed', 'ruleup-stg-P1-outbox-dead-lettered',
-             'ruleup-stg-P1-verification-finalize-late'],
+             'ruleup-stg-P1-verification-finalize-late',
+             'ruleup-stg-P1-rds-ruleup-stg-mysql-v2-cpu-high', 'ruleup-stg-P1-redis-ruleup-stg-redis-cpu-high',
+             'ruleup-stg-P1-redis-ruleup-stg-redis-memory-high'],
 }
 
 LLM_PROVIDERS = (('generation', 'gemini'), ('generation', 'nova'), ('moderation', 'gemini'), ('moderation', 'nova'))
