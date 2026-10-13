@@ -90,6 +90,7 @@ class VerificationResultNotificationIT extends VerificationApiSupport {
             assertThat(resultsOf(me.id())).singleElement().satisfies(n -> {
                 assertThat(n.getChallengeId()).isEqualTo(challengeId);
                 assertThat(n.getDeeplink()).contains(challengeId.toString());
+                assertThat(n.getTitle()).isEqualTo("[" + titleOf(challengeId) + "] 인증이 완료됐어요");
             });
         }
 
@@ -116,9 +117,15 @@ class VerificationResultNotificationIT extends VerificationApiSupport {
 
             manualService.submit(me.id(), challengeId, new ManualVerificationRequest(null, null));
 
-            assertThat(resultsOf(me.id())).singleElement().satisfies(n ->
-                    assertThat(n.getChallengeId()).isEqualTo(challengeId));
+            assertThat(resultsOf(me.id())).singleElement().satisfies(n -> {
+                assertThat(n.getChallengeId()).isEqualTo(challengeId);
+                assertThat(n.getTitle()).isEqualTo("[테스트 챌린지] 인증이 완료됐어요");
+            });
         }
+    }
+
+    private String titleOf(UUID challengeId) {
+        return jdbc().queryForObject("SELECT title FROM challenges WHERE id = ?", String.class, bytes(challengeId));
     }
 
     // =====================================================================
@@ -179,7 +186,8 @@ class VerificationResultNotificationIT extends VerificationApiSupport {
             assertThat(failExpectedOf(me.id())).singleElement().satisfies(n -> {
                 // 이의 버튼이 있는 화면은 캘린더 일자 상세다 — 이의 내역이 아니다.
                 assertThat(n.getDeeplink()).isEqualTo("ruleup://me/calendar/" + yesterday);
-                assertThat(n.getTitle()).isEqualTo("이의제기가 필요해요");
+                // 어느 루틴을 놓쳤는지가 제목에 있어야 한다 — 방이 여럿이면 제목만으론 구분이 안 됐다.
+                assertThat(n.getTitle()).isEqualTo("[" + titleOf(challengeId) + "] 인증을 놓쳤어요");
                 assertThat(n.getChallengeId()).isEqualTo(challengeId);
             });
         }

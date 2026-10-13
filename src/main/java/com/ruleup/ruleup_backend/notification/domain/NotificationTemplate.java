@@ -158,16 +158,20 @@ public enum NotificationTemplate {
      * 뒤는 귀속일 이틀 뒤 00:00 에 되돌릴 수 없게 굳은 것이다.
      */
     VERIFICATION_RESULT_MANUAL(NotificationType.VERIFICATION_RESULT, VARIANT, "MANUAL_SUCCESS",
-            "인증이 완료됐어요", "오늘 몫을 체크했어요. 진행률에 반영됐어요."),
+            "[{challenge_title}] 인증이 완료됐어요", "오늘 몫을 체크했어요. 진행률에 반영됐어요."),
     VERIFICATION_RESULT_SYNC(NotificationType.VERIFICATION_RESULT, VARIANT, "SYNC_SUCCESS",
-            "인증이 완료됐어요", "오늘 몫을 채웠어요. 진행률에 반영됐어요."),
+            "[{challenge_title}] 인증이 완료됐어요", "오늘 몫을 채웠어요. 진행률에 반영됐어요."),
     VERIFICATION_RESULT_CONFIRMED(NotificationType.VERIFICATION_RESULT, VARIANT, "CONFIRMED_SUCCESS",
-            "인증이 완료로 확정됐어요", "그날 몫을 채웠어요. 진행률에 반영됐어요."),
+            "[{challenge_title}] 인증이 완료로 확정됐어요", "그날 몫을 채웠어요. 진행률에 반영됐어요."),
     VERIFICATION_RESULT_FAILED(NotificationType.VERIFICATION_RESULT, VARIANT, "CONFIRMED_FAILURE",
-            "인증이 실패로 확정됐어요", "이의 기간이 지나 이 결과는 되돌릴 수 없어요."),
+            "[{challenge_title}] 인증이 실패로 확정됐어요", "이의 기간이 지나 이 결과는 되돌릴 수 없어요."),
 
+    /**
+     * 실패가 확실해진 첫 순간의 고지 — 위반이 잡힌 sync 또는 귀속일이 끝난 직후. 그래서 제목이
+     * 「놓쳤어요」이고, 본문이 이의 경로를 안내한다.
+     */
     VERIFICATION_FAIL_EXPECTED(NotificationType.VERIFICATION_FAIL_EXPECTED,
-            "이의제기가 필요해요", "이대로면 인증이 실패로 확정돼요. 사정이 있었다면 이의를 신청해주세요."),
+            "[{challenge_title}] 인증을 놓쳤어요", "이대로면 실패로 확정돼요. 사정이 있었다면 이의를 신청해주세요."),
 
     CONSECUTIVE_FAILURE_WARNING(NotificationType.CONSECUTIVE_FAILURE_WARNING,
             "연속으로 인증을 놓치고 있어요",
@@ -208,9 +212,10 @@ public enum NotificationTemplate {
 
     // ===== 그룹 없음 =====
 
+    /** 남은 루틴을 이름으로 보여 준다 — 「무엇이」 남았는지 알아야 앱을 열 이유가 생긴다. */
     ROUTINE_REMINDER(NotificationType.ROUTINE_REMINDER,
-            "오늘 인증할 루틴이 남아 있어요",
-            "아직 인증하지 않은 루틴이 있어요. 오늘이 지나기 전에 확인해주세요.");
+            "오늘 인증할 루틴이 {pending_count}개 남았어요",
+            "남은 루틴: {routine_summary}. 오늘이 지나기 전에 인증해주세요.");
 
     /**
      * 문구를 <b>사람이 쓰는</b> 두 타입. 운영자가 콘솔에서 제목·본문을 직접 적으므로 템플릿이 없다.

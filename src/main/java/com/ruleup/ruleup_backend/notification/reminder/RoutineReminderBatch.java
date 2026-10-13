@@ -9,6 +9,7 @@ import com.ruleup.ruleup_backend.notification.repository.NotificationMuteReposit
 import com.ruleup.ruleup_backend.notification.service.NotificationPublisher;
 import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
+import com.ruleup.ruleup_backend.notification.domain.RoutineLabels;
 import com.ruleup.ruleup_backend.verification.domain.VerificationDaily;
 import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
@@ -31,6 +32,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 
 /**
@@ -47,6 +49,10 @@ import java.util.UUID;
  * (09-28 결정, QA NOTI-03·04). 푸시 차단은 발송 단계의 음소거 판정({@code DispatchDecision})이
  * 대표 챌린지로 한다. 그래서 대표는 <b>음소거하지 않은 방을 먼저</b> 고른다 — 음소거한 방이 대표가
  * 되면 음소거하지 않은 방의 미인증 루틴 푸시까지 함께 막힌다. 전부 음소거했을 때만 푸시가 빠진다.
+ *
+ * <h4>남은 루틴을 이름으로 싣는다</h4>
+ * 한 건으로 묶는 대신 본문에 남은 루틴(방) 이름을 싣는다 — 「물 마시기, 러닝 외 1개」. 순서는 챌린지 id 라
+ * 실행마다 같다. 음소거한 방도 목록에 든다(알림 센터 기록이므로).
  *
  * <h4>판정 대상일은 하나의 근거만 쓴다</h4>
  * {@link VerificationTargetDays} 를 그대로 부른다. 여기서 요일·빈도 계산을 다시 구현하면
@@ -103,14 +109,14 @@ public class RoutineReminderBatch {
         LocalDate today = LocalDate.now(KST);
         ReminderSlot slot = ReminderSlot.at(now);
 
-        Map<UUID, UUID> targets = pendingTargets(today);
+        Map<UUID, Pending> targets = pendingTargets(today);
         if (targets.isEmpty()) {
             log.info("루틴 리마인더 {} — 대상 없음", slot);
             return 0;
         }
 
         int stored = 0;
-        List<Map.Entry<UUID, UUID>> entries = new ArrayList<>(targets.entrySet());
+        List<Map.Entry<UUID, Pending>> entries = new ArrayList<>(targets.entrySet());
         for (int from = 0; from < entries.size(); from += CHUNK) {
             stored += self.storeChunk(
                     entries.subList(from, Math.min(from + CHUNK, entries.size())), today, slot);
@@ -126,7 +132,7 @@ public class RoutineReminderBatch {
      * 오늘 마감은 전부 23:59 KST 로 같아 「가장 급한 방」이라는 기준이 없고, 임의로 고르면 실행마다
      * 딥링크가 바뀌어 재시도 판정이 흔들린다.
      */
-    private Map<UUID, UUID> pendingTargets(LocalDate today) {
+    private Map<UUID, Pending> pendingTargets(LocalDate today) {
         List<ChallengeMember> members = challengeQueryService.findActiveOnDate(today, SCAN_LIMIT);
         if (members.isEmpty()) return Map.of();
 
@@ -144,6 +150,7 @@ public class RoutineReminderBatch {
 
         // LinkedHashMap 이라 삽입 순서가 유지된다. 정렬은 아래에서 챌린지 id 로 한 번 더 한다.
         Map<UUID, UUID> byUser = new LinkedHashMap<>();
+        Map<UUID, TreeMap<UUID, String>> labels = new HashMap<>();
         for (ChallengeMember member : members) {
             if (settled.contains(member.getId())) continue;   // 이미 인증했거나 대상이 아니다
 
@@ -156,9 +163,17 @@ public class RoutineReminderBatch {
             Set<UUID> mine = muted.getOrDefault(member.getUserId(), Set.of());
             byUser.merge(member.getUserId(), challenge.getId(),
                     (kept, candidate) -> representative(kept, candidate, mine));
+            labels.computeIfAbsent(member.getUserId(), k -> new TreeMap<>())
+                    .put(challenge.getId(), RoutineLabels.of(challenge));
         }
-        return byUser;
+        Map<UUID, Pending> pending = new LinkedHashMap<>();
+        byUser.forEach((userId, representative) -> pending.put(userId,
+                new Pending(representative, List.copyOf(labels.get(userId).values()))));
+        return pending;
     }
+
+    /** 한 유저의 리마인더 — 딥링크가 가리킬 대표 방과 남은 루틴 이름(챌린지 id 순). */
+    public record Pending(UUID representative, List<String> labels) {}
 
     /** 음소거하지 않은 방이 먼저, 같으면 작은 id. */
     private static UUID representative(UUID kept, UUID candidate, Set<UUID> muted) {
@@ -182,14 +197,16 @@ public class RoutineReminderBatch {
 
     /** 청크 하나를 자기 트랜잭션에서 적재한다. 중단돼도 이미 커밋된 청크는 남는다. */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public int storeChunk(List<Map.Entry<UUID, UUID>> targets, LocalDate date, ReminderSlot slot) {
+    public int storeChunk(List<Map.Entry<UUID, Pending>> targets, LocalDate date, ReminderSlot slot) {
         return publisher.publishAll(targets.stream()
                 .map(entry -> NotificationEvent.forChallenge(entry.getKey(),
                         NotificationType.ROUTINE_REMINDER,
-                        entry.getValue(),
-                        Map.of(NotificationParams.CHALLENGE_ID, entry.getValue().toString(),
+                        entry.getValue().representative(),
+                        Map.of(NotificationParams.CHALLENGE_ID, entry.getValue().representative().toString(),
                                 NotificationParams.DATE, date.toString(),
-                                NotificationParams.SLOT, slot.name())))
+                                NotificationParams.SLOT, slot.name(),
+                                NotificationParams.PENDING_COUNT, String.valueOf(entry.getValue().labels().size()),
+                                NotificationParams.ROUTINE_SUMMARY, RoutineLabels.summary(entry.getValue().labels()))))
                 .toList()).size();
     }
 }

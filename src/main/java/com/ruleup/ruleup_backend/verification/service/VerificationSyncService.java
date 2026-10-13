@@ -12,6 +12,7 @@ import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.service.NotificationPublisher;
 import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
+import com.ruleup.ruleup_backend.notification.domain.RoutineLabels;
 import com.ruleup.ruleup_backend.agreement.domain.AgreementType;
 import com.ruleup.ruleup_backend.verification.domain.*;
 import com.ruleup.ruleup_backend.verification.config.VerificationProperties;
@@ -629,13 +630,14 @@ public class VerificationSyncService {
                         Map.of(NotificationParams.VARIANT, "SYNC_SUCCESS",
                                 NotificationParams.VERIFICATION_ID, daily.getId().toString(),
                                 NotificationParams.CHALLENGE_ID,
-                                member.getChallengeId().toString())));
+                                member.getChallengeId().toString(),
+                                NotificationParams.CHALLENGE_TITLE, labelOf(member.getChallengeId()))));
             }
         }
         // 자정 배치가 돈 뒤 첫 sync 로 어제 행이 열릴 수도 있다. 평가기가 위반 사유를 내지 않아도
         // 귀속일이 끝난 목표 미달은 실패 예정이다. 화면과 같은 판정으로 알리고, 재전송은 멱등 키로 막는다.
         if (daily.isFailExpected(VerificationPolarity.of(config), now)) {
-            notificationPublisher.publish(FailExpectedNoticeJob.event(daily));
+            notificationPublisher.publish(FailExpectedNoticeJob.event(daily, labelOf(daily.getChallengeId())));
         }
         return daily.getStatus();
     }
@@ -669,9 +671,14 @@ public class VerificationSyncService {
                     member.getUserId(), member.getChallengeId(), method.name(), today, now));
         }
         if (daily.isFailExpected(VerificationPolarity.of(config), now)) {
-            notificationPublisher.publish(FailExpectedNoticeJob.event(daily));
+            notificationPublisher.publish(FailExpectedNoticeJob.event(daily, labelOf(daily.getChallengeId())));
         }
         return daily.getStatus();
+    }
+
+    /** 알림 문구의 루틴 이름. 같은 트랜잭션에서 이미 읽은 방이라 영속성 컨텍스트에서 나온다. */
+    private String labelOf(java.util.UUID challengeId) {
+        return RoutineLabels.of(challengeQuery.findChallenge(challengeId).orElse(null));
     }
 
     /** 해당 method의 신호타입에 대해, 당일과 겹치는 비회복(recoverable=false) 권한 공백이 있는지(§8.5). */
