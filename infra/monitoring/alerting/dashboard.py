@@ -135,7 +135,9 @@ row(('RDS CPU(%)·연결 사용률(%)', [rds('CPUUtilization'), dbm('DbConnectio
 text('## OPS-4 · 의존성 — Redis·SQS·FCM·LLM·배치 (외부 장애·적체)')
 red = lambda m, node, **o: ['AWS/ElastiCache', m, 'CacheClusterId', node, {'stat': 'Average', **o}]
 sqs = lambda q, m: ['AWS/SQS', m, 'QueueName', q, {'stat': 'Maximum', 'label': q}]
-row(('Redis CPU·메모리(%)', [red(m, n, label=f'{n} {m}') for n in REG['redis_nodes'] for m in ('EngineCPUUtilization', 'DatabaseMemoryUsagePercentage')], None),
+# 히트율은 경보 없이 화면에만 — 앱 캐시(@Cacheable)는 Caffeine 이라, 이 값은 탐색 ZSET·rate limit 같은 Redis 직접 조회의 적중률이다.
+row(('Redis CPU·메모리·히트율(%)', [red(m, n, label=f'{n} {m}') for n in REG['redis_nodes'] for m in ('EngineCPUUtilization', 'DatabaseMemoryUsagePercentage')]
+     + [red('CacheHitRate', n, label=f'{n} 히트율') for n in REG['redis_nodes']], None),
     ('SQS 가장 오래된 메시지(초)·DLQ', [sqs(q, 'ApproximateAgeOfOldestMessage') for q in REG['queues']]
      + [sqs(q, 'ApproximateNumberOfMessagesVisible')[:-1] + [{'stat': 'Maximum', 'label': q, 'yAxis': 'right'}] for q in REG['dlqs']], None),
     ('공급자 호출 실패(429·쿼터 포함)', [['RuleUp/Ops', 'ProviderFailureCount', *BASE, 'Feature', f, 'Provider', pv, {'stat': 'Sum', 'label': f'{f}/{pv}'}]
