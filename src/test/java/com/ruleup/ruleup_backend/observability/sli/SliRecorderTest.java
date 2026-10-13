@@ -47,7 +47,8 @@ class SliRecorderTest {
                     .containsEntry("AvailabilityBadCount/" + op.id(), 0.0)
                     .containsEntry("LatencyBadCount/" + op.id(), 0.0);
         }
-        assertThat(m).containsEntry("LoginCompletedCount/-", 0.0).containsEntry("HttpRejectCount/429", 0.0);
+        assertThat(m).containsEntry("LoginCompletedCount/-", 0.0).containsEntry("HttpRejectCount/429", 0.0)
+                .containsEntry("ApiRequestCount/-", 0.0);
     }
 
     @Test
@@ -110,5 +111,20 @@ class SliRecorderTest {
         assertThat(m).containsEntry("EligibleCount/sync", 1.0)
                 .containsEntry("AvailabilityBadCount/sync", 1.0)
                 .containsEntry("HttpRejectCount/429", 1.0);
+    }
+
+    @Test
+    @DisplayName("필터: API 요청 수는 /api/** 만 센다 — 헬스체크·합성 점검은 빼서 배포 사전 점검이 잘못 걸리지 않게")
+    void apiRequestCountExcludesHealthAndSynthetic() throws Exception {
+        SliFilter filter = new SliFilter(recorder);
+
+        filter.doFilter(new MockHttpServletRequest("GET", "/api/v1/devices"), new MockHttpServletResponse(), new MockFilterChain());
+        filter.doFilter(new MockHttpServletRequest("GET", "/api/v1/challenges"), new MockHttpServletResponse(), new MockFilterChain());
+        filter.doFilter(new MockHttpServletRequest("GET", "/health/public"), new MockHttpServletResponse(), new MockFilterChain());
+        MockHttpServletRequest probe = new MockHttpServletRequest("GET", "/api/v1/challenges");
+        probe.addHeader(SliFilter.SYNTHETIC_HEADER, "edge-oregon");
+        filter.doFilter(probe, new MockHttpServletResponse(), new MockFilterChain());
+
+        assertThat(drain()).containsEntry("ApiRequestCount/-", 2.0);
     }
 }

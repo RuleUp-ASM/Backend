@@ -49,6 +49,8 @@
 - **하드 메모리는 태스크가 직접 잰다**(ECS 메타데이터 v4) — Container Insights 태스크 지표 대신. TaskId 차원 없이 같은 시계열에 쓰고 Maximum/Minimum/SampleCount 로 「가장 찬·가장 여유 있는·보고한 태스크 수」를 본다.
 - **EXT-01·TOKEN-01·EXT-02 는 경보 metric math**(10분 창·표본 게이트) — 별도 Flag 계산기 없이 같은 의미.
 - **OR 조건은 행마다 경보를 따로**(Composite 과금 없이). EDGE-01 만 AND Composite.
+- **사전 점검의 계측 불일치는 ALB 요청 수 대신 앱의 `RuleUp/Traffic ApiRequestCount`**(`/api/**`, 합성 점검 제외)와 비교 — ALB 는 경로를 못 나눠 Route 53·외부 점검의 `/health/public` 호출(분당 십수 건)이 섞이고, 트래픽이 적을 때 늘 「계측 누락」으로 걸렸다.
+- **OPS-4 Redis 칸에 히트율** — 노션 §4.2 에는 없다. 경보 없이 화면에만. 앱 캐시(`@Cacheable`)는 Caffeine 이라 탐색 ZSET·rate limit 같은 Redis 직접 조회의 적중률이다.
 
 ## 아직 못 한 것 — 막는 것
 

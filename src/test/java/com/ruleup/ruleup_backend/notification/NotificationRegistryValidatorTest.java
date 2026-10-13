@@ -25,9 +25,9 @@ class NotificationRegistryValidatorTest {
     }
 
     @Test
-    @DisplayName("25종 전부를 실제로 렌더해 본다 — 개수를 세어 누락을 막는다")
+    @DisplayName("27종 전부를 실제로 렌더해 본다 — 개수를 세어 누락을 막는다")
     void everyTypeIsRendered() {
-        assertThat(new NotificationRegistryValidator().validate()).isEqualTo(25);
+        assertThat(new NotificationRegistryValidator().validate()).isEqualTo(27);
     }
 
     @Test

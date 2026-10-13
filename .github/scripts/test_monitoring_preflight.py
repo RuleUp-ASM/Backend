@@ -26,10 +26,15 @@ class PreflightTest(unittest.TestCase):
         self.assertTrue(any('Operation=sync' in b for b in block))
 
     def test_zero_counter_with_real_ingress_blocks(self):
-        """(d) 원천은 0 인데 ALB 에 유효 요청이 있다 → 계측 누락."""
+        """(d) 원천은 0 인데 API 요청이 있다 → 계측 누락."""
         raw = {op: [0.0, 0.0, 0.0] for op in OPS}
         block, _ = m.decide([], raw, 120, {})
         self.assertTrue(any('계측 불일치' in b for b in block))
+
+    def test_unknown_api_requests_do_not_block(self):
+        """옛 앱은 ApiRequestCount 를 안 보낸다(None) — 그것만으로 막지 않는다."""
+        raw = {op: [0.0, 0.0, 0.0] for op in OPS}
+        self.assertEqual(m.decide([], raw, None, {})[0], [])
 
     def test_budget_freeze_blocks_unless_incident_rollback(self):
         self.assertEqual(len(m.decide([], healthy(), 10, {'join': 1})[0]), 1)

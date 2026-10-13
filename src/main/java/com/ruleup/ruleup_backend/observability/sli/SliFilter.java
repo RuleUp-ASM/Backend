@@ -25,6 +25,7 @@ import java.io.IOException;
 public class SliFilter extends OncePerRequestFilter {
 
     public static final String SYNTHETIC_HEADER = "X-RuleUp-Synthetic";
+    static final String API_PREFIX = "/api/";
 
     private final SliRecorder recorder;
 
@@ -50,6 +51,7 @@ public class SliFilter extends OncePerRequestFilter {
             ErrorCode code = request.getAttribute(ClientErrorLog.ERROR_CODE_ATTRIBUTE) instanceof ErrorCode c ? c : null;
             boolean synthetic = request.getHeader(SYNTHETIC_HEADER) != null;
             recorder.record(op, status, SliOutcome.classify(status, code, synthetic), millis);
+            if (!synthetic && path.startsWith(API_PREFIX)) recorder.recordApiRequest();
         }
     }
 }

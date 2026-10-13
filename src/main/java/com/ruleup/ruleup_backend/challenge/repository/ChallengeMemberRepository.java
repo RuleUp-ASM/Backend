@@ -101,6 +101,15 @@ public interface ChallengeMemberRepository extends JpaRepository<ChallengeMember
     List<ChallengeMember> findActiveOnDateAfter(@Param("date") LocalDate date, @Param("after") UUID after, Pageable pageable);
 
     /**
+     * {@link #findActiveOnDateAfter} 에서 셋업 조건만 뺀 것 — 수동 인증 방 미체크 알림용.
+     * 수동 방은 셋업이 끝나지 않아도 체크할 수 있어서(체크가 셋업을 요구하지 않는다) 놓친 날도 셋업과 무관하다.
+     */
+    @Query("SELECT m FROM ChallengeMember m, Challenge c WHERE c.id=m.challengeId AND c.deletedAt IS NULL " +
+            "AND m.status='ACTIVE' AND c.startDate<=:date " +
+            "AND (c.endDate IS NULL OR c.endDate>=:date) AND m.id>:after ORDER BY m.id")
+    List<ChallengeMember> findActiveOnDateAnySetupAfter(@Param("date") LocalDate date, @Param("after") UUID after, Pageable pageable);
+
+    /**
      * 방별 확정 실패 인원(§3.2.4): 남은 날을 다 성공해도 90% 날 달성이 불가능해진 ACTIVE 멤버 수.
      *  (완주 하한 = ceil(0.9·targetDays) → 허용 실패 상한 = targetDays − 하한, 이를 초과하면 확정 실패)
      */

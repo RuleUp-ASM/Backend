@@ -1,10 +1,13 @@
 package com.ruleup.ruleup_backend.verification.service;
 
 import com.ruleup.ruleup_backend.challenge.domain.Challenge;
+import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
+import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
 import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
 import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
+import com.ruleup.ruleup_backend.notification.domain.RoutineLabels;
 import com.ruleup.ruleup_backend.notification.service.NotificationPublisher;
 import com.ruleup.ruleup_backend.verification.domain.VerificationConfig;
 import com.ruleup.ruleup_backend.verification.domain.FailExpectation;
@@ -26,6 +29,8 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -72,13 +77,14 @@ public class FailExpectedNoticeJob {
      *
      * <p>{@code date} 는 딥링크가 쓴다(캘린더 일자 상세). 멱등 키에는 들어가지 않는다.
      */
-    public static NotificationEvent event(VerificationDaily daily) {
+    public static NotificationEvent event(VerificationDaily daily, String routineLabel) {
         return NotificationEvent.forChallenge(daily.getUserId(),
                 NotificationType.VERIFICATION_FAIL_EXPECTED,
                 daily.getChallengeId(),
                 Map.of(NotificationParams.VERIFICATION_ID, daily.getId().toString(),
                         NotificationParams.CHALLENGE_ID, daily.getChallengeId().toString(),
-                        NotificationParams.DATE, daily.getTargetDate().toString()));
+                        NotificationParams.DATE, daily.getTargetDate().toString(),
+                        NotificationParams.CHALLENGE_TITLE, routineLabel));
     }
 
     @SchedulerLock(name = "FailExpectedNoticeJob.runIfNeeded", lockAtMostFor = "PT10M", lockAtLeastFor = "PT30S")
@@ -88,6 +94,7 @@ public class FailExpectedNoticeJob {
         if (today.equals(doneFor.get())) return;
         try {
             notifyFor(today.minusDays(1));
+            notifyManualMissed(today.minusDays(1));
             doneFor.set(today);
         } catch (RuntimeException e) {
             // 다음 tick 에 다시 돈다 — 이미 적재한 건은 멱등 키가 걸러 준다.
@@ -100,6 +107,7 @@ public class FailExpectedNoticeJob {
         Instant now = clock.instant();
         Instant finalizeAfter = VerificationDeadlines.finalizeAfter(targetDate);
         Map<UUID, Optional<Polarity>> polarityByChallenge = new HashMap<>();
+        Map<UUID, String> labels = new HashMap<>();
         UUID after = new UUID(0, 0);
         int total = 0;
         while (true) {
@@ -115,7 +123,8 @@ public class FailExpectedNoticeJob {
                 // 그 사이 방을 나갔으면 이의를 낼 자리가 없다.
                 if (challengeQuery.findMember(daily.getChallengeMemberId())
                         .filter(com.ruleup.ruleup_backend.challenge.domain.ChallengeMember::isActive).isEmpty()) continue;
-                events.add(event(daily));
+                events.add(event(daily, labels.computeIfAbsent(daily.getChallengeId(),
+                        id -> RoutineLabels.of(challengeQuery.findChallenge(id).orElse(null)))));
             }
             if (!events.isEmpty()) transactionTemplate.executeWithoutResult(tx -> notificationPublisher.publishAll(events));
             total += events.size();
@@ -123,6 +132,63 @@ public class FailExpectedNoticeJob {
         }
         if (total > 0) log.info("실패 예정 알림: 귀속일 {} 대상 {}건", targetDate, total);
         return total;
+    }
+
+    /**
+     * 수동 방에서 어제 체크하지 않은 멤버에게 「[루틴] 인증을 놓쳤어요」.
+     *
+     * <p>수동 방은 미체크 날에 행이 생기지 않아 위의 실패 예정 스캔에 잡히지 않는다. 그래서 그날 판정 대상이었던
+     * 멤버십을 훑어 성공 행이 없는 것을 고른다. 체크했다가 당일에 취소한 날(PENDING 행)도 놓친 날이다.
+     * 멱등 키가 {@code (challenge_id, date)} 라 다시 돌아도 한 번이다.
+     *
+     * @return 발행을 시도한 건 수(이미 적재된 건 포함)
+     */
+    public int notifyManualMissed(LocalDate targetDate) {
+        Map<UUID, Optional<Challenge>> manualRooms = new HashMap<>();
+        UUID after = new UUID(0, 0);
+        int total = 0;
+        while (true) {
+            List<ChallengeMember> page = challengeQuery.findActiveOnDateAnySetupAfter(targetDate, after, PAGE);
+            if (page.isEmpty()) break;
+            after = page.getLast().getId();
+
+            List<ChallengeMember> candidates = new ArrayList<>();
+            for (ChallengeMember member : page) {
+                Challenge room = manualRooms.computeIfAbsent(member.getChallengeId(), this::manualRoom).orElse(null);
+                if (room == null) continue;
+                if (VerificationTargetDays.of(configFactory.build(room), room, member, targetDate)
+                        != VerificationTargetDays.Disposition.EVALUATE) continue;
+                candidates.add(member);
+            }
+            if (candidates.isEmpty()) continue;
+
+            Set<UUID> done = new HashSet<>();
+            for (VerificationDaily daily : dailyRepo.findByUserIdInAndTargetDate(
+                    candidates.stream().map(ChallengeMember::getUserId).distinct().toList(), targetDate)) {
+                if (daily.getStatus() == VerificationStatus.SUCCESS) done.add(daily.getChallengeMemberId());
+            }
+            List<NotificationEvent> events = new ArrayList<>();
+            for (ChallengeMember member : candidates) {
+                if (done.contains(member.getId())) continue;
+                Challenge room = manualRooms.get(member.getChallengeId()).orElseThrow();
+                events.add(NotificationEvent.forChallenge(member.getUserId(), NotificationType.ROUTINE_MISSED,
+                        room.getId(),
+                        Map.of(NotificationParams.CHALLENGE_ID, room.getId().toString(),
+                                NotificationParams.DATE, targetDate.toString(),
+                                NotificationParams.CHALLENGE_TITLE, RoutineLabels.of(room))));
+            }
+            if (!events.isEmpty()) transactionTemplate.executeWithoutResult(tx -> notificationPublisher.publishAll(events));
+            total += events.size();
+        }
+        if (total > 0) log.info("수동 방 미체크 알림: 귀속일 {} 대상 {}건", targetDate, total);
+        return total;
+    }
+
+    /** 삭제되지 않은 수동 인증 방이면 그 방, 아니면 비어 있다. */
+    private Optional<Challenge> manualRoom(UUID challengeId) {
+        return challengeQuery.findChallenge(challengeId)
+                .filter(c -> c.getDeletedAt() == null)
+                .filter(c -> configFactory.build(c).isManual());
     }
 
     private Optional<Polarity> autoPolarity(UUID challengeId) {
