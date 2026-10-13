@@ -102,6 +102,7 @@ public class VerificationSyncService {
     private final Map<VerificationMethod, MethodEvaluator> evaluators;
     /** 운영은 시스템 시계. 시험이 「오늘」을 KST 자정 근처에서 떼어 놓을 수 있게 주입받는다. */
     private final Clock clock;
+    private final DailyCompletionNotice completionNotice;
 
     public VerificationSyncService(DeviceSyncPolicyService syncPolicy, ChallengeQueryService challengeQuery,
                                    VerificationDailyRepository dailyRepo,
@@ -127,8 +128,10 @@ public class VerificationSyncService {
                                    VerificationMetrics metrics,
                                    com.ruleup.ruleup_backend.observability.BusinessMetrics businessMetrics,
                                    List<MethodEvaluator> evaluatorList,
-                                   Clock clock) {
+                                   Clock clock,
+                                   DailyCompletionNotice completionNotice) {
         this.clock = clock;
+        this.completionNotice = completionNotice;
         this.syncPolicy = syncPolicy;
         this.challengeQuery = challengeQuery;
         this.dailyRepo = dailyRepo;
@@ -624,14 +627,19 @@ public class VerificationSyncService {
                 // finalizeOne 은 초입에서 isTerminal() 로 되돌아간다. 그래서 성공 고지를 여기서
                 // 하지 않으면 「성공한 날」만 알림이 없는 비대칭이 생긴다(실패는 확정 배치가 고지한다).
                 // 같은 날을 여러 번 sync 해도 verification_id 멱등 키가 두 번째 적재를 막는다.
-                notificationPublisher.publish(NotificationEvent.forChallenge(member.getUserId(),
-                        NotificationType.VERIFICATION_RESULT,
-                        member.getChallengeId(),
-                        Map.of(NotificationParams.VARIANT, "SYNC_SUCCESS",
-                                NotificationParams.VERIFICATION_ID, daily.getId().toString(),
-                                NotificationParams.CHALLENGE_ID,
-                                member.getChallengeId().toString(),
-                                NotificationParams.CHALLENGE_TITLE, labelOf(member.getChallengeId()))));
+                // 오늘 몫이면 「모두 완료」도 본다 — 오늘 해야 할 게 이것 하나였다면 그 알림이 이걸 대신한다.
+                // 어제 행(유예 하루)의 늦은 성공은 「오늘」의 완료가 아니라 보지 않는다.
+                boolean forToday = daily.getTargetDate().equals(LocalDate.ofInstant(now, VerificationDeadlines.KST));
+                if (!(forToday && completionNotice.afterSuccess(member.getUserId(), daily.getTargetDate()).replacesIndividual())) {
+                    notificationPublisher.publish(NotificationEvent.forChallenge(member.getUserId(),
+                            NotificationType.VERIFICATION_RESULT,
+                            member.getChallengeId(),
+                            Map.of(NotificationParams.VARIANT, "SYNC_SUCCESS",
+                                    NotificationParams.VERIFICATION_ID, daily.getId().toString(),
+                                    NotificationParams.CHALLENGE_ID,
+                                    member.getChallengeId().toString(),
+                                    NotificationParams.CHALLENGE_TITLE, labelOf(member.getChallengeId()))));
+                }
             }
         }
         // 자정 배치가 돈 뒤 첫 sync 로 어제 행이 열릴 수도 있다. 평가기가 위반 사유를 내지 않아도

@@ -173,6 +173,12 @@ public enum NotificationTemplate {
     VERIFICATION_FAIL_EXPECTED(NotificationType.VERIFICATION_FAIL_EXPECTED,
             "[{challenge_title}] 인증을 놓쳤어요", "이대로면 실패로 확정돼요. 사정이 있었다면 이의를 신청해주세요."),
 
+    ROUTINE_MISSED(NotificationType.ROUTINE_MISSED,
+            "[{challenge_title}] 인증을 놓쳤어요", "어제 체크하지 않아 미완료로 남았어요. 오늘은 잊지 말고 체크해주세요."),
+
+    DAILY_ROUTINES_COMPLETED(NotificationType.DAILY_ROUTINES_COMPLETED,
+            "오늘 루틴을 모두 완료했어요", "오늘 해야 할 루틴 {routine_count}개를 전부 해냈어요. 수고하셨어요!"),
+
     CONSECUTIVE_FAILURE_WARNING(NotificationType.CONSECUTIVE_FAILURE_WARNING,
             "연속으로 인증을 놓치고 있어요",
             "한 번 더 놓치면 이 챌린지에서 나가게 돼요. 다음 사이클은 꼭 채워보세요."),

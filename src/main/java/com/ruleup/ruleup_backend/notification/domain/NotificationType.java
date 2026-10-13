@@ -9,10 +9,12 @@ import java.util.UUID;
 import static com.ruleup.ruleup_backend.notification.domain.NotificationParams.*;
 
 /**
- * 알림 타입 레지스트리 <b>25종</b> — 백엔드 테크 스펙 5절, 공통 8절.
+ * 알림 타입 레지스트리 <b>27종</b> — 백엔드 테크 스펙 5절, 공통 8절.
  *
  * <p>2026-09-19 {@link #VERIFICATION_FAIL_EXPECTED}(이의 필요) 가 추가돼 24종, 2026-09-28
- * {@link #INVITATION_RECEIVED}(설치 후 가입한 사람이 받은 초대, QA NAV-06) 가 추가돼 25종이다.
+ * {@link #INVITATION_RECEIVED}(설치 후 가입한 사람이 받은 초대, QA NAV-06) 가 추가돼 25종,
+ * 2026-10-13 {@link #ROUTINE_MISSED}(수동 방 미체크) · {@link #DAILY_ROUTINES_COMPLETED}(오늘 루틴 모두 완료) 가
+ * 추가돼 27종이다. 두 타입은 아직 노션 공통 8절 표에 행이 없다.
  *
  * <h4>23종 — 문서와 맞다</h4>
  * 한동안 코드가 문서보다 한 종 앞서 있었다. {@code CS_ANSWERED} 가 앱 운영 정책 §5.5 에만 있고
@@ -149,7 +151,26 @@ public enum NotificationType {
     CS_ANSWERED(NotificationToggleGroup.ACCOUNT, "ruleup://me/inquiries/{inquiry_id}",
             new String[]{INQUIRY_ID}),
 
-    // ===== 챌린지 그룹 9종 =====
+    // ===== 챌린지 그룹 11종 =====
+
+    /**
+     * 수동 인증 방에서 그날 체크하지 않고 하루가 지났다 — 귀속일 다음 날 자정 직후에 한 번.
+     *
+     * <p>수동 방은 미체크 날에 판정 행이 생기지 않는다. 그래서 실패 예정·확정 알림이 <b>하나도</b>
+     * 가지 않았고, 사용자는 놓친 줄도 몰랐다. 행이 없으니 {@code verification_id} 대신
+     * {@code (challenge_id, date)} 가 멱등 키다. 자동 방은 {@link #VERIFICATION_FAIL_EXPECTED} 가 같은 몫을 한다.
+     */
+    ROUTINE_MISSED(NotificationToggleGroup.CHALLENGE, "ruleup://challenge/{challenge_id}",
+            new String[]{CHALLENGE_ID, DATE}),
+
+    /**
+     * 오늘 해야 할 루틴을 전부 성공한 순간 — 하루 한 번. 특정 방이 아니라 하루 전체라 홈으로 보낸다.
+     *
+     * <p>「해야 할 루틴」은 그날 판정 대상이고 <b>목표 달성형</b>인 것이다. 규칙 지키기형은 하루가 끝나야
+     * (실은 이틀 뒤 확정에서야) 성공이 되므로 당일에 「완료」라 부를 수 없어 셈에서 뺀다.
+     */
+    DAILY_ROUTINES_COMPLETED(NotificationToggleGroup.CHALLENGE, "ruleup://home",
+            new String[]{DATE}),
 
     /**
      * 인증 판정 결과 — 방 상세의 「오늘」 카드. 앱에 인증 상세 단독 화면이 없다.
