@@ -6,7 +6,8 @@
   1. ALARM 상태인 연결 경보 — ECS 서비스 deployment alarms + 이 환경의 P0 경보(서울·중앙) + 관측 하트비트(OBS-01)
   2. CUJ Operation 원천 RuleUp/SLI EligibleCount(Env,Service,Operation) — 수집 지연 120초를 뺀 최근 완료 3구간 중 실제 데이터포인트 2개 미만.
      0 은 「실제로 보낸 0」이면 인정하고, 빈 Timestamps 는 실패다(FILL 하지 않는다)
-  3. 원천이 전부 0 인데 ALB 에 실요청이 있다 — 라우트 계측 누락
+  3. 원천이 전부 0 인데 API 요청(RuleUp/Traffic ApiRequestCount — 합성 점검·/health/public 제외)이 있다 — 라우트 계측 누락.
+     ALB 요청 수는 경로를 못 나눠 Route 53·외부 점검 호출이 섞여, 트래픽이 적을 때 늘 잘못 걸렸다
   4. BudgetFreeze=1 인 Operation — 완전한 30일·≥1,000건·coverage ≥99% 에서 버짓 소진(저표본은 0 이라 막지 않는다)
 경고만(통과): 저표본 P0 Flag 의 INSUFFICIENT_DATA — 위 원천·하트비트·백스톱이 정상일 때만.
 예외: INCIDENT_ROLLBACK_ID 가 있으면(승인된 사고 중 B 복구) 1·4 를 경고로 낮춘다. 2·3 은 그대로 본다.
@@ -24,12 +25,12 @@ sys.path.insert(0, os.path.join(ROOT, 'infra', 'monitoring', 'lambdas'))
 import slo_core  # noqa: E402
 
 
-def decide(alarms, raw_counts, alb_requests, budget_freeze, incident=None):
+def decide(alarms, raw_counts, api_requests, budget_freeze, incident=None):
     """(차단 사유 목록, 경고 목록). 순수 함수 — 시험한다.
 
     alarms        [(이름, 상태)] — 연결 경보·P0·하트비트
     raw_counts    {operation: [최근 완료 3구간 값, 없으면 None]}
-    alb_requests  같은 3구간 ALB 요청 합(None 이면 모름)
+    api_requests  같은 3구간 API 요청 합(None 이면 모름 — 아직 이 지표를 안 보내는 옛 앱)
     budget_freeze {operation: 0|1|None}
     """
     block, warn = [], []
@@ -45,8 +46,8 @@ def decide(alarms, raw_counts, alb_requests, budget_freeze, incident=None):
         if len(present) < 2:
             block.append(f'원천 누락: RuleUp/SLI EligibleCount Operation={op} — 최근 완료 3구간 중 데이터 {len(present)}개')
     total = sum(v for vals in raw_counts.values() for v in vals if v is not None)
-    if alb_requests and alb_requests >= 20 and total == 0:
-        block.append(f'계측 불일치: ALB 요청 {int(alb_requests)}건인데 CUJ EligibleCount 합이 0 — 라우트 계측 누락 의심')
+    if api_requests and api_requests >= 20 and total == 0:
+        block.append(f'계측 불일치: API 요청 {int(api_requests)}건인데 CUJ EligibleCount 합이 0 — 라우트 계측 누락 의심')
     for op, freeze in budget_freeze.items():
         if freeze == 1:
             soft(f'버짓 소진으로 기능 배포 중단: {op} (재개는 §8 승인 경로)')
@@ -80,15 +81,15 @@ def collect(reg, env):
     q = [{'Id': f'e{i}', 'MetricStat': {'Metric': {'Namespace': 'RuleUp/SLI', 'MetricName': 'EligibleCount', 'Dimensions': [
         {'Name': 'Env', 'Value': env}, {'Name': 'Service', 'Value': svc}, {'Name': 'Operation', 'Value': op}]}, 'Period': 60, 'Stat': 'Sum'}}
          for i, op in enumerate(ops)]
-    q.append({'Id': 'alb', 'MetricStat': {'Metric': {'Namespace': 'AWS/ApplicationELB', 'MetricName': 'RequestCount', 'Dimensions': [
-        {'Name': 'LoadBalancer', 'Value': reg['load_balancer']}, {'Name': 'TargetGroup', 'Value': reg['target_group']}]}, 'Period': 180, 'Stat': 'Sum'}})
+    q.append({'Id': 'api', 'MetricStat': {'Metric': {'Namespace': 'RuleUp/Traffic', 'MetricName': 'ApiRequestCount', 'Dimensions': [
+        {'Name': 'Env', 'Value': env}, {'Name': 'Service', 'Value': svc}]}, 'Period': 180, 'Stat': 'Sum'}})
     res = {r['Id']: r for r in cw.get_metric_data(MetricDataQueries=q, StartTime=start, EndTime=end)['MetricDataResults']}
     buckets = [start + timedelta(minutes=k) for k in range(3)]
     raw = {}
     for i, op in enumerate(ops):
         got = {t.replace(second=0, microsecond=0): v for t, v in zip(res[f'e{i}']['Timestamps'], res[f'e{i}']['Values'])}
         raw[op] = [got.get(b) for b in buckets]
-    alb = sum(res['alb']['Values']) if res['alb']['Values'] else None
+    api_requests = sum(res['api']['Values']) if res['api']['Values'] else None
     freeze = {}
     mcw = boto3.client('cloudwatch', region_name=mon)
     fq = [{'Id': f'f{i}', 'MetricStat': {'Metric': {'Namespace': 'RuleUp/SLO', 'MetricName': 'BudgetFreeze', 'Dimensions': [
@@ -97,7 +98,7 @@ def collect(reg, env):
     fres = mcw.get_metric_data(MetricDataQueries=fq, StartTime=end - timedelta(minutes=30), EndTime=end)['MetricDataResults']
     for r in fres:
         freeze[ops[int(r['Id'][1:])]] = r['Values'][0] if r['Values'] else None
-    return alarms, raw, alb, freeze
+    return alarms, raw, api_requests, freeze
 
 
 if __name__ == '__main__':
