@@ -18,6 +18,10 @@ import java.util.Map;
  *
  * <p>같은 필터에서 처리량 원천({@code RuleUp/Traffic})도 함께 센다 — 로그인 완료·sync 수신(FLOW-01/02)과
  * 상태별 4xx 거절 수(HTTP-04). 이것들은 제품 참여 지표가 아니라 서버가 실제로 받아 처리한 건수다.
+ *
+ * <p>{@code ApiRequestCount} 는 합성 점검을 뺀 {@code /api/**} 요청 수다 — 배포 사전 점검이 「API 요청은 들어오는데
+ * CUJ 원천이 0」(라우트 계측 누락)을 가르는 기준. ALB 요청 수는 경로를 못 나눠 Route 53·외부 점검의
+ * {@code /health/public} 호출(분당 십수 건)이 섞이고, 트래픽이 적을 때 늘 계측 누락으로 잘못 걸렸다.
  */
 @Component
 public class SliRecorder {
@@ -31,6 +35,7 @@ public class SliRecorder {
     private final Map<SliOperation, Keys> keys = new EnumMap<>(SliOperation.class);
     private final MetricKey loginCompleted;
     private final MetricKey syncReceived;
+    private final MetricKey apiRequests;
     private final Map<Integer, MetricKey> rejects = new java.util.HashMap<>();
 
     private record Keys(MetricKey eligible, MetricKey bad, MetricKey latencyBad, MetricKey duration) {}
@@ -53,14 +58,21 @@ public class SliRecorder {
         }
         loginCompleted = MetricKey.count(TRAFFIC, "LoginCompletedCount", ctx.dims());
         syncReceived = MetricKey.count(TRAFFIC, "SyncReceivedCount", ctx.dims());
+        apiRequests = MetricKey.count(TRAFFIC, "ApiRequestCount", ctx.dims());
         for (int status : REJECT_STATUSES) {
             rejects.put(status, MetricKey.count(TRAFFIC, "HttpRejectCount", ctx.dims("Status", String.valueOf(status))));
         }
         if (publicApi) {
             buffer.declare(loginCompleted);
             buffer.declare(syncReceived);
+            buffer.declare(apiRequests);
             rejects.values().forEach(buffer::declare);
         }
+    }
+
+    /** 합성 점검이 아닌 {@code /api/**} 요청 한 건 — CUJ 여부와 상관없이 센다. */
+    public void recordApiRequest() {
+        buffer.increment(apiRequests);
     }
 
     /** 응답이 끝난 요청 한 건. {@code op} 가 null 이면 CUJ 밖이라 거절 수만 센다. */
