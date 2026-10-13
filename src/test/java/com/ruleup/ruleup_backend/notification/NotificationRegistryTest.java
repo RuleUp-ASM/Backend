@@ -35,7 +35,7 @@ class NotificationRegistryTest {
     class Types {
 
         @Test
-        @DisplayName("25종 — 공통 8절 표 22종 + CS 답변 1종 + 실패 예정 1종(2026-09-19) + 받은 초대 1종(2026-09-28)")
+        @DisplayName("27종 — 공통 8절 표 22종 + CS 답변 + 실패 예정(09-19) + 받은 초대(09-28) + 수동 방 미체크·모두 완료(10-13)")
         void twentyThreeTypes() {
             assertThat(Arrays.stream(NotificationType.values()).map(Enum::name))
                     .containsExactlyInAnyOrder(
@@ -47,6 +47,7 @@ class NotificationRegistryTest {
                             "VERIFICATION_RESULT", "VERIFICATION_FAIL_EXPECTED", "CONSECUTIVE_FAILURE_WARNING",
                             "CHALLENGE_LIFECYCLE", "WATCHER_INVITATION_EXPIRED", "TIER_CHANGED",
                             "TIER_BOUNDARY_NEAR", "PENALTY_FAILURE_SHARED", "WATCHER_REACTION",
+                            "ROUTINE_MISSED", "DAILY_ROUTINES_COMPLETED",
                             "ROUTINE_REMINDER", "MARKETING", "ANNOUNCEMENT");
         }
 
@@ -78,7 +79,7 @@ class NotificationRegistryTest {
         }
 
         @Test
-        @DisplayName("챌린지 9종")
+        @DisplayName("챌린지 11종")
         void challenge() {
             assertThat(byGroup(NotificationToggleGroup.CHALLENGE)).containsExactlyInAnyOrder(
                     NotificationType.VERIFICATION_RESULT, NotificationType.VERIFICATION_FAIL_EXPECTED,
@@ -86,7 +87,8 @@ class NotificationRegistryTest {
                     NotificationType.CHALLENGE_LIFECYCLE,
                     NotificationType.WATCHER_INVITATION_EXPIRED, NotificationType.TIER_CHANGED,
                     NotificationType.TIER_BOUNDARY_NEAR, NotificationType.PENALTY_FAILURE_SHARED,
-                    NotificationType.WATCHER_REACTION);
+                    NotificationType.WATCHER_REACTION,
+                    NotificationType.ROUTINE_MISSED, NotificationType.DAILY_ROUTINES_COMPLETED);
         }
 
         @Test

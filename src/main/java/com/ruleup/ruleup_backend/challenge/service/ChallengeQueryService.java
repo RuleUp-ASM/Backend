@@ -72,6 +72,11 @@ public class ChallengeQueryService {
         return memberRepository.findActiveOnDateAfter(date, after, org.springframework.data.domain.PageRequest.of(0, limit));
     }
 
+    /** 셋업 상태와 무관하게 — 수동 인증 방처럼 셋업 없이 인증할 수 있는 방을 훑을 때. */
+    public List<ChallengeMember> findActiveOnDateAnySetupAfter(LocalDate date, UUID after, int limit) {
+        return memberRepository.findActiveOnDateAnySetupAfter(date, after, org.springframework.data.domain.PageRequest.of(0, limit));
+    }
+
     public List<ChallengeMember> findFrequencyRolloverTargets(LocalDate date) {
         return memberRepository.findByScheduleTypeAndStatusAndCurPeriodEndLessThan(
                 ScheduleType.FREQUENCY, MemberStatus.ACTIVE, date);

@@ -70,6 +70,8 @@ public final class NotificationParams {
     public static final String ROUTINE_NAME = "routine_name";
     /** 문구에 들어가는 남은 루틴 목록 — 「물 마시기, 러닝 외 1개」. 리마인더가 쓴다. */
     public static final String ROUTINE_SUMMARY = "routine_summary";
+    /** 문구에 들어가는 오늘 완료한 루틴 수. */
+    public static final String ROUTINE_COUNT = "routine_count";
     /** 문구에 들어가는 남은 루틴 수. */
     public static final String PENDING_COUNT = "pending_count";
     /** 강퇴 사유 — 방장이 직접 쓴 문장이라 템플릿이 아니라 값으로 들어간다. */

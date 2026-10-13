@@ -83,6 +83,7 @@ class VerificationResultNotificationIT extends VerificationApiSupport {
             UUID challengeId = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", VISIT_PARAMS);
             UUID memberId = insertReadyMember(challengeId, me.id(),
                     anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+            anotherPendingRoutine(me);
 
             syncFullVisit(me, memberId);
 
@@ -101,6 +102,7 @@ class VerificationResultNotificationIT extends VerificationApiSupport {
             UUID challengeId = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", VISIT_PARAMS);
             UUID memberId = insertReadyMember(challengeId, me.id(),
                     anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+            anotherPendingRoutine(me);
 
             syncFullVisit(me, memberId);
             syncFullVisit(me, memberId);
@@ -114,6 +116,7 @@ class VerificationResultNotificationIT extends VerificationApiSupport {
             Member me = member(uniq("vrm"));
             UUID challengeId = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
             insertActiveMembership(challengeId, me.id(), "OWNER");
+            anotherPendingRoutine(me);
 
             manualService.submit(me.id(), challengeId, new ManualVerificationRequest(null, null));
 
@@ -122,6 +125,15 @@ class VerificationResultNotificationIT extends VerificationApiSupport {
                 assertThat(n.getTitle()).isEqualTo("[테스트 챌린지] 인증이 완료됐어요");
             });
         }
+    }
+
+    /**
+     * 오늘 아직 체크하지 않은 수동 방 하나를 더 둔다. 오늘 해야 할 루틴이 하나뿐이면 「모두 완료」가 개별 성공
+     * 알림을 대신하므로(DailyRoutineNoticeIT), 개별 알림을 보는 시험은 남은 루틴이 있는 상태에서 본다.
+     */
+    private void anotherPendingRoutine(Member me) {
+        UUID other = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
+        insertActiveMembership(other, me.id(), "OWNER");
     }
 
     private String titleOf(UUID challengeId) {
@@ -140,6 +152,7 @@ class VerificationResultNotificationIT extends VerificationApiSupport {
             UUID challengeId = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", VISIT_PARAMS);
             UUID memberId = insertReadyMember(challengeId, me.id(),
                     anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
+            anotherPendingRoutine(me);
 
             syncFullVisit(me, memberId);
 
