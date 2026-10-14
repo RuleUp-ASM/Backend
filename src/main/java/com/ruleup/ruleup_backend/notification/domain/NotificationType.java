@@ -177,9 +177,14 @@ public enum NotificationType {
      *
      * <p>딥링크는 {@code ruleup://challenge/{id}} (단수) 다 — 2026-09-19 Android 와 합의한 계약값이다
      * (QA NOTI-15). 다른 챌린지 그룹 타입의 {@code challenges/} 는 아직 정합 전이다.
+     *
+     * <p>멱등 키는 {@code (verification_id, variant)} 다. 한 판정이 결과를 바꿀 수 있어서다 — 수동 체크
+     * (MANUAL_SUCCESS)를 당일 취소하면 같은 행이 이틀 뒤 CONFIRMED_FAILURE 로 굳는다. 키가
+     * {@code verification_id} 하나였을 때는 실패 확정이 앞선 성공 알림의 UNIQUE 에 막혀 조용히 사라졌다.
+     * 같은 변형의 재발행(재 sync·취소 후 재체크·배치 재실행)은 그대로 한 번이다.
      */
     VERIFICATION_RESULT(NotificationToggleGroup.CHALLENGE, "ruleup://challenge/{challenge_id}",
-            new String[]{VERIFICATION_ID}),
+            new String[]{VERIFICATION_ID, VARIANT}),
 
     /**
      * 실패 예정 진입 — 「이의제기가 필요해요」(QA NOTI-16). 탭하면 <b>이의를 낼 수 있는 화면</b>으로 간다.
@@ -193,8 +198,8 @@ public enum NotificationType {
      * <p>그래서 {@code date}(귀속일) 가 파라미터에 들어간다. 멱등 키는 {@code verification_id} 그대로다 —
      * 키에 날짜를 더하면 같은 건에 두 번 적재될 길이 열린다.
      *
-     * <p>{@link #VERIFICATION_RESULT} 의 변형으로 두지 않는다. 멱등 키가 {@code verification_id} 하나라
-     * 같은 건에 실패 예정 알림이 먼저 적재되면 이틀 뒤 「실패로 확정됐어요」가 UNIQUE 에 막혀 사라진다.
+     * <p>{@link #VERIFICATION_RESULT} 의 변형으로 두지 않는다. 타입이 다르면 앱이 목적지를 타입으로 가를 수
+     * 있고, 처음 이렇게 나눈 이유였던 멱등 키 충돌(실패 예정이 이틀 뒤 「실패로 확정됐어요」를 막음)도 따로 막힌다.
      */
     VERIFICATION_FAIL_EXPECTED(NotificationToggleGroup.CHALLENGE, "ruleup://me/calendar/{date}",
             new String[]{VERIFICATION_ID}),

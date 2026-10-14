@@ -47,12 +47,19 @@ class VerificationResultNotificationIT extends VerificationApiSupport {
     @Autowired NotificationRepository notificationRepository;
     @Autowired VerificationManualService manualService;
     @Autowired com.ruleup.ruleup_backend.verification.service.FailExpectedNoticeJob failExpectedJob;
+    @Autowired com.ruleup.ruleup_backend.verification.service.VerificationFinalizeService finalizeService;
+    @Autowired TestcontainersConfiguration.MutableClock clock;
 
     private MockMvc mvc;
 
     @BeforeEach
     void setUp() {
         mvc = MockMvcBuilders.webAppContextSetup(wac).apply(springSecurity()).build();
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void resetClock() {
+        clock.reset();
     }
 
     @Override protected MockMvc mvc() { return mvc; }
@@ -124,6 +131,35 @@ class VerificationResultNotificationIT extends VerificationApiSupport {
                 assertThat(n.getChallengeId()).isEqualTo(challengeId);
                 assertThat(n.getTitle()).isEqualTo("[테스트 챌린지] 인증이 완료됐어요");
             });
+        }
+    }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("결과가 바뀐 판정")
+    class ChangedOutcome {
+
+        @Test
+        @DisplayName("수동 체크를 당일 취소하면 이틀 뒤 실패 확정 알림이 앞선 성공 알림에 막히지 않는다")
+        void canceledManualCheckStillGetsConfirmedFailure() throws Exception {
+            Member me = member(uniq("vrc"));
+            UUID challengeId = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
+            insertActiveMembership(challengeId, me.id(), "OWNER");
+            anotherPendingRoutine(me);
+
+            String verificationId = manualService.submit(me.id(), challengeId,
+                    new ManualVerificationRequest(null, null)).verificationId();
+            manualService.cancel(me.id(), UUID.fromString(verificationId));
+            manualService.submit(me.id(), challengeId, new ManualVerificationRequest(null, null));
+            manualService.cancel(me.id(), UUID.fromString(verificationId));
+            assertThat(resultsOf(me.id())).as("취소 후 다시 체크해도 성공 알림은 한 번").hasSize(1);
+
+            clock.advance(java.time.Duration.ofDays(2).plusMinutes(1));
+            finalizeService.finalizeDue();
+
+            assertThat(resultsOf(me.id())).extracting(Notification::getTitle).containsExactly(
+                    "[테스트 챌린지] 인증이 실패로 확정됐어요",
+                    "[테스트 챌린지] 인증이 완료됐어요");
         }
     }
 

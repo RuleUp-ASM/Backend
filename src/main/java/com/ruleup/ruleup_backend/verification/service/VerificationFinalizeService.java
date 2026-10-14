@@ -509,8 +509,8 @@ public class VerificationFinalizeService {
 
         // 판정 결과 고지 — 성공·실패 둘 다. 확정 시각이 귀속일 이틀 뒤 00:00 이라 그때 유저는
         // 앱을 보고 있지 않다. 알림함이 「그날이 어떻게 끝났는지」를 확인할 유일한 자리다.
-        // 판정 하나에 확정은 하나뿐이라 verification_id 가 곧 멱등 키이고, 배치가 재실행돼도
-        // 두 번 적재되지 않는다.
+        // 판정 하나에 확정은 하나뿐이라 (verification_id, variant) 멱등 키로 배치가 재실행돼도
+        // 두 번 적재되지 않는다. 변형이 키에 들어가 있어 당일 취소된 수동 체크의 성공 알림에 막히지 않는다.
         if (member != null) {
             notificationPublisher.publish(NotificationEvent.forChallenge(member.getUserId(),
                     NotificationType.VERIFICATION_RESULT,
