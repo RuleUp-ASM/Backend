@@ -6,6 +6,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.event.ContextClosedEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -27,6 +29,7 @@ public class UserModerationQueue {
     private final String url;
     private final boolean local;
     private final ObjectMapper json = new ObjectMapper();
+    private volatile boolean stopping;
 
     public UserModerationQueue(JdbcTemplate jdbc, UserModerationService moderation,
                               @Qualifier("challengeModerationSqsClient") ObjectProvider<SqsClient> clients,
@@ -64,9 +67,15 @@ public class UserModerationQueue {
         }
     }
 
+    /** 종료가 시작되면 새 수신을 멈춘다 — 닫힌 SqsClient 로 폴링하지 않게(ChallengeModerationQueue#stop 과 같은 이유). */
+    @EventListener(ContextClosedEvent.class)
+    public void stop() {
+        stopping = true;
+    }
+
     @Scheduled(fixedDelayString = "${app.moderation.poll-ms:5000}")
     public void poll() {
-        if (local || url.isBlank()) return;
+        if (local || url.isBlank() || stopping) return;
         try {
             SqsClient sqs = clients.getObject();
             for (var message : sqs.receiveMessage(b -> b.queueUrl(url).maxNumberOfMessages(1)
@@ -76,7 +85,9 @@ public class UserModerationQueue {
                 // Pending on provider failure remains eligible for tomorrow's sweep.
                 sqs.deleteMessage(b -> b.queueUrl(url).receiptHandle(message.receiptHandle()));
             }
-        } catch (Exception failure) { log.warn("user_moderation_consume_failed error={}", failure.getClass().getSimpleName()); }
+        } catch (Exception failure) {
+            if (!stopping) log.warn("user_moderation_consume_failed error={}", failure.getClass().getSimpleName());
+        }
     }
 
     public record MessageBody(UUID userId, List<String> targets) {}

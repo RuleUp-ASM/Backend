@@ -6,6 +6,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.event.ContextClosedEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.services.sqs.SqsClient;
@@ -27,6 +29,7 @@ public class ChallengeModerationQueue {
     private final boolean local;
     private final ChallengeModerationStore store;
     private final ChallengeModerationService service;
+    private volatile boolean stopping;
 
     public ChallengeModerationQueue(@Qualifier("challengeModerationSqsClient") ObjectProvider<SqsClient> sqs,
                                     @Value("${app.moderation.queue.url:}") String queueUrl,
@@ -60,9 +63,19 @@ public class ChallengeModerationQueue {
         return local || (!queueUrl.isEmpty() && sqs.getIfAvailable() != null);
     }
 
+    /**
+     * 종료가 시작되면 새 수신을 멈춘다. 컨텍스트 종료 이벤트는 빈 파괴보다 먼저 온다 — SqsClient 가
+     * 닫힌 뒤에도 5초 폴러가 돌아 배포 때마다 옛 태스크가 「Connection pool shut down」·
+     * RejectedExecutionException 을 ERROR 로 남겼다. 받아 둔 메시지는 가시성 만료 후 새 태스크가 받는다.
+     */
+    @EventListener(ContextClosedEvent.class)
+    public void stop() {
+        stopping = true;
+    }
+
     @Scheduled(fixedDelayString = "${app.moderation.queue.poll-delay-ms:5000}")
     public void poll() {
-        if (local || queueUrl.isEmpty()) return;
+        if (local || queueUrl.isEmpty() || stopping) return;
         try {
             for (Message message : sqs.getObject().receiveMessage(ReceiveMessageRequest.builder()
                     .queueUrl(queueUrl).maxNumberOfMessages(1).waitTimeSeconds(1).visibilityTimeout(120)
@@ -70,6 +83,8 @@ public class ChallengeModerationQueue {
                 handle(message);
             }
         } catch (RuntimeException failure) {
+            // 종료 신호와 같은 순간에 시작된 수신은 닫히는 클라이언트에 걸릴 수 있다 — 장애가 아니다.
+            if (stopping) return;
             // 클래스 이름만 남기면 enqueue 때처럼 원인이 가려진다 — 메시지까지 남긴다.
             log.error("moderation_receive_failed error={}", failure.toString());
         }
