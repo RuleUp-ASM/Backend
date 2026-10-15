@@ -27,7 +27,7 @@
   "slack_p0_mention_member": null,
   "route53_health_check_id": "7f7ffb91-fd17-4afa-9f08-85bdf7d13d32",
   "healthchecks": {"obs03_ping_url": null, "obs04_ping_url": null},
-  "pagerduty": {"service_id": null, "api_key_secret": null},
+  "pagerduty": {"_note": "stg 는 온콜 없음 — P0 도 시험 채널(ruleup-stg-alerts)만"},
   "dashboards": {"ops": "ruleup-stg-ops", "observe": "ruleup-stg-observe", "business": null},
   "runbook_url": "https://app.notion.com/p/3f5ad4145fb6811da317e294cf339757",
   "catalog_url": "https://app.notion.com/p/3f5ad4145fb681bbabccefd603336193",

@@ -59,7 +59,7 @@
 
 | 항목 | 막는 것 | 그 전까지 |
 |---|---|---|
-| PagerDuty(G01·G03), OBS-03/05/06 | 계약·계정 없음 | P0 = Slack 긴급 채널 멘션. 원장 `sns.pagerduty` 에 토픽 이름을 넣으면 P0 경보에 붙는다 |
+| PagerDuty 개통(G01·G03), OBS-03/05/06 | 계약·계정·API 키 없음 | 설정은 `alerting/pagerduty.py` 로 준비됨(1차 → 10분 미ACK → 팀원). 개통 전 P0 = Slack 긴급 채널 멘션 |
 | OBS-04 외부 watchdog | Healthchecks.io 없음 | CloudWatch 하트비트 5분 누락 P0 로 대신(같은 리전 장애는 못 잡음). 원장 `healthchecks.obs04_ping_url` 이 생기면 계산기가 외부 ping 도 한다 |
 | APP-01~04·ERR-01 (G06) | Crashlytics·Sentry 연결 미검증 | SLO·ERROR 로그 패널 |
 | AUTH-01 | 지점별 격리 시험 계정·Secrets | C01 SLO(실사용 로그인) |

@@ -62,5 +62,14 @@ EventBridge 규칙이 서울·버지니아 모두 `ruleup-prod-P0-` 접두어로
 누락 정책: 커스텀 P0·EDGE leaf = `ignore`(입력이 끊겨도 정상으로 돌아가지 않는다 — 재무장은 정상 Flag=0 또는 `../lambdas/rearm.py`),
 하트비트·NATIVE-01 = `breaching`, 나머지 = `notBreaching`.
 
-**온콜**: Incident Manager(`ssm-contacts`·`ssm-incidents`)는 조직 SCP 가 막는다. 노션은 PagerDuty 를 채택했지만 아직 계약 전이라,
-지금 P0 의 호출 수단은 긴급 채널 멘션(`p0_mention.py`·`routing.py`)뿐이다. 원장 `sns.pagerduty` 가 생기면 P0 경보 AlarmActions 에 붙는다.
+**온콜**(`pagerduty.py`, prod 만): **1차 담당(이성은)에게 먼저 → 10분 안에 ACK 가 없으면 팀원 → 그래도 없으면 처음부터 다시(2회)**.
+PagerDuty 서비스 「RuleUp prod P0」 — 긴급도 항상 high, ACK 후 15분 안에 해결 안 되면 다시 울림, 시간 기반 자동 종료 끔.
+CloudWatch → 같은 리전 SNS `ruleup-prod-pagerduty`(서울·버지니아) → PagerDuty 공식 CloudWatch 연동. 경보가 OK 로 돌아오면 사건이 닫힌다.
+Incident Manager(`ssm-contacts`·`ssm-incidents`)는 조직 SCP 가 막아 쓰지 않는다. 긴급 채널 멘션(`p0_mention.py`)은 보조로 그대로 둔다.
+
+개통 순서(PagerDuty 계정·API 키가 생긴 뒤):
+1. 두 사람 모두 PagerDuty 앱 설치 + 프로필 알림 규칙에 **High-urgency: 즉시 푸시 + 1분 뒤 전화**를 넣는다(서비스가 아니라 사람마다 설정이다).
+2. `PAGERDUTY_API_TOKEN=… python3 infra/monitoring/alerting/pagerduty.py setup --primary <내 PD 이메일> --secondary <팀원 PD 이메일>` — 원장 `env/prod.json` 이 채워진다 → 커밋.
+3. `python3 infra/monitoring/alerting/p0_p1.py prod` — P0 경보 AlarmActions·OKActions 에 PagerDuty 토픽이 붙는다.
+4. 실수신 시험(G01): `pagerduty.py test-trigger` → 내 폰이 울리면 **ACK 하지 않고** 10분 기다려 팀원 폰이 울리는지 → `pagerduty.py test-resolve`.
+   노션 「대시보드·알림 요약표」 P0 온콜 연결 체크표 12종은 경보별로 `aws cloudwatch set-alarm-state` 로 한 번씩 확인한다(다음 평가에서 OK 로 돌아온다).

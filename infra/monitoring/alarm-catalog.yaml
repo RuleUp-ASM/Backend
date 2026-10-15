@@ -14,7 +14,7 @@
 schema_version: 2
 status: proposed
 resource_registry: infra/monitoring/env/<env>.json
-pager: PagerDuty            # 미계약 — 원장 sns.pagerduty 가 null 인 동안 P0 는 Slack 긴급 채널 멘션만
+pager: PagerDuty            # alerting/pagerduty.py — 1차 담당 → 10분 미ACK → 팀원(2회 반복). 미계약이라 원장 sns.pagerduty 가 null 인 동안 P0 는 Slack 긴급 채널 멘션만
 watchdog: Healthchecks.io   # 미계약 — 원장 healthchecks.* 가 null
 slo:
   window_days: 30
