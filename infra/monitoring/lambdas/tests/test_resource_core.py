@@ -50,8 +50,8 @@ class ResTest(unittest.TestCase):
         self.assertIsNone(r.res01(cap(mem_min=[99.5, 99.5], mem_samples=[1, 2])))
 
     def test_res01_98_needs_blocked_scale_out(self):
-        self.assertEqual(r.res01(cap(mem_min=[98.5, 98.2])), 0)
-        self.assertEqual(r.res01(cap(mem_min=[98.5, 98.2], scale_blocked_history=[1, 1, 1, 1])), 1)
+        self.assertEqual(r.res01(cap(mem_min=[98.5, 50])), 0)
+        self.assertEqual(r.res01(cap(mem_min=[98.5, 50], scale_blocked_history=[1, 0, 0, 0])), 1, '1분이면 충분하다(10/15)')
 
     def test_res02(self):
         self.assertEqual(r.res02(cap(oom_5m=2, healthy=1)), 1)
@@ -59,10 +59,13 @@ class ResTest(unittest.TestCase):
         self.assertEqual(r.res02(cap(oom_5m=3, healthy=2)), 0)
 
     def test_res03_cpu_alone_is_not_p0(self):
-        self.assertEqual(r.res03(cap(cpu_avg=[99.5, 99.4, 99.9])), 0, '확장 가능하면 P1(ECS-09)')
-        self.assertEqual(r.res03(cap(cpu_avg=[99.5, 99.4, 99.9], scale_blocked_history=[1, 1, 1, 1])), 0, '처리 포화 증거 없음')
-        self.assertEqual(r.res03(cap(cpu_avg=[99.5, 99.4, 99.9], scale_blocked_history=[1, 1, 1, 1],
-                                     busy_threads_max=[96, 97])), 1)
+        self.assertEqual(r.res03(cap(cpu_avg=[99.5, 30, 30])), 0, '확장 가능하면 P1(ECS-09)')
+        self.assertEqual(r.res03(cap(cpu_avg=[99.5, 30, 30], scale_blocked_history=[1, 1, 0, 0])), 0, '처리 포화 증거 없음')
+        self.assertEqual(r.res03(cap(cpu_avg=[99.5, 30, 30], scale_blocked_history=[1, 1, 0, 0], busy_threads_max=[96, 10])), 1,
+                         '1분이면 충분하다(10/15)')
+
+    def test_res03_blocked_must_last_a_minute(self):
+        self.assertEqual(r.res03(cap(cpu_avg=[99.5], scale_blocked_history=[1, 0], busy_threads_max=[96])), 0)
 
     def test_scale_out_blocked(self):
         self.assertEqual(r.scale_out_blocked(6, 6, False), 1)
@@ -81,20 +84,27 @@ class StorageTest(unittest.TestCase):
 
     def test_res04_requires_unexpandable(self):
         free = [1 * self.GB + i * 0.1 * self.GB for i in range(16)]
-        self.assertEqual(r.res04(r.Storage([4, 4.5], free, expandable=True)), 0)
-        self.assertEqual(r.res04(r.Storage([4, 4.5], free, expandable=False)), 1)
-        self.assertIsNone(r.res04(r.Storage([4], free, expandable=False)))
+        self.assertEqual(r.res04(r.Storage([4, 6], free, expandable=True)), 0)
+        self.assertEqual(r.res04(r.Storage([4, 6], free, expandable=False)), 1)
+        self.assertIsNone(r.res04(r.Storage([None, 4], free, expandable=False)))
 
     def test_expandable(self):
         self.assertFalse(r.expandable({'AllocatedStorage': 100}))
         self.assertFalse(r.expandable({'AllocatedStorage': 200, 'MaxAllocatedStorage': 200}))
         self.assertTrue(r.expandable({'AllocatedStorage': 100, 'MaxAllocatedStorage': 200}))
 
-    def test_db_memory_pressure(self):
-        low = [0.3 * self.GB] * 10   # 4GiB 의 10% = 0.4GiB 아래
-        self.assertEqual(r.db_memory_pressure('db.t4g.medium', low, [300, 200, 100]), 1)
-        self.assertEqual(r.db_memory_pressure('db.t4g.medium', low, [100, 100]), 0)
-        self.assertIsNone(r.db_memory_pressure('db.x9.huge', low, [300, 100]))
+    def test_db_memory_pressure_p1_five_minutes(self):
+        low = [0.3 * self.GB] * 5    # 4GiB 의 10% = 0.4GiB 아래
+        self.assertEqual(r.db_memory_flag('db.t4g.medium', low, [300, 200, 100], r.DB_MEMORY_PRESSURE), 1)
+        self.assertEqual(r.db_memory_flag('db.t4g.medium', low, [100, 100], r.DB_MEMORY_PRESSURE), 0, 'Swap 이 늘지 않음')
+        self.assertIsNone(r.db_memory_flag('db.t4g.medium', low[:4], [300, 100], r.DB_MEMORY_PRESSURE), '5분이 안 찼다')
+        self.assertIsNone(r.db_memory_flag('db.x9.huge', low, [300, 100], r.DB_MEMORY_PRESSURE))
+
+    def test_db_memory_critical_p0_one_minute(self):
+        """P0 는 RAM 5% 1분 — 10% 선 아래여도 5% 를 넘으면 P1 만."""
+        self.assertEqual(r.db_memory_flag('db.t4g.medium', [0.15 * self.GB], [300, 250, 200], r.DB_MEMORY_CRITICAL), 1)
+        self.assertEqual(r.db_memory_flag('db.t4g.medium', [0.3 * self.GB], [300, 250, 200], r.DB_MEMORY_CRITICAL), 0)
+        self.assertIsNone(r.db_memory_flag('db.t4g.medium', [0.15 * self.GB], [300], r.DB_MEMORY_CRITICAL), 'Swap 추세 두 점 필요')
 
 
 if __name__ == '__main__':

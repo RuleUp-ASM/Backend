@@ -1,4 +1,4 @@
-"""서버(운영) 대시보드 ruleup-<env>-ops — 노션 「운영 경보 상세」 §4.2 패널 순서(OPS-1~5). 재실행 안전.
+"""서버(운영) 대시보드 ruleup-<env>-ops — 노션 「운영 경보 상세」 §4.2 패널 순서(OPS-1~6, OPS-6 JVM 은 10/15 리뷰). 재실행 안전.
 prod 는 이 화면 + 사용자 지표(business_dashboard.py) + 감시망(observe_dashboard.py), stg 는 business 없이.
 런북(RB-01~03)이 패널 번호로 이 화면을 가리킨다 — 순서를 바꾸면 노션 런북도 고친다.
 사용: python dashboard.py [prod|stg]"""
@@ -124,7 +124,12 @@ row(('JVM — Old(GC 후)·GC 정지(%)', [ops_m('OldGenAfterGcPct'), ops_m('GcP
     ('종료·OOM·배포 실패', [ops_m('UnexpectedStopCount', 'Sum'), ops_m('OOMStopCount', 'Sum'), ops_m('DeployFailureCount', 'Sum')], None))
 rds = lambda m, s='Average': ['AWS/RDS', m, 'DBInstanceIdentifier', REG['rds_instance'], {'stat': s}]
 dbm = lambda m, d, s='Maximum': ['RuleUp/DB', m, 'Database', d, 'Env', ENV, {'stat': s}]
-row(('RDS CPU(%)·연결 사용률(%)', [rds('CPUUtilization'), dbm('DbConnectionPct', 'primary')], {'period': 60}),
+row(('RDS CPU(%)·연결 사용률(%)', [rds('CPUUtilization'), dbm('DbConnectionPct', 'primary')], {'period': 60,
+     'annotations': {'horizontal': [{'value': 80, 'label': 'DB-01'}, {'value': 99, 'label': 'DB-10 P0'}]}}),
+    ('RDS 메모리 — 여유(바이트)·Swap·Flag', [rds('FreeableMemory', 'Minimum'), rds('SwapUsage', 'Maximum'),
+                                       *[dbm(f, REG['rds_instance'])[:-1] + [{'stat': 'Maximum', 'label': f, 'yAxis': 'right'}]
+                                         for f in ('DbMemoryPressure', 'DbMemoryCritical')]],
+     {'period': 60}),
     ('RDS 여유 저장공간(%)·소진 예상(분)', [dbm('FreeStoragePct', REG['rds_instance'], 'Minimum'),
                                        dbm('StorageMinutesToFull', REG['rds_instance'], 'Minimum') + []], {'period': 60}),
     ('락 대기·장기 트랜잭션(초)·데드락', [dbm('OldestLockWaitSec', 'primary'), dbm('OldestTransactionSec', 'primary'),
@@ -164,6 +169,22 @@ row(('Running·Desired(배포 교체 구간)', [ops_m('RunningCount', 'Minimum')
     ('CUJ 실패 합계 vs 4xx', [[{'expression': 'SUM([' + ','.join(f'b{i}' for i in range(len(OPS))) + '])', 'label': '가용성 실패 합', 'id': 'bs'}]]
      + [sli('AvailabilityBadCount', op, id=f'b{i}', visible=False) for i, op in enumerate(OPS)]
      + [['RuleUp/Traffic', 'HttpRejectCount', *BASE, 'Status', '400', {'stat': 'Sum', 'label': '400', 'yAxis': 'right'}]], {'period': 60}))
+
+# ---------------- OPS-6 · JVM 런타임 (10/15 리뷰) ----------------
+# 원천은 앱 RuntimeOpsSampler(RuleUp/Ops). 태스크 차원이 없어 Maximum = 가장 나쁜 태스크, ProcessUptimeSec 는 Minimum = 막 재기동한 태스크.
+text('## OPS-6 · JVM 런타임 — 힙 영역·GC 정지·스레드·클래스·버퍼 (누수·GC 지연·락 경합)')
+row(('힙·Non-heap 사용(MB) — 영역별, 기준선 = 최대 힙', [ops_m('JvmMemoryUsedMb', 'Maximum', 'Area', a, label=a) for a in ('eden', 'survivor', 'old')]
+     + [ops_m('JvmHeapMaxMb', label='최대 힙')]
+     + [ops_m('JvmMemoryUsedMb', 'Maximum', 'Area', a, label=a, yAxis='right') for a in ('metaspace', 'codecache')], {'period': 60}),
+    ('GC — 직후 Old(%)·정지 최대(ms)·정지 횟수', [ops_m('OldGenAfterGcPct', label='Old(GC 후, JVM-01)'), ops_m('GcPauseRatio5m', label='정지 비율 5분(JVM-02)'),
+                                             ops_m('JvmGcPauseMaxMs', label='정지 최대(ms)', yAxis='right'),
+                                             ops_m('JvmGcPauseCount', 'Sum', label='정지 횟수', yAxis='right')], {'period': 60}),
+    ('스레드 — 상태별', [ops_m('JvmThreads', 'Maximum', 'State', st, label=st) for st in ('live', 'runnable', 'waiting', 'blocked', 'daemon', 'peak')],
+     {'period': 60}))
+row(('클래스 로딩(개)', [ops_m('JvmClassesLoaded')], {'period': 60}),
+    ('힙 밖 버퍼(MB) — direct·mapped', [ops_m('JvmBufferUsedMb', 'Maximum', 'Pool', pl, label=pl) for pl in ('direct', 'mapped')], {'period': 60}),
+    ('프로세스 CPU(%)·업타임(초, 최소)', [ops_m('ProcessCpuPct', label='CPU'), ops_m('ProcessUptimeSec', 'Minimum', label='업타임', yAxis='right')],
+     {'period': 60}))
 
 text('## 최근 오류 로그')
 # 대시보드를 열 때마다 Logs Insights 가 이 범위를 훑는다(스캔 GB 과금) — 그래서 ERROR 만, 50줄만.

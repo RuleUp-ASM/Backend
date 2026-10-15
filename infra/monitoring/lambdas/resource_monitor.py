@@ -5,7 +5,7 @@
   · 멈춘 태스크 → UnexpectedStopCount·OOMStopCount(ECS-03/04), 실패한 배포 → DeployFailureCount(ECS-07)
   · 오토스케일 상한·최근 실패 → ScaleOutBlocked
   · RES-01~04 판정 → 버지니아 RuleUp/Ops CriticalCapacityFlag(Env,Service,Rule). 입력이 불완전하면 그 Rule 은 내지 않는다
-  · RDS → RuleUp/DB FreeStoragePct(DB-05)·StorageMinutesToFull(DB-09)·DbMemoryPressure(DB-02)
+  · RDS → RuleUp/DB FreeStoragePct(DB-05)·StorageMinutesToFull(DB-09)·DbMemoryPressure(DB-02 P1)·DbMemoryCritical(DB-11 P0)
 5분마다
   · RDS 백업 → RuleUp/Backup BackupEnabled·LatestRestorableLagSec·AutomatedSnapshotAgeSec·BackupFailureCount(BACKUP-01~04)
 모든 원천을 읽은 실행만 RuleUp/Observe CollectorHeartbeat(Component=resource-monitor) 를 낸다(OBS-01).
@@ -124,9 +124,10 @@ def handler(event, context):
         eta = rc.minutes_to_full(free)
         if eta is not None:
             db_out.append(('StorageMinutesToFull', db, eta, stamp, 'None'))
-        pressure = rc.db_memory_pressure(inst['DBInstanceClass'], recent('fmem', 10), recent('swap', 10))
-        if pressure is not None:
-            db_out.append(('DbMemoryPressure', db, pressure, stamp, 'None'))
+        for metric_name, level in (('DbMemoryPressure', rc.DB_MEMORY_PRESSURE), ('DbMemoryCritical', rc.DB_MEMORY_CRITICAL)):
+            flag = rc.db_memory_flag(inst['DBInstanceClass'], recent('fmem', 10), recent('swap', 10), level)
+            if flag is not None:
+                db_out.append((metric_name, db, flag, stamp, 'None'))
         if now.minute % 5 == 0:
             backup(boto3.client('rds', region_name=api), cw_api, inst, env, now, stamp)
     except Exception as e:  # noqa: BLE001

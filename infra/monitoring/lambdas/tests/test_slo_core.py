@@ -65,14 +65,26 @@ class BurnRuleTest(unittest.TestCase):
         flag, _ = s.evaluate_burn(s.BURN_RULES[4], series, L)
         self.assertEqual(flag, 1)
 
-    def test_acute_failure_needs_ten_failures(self):
+    def test_acute_failure_uses_two_minute_window(self):
         series = flat(4320, 10, 0)
-        for m in range(L - 4, L + 1):
-            series[m] = (4, 3, 3)   # 20건 중 15건 실패
+        for m in range(L - 1, L + 1):
+            series[m] = (10, 5, 5)   # 최근 2분 20건 중 10건 실패
         self.assertEqual(s.evaluate_acute('API-01', series, L)[0], 1)
-        for m in range(L - 4, L + 1):
-            series[m] = (4, 1, 1)   # 20건 중 5건 = 25% 이지만 실패 10건 미만
+        for m in range(L - 1, L + 1):
+            series[m] = (10, 4, 4)   # 20건 중 8건 = 40%
         self.assertEqual(s.evaluate_acute('API-01', series, L)[0], 0)
+
+    def test_acute_low_sample_in_two_minutes_is_pending(self):
+        """2분 창에 요청 20건이 안 되면 판정하지 않는다 — 그 전 분의 실패는 세지 않는다."""
+        series = flat(4320, 4, 3)   # 분당 4건 → 2분 8건
+        self.assertIsNone(s.evaluate_acute('API-01', series, L)[0])
+
+    def test_api02_uses_three_minute_window(self):
+        series = flat(4320, 10, 0)
+        series[L - 3] = (10, 10, 10)   # 3분 창 밖의 실패는 보지 않는다
+        self.assertEqual(s.evaluate_acute('API-02', series, L)[0], 0)
+        series[L - 2] = (10, 2, 2)     # 30건 중 2건 = 6.7%
+        self.assertEqual(s.evaluate_acute('API-02', series, L)[0], 1)
 
 
 class BudgetTest(unittest.TestCase):

@@ -65,13 +65,12 @@ class Capacity:
 
 
 def res01(c):
-    """정상 태스크 전부 하드 한도 ≥99%(1분 1/1), 또는 전부 ≥98% 2/2 + 확장 불가."""
-    if not c.healthy or len(c.mem_min) < 1 or c.mem_samples[0] is None or c.mem_samples[0] < c.healthy:
+    """정상 태스크 전부 하드 한도 ≥99% 1분, 또는 전부 ≥98% 1분 + 확장 불가(노션 10/15: 2/2 → 1분)."""
+    if not c.healthy or len(c.mem_min) < 1 or c.mem_min[0] is None or c.mem_samples[0] is None or c.mem_samples[0] < c.healthy:
         return None
     if c.mem_min[0] >= 99:
         return 1
-    if len(c.mem_min) >= 2 and None not in c.mem_min[:2] and min(c.mem_min[:2]) >= 98 \
-            and c.mem_samples[1] is not None and c.mem_samples[1] >= c.healthy and c.scale_blocked_history[:1] == [1]:
+    if c.mem_min[0] >= 98 and c.scale_blocked_history[:1] == [1]:
         return 1
     return 0
 
@@ -84,12 +83,12 @@ def res02(c):
 
 
 def res03(c):
-    """CPU 평균 ≥99% 3/3 AND 확장 3분 이상 막힘 AND (Tomcat busy ≥95% 2/2 OR CUJ p95 ≥목표 2배 2/2)."""
-    if len(c.cpu_avg) < 3 or None in c.cpu_avg[:3] or len(c.scale_blocked_history) < 4:
+    """CPU 평균 ≥99% 1분 AND 확장 1분 이상 막힘(지금·직전) AND (Tomcat busy ≥95% OR CUJ p95 ≥목표 2배) — 노션 10/15: 3분 → 1분."""
+    if len(c.cpu_avg) < 1 or c.cpu_avg[0] is None or len(c.scale_blocked_history) < 2:
         return None
-    saturated = (len(c.busy_threads_max) >= 2 and None not in c.busy_threads_max[:2] and min(c.busy_threads_max[:2]) >= 95) \
+    saturated = (len(c.busy_threads_max) >= 1 and c.busy_threads_max[0] is not None and c.busy_threads_max[0] >= 95) \
         or bool(c.slow_cuj)
-    hit = min(c.cpu_avg[:3]) >= 99 and all(b == 1 for b in c.scale_blocked_history[:4]) and saturated
+    hit = c.cpu_avg[0] >= 99 and all(b == 1 for b in c.scale_blocked_history[:2]) and saturated
     return 1 if hit else 0
 
 
@@ -122,11 +121,11 @@ def minutes_to_full(free_bytes):
 
 
 def res04(s):
-    """여유 ≤5% 2/2 AND 소진 예상 ≤15분 AND 확장 불가."""
-    if len(s.free_pct) < 2 or None in s.free_pct[:2] or s.expandable is None:
+    """여유 ≤5% 1분 AND 소진 예상 ≤15분 AND 확장 불가. 예상은 15분 추세라 여유 판정만 1분으로 줄였다."""
+    if len(s.free_pct) < 1 or s.free_pct[0] is None or s.expandable is None:
         return None
     eta = minutes_to_full(s.free_bytes)
-    hit = max(s.free_pct[:2]) <= 5 and eta is not None and eta <= 15 and not s.expandable
+    hit = s.free_pct[0] <= 5 and eta is not None and eta <= 15 and not s.expandable
     return 1 if hit else 0
 
 
@@ -138,7 +137,7 @@ def expandable(instance):
     return instance.get('AllocatedStorage', 0) < max_alloc * 0.99
 
 
-# RDS 인스턴스 클래스 → RAM(GiB). DB-02 DbMemoryPressure 의 「RAM 의 10%」. 모르는 클래스는 판정하지 않는다.
+# RDS 인스턴스 클래스 → RAM(GiB). DB-02(10%)·DB-11(5%) 의 RAM 기준. 모르는 클래스는 판정하지 않는다.
 RDS_RAM_GIB = {
     'db.t4g.micro': 1, 'db.t4g.small': 2, 'db.t4g.medium': 4, 'db.t4g.large': 8, 'db.t4g.xlarge': 16,
     'db.t3.micro': 1, 'db.t3.small': 2, 'db.t3.medium': 4, 'db.t3.large': 8,
@@ -147,12 +146,19 @@ RDS_RAM_GIB = {
 }
 
 
-def db_memory_pressure(instance_class, freeable, swap):
-    """최근 10분 내내 Freeable ≤ RAM 10% 이고 그 사이 Swap 이 늘었으면 1. 입력이 모자라면 None."""
+# 메모리 판정 두 단계 — 노션 10/15 리뷰: P1 은 RAM 10% 5분, P0 는 RAM 5% 1분. 둘 다 Swap 이 늘고 있어야 한다.
+DB_MEMORY_PRESSURE = (0.10, 5)   # DB-02 P1 DbMemoryPressure
+DB_MEMORY_CRITICAL = (0.05, 1)   # DB-11 P0 DbMemoryCritical
+SWAP_TREND_MINUTES = 5           # Swap 증가는 최근 5분 처음·끝으로 본다 — 1분 창에서는 두 점이 안 나온다
+
+
+def db_memory_flag(instance_class, freeable, swap, level):
+    """최근 level 분 내내 Freeable ≤ RAM×비율 이고 최근 5분 사이 Swap 이 늘었으면 1. 입력이 모자라면 None."""
+    fraction, minutes = level
     ram = RDS_RAM_GIB.get(instance_class)
-    f = [v for v in freeable[:10] if v is not None]
-    w = [v for v in swap[:10] if v is not None]
-    if ram is None or len(f) < 10 or len(w) < 2:
+    f = [v for v in freeable[:minutes] if v is not None]
+    w = [v for v in swap[:max(minutes, SWAP_TREND_MINUTES)] if v is not None]
+    if ram is None or len(f) < minutes or len(w) < 2:
         return None
-    limit = ram * 1024 ** 3 * 0.10
+    limit = ram * 1024 ** 3 * fraction
     return 1 if max(f) <= limit and w[0] > w[-1] else 0
