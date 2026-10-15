@@ -54,7 +54,46 @@ public class ExploreIndexJobs {
     @EventListener(ApplicationReadyEvent.class)
     public void warmUpOnStartup() {
         if (!RuntimeRole.valueOf(runtimeRole.toUpperCase()).runsBackgroundWork()) return;
+        if (!redisReachable()) return;   // 끝내 못 붙으면 5분 스윕이 이어서 시도한다
         ensureWarmed("기동");
+    }
+
+    /**
+     * 기동 직후 첫 Redis 연결은 여러 번 시도한다.
+     *
+     * <p>배포·스케일아웃 때마다 워밍업이 「Unable to connect to Redis」로 실패해 회로가 열리고, 5분 스윕이
+     * 다시 데울 때까지 탐색이 SQL 폴백으로 돌았다(stg·prod 모두, 부하테스트 2026-10). 네트워크는 정상이었다 —
+     * 컨테이너에서 연결+PING 이 7ms. 0.5 vCPU 에서 막 뜬 JVM 이 기동 작업과 겹쳐 첫 핸드셰이크를 제때 못 끝낸
+     * 것이라, 시간을 두고 다시 붙으면 된다. 스케일아웃은 부하가 몰릴 때 일어나므로 이 5분이 가장 비싼 5분이다.
+     */
+    boolean redisReachable() {
+        RuntimeException last = null;
+        for (int attempt = 1; attempt <= STARTUP_REDIS_ATTEMPTS; attempt++) {
+            try {
+                store.ping();
+                if (attempt > 1) log.info("탐색 Redis 연결 — {}번째 시도에 성공", attempt);
+                return true;
+            } catch (RuntimeException e) {
+                last = e;
+                log.info("탐색 Redis 연결 대기 {}/{} — {}", attempt, STARTUP_REDIS_ATTEMPTS, rootCause(e));
+                sleepQuietly(STARTUP_REDIS_BACKOFF.multipliedBy(attempt));
+            }
+        }
+        circuit.openManually("워밍업 실패(기동, 연결 " + STARTUP_REDIS_ATTEMPTS + "회): " + rootCause(last));
+        return false;
+    }
+
+    private static final int STARTUP_REDIS_ATTEMPTS = 5;
+    private static final java.time.Duration STARTUP_REDIS_BACKOFF = java.time.Duration.ofSeconds(2);
+
+    static String rootCause(Throwable e) {
+        Throwable t = e;
+        while (t.getCause() != null && t.getCause() != t) t = t.getCause();
+        return t == e ? e.toString() : e.getClass().getSimpleName() + " ← " + t;
+    }
+
+    private static void sleepQuietly(java.time.Duration d) {
+        try { Thread.sleep(d.toMillis()); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
     }
 
     /**
@@ -123,7 +162,7 @@ public class ExploreIndexJobs {
                 store.unlockRebuild(token);
             }
         } catch (RuntimeException e) {
-            circuit.openManually("워밍업 실패(" + reason + "): " + e);
+            circuit.openManually("워밍업 실패(" + reason + "): " + rootCause(e));
             return false;
         }
     }

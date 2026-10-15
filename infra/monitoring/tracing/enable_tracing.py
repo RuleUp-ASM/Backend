@@ -8,7 +8,9 @@ Application Signals 는 조직 SCP 가 막아(application-signals:* explicit den
 1) 태스크 역할에 AWSXRayDaemonWriteAccess
 2) X-Ray 샘플링 규칙 — 계정 단위라 stg·prod 공통이다.
    ruleup-skip-health(100) /actuator/* 는 기록하지 않음(ALB 헬스체크).
-   ruleup-api(200)         */api/* 요청은 전부 기록.
+   ruleup-api(200)         */api/* 요청은 초당 10건까지 전부, 그 위로는 10%만 기록. 평소 트래픽은 사실상 전부 남고,
+                           피크(2026-10 부하테스트 350 RPS)에선 100% 기록이 스팬 큐(2048)를 넘쳐 버려지고
+                           X-Ray 기록 요금이 하루 ~$150 꼴이 된다.
    Default(10000)          그 밖(배치·고아 DB 쿼리·지표 전송·SQS 폴링)은 1%만. 초당 1건+5% 였을 땐 이것들이 트레이스의 98% 였다
                            (배치 87% — 분당 ~30건이 초당 1건 예약분에 전부 들어갔다).
    그룹 ruleup-<env>-api   API 트레이스만 보는 필터(콘솔 트레이스 목록·서비스 맵에서 그룹을 고른다).
@@ -72,7 +74,7 @@ if not DRY and not DISABLE:
     # 에이전트는 경로가 아니라 전체 URL(http://10.1.1.73:8080/actuator/health)로 맞춰 본다 — '/actuator/*' 는 한 번도 안 걸렸다.
     rule=dict(RuleName='ruleup-skip-health',Priority=100,FixedRate=0.0,ReservoirSize=0,ServiceName='*',ServiceType='*',
               Host='*',HTTPMethod='*',URLPath='*/actuator/*',ResourceARN='*')
-    api=dict(RuleName='ruleup-api',Priority=200,FixedRate=1.0,ReservoirSize=10,ServiceName='*',ServiceType='*',
+    api=dict(RuleName='ruleup-api',Priority=200,FixedRate=0.1,ReservoirSize=10,ServiceName='*',ServiceType='*',
              Host='*',HTTPMethod='*',URLPath='*/api/*',ResourceARN='*')
     names={r['SamplingRule']['RuleName'] for r in xray.get_sampling_rules()['SamplingRuleRecords']}
     for r in (rule,api):

@@ -15,6 +15,11 @@ spring:
 
   task:
     scheduling:
+      # 예약 작업이 50개가 넘는데 기본 스레드는 1개다 — 긴 작업(자정 활성화 등) 뒤에 다른 작업이 줄줄이 밀렸고,
+      # 밀린 cron 작업은 다른 태스크의 ShedLock 최소 잠금이 풀린 뒤 시작해 같은 날 중복 실행됐다(부하테스트 2026-10:
+      # 00:40 일별 집계가 태스크 3대에서 00:40·00:41·00:43 에 각각). 같은 작업의 중복은 여전히 ShedLock 이 막는다.
+      pool:
+        size: ${SCHEDULER_POOL_SIZE:4}
       # 확정 배치·정산·파기처럼 @Scheduled 로 도는 작업이 많다. 종료 시 스케줄러를 곧바로
       # 끊으면 그 작업이 중간에 죽는데, 대부분 청크 트랜잭션이라 롤백은 깨끗해도 그만큼
       # 다음 주기까지 처리가 밀린다. 짧게 기다려 진행 중인 한 사이클만 마치게 한다.
@@ -36,6 +41,18 @@ spring:
       minimum-idle: 5
       # 운영 지표 RuleUp/Ops 의 Pool 차원 — POOL-01~03 경보가 이 이름을 가리킨다(기본값 HikariPool-1 은 기동 순서에 따라 바뀔 수 있다).
       pool-name: ruleup-main
+      # MySQL 드라이버 성능 옵션 — 접속 주소(env)와 상관없이 늘 적용된다(부하테스트 2026-10).
+      # 주소에만 두면 env 가 기본 주소를 통째로 덮어 빠진다: stg·prod 주소에 rewriteBatchedStatements 가 없어
+      # 신호 일괄 적재가 행마다 따로 나갔다. 프로파일에서 드라이버가 CPU 의 16% 였다.
+      data-source-properties:
+        rewriteBatchedStatements: true    # batchUpdate 를 다중 행 INSERT 하나로
+        cachePrepStmts: true              # 같은 SQL 의 파싱 결과를 커넥션마다 재사용
+        prepStmtCacheSize: 250
+        prepStmtCacheSqlLimit: 2048
+        useLocalSessionState: true        # autocommit·읽기전용 상태를 드라이버가 기억 — 매 트랜잭션 확인 왕복 생략
+        elideSetAutoCommits: true
+        cacheServerConfiguration: true
+        maintainTimeStats: false
 
   jpa:
     hibernate:
@@ -56,9 +73,11 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
-      # 명령 타임아웃은 짧게 — 탐색 조회가 Redis 를 기다리며 늘어지면 그건 장애를 지연으로
-      # 바꾸는 것뿐이다. 느리면 빨리 포기하고 회로를 열어 503 으로 드러낸다.
-      timeout: ${REDIS_TIMEOUT:500ms}
+      # 명령 타임아웃 — 느리면 포기하고 회로를 열어 503 으로 드러낸다. 다만 500ms 는 너무 짧았다(부하테스트 2026-10):
+      # 앱 CPU 가 포화되면 Redis 는 한가해도(엔진 CPU 5%) 응답을 받을 이벤트 루프가 늦게 돌아 500ms 를 넘기고,
+      # 3번 연속이면 그 태스크의 탐색 전체가 30초간 503 이 됐다(시드 가입 몰림에서 145건). 진짜 장애(연결 끊김·
+      # 무응답)는 2초로도 충분히 빨리 걸린다.
+      timeout: ${REDIS_TIMEOUT:2000ms}
       # <b>연결</b> 타임아웃은 그럴 수 없다. 기동 직후 워밍업은 JVM 이 아직 차가운 상태에서
       # DNS 조회·TCP·Lettuce 핸드셰이크를 한꺼번에 하는데, 500ms 로는 그 한 번을 못 넘긴다 —
       # 실제로 배포할 때마다 워밍업이 여기서 실패해 회로가 열렸고, 5분 스윕이 다시 시도할
