@@ -104,7 +104,9 @@ public class MyChallengeQueryService {
                 "                 ELSE m.success_days / (m.success_days + m.fail_days) END " +
                 "            AS DECIMAL(6,4)) AS success_rate " +
                 "FROM challenge_members m JOIN challenges c ON c.id = m.challenge_id " +
-                "WHERE m.user_id = ? AND c.deleted_at IS NULL AND " + memberAndChallenge;
+                // 이탈 탭은 내가 나가서 닫힌(삭제 표시된) 방도 보여 준다 — 실제 삭제 뒤에는 이력에서 같은 행이 나온다.
+                "WHERE m.user_id = ? AND " + (filter == MyChallengeFilter.LEFT ? "" : "c.deleted_at IS NULL AND ")
+                + memberAndChallenge;
     }
 
     // ===== 원천 2: 삭제된 방의 이력 스냅샷 =====
