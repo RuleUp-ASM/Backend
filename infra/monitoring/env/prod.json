@@ -34,7 +34,7 @@
   "sns": {
     "alerts": "ruleup-prod-alerts",
     "p0": "ruleup-prod-p0-alerts",
-    "pagerduty": null
+    "pagerduty": "ruleup-prod-pagerduty"
   },
   "slack_p0_mention_member": "U0AVBAWH05Q",
   "route53_health_check_id": "26710503-030a-4b93-8df5-e7339b675632",
@@ -44,10 +44,10 @@
   },
   "pagerduty": {
     "_note": "pagerduty.py setup 이 채운다. 1차 담당 → escalation_delay_minutes 분 미ACK → 팀원 → repeat_loops 회 반복. API 키·연동 키·이메일은 넣지 않는다",
-    "service_id": null,
-    "escalation_policy_id": null,
-    "primary_user_id": null,
-    "secondary_user_id": null,
+    "service_id": "PQ9NRPT",
+    "escalation_policy_id": "POF6OPH",
+    "primary_user_id": "PYEDO11",
+    "secondary_user_id": "P7VNRZB",
     "escalation_delay_minutes": 10,
     "repeat_loops": 2,
     "ack_timeout_minutes": 15
