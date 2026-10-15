@@ -31,6 +31,13 @@ public class ExploreRedisStore {
 
     private final StringRedisTemplate redis;
 
+    // ===== 연결 =====
+
+    /** 연결을 맺고 왕복 한 번 — 기동 직후 첫 연결을 워밍업 본작업과 떼어 두려고 쓴다. */
+    public void ping() {
+        redis.execute((org.springframework.data.redis.core.RedisCallback<String>) c -> c.ping());
+    }
+
     // ===== 워밍업 플래그 =====
 
     public boolean isWarmed() {
