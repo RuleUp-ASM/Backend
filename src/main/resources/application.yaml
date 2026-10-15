@@ -185,6 +185,9 @@ app:
       sample-interval-ms: ${SYS_METRICS_INTERVAL_MS:60000}     # 수집 주기(기본 60초)
       retention-days: ${SYS_METRICS_RETENTION_DAYS:14}         # 스냅샷 보관 일수(초과분 정리)
   oauth:
+    # stg 부하테스트 동안만 true — IdP 호출만 빼고 실제 로그인 트랜잭션을 태운다(LoadTestOAuthGate, prod 에는 없다)
+    load-test:
+      enabled: ${OAUTH_LOAD_TEST_ENABLED:false}
     http:
       # OAuth 로그인은 토큰 교환 + 사용자 조회 2회 직렬 호출이다. 풀 고갈/IdP 지연에 무한정 매달리지 않도록
       # 각 단계 제한 시간을 분리한다. Duration 형식(예: 500ms, 3s)으로 운영 환경에서 조정 가능하다.

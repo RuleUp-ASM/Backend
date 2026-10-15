@@ -121,7 +121,7 @@ public class AuthService {
         requireValidDevice(req.deviceId(), req.deviceInfo());
         requireValidOAuthRequest(provider, req);
 
-        OAuthClient client = resolver.resolve(provider);
+        OAuthClient client = resolver.resolve(provider, req.code(), req.codeVerifier());
 
         // 1) 외부 IdP 호출 (트랜잭션 밖)
         OAuthUserInfo info = client.fetchUserInfo(req.code(), req.codeVerifier(), req.redirectUri());
