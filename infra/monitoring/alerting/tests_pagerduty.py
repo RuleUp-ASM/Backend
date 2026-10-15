@@ -1,6 +1,5 @@
 """pagerduty.py 계약 시험 — python3 infra/monitoring/alerting/tests_pagerduty.py (PagerDuty·AWS 호출 없음)"""
 import json, os, sys, unittest
-from datetime import datetime, timezone
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import pagerduty as pd
@@ -23,11 +22,17 @@ class PagerDutyTest(unittest.TestCase):
         self.assertEqual(body['acknowledgement_timeout'], 900)
         self.assertEqual(body['incident_urgency_rule'], {'type': 'constant', 'urgency': 'high'})
 
-    def test_test_message_looks_like_cloudwatch(self):
-        m = pd.cloudwatch_message('123', 'ap-northeast-2', 'ALARM', datetime(2026, 10, 15, tzinfo=timezone.utc))
-        self.assertTrue({'AlarmName', 'NewStateValue', 'AlarmArn', 'StateChangeTime', 'AWSAccountId', 'Trigger'} <= set(m))
-        self.assertTrue(m['AlarmName'].startswith('ruleup-prod-P0-'), '긴급 채널 멘션과 같은 접두어')
-        json.dumps(m)
+    def test_test_alarm_follows_real_p0_path(self):
+        """시험 경보는 실제 P0 와 같은 전달(Slack 운영·긴급 멘션·PagerDuty)을 타고, 다음 평가에서 저절로 OK 가 되지 않는다."""
+        import p0_p1
+        reg = pd.load()
+        acts = p0_p1.actions(reg, reg['api_region'], 'P0')
+        a = pd.test_alarm(reg, acts)
+        self.assertTrue(a['AlarmName'].startswith('ruleup-prod-P0-'), 'EventBridge 긴급 채널 멘션이 이 접두어로 잡는다')
+        self.assertEqual(a['TreatMissingData'], 'ignore')
+        self.assertEqual(a['AlarmActions'], a['OKActions'])
+        names = {x.split(':')[-1] for x in a['AlarmActions']}
+        self.assertEqual(names, {reg['sns']['alerts'], reg['sns']['p0'], reg['sns']['pagerduty']})
 
     def test_ledger_keeps_no_secrets(self):
         text = json.dumps(pd.load(), ensure_ascii=False)
