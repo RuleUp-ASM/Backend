@@ -53,5 +53,28 @@ class ProbeTest(unittest.TestCase):
             self.assertEqual(edge_probe.probe('x', '/', 't', 'tokyo'), (False, 'dns', None))
 
 
+
+class HandlerTest(unittest.TestCase):
+    """한 실행에 두 번 점검 — 둘 다 실패해야 EDGE-01 leaf(ProbeFailure=1), 실패 횟수는 EDGE-02 로."""
+
+    def invoke(self, results):
+        put = fake_aws.install()
+        os.environ['RULEUP_REGISTRY'] = os.path.join(os.path.dirname(__file__), '..', '..', 'env', 'stg.json')
+        os.environ['PROBE_ORIGIN'] = 'oregon'
+        with mock.patch.object(edge_probe, 'probe', side_effect=results), mock.patch('time.sleep') as sleep:
+            edge_probe.handler({'time': '2026-10-15T10:15:00Z'}, None)
+        self.assertEqual(sleep.call_count, 1, '두 점검 사이에 한 번 쉰다')
+        return {d['MetricName']: d['Value'] for _, ns, data in put if ns == 'RuleUp/Edge' for d in data}
+
+    def test_two_consecutive_failures(self):
+        m = self.invoke([(False, 'http', None), (False, 'http', None)])
+        self.assertEqual((m['ProbeFailure'], m['ProbeAttemptFailures']), (1, 2))
+
+    def test_one_failure_is_not_edge01(self):
+        m = self.invoke([(False, 'http', None), (True, 'ok', 30)])
+        self.assertEqual((m['ProbeFailure'], m['ProbeAttemptFailures']), (0, 1))
+        self.assertEqual(m['CertificateDaysLeft'], 30)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -24,7 +24,7 @@ class CatalogTest(unittest.TestCase):
             self.assertTrue(all(len(n) <= 255 for n in names))
 
     def test_p0_only_for_contract_ids(self):
-        """CPU·메모리·DB·Redis·SQS 사용률 하나로 P0 를 만들지 않는다."""
+        """CPU·메모리·DB·Redis·SQS 사용률 하나로 P0 를 만들지 않는다 — 10/15 리뷰가 올린 RDS CPU·메모리(DB-10/11)만 예외."""
         for _, s in self.specs('prod', res_enabled=True, detectors_enabled=True):
             if s['severity'] == 'P0':
                 self.assertIn(s['id'], catalog.P0_IDS, s['name'])
@@ -37,9 +37,9 @@ class CatalogTest(unittest.TestCase):
             p = s['params']
             if s['kind'] == 'composite':
                 self.assertNotIn('TreatMissingData', p, 'Composite 에는 누락 정책을 넣지 않는다')
-            elif s['id'] in ('SLO-01', 'SLO-02', 'API-01', 'RES-01', 'RES-02', 'RES-03', 'RES-04') or s['severity'] == 'leaf':
+            elif s['id'] in ('SLO-01', 'SLO-02', 'API-01', 'RES-01', 'RES-02', 'RES-03', 'RES-04', 'DB-11') or s['severity'] == 'leaf':
                 self.assertEqual(p['TreatMissingData'], 'ignore', s['name'])
-            elif s['id'] in ('OBS-01', 'NATIVE-01'):
+            elif s['id'] in ('OBS-01', 'OBS-04', 'NATIVE-01'):
                 self.assertEqual(p['TreatMissingData'], 'breaching', s['name'])
             else:
                 self.assertEqual(p['TreatMissingData'], 'notBreaching', s['name'])
@@ -56,8 +56,23 @@ class CatalogTest(unittest.TestCase):
         r = reg('prod')
         for region, s in self.specs('prod', res_enabled=True):
             central = s['id'].split('-')[0] in ('SLO', 'LAT', 'EDGE', 'TLS', 'RES') or s['id'] in ('NATIVE-01',) \
-                or (s['id'] == 'OBS-01' and not s['name'].endswith('db-collector')) or s['id'] in ('API-01', 'API-02')
+                or (s['id'] == 'OBS-01' and not s['name'].endswith('db-collector')) or s['id'] in ('API-01', 'API-02', 'OBS-04')
             self.assertEqual(region, r['monitor_region'] if central else r['api_region'], s['name'])
+
+    def test_p0_pages_within_two_minutes(self):
+        """10/15 리뷰: P0 는 조건 충족 후 1~2분 안에 호출 — 평가 창(Period×DatapointsToAlarm)이 2분을 넘지 않는다.
+        OBS-04(5분 누락)는 「5분 누락」 자체가 조건이라 뺀다."""
+        for _, s in self.specs('prod', res_enabled=True):
+            if s['severity'] != 'P0' or s['kind'] == 'composite' or s['id'] == 'OBS-04':
+                continue
+            p = s['params']
+            period = p['Period'] if 'Period' in p else next(q['MetricStat']['Period'] for q in p['Metrics'] if 'MetricStat' in q)
+            self.assertLessEqual(period * p['DatapointsToAlarm'], 120, s['name'])
+
+    def test_rds_cpu_and_memory_page(self):
+        names = {s['name'] for _, s in self.specs('prod')}
+        self.assertIn('ruleup-prod-P0-DB-10', names)
+        self.assertIn('ruleup-prod-P0-DB-11', names)
 
     def test_res_and_detectors_are_gated(self):
         ids = {s['id'] for _, s in self.specs('prod', res_enabled=False, detectors_enabled=False)}

@@ -180,6 +180,14 @@ alarms:
   - id: DB-08
     status: active
     severity: P1
+  - id: DB-10
+    status: active
+    severity: P0
+    notes: 10/15 리뷰 — RDS CPU ≥99% 1분(AWS/RDS 네이티브). 노션 카탈로그 §4.2 의 「RDS CPU 99% 는 단독 P0 아님」을 뒤집었다
+  - id: DB-11
+    status: active
+    severity: P0
+    notes: 10/15 리뷰 — Freeable ≤RAM 5% 1분 + Swap 증가(resource-monitor DbMemoryCritical, missing=ignore). DB-02 는 10% 5분 P1
   - id: DB-09
     status: followup
     severity: P1
@@ -309,9 +317,9 @@ alarms:
     severity: P0
     notes: PagerDuty 시험 서비스·webhook 수신기·Healthchecks.io 가 모두 필요
   - id: OBS-04
-    status: blocked
+    status: active
     severity: P0
-    notes: 계산기는 원장 healthchecks.obs04_ping_url 이 생기면 바로 ping 한다(lambdas/cwio.ping)
+    notes: Healthchecks.io 전까지 CloudWatch 대체 — slo-calculator·resource-monitor 하트비트 5분 누락(breaching). 버지니아 전체 장애는 못 잡는다(수용 리스크). 원장 healthchecks.obs04_ping_url 이 생기면 계산기가 외부 ping 도 한다
   - id: OBS-05
     status: blocked
     severity: P1

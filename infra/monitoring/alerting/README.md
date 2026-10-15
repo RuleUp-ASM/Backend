@@ -43,12 +43,14 @@ EventBridge 규칙이 서울·버지니아 모두 `ruleup-prod-P0-` 접두어로
 | 등급 | ID | 조건(요약) | 리전 |
 |---|---|---|---|
 | P0 | SLO-01 / SLO-02 | BR(1h·5m) ≥14.4 / BR(6h·30m) ≥6, 짧은 창 표본·실패 게이트 | 버지니아 |
-| P0 | API-01 | 5분 실패율 ≥50%·요청 ≥20·실패 ≥10 | 버지니아 |
-| P0 | EDGE-01 | 오리건·버지니아 공개 점검 둘 다 1분×3 실패 | 버지니아 |
-| P0 | NATIVE-01 / NATIVE-02 | Route 53 3분 / ALB Target 5xx ≥50%(5분·요청 ≥20·오류 ≥10) | 버지니아 / 서울 |
+| P0 | API-01 | 2분 실패율 ≥50%·요청 ≥20·실패 ≥10 | 버지니아 |
+| P0 | EDGE-01 | 오리건·버지니아 공개 점검 둘 다 30초 간격 2회 연속 실패 | 버지니아 |
+| P0 | NATIVE-01 / NATIVE-02 | Route 53 1분 / ALB Target 5xx ≥50%(2분·요청 ≥20·오류 ≥10) | 버지니아 / 서울 |
+| P0 | DB-10 / DB-11 | RDS CPU ≥99% 1분 / Freeable ≤RAM 5% 1분 + Swap 증가 (10/15 리뷰) | 서울 |
+| P0 | OBS-04 | slo-calculator·resource-monitor 하트비트 5분 누락 (Healthchecks.io 전 대체) | 버지니아 |
 | P0 | RES-01~04 (`res_enabled`) | 마지막 정상 태스크까지 하드 메모리 ≥99% · OOM 반복 + 정상 ≤1 · CPU 99% + 확장 불능 + 포화 · RDS 소진 임박 + 확장 불가 | 버지니아 |
-| P1 | SLO-03/04 · LAT-01 · API-02 | 느린 소진 · 지연 BR ≥3 · 실패율 ≥5% | 버지니아 |
-| P1 | ECS-01~09 · JVM · POOL · THREAD | 카탈로그 §4·§5 (CPU 80/90/99%, 하드 메모리 80/90%, OOM ≥1 …) | 서울 |
+| P1 | SLO-03/04 · LAT-01 · API-02 | 느린 소진 · 지연 BR ≥3 · 3분 실패율 ≥5% | 버지니아 |
+| P1 | ECS-01~09 · JVM · POOL · THREAD | 카탈로그 §4·§5 (CPU 80% 3분/90% 1분/99%, 하드 메모리 80% 3분/90% 1분, OOM ≥1 즉시 …) | 서울 |
 | P1 | DB-01~08 · REDIS · QUEUE · JOB · EXT · TOKEN | 카탈로그 §5·§6 | 서울 |
 | P1 | SEC-01/05 · INV-01 · BACKUP-01~04 · OBS-01 | 카탈로그 §6.1·§7 | 서울·버지니아 |
 | P1 | SEC-02/03/04 | EventBridge 규칙(`security_events.py`) | 서울·버지니아 |

@@ -36,11 +36,11 @@ flowchart LR
     sch --> res[λ resource-monitor<br/>ECS·RES-01~04·RDS·백업]
     probe2[λ edge-probe 버지니아]
     cwv[CloudWatch RuleUp/SLO·Edge·Observe·Ops CriticalCapacityFlag]
-    a1{P0: SLO·API-01·EDGE-01·NATIVE-01·RES<br/>P1: 하트비트·TLS·EDGE-02}
+    a1{P0: SLO·API-01·EDGE-01·NATIVE-01·RES·OBS-04<br/>P1: 하트비트·TLS·EDGE-02}
     r53[Route 53 헬스체크 /health/public]
     sns2[SNS us-east-1]
   end
-  probe1[λ edge-probe 오리건] -->|ProbeFailure| cwv
+  probe1[λ edge-probe 오리건<br/>30초 간격 2회] -->|ProbeFailure·ProbeAttemptFailures| cwv
   probe1 & probe2 -->|GET /health/public| cf
   r53 --> cf
   slo -->|GetMetricData 72h| cwm

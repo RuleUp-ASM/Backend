@@ -101,9 +101,13 @@ def evaluate_burn(rule, series, last_minute):
     return (1 if hit else 0), {**why, 'state': 'breach' if hit else 'ok'}
 
 
+# 급성 판정 창(분) — 노션 10/15 리뷰: API-01 2분(P0 1~2분 내 호출), API-02 3분.
+ACUTE_WINDOW_MIN = {'API-01': 2, 'API-02': 3}
+
+
 def evaluate_acute(rule_id, series, last_minute):
-    """API-01(P0): 5분 실패율 ≥50%·요청 ≥20·실패 ≥10 / API-02(P1): 실패율 ≥5%·요청 ≥20."""
-    w = window(series, last_minute, 5)
+    """API-01(P0): 2분 실패율 ≥50%·요청 ≥20·실패 ≥10 / API-02(P1): 3분 실패율 ≥5%·요청 ≥20."""
+    w = window(series, last_minute, ACUTE_WINDOW_MIN[rule_id])
     why = {'rule': rule_id, 'short': _w(w, 'availability')}
     if not w.valid:
         return None, {**why, 'state': 'insufficient_coverage'}

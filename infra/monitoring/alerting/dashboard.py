@@ -124,7 +124,12 @@ row(('JVM — Old(GC 후)·GC 정지(%)', [ops_m('OldGenAfterGcPct'), ops_m('GcP
     ('종료·OOM·배포 실패', [ops_m('UnexpectedStopCount', 'Sum'), ops_m('OOMStopCount', 'Sum'), ops_m('DeployFailureCount', 'Sum')], None))
 rds = lambda m, s='Average': ['AWS/RDS', m, 'DBInstanceIdentifier', REG['rds_instance'], {'stat': s}]
 dbm = lambda m, d, s='Maximum': ['RuleUp/DB', m, 'Database', d, 'Env', ENV, {'stat': s}]
-row(('RDS CPU(%)·연결 사용률(%)', [rds('CPUUtilization'), dbm('DbConnectionPct', 'primary')], {'period': 60}),
+row(('RDS CPU(%)·연결 사용률(%)', [rds('CPUUtilization'), dbm('DbConnectionPct', 'primary')], {'period': 60,
+     'annotations': {'horizontal': [{'value': 80, 'label': 'DB-01'}, {'value': 99, 'label': 'DB-10 P0'}]}}),
+    ('RDS 메모리 — 여유(바이트)·Swap·Flag', [rds('FreeableMemory', 'Minimum'), rds('SwapUsage', 'Maximum'),
+                                       *[dbm(f, REG['rds_instance'])[:-1] + [{'stat': 'Maximum', 'label': f, 'yAxis': 'right'}]
+                                         for f in ('DbMemoryPressure', 'DbMemoryCritical')]],
+     {'period': 60}),
     ('RDS 여유 저장공간(%)·소진 예상(분)', [dbm('FreeStoragePct', REG['rds_instance'], 'Minimum'),
                                        dbm('StorageMinutesToFull', REG['rds_instance'], 'Minimum') + []], {'period': 60}),
     ('락 대기·장기 트랜잭션(초)·데드락', [dbm('OldestLockWaitSec', 'primary'), dbm('OldestTransactionSec', 'primary'),
