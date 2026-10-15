@@ -219,6 +219,7 @@ public class ChallengeMemberService {
     /**
      * 챌린지 탈퇴(본인). 언제든 나갈 수 있다 — 구 "재참여 영구 불가"·"방장 탈퇴 불가"는 둘 다 폐기.
      *  - 방장이 권한을 넘기지 않고 나가면 <b>즉시 봇방장 체제</b>로 전환하고 잔류 멤버에게 승계 알림을 보낸다(§11.2).
+     *    단 <b>남는 멤버가 없으면</b> 봇방장으로 넘기지 않고 방을 닫는다 — {@link #closeIfLastMember}.
      *  - 감점 면제: 1년 이상 성공(LONG_SUCCESS) / 승계 3일 면책(SUCCESSION_GRACE — 모든 멤버 기준, §11.3).
      *  - 재입장은 1주 대기.
      */
@@ -240,9 +241,10 @@ public class ChallengeMemberService {
         // 면제 판정은 상태를 바꾸기 전에 — 나가면서 스스로 만든 봇방장 전환으로 자기 감점을 면제받으면 안 된다.
         String exemptReason = resolveExemptReason(c, me, now);
 
-        // 방장이 넘기지 않고 나감 → 즉시 봇방장 체제 + 잔류 멤버에게 승계 알림
+        // 마지막 멤버가 나가면 방을 닫는다. 아니면 방장이 넘기지 않고 나감 → 즉시 봇방장 체제 + 승계 알림
+        boolean closed = closeIfLastMember(c);
         boolean botOwnerActivated = false;
-        if (c.isOwner(userId)) {
+        if (!closed && c.isOwner(userId)) {
             c.convertToBotOwner(now);
             botOwnerActivated = true;
             notifyBotOwnerActivated(c, userId);
@@ -274,8 +276,8 @@ public class ChallengeMemberService {
                             source, completedWeeks, "AUTO", scoreDelta, now), source);
             outboxDispatcher.requestFlush();
         }
-        log.info("challenge_leave challengeId={} userId={} penalty={} exempt={} beforeStart={} botOwner={}",
-                challengeId, userId, scoreDelta, exemptReason, beforeStart, botOwnerActivated);
+        log.info("challenge_leave challengeId={} userId={} penalty={} exempt={} beforeStart={} botOwner={} closed={}",
+                challengeId, userId, scoreDelta, exemptReason, beforeStart, botOwnerActivated, closed);
         return new LeaveResponse(true, scoreDelta, exemptReason, rejoinAt.toString(), botOwnerActivated);
     }
 
@@ -322,7 +324,7 @@ public class ChallengeMemberService {
             }
 
 
-            if (c.isOwner(userId)) {
+            if (!closeIfLastMember(c) && c.isOwner(userId)) {
                 c.convertToBotOwner(now);
                 notifyBotOwnerActivated(c, userId);
             }
@@ -338,6 +340,22 @@ public class ChallengeMemberService {
 
         if (left > 0) log.info("회원 탈퇴 정리 userId={} 나간 방 {}건", userId, left);
         return left;
+    }
+
+    /**
+     * 나가는 사람이 <b>마지막 활성 멤버</b>면 방을 닫는다(삭제 표시). 호출 시점에는 아직 그 사람이 ACTIVE 다.
+     *
+     * <p>0명 방은 봇방장으로 넘길 대상이 없다 — 넘기면 아무도 없는 방이 탐색·인기에 그대로 남아,
+     * 하루 1번 도는 유령방 삭제 배치가 지울 때까지(정산 대기가 있으면 1주 넘게) 노출되고 남이 가입해
+     * 되살릴 수도 있었다. 삭제 표시만 하면 탐색·인기·상세·가입이 모두 즉시 막히고(커밋 뒤 탐색 인덱스
+     * 재계산이 빼낸다), 이력 스냅샷과 실제 삭제는 같은 배치가 정산이 끝난 뒤 이어서 한다.
+     *
+     * @return 방을 닫았으면 true — 이때는 봇방장 전환·승계 알림을 하지 않는다
+     */
+    private boolean closeIfLastMember(Challenge c) {
+        if (memberRepository.countByChallengeIdAndStatus(c.getId(), MemberStatus.ACTIVE) > 1) return false;
+        c.softDelete();
+        return true;
     }
 
     /**

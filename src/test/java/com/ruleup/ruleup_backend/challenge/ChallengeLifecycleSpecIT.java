@@ -94,6 +94,47 @@ class ChallengeLifecycleSpecIT extends ChallengeApiSupport {
         assertThat(jdbc.queryForObject("SELECT close_reason FROM challenge_history WHERE challenge_id=?",String.class,bytes(id))).isEqualTo("EMPTY");
     }
 
+    private org.springframework.test.web.servlet.MvcResult leave(UUID id,String token) throws Exception {
+        return mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .delete("/api/v1/challenges/"+id+"/members/me").header("Authorization","Bearer "+token)).andReturn();
+    }
+
+    /** 마지막 멤버가 나가면 봇방장으로 넘기지 않고 방을 닫는다 — 탐색·상세·가입에서 바로 사라진다. */
+    @Test void lastMemberLeavingClosesTheRoomInsteadOfBotOwner() throws Exception {
+        Member owner=member(uniq("last-leave"));Member other=member(uniq("last-leave-other"));
+        UUID id=insertChallenge(owner.id(),"EXERCISE","ACTIVE","GROUP");
+        insertActiveMembership(id,owner.id(),"OWNER");
+
+        var left=leave(id,owner.token());
+        assertThat(left.getResponse().getStatus()).isEqualTo(200);
+        assertThat((Boolean)read(left,"$.data.botOwnerActivated")).isFalse();
+
+        var row=jdbc.queryForMap("SELECT owner_type,deleted_at FROM challenges WHERE id=?",bytes(id));
+        assertThat(row.get("owner_type")).as("아무도 없는 방을 봇방장으로 넘기지 않는다").isEqualTo("USER");
+        assertThat(row.get("deleted_at")).as("0명이 되는 순간 닫힌다").isNotNull();
+        assertThat(getAuth("/api/v1/challenges/"+id,other.token()).getResponse().getStatus()).isEqualTo(404);
+        assertThat(postJsonAuth("/api/v1/challenges/"+id+"/members",other.token(),Map.of()).getResponse().getStatus())
+                .as("닫힌 방에 남이 가입해 되살릴 수 없다").isEqualTo(404);
+        assertThat((List<String>)read(getAuth("/api/v1/challenges?filter=IN_PROGRESS",owner.token()),"$.data.challenges[*].challengeId"))
+                .doesNotContain(id.toString());
+        assertThat((List<String>)read(getAuth("/api/v1/challenges?filter=LEFT",owner.token()),"$.data.challenges[*].challengeId"))
+                .as("마이페이지 이탈 탭에는 기록으로 남는다").contains(id.toString());
+    }
+
+    /** 다른 멤버가 남아 있으면 지금처럼 봇방장 체제 — 방은 닫히지 않는다. */
+    @Test void ownerLeavingWithOthersRemainingHandsOverToBot() throws Exception {
+        Member owner=member(uniq("bot-leave"));Member stay=member(uniq("bot-leave-stay"));
+        UUID id=insertChallenge(owner.id(),"EXERCISE","ACTIVE","GROUP");
+        insertActiveMembership(id,owner.id(),"OWNER");insertActiveMembership(id,stay.id(),"MEMBER");
+
+        var left=leave(id,owner.token());
+        assertThat((Boolean)read(left,"$.data.botOwnerActivated")).isTrue();
+        var row=jdbc.queryForMap("SELECT owner_type,deleted_at FROM challenges WHERE id=?",bytes(id));
+        assertThat(row.get("owner_type")).isEqualTo("BOT");
+        assertThat(row.get("deleted_at")).isNull();
+        assertThat(getAuth("/api/v1/challenges/"+id,stay.token()).getResponse().getStatus()).isEqualTo(200);
+    }
+
     /** 관리자가 폐쇄한 방은 「완료」가 아니다 — 이탈 탭에 AUTO_CLOSED 로, 지워졌든 삭제가 미뤄졌든 같다. */
     @Test void adminClosedRoomsAreStoppedNotCompleted() throws Exception {
         Member member=member(uniq("closed"));Member owner=member(uniq("closed-owner"));
