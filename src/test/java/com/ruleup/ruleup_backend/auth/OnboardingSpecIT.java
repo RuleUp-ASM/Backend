@@ -135,8 +135,9 @@ class OnboardingSpecIT extends ChallengeApiSupport {
         var user = member(uniq("activity"));
         jdbc.update("UPDATE user_activity SET last_active_on=DATE_SUB(CURDATE(),INTERVAL 24 DAY),notified_stage='D7' WHERE user_id=?", bytes(user.id()));
         Object updated = jdbc.queryForObject("SELECT updated_at FROM users WHERE id=?", Object.class, bytes(user.id()));
-        activity.touch(user.id());
-        activity.touch(user.id());
+        // 날짜를 DB 에서 되돌려 「다음 날의 첫 활동」을 흉내 낸다 — 같은 날 기억(touch)은 건너뛰므로 기록을 강제한다.
+        activity.touchNow(user.id());
+        activity.touchNow(user.id());
         assertThat(jdbc.queryForObject("SELECT notified_stage FROM user_activity WHERE user_id=?", String.class, bytes(user.id()))).isEqualTo("NONE");
         assertThat(jdbc.queryForObject("SELECT updated_at FROM users WHERE id=?", Object.class, bytes(user.id()))).isEqualTo(updated);
     }

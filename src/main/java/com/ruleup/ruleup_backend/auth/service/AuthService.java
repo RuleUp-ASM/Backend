@@ -320,7 +320,7 @@ public class AuthService {
         user.attachInstallation(req.installationId(), req.deviceId());
         applyCountry(user, req.deviceInfo());   // 지오 헤더 → 기기 지역 → Accept-Language → 기기 타임존 → 기본값
         userRepository.saveAndFlush(user);
-        activity.touch(user.getId());
+        activity.touchNow(user.getId());
 
         UserScoreSummary summary = scoreService.initialize(user.getId());   // 브론즈 10점
         // 친구 초대 기록(선택). 설치 경로로 받은 친구 초대 링크는 코드를 따로 보내지 않아도 연동한다.

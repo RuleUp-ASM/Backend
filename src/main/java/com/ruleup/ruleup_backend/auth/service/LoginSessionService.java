@@ -119,9 +119,9 @@ public class LoginSessionService {
         user.attachInstallation(req.installationId(), req.deviceId());
         applyCountry(user, req.deviceInfo());
         user.touchLastLogin();
-        activity.touch(user.getId());
         userRepository.saveAndFlush(user);
-        activity.touch(user.getId());
+        // 저장 뒤에 한 번만 — 복원이면 저장 전엔 아직 WITHDRAWN 이라 기록이 무시된다.
+        activity.touchNow(user.getId());
 
         socialTokenService.upsert(user.getId(), provider, info.idpTokens());   // unlink 근거 최신화
 
