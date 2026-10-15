@@ -464,7 +464,7 @@ class MyPageContractIT extends ChallengeApiSupport {
         void constraint_grace_day_without_violation_is_not_appealable() throws Exception {
             Member me = member("cc-grace-constraint");
             UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "SOLO");
-            makeAvoidChallenge(ch);
+            makeConstraintChallenge(ch);
             UUID daily = insertDaily(ch, me.id(), 1, "PENDING", true);
 
             assertThat(firstDay(me, ch)).containsEntry("status", "IN_PROGRESS")
@@ -478,21 +478,28 @@ class MyPageContractIT extends ChallengeApiSupport {
         void constraint_violation_is_appealable() throws Exception {
             Member me = member("cc-grace-violation");
             UUID ch = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "SOLO");
-            makeAvoidChallenge(ch);
+            makeConstraintChallenge(ch);
             UUID daily = insertDaily(ch, me.id(), 1, "PENDING", true);
-            jdbc().update("UPDATE VerificationDaily SET failureReason = 'ENTERED_AVOID_AREA' WHERE id = ?",
+            jdbc().update("UPDATE VerificationDaily SET failureReason = 'USAGE_EXCEEDED' WHERE id = ?",
                     bytes(daily));
 
             assertThat(firstDay(me, ch)).containsEntry("status", "FAIL_EXPECTED")
                     .containsEntry("appealable", true);
         }
 
-        /** 장소 피하기(규칙 지키기형)로 바꾼다 — 템플릿 없이 신호원·파라미터로 판정 방향이 정해진다. */
-        private void makeAvoidChallenge(UUID challengeId) {
-            jdbc().update("UPDATE challenges SET verification_config = ?, params = ? WHERE id = ?",
-                    "{\"selectedMethod\":\"AUTO\",\"verificationType\":\"PHONE\",\"signalSource\":\"GEOFENCE\","
+        private static final java.util.concurrent.atomic.AtomicLong CONSTRAINT_TEMPLATE_SEQ =
+                new java.util.concurrent.atomic.AtomicLong(1_900_000);
+
+        /** 앱 최대 사용(규칙 지키기형)으로 바꾼다 — 판정 방향은 템플릿의 판정 방식이 정한다. */
+        private void makeConstraintChallenge(UUID challengeId) {
+            long templateId = CONSTRAINT_TEMPLATE_SEQ.incrementAndGet();
+            insertAutoTemplate(templateId, "앱 줄이기-" + templateId, "설명", "DETOX",
+                    "{}", "SCREEN_TIME_MAX", "[]");
+            jdbc().update("UPDATE challenges SET template_id = ?, verification_config = ?, params = ? WHERE id = ?",
+                    templateId,
+                    "{\"selectedMethod\":\"AUTO\",\"verificationType\":\"PHONE\",\"signalSource\":\"USAGE\","
                             + "\"wearableReq\":\"NONE\",\"requiredPermissions\":[]}",
-                    "{\"gps_presence\":\"AVOID\",\"radius_m\":100}", bytes(challengeId));
+                    "{\"duration_min\":30}", bytes(challengeId));
         }
 
         @Test

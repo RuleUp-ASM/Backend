@@ -112,17 +112,27 @@ class VerificationSignalContractIT extends VerificationApiSupport {
     class InputTypes {
 
         @Test
-        @DisplayName("[P1] WAKE 로 올라온 잠금해제가 기상 판정에 쓰인다")
-        void wakeSignalDrivesWakeVerification() throws Exception {
+        @DisplayName("[P1] 기상은 목표 시각 + 유예 안의 걸음으로 판정된다")
+        void stepsDriveWakeVerification() throws Exception {
             Member me = member(uniq("contract-wake"));
-            UUID challenge = insertAutoChallenge(me.id(), "WAKE", "USAGE", "{\"target_time\":\"07:00\"}");
+            UUID challenge = insertAutoChallenge(me.id(), "WAKE", "HC_RECORD", "{\"target_time\":\"07:00\"}");
+            UUID memberId = insertReadyMember(challenge, me.id(), null, null);
+
+            syncOk(me.token(), List.of(healthSignal("wake-steps-1", 30, todayAt(7, 5), todayAt(7, 10))));
+
+            assertThat(statusToday(memberId)).isEqualTo("SUCCESS");
+        }
+
+        @Test
+        @DisplayName("[P1] 잠금 해제만으로는 기상으로 인정하지 않는다")
+        void unlockAloneDoesNotVerifyWake() throws Exception {
+            Member me = member(uniq("contract-wake-unlock"));
+            UUID challenge = insertAutoChallenge(me.id(), "WAKE", "HC_RECORD", "{\"target_time\":\"07:00\"}");
             UUID memberId = insertReadyMember(challenge, me.id(), null, null);
 
             syncOk(me.token(), List.of(wakeSignal("UNLOCK", todayAt(6, 30))));
 
-            assertThat(statusToday(memberId))
-                    .as("SCREEN_TIME 만 읽으면 기상만 보내는 기기는 영영 인증되지 않는다")
-                    .isEqualTo("SUCCESS");
+            assertThat(statusToday(memberId)).isNotEqualTo("SUCCESS");
         }
 
         @Test

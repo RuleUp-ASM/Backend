@@ -119,7 +119,7 @@ public class VerificationGuideService {
         for (String must : f.mustContain()) {
             if (!guide.contains(must)) return false;   // 판정 기준 값이 바뀌거나 빠졌다
         }
-        // 「매일」은 장소 피하기처럼 문장에서 자연스럽게 빠질 수 있다. 「주 3회」는 빠지면 조건이 바뀐다
+        // 「매일」은 문장에서 자연스럽게 빠질 수 있다. 「주 3회」는 빠지면 조건이 바뀐다
         if (!"매일".equals(f.frequency()) && !guide.contains(f.frequency())) return false;
         return f.auto() ? guide.contains("자동 인증") : guide.contains("직접 인증");
     }

@@ -124,7 +124,7 @@ public class AnomalyEventRecorder {
             case GPS_PRESENCE, GPS_DISTANCE -> "LOCATION";
             case HEALTH -> "HEALTH";
             case SCREEN_TIME -> "SCREEN_TIME";
-            case WAKE -> "WAKE";
+            case WAKE -> "HEALTH";
             case SLEEP -> "SLEEP";
             default -> "UNKNOWN";
         };

@@ -278,9 +278,8 @@ class VerificationResultNotificationIT extends VerificationApiSupport {
         @DisplayName("규칙 지키기형은 위반 없이 하루가 끝나면 실패 예정이 아니다 — 알리지 않는다")
         void constraintWithoutViolationIsQuiet() throws Exception {
             Member me = member(uniq("vfc"));
-            UUID challengeId = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE",
-                    "{\"duration_min\":30,\"radius_m\":100,\"gps_presence\":\"AVOID\"}");
-            UUID memberId = insertReadyMember(challengeId, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "편의점"), null);
+            UUID challengeId = insertAutoChallenge(me.id(), "SCREEN_TIME_MAX", "USAGE", "{\"duration_min\":30}");
+            UUID memberId = insertReadyMember(challengeId, me.id(), null, screenApps("com.instagram.android"));
             pendingYesterday(me, challengeId, memberId, null);
 
             failExpectedJob.notifyFor(java.time.LocalDate.now(KST).minusDays(1));
@@ -289,16 +288,14 @@ class VerificationResultNotificationIT extends VerificationApiSupport {
         }
 
         @Test
-        @DisplayName("장소 피하기 위반이 잡힌 sync 에서 곧바로 알린다 — 확정 알림과 따로 쌓인다")
+        @DisplayName("앱 최대 사용 위반이 잡힌 sync 에서 곧바로 알린다 — 확정 알림과 따로 쌓인다")
         void violationDuringSync() throws Exception {
             Member me = member(uniq("vfv"));
-            UUID challengeId = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE",
-                    "{\"duration_min\":30,\"radius_m\":100,\"gps_presence\":\"AVOID\"}");
-            UUID memberId = insertReadyMember(challengeId, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "편의점"), null);
+            UUID challengeId = insertAutoChallenge(me.id(), "SCREEN_TIME_MAX", "USAGE", "{\"duration_min\":30}");
+            insertReadyMember(challengeId, me.id(), null, screenApps("com.instagram.android"));
 
             postJsonAuth("/api/v1/verifications/sync", me.token(), syncBody(List.of(
-                    geofenceSignal(memberId, "ENTER", todayAt(0, 5)),
-                    geofenceSignal(memberId, "EXIT", todayAt(0, 45)))));
+                    usageSignal("com.instagram.android", todayAt(0, 5), todayAt(0, 45)))));
 
             assertThat(failExpectedOf(me.id())).singleElement().satisfies(n ->
                     assertThat(n.getDeeplink())

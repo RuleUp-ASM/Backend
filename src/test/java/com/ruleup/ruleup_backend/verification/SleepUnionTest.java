@@ -34,7 +34,7 @@ class SleepUnionTest {
 
     private final SleepEvaluator evaluator = new SleepEvaluator(
             new com.ruleup.ruleup_backend.verification.config.VerificationProperties(
-                    null, null, null, null, null, null, null, null, null, null, false, false));
+                    null, null, null, null, null, null, null, null, null, false, false, null, null));
 
     private static Instant at(int day, int hour, int minute) {
         return LocalDate.of(2026, 9, day).atTime(hour, minute).atZone(KST).toInstant();

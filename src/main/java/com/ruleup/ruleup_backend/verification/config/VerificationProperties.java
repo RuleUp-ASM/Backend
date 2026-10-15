@@ -11,9 +11,10 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param syncMinIntervalSec 평상시 sync 최소 간격(초). 기기 스펙 기반 flushIntervalSec 보다 짧게 잡아
  *                           정상 주기 전송이 걸리지 않게 한다
  * @param syncBacklogMinIntervalSec 복구 전송(backlog=true) 최소 간격(초). 밀린 구간을 나눠 올려야 해서 더 짧다
- * @param avoidGraceMinutes 장소 피하기의 "스침" 허용 시간(분). 이 시간 안에 나오면 위반이 아니다 —
- *                          금지 장소 앞을 지나가기만 해도 지오펜스는 ENTER 를 쏘기 때문이다.
- *                          실기기 테스트로 조절할 값이라 코드 상수로 두지 않는다
+ * @param wakeGraceMinutes 기상 판정에서 목표 시각 뒤로 걸음을 더 기다리는 시간(분). 일어나 바로 걷지 않거나
+ *                          걸음 기록이 조금 늦게 잡혀도 인정한다. 기본 30
+ * @param wakeMinSteps      기상으로 인정할 걸음 수(창 안 합계). 휴대폰을 집어 드는 정도의 오탐 걸음과
+ *                          실제로 일어나 움직인 것을 가르는 문턱이라 실기기 테스트로 찾는다. 기본 10
  * @param signalRetentionDays 판정 원본을 유지할 <b>일수</b>. raw 는 현재 귀속일과 직전 유예
  *                          귀속일만 필요한 hot storage 이고, D일 신호는 D+2 00:00 KST 확정이
  *                          끝나면 목적이 끝난다. <b>정확히 이 일수</b>를 남긴다 — 기본 3이면
@@ -57,22 +58,24 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "app.verification")
 public record VerificationProperties(Integer geofenceRadiusM, Integer maxPayloadBytes,
                                      Integer syncMinIntervalSec, Integer syncBacklogMinIntervalSec,
-                                     Integer avoidGraceMinutes, Integer signalRetentionDays,
+                                     Integer signalRetentionDays,
                                      Integer signalPartitionLookaheadDays,
                                      Integer gpsRetentionDays, Integer anomalyRetentionDays,
                                      Integer materializeCatchupDays,
-                                     Boolean requireActiveDevice, Boolean requireSignalOrigin) {
+                                     Boolean requireActiveDevice, Boolean requireSignalOrigin,
+                                     Integer wakeGraceMinutes, Integer wakeMinSteps) {
 
     private static final int DEFAULT_GEOFENCE_RADIUS_M = 200;
     private static final int DEFAULT_MAX_PAYLOAD_BYTES = 1_048_576;
     private static final int DEFAULT_SYNC_MIN_INTERVAL_SEC = 300;
     private static final int DEFAULT_SYNC_BACKLOG_MIN_INTERVAL_SEC = 10;
-    private static final int DEFAULT_AVOID_GRACE_MINUTES = 5;
     private static final int DEFAULT_SIGNAL_RETENTION_DAYS = 3;
     private static final int DEFAULT_SIGNAL_PARTITION_LOOKAHEAD_DAYS = 10;
     private static final int DEFAULT_GPS_RETENTION_DAYS = 0;
     private static final int DEFAULT_ANOMALY_RETENTION_DAYS = 30;
     private static final int DEFAULT_MATERIALIZE_CATCHUP_DAYS = 7;
+    private static final int DEFAULT_WAKE_GRACE_MINUTES = 30;
+    private static final int DEFAULT_WAKE_MIN_STEPS = 10;
 
     public VerificationProperties {
         geofenceRadiusM = positiveOrDefault(geofenceRadiusM, DEFAULT_GEOFENCE_RADIUS_M);
@@ -80,7 +83,6 @@ public record VerificationProperties(Integer geofenceRadiusM, Integer maxPayload
         // 0 은 "제한 없음"으로 인정한다(테스트·부하 시나리오).
         syncMinIntervalSec = nonNegativeOrDefault(syncMinIntervalSec, DEFAULT_SYNC_MIN_INTERVAL_SEC);
         syncBacklogMinIntervalSec = nonNegativeOrDefault(syncBacklogMinIntervalSec, DEFAULT_SYNC_BACKLOG_MIN_INTERVAL_SEC);
-        avoidGraceMinutes = nonNegativeOrDefault(avoidGraceMinutes, DEFAULT_AVOID_GRACE_MINUTES);
         signalRetentionDays = positiveOrDefault(signalRetentionDays, DEFAULT_SIGNAL_RETENTION_DAYS);
         signalPartitionLookaheadDays = positiveOrDefault(
                 signalPartitionLookaheadDays, DEFAULT_SIGNAL_PARTITION_LOOKAHEAD_DAYS);
@@ -100,6 +102,9 @@ public record VerificationProperties(Integer geofenceRadiusM, Integer maxPayload
         // 관측으로 안전을 확인한 뒤 켜야 한다.
         requireActiveDevice = requireActiveDevice != null && requireActiveDevice;
         requireSignalOrigin = requireSignalOrigin != null && requireSignalOrigin;
+        // 0 은 「목표 시각까지만」이라는 유효한 값이다.
+        wakeGraceMinutes = nonNegativeOrDefault(wakeGraceMinutes, DEFAULT_WAKE_GRACE_MINUTES);
+        wakeMinSteps = positiveOrDefault(wakeMinSteps, DEFAULT_WAKE_MIN_STEPS);
     }
 
     private static int positiveOrDefault(Integer value, int fallback) {

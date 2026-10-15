@@ -98,7 +98,7 @@ class AndroidWireSignalTest {
                 List.of());
         EvaluationOutcome outcome = new SleepEvaluator(
                 new com.ruleup.ruleup_backend.verification.config.VerificationProperties(
-                        null, null, null, null, null, null, null, null, null, null, false, false))
+                        null, null, null, null, null, null, null, null, null, false, false, null, null))
                 .evaluate(new DayContext(LocalDate.of(2026, 9, 17), KST, morning, config,
                         List.of(wire.withReceivedAt(morning)), List.of(), List.of(), "member"));
 

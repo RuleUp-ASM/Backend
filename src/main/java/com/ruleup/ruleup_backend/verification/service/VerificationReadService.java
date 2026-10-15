@@ -196,7 +196,8 @@ public class VerificationReadService {
             case GPS_PRESENCE -> (config.gps() != null) ? config.gps().timeWindow() : null;
             case SCREEN_TIME -> (config.screenTime() != null) ? config.screenTime().timeWindow() : null;
             case WAKE -> (config.wake() != null && config.wake().beforeTime() != null)
-                    ? "~" + config.wake().beforeTime() : null;
+                    ? "~" + java.time.LocalTime.parse(config.wake().beforeTime())
+                            .plusMinutes(config.wake().graceMinutes()) : null;
             case SLEEP -> (config.sleep() != null && config.sleep().bedtimeBefore() != null)
                     ? "~" + config.sleep().bedtimeBefore() : null;
             default -> null;
