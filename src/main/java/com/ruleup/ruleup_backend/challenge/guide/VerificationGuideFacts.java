@@ -59,11 +59,6 @@ public record VerificationGuideFacts(
                 fallback = "장소를 등록한 뒤 " + freq + " 그곳에 " + (dur != null ? dur + " 이상 " : "")
                         + "머물면 자동 인증됩니다.";
             }
-            case "GPS_AVOID" -> {
-                conditions.add("등록한 장소에 머물지 않기(잠깐 스쳐 지나가는 것은 괜찮다)");
-                fallback = "피하고 싶은 장소를 등록하고 그곳에 머물지 않으면 자동 인증됩니다. "
-                        + "잠깐 스쳐 지나가는 것은 괜찮습니다.";
-            }
             case "HEALTH" -> {
                 String steps = steps(params.get("steps"));
                 String km = km(params.get("distance_km"));

@@ -11,9 +11,6 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param syncMinIntervalSec 평상시 sync 최소 간격(초). 기기 스펙 기반 flushIntervalSec 보다 짧게 잡아
  *                           정상 주기 전송이 걸리지 않게 한다
  * @param syncBacklogMinIntervalSec 복구 전송(backlog=true) 최소 간격(초). 밀린 구간을 나눠 올려야 해서 더 짧다
- * @param avoidGraceMinutes 장소 피하기의 "스침" 허용 시간(분). 이 시간 안에 나오면 위반이 아니다 —
- *                          금지 장소 앞을 지나가기만 해도 지오펜스는 ENTER 를 쏘기 때문이다.
- *                          실기기 테스트로 조절할 값이라 코드 상수로 두지 않는다
  * @param signalRetentionDays 판정 원본을 유지할 <b>일수</b>. raw 는 현재 귀속일과 직전 유예
  *                          귀속일만 필요한 hot storage 이고, D일 신호는 D+2 00:00 KST 확정이
  *                          끝나면 목적이 끝난다. <b>정확히 이 일수</b>를 남긴다 — 기본 3이면
@@ -57,7 +54,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "app.verification")
 public record VerificationProperties(Integer geofenceRadiusM, Integer maxPayloadBytes,
                                      Integer syncMinIntervalSec, Integer syncBacklogMinIntervalSec,
-                                     Integer avoidGraceMinutes, Integer signalRetentionDays,
+                                     Integer signalRetentionDays,
                                      Integer signalPartitionLookaheadDays,
                                      Integer gpsRetentionDays, Integer anomalyRetentionDays,
                                      Integer materializeCatchupDays,
@@ -67,7 +64,6 @@ public record VerificationProperties(Integer geofenceRadiusM, Integer maxPayload
     private static final int DEFAULT_MAX_PAYLOAD_BYTES = 1_048_576;
     private static final int DEFAULT_SYNC_MIN_INTERVAL_SEC = 300;
     private static final int DEFAULT_SYNC_BACKLOG_MIN_INTERVAL_SEC = 10;
-    private static final int DEFAULT_AVOID_GRACE_MINUTES = 5;
     private static final int DEFAULT_SIGNAL_RETENTION_DAYS = 3;
     private static final int DEFAULT_SIGNAL_PARTITION_LOOKAHEAD_DAYS = 10;
     private static final int DEFAULT_GPS_RETENTION_DAYS = 0;
@@ -80,7 +76,6 @@ public record VerificationProperties(Integer geofenceRadiusM, Integer maxPayload
         // 0 은 "제한 없음"으로 인정한다(테스트·부하 시나리오).
         syncMinIntervalSec = nonNegativeOrDefault(syncMinIntervalSec, DEFAULT_SYNC_MIN_INTERVAL_SEC);
         syncBacklogMinIntervalSec = nonNegativeOrDefault(syncBacklogMinIntervalSec, DEFAULT_SYNC_BACKLOG_MIN_INTERVAL_SEC);
-        avoidGraceMinutes = nonNegativeOrDefault(avoidGraceMinutes, DEFAULT_AVOID_GRACE_MINUTES);
         signalRetentionDays = positiveOrDefault(signalRetentionDays, DEFAULT_SIGNAL_RETENTION_DAYS);
         signalPartitionLookaheadDays = positiveOrDefault(
                 signalPartitionLookaheadDays, DEFAULT_SIGNAL_PARTITION_LOOKAHEAD_DAYS);

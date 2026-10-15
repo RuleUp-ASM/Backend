@@ -60,7 +60,6 @@ public record FailureEvidence(String summary,
             case "WOKE_UP_LATE" -> before(ev, "첫 잠금 해제", "firstUnlockAt", "beforeTime");
             case "SLEPT_LATE" -> before(ev, "취침", "bedtime", "bedtimeBefore");
             case "INSUFFICIENT_SLEEP" -> pair(ev, "수면", "sleepHours", "시간", "goal", "시간");
-            case "ENTERED_AVOID_ZONE" -> "피해야 하는 장소에 들어간 기록이 있어요.";
             case "PERMISSION_MISSING" -> "인증에 필요한 권한이 꺼져 있어 측정하지 못했어요.";
             case "NO_SIGNAL_RECEIVED" -> "판정에 쓸 신호가 도착하지 않았어요.";
             case "UNTRUSTED_HEALTH_SOURCE" -> "직접 입력했거나 신뢰할 수 없는 출처의 기록만 있었어요.";

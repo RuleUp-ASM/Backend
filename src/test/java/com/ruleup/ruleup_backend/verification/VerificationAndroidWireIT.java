@@ -137,23 +137,6 @@ class VerificationAndroidWireIT extends VerificationApiSupport {
     }
 
     @Test
-    @DisplayName("장소 피하기 — 앱 형식 ENTER 가 위반으로 잡힌다(거짓 통과 없음)")
-    void avoidWithAndroidGeofence() throws Exception {
-        Member me = member(uniq("wire-avoid"));
-        UUID ch = insertAutoChallenge(me.id(), "GPS_AVOID", "GEOFENCE", "{\"duration_min\":0,\"radius_m\":100}");
-        UUID memberId = insertReadyMember(ch, me.id(), anchor(CAFE_LAT, CAFE_LNG, 100, "편의점"), null);
-
-        // 이탈 없는 진입은 「스침」 허용 시간이 지나야 위반이다. 그래서 진입은 허용 시간보다 앞이면서
-        // 오늘(KST) 안이어야 한다 — 예전의 todayAt(9, 0) 은 00~09시 KST 에 돌면 미래 시각이라 보류로 남았다.
-        Instant enteredAt = Instant.now().minus(Duration.ofMinutes(properties.avoidGraceMinutes() + 2L));
-        assumeTrue(enteredAt.isAfter(LocalDate.now(KST).atStartOfDay(KST).toInstant()),
-                "자정 직후 몇 분은 오늘 안에 허용 시간을 넘긴 진입을 만들 수 없다");
-        sync(me.token(), List.of(androidGeofence(anchorId(me.id(), ch), "ENTER", enteredAt)));
-
-        assertThat(failureReasonOf(memberId)).isEqualTo("ENTERED_AVOID_ZONE");
-    }
-
-    @Test
     @DisplayName("다른 계정이 등록한 지오펜스 id 는 같은 방이어도 내 전환으로 세지 않는다")
     void anchorOfAnotherUserIsIgnored() throws Exception {
         Member me = member(uniq("wire-other"));

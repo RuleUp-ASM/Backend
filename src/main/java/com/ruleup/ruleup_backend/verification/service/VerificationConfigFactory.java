@@ -21,7 +21,7 @@ import java.util.Map;
  *  v2 변경:
  *   - 움직임 태그(HEALTH / 레거시 GPS_DISTANCE·ACTIVITY) → VerificationMethod.HEALTH 로 라우팅 + HealthConfig 조립.
  *     (커스텀 세션 GPS_DISTANCE는 보존하되 라우팅 안 함, §3)
- *   - GPS_PRESENCE에 presence(VISIT/AVOID)·anchorFillMode·brandKeyword·nearbyRadiusM 반영. 앵커 좌표는 멤버 바인딩.
+ *   - GPS_PRESENCE에 anchorFillMode·brandKeyword·nearbyRadiusM 반영. 앵커 좌표는 멤버 바인딩.
  */
 @Component
 @RequiredArgsConstructor
@@ -73,7 +73,7 @@ public class VerificationConfigFactory {
             case "SCREEN_TIME_MAX" -> screenTime = new ScreenTimeConfig(
                     ScreenTimeMode.MAX, Polarity.CONSTRAINT,
                     packages(params), intParam(params, "duration_min", 30), timeWindow(params), 1);
-            case "GPS_PRESENCE", "GPS_AVOID" -> gps = buildGps(params, "GPS_AVOID".equals(tag));
+            case "GPS_PRESENCE" -> gps = buildGps(params);
             // 움직임: 레거시 GPS_DISTANCE/ACTIVITY 태그도 v2에서는 HEALTH로 라우팅.
             case "HEALTH", "GPS_DISTANCE", "ACTIVITY" -> health = buildHealth(params);
             case "SLEEP" -> sleep = new SleepConfig(
@@ -88,29 +88,18 @@ public class VerificationConfigFactory {
                 gps, health, screenTime, wake, sleep, perms);
     }
 
-    // ===== GPS_PRESENCE (VISIT/AVOID) =====
-    /**
-     * @param avoidByTemplate 루틴 템플릿이 "장소 피하기"({@code GPS_AVOID})로 정의된 경우.
-     *                        방문/회피는 방 단위 인증 방식이라 사용자가 고치는 목표값(params)이 아니라
-     *                        템플릿 쪽에 둔다. 레거시 {@code gps_presence} 파라미터도 계속 인정한다.
-     */
-    private GpsConfig buildGps(Map<String, Object> params, boolean avoidByTemplate) {
-        boolean avoid = avoidByTemplate || "AVOID".equalsIgnoreCase(strParam(params, "gps_presence"));
-        GpsPresence presence = avoid ? GpsPresence.AVOID : GpsPresence.VISIT;
-        Polarity polarity = avoid ? Polarity.CONSTRAINT : Polarity.ACHIEVEMENT;
+    // ===== GPS_PRESENCE (방문) =====
+    private GpsConfig buildGps(Map<String, Object> params) {
         AnchorFillMode fillMode = "NEARBY_BRAND".equalsIgnoreCase(strParam(params, "anchor_fill_mode"))
                 ? AnchorFillMode.NEARBY_BRAND : AnchorFillMode.MANUAL;
         int dwell = intParam(params, "duration_min", 60);
-        // 방문형의 loiteringDelay 는 "이만큼 머물러야 인정"(=dwell)이지만,
-        // 회피형에서는 "이만큼 안에 나오면 스침"이라 의미가 정반대다. 회피는 서버 설정값을 쓴다.
-        int loitering = avoid ? properties.avoidGraceMinutes() : dwell;
         return new GpsConfig(
-                GpsMode.PRESENCE, presence, fillMode,
+                GpsMode.PRESENCE, fillMode,
                 strParam(params, "brand_keyword"), intParam(params, "nearby_radius_m", 1500),
                 dbl(params, "lat"), dbl(params, "lng"),       // 레거시 단일앵커(보통 null) — 평가는 멤버 anchors[] 우선
-                intParam(params, "radius_m", 80), dwell, loitering,
+                intParam(params, "radius_m", 80), dwell, dwell,
                 null, timeWindow(params),
-                polarity, 1, GPS_ACCURACY_MAX_M, 50, List.of());
+                Polarity.ACHIEVEMENT, 1, GPS_ACCURACY_MAX_M, 50, List.of());
     }
 
     /**
@@ -172,8 +161,7 @@ public class VerificationConfigFactory {
         return switch (tag) {
             case "WAKE" -> VerificationMethod.WAKE;
             case "SCREEN_TIME_MIN", "SCREEN_TIME_MAX" -> VerificationMethod.SCREEN_TIME;
-            // 방문(VISIT)·회피(AVOID) 는 같은 평가기가 처리한다 — 방향만 GpsConfig 에 실린다.
-            case "GPS_PRESENCE", "GPS_AVOID" -> VerificationMethod.GPS_PRESENCE;
+            case "GPS_PRESENCE" -> VerificationMethod.GPS_PRESENCE;
             // v2: 움직임은 전부 HEALTH로. 커스텀 세션(GPS_DISTANCE 평가기)은 보존하되 라우팅 제외.
             case "HEALTH", "GPS_DISTANCE", "ACTIVITY" -> VerificationMethod.HEALTH;
             case "SLEEP" -> VerificationMethod.SLEEP;

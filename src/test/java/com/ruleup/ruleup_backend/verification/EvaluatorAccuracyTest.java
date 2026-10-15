@@ -34,13 +34,13 @@ class EvaluatorAccuracyTest {
     /** 게이트 강화를 끈 기본 설정. 나머지 값은 record 가 기본값으로 채운다. */
     private static com.ruleup.ruleup_backend.verification.config.VerificationProperties lenientProperties() {
         return new com.ruleup.ruleup_backend.verification.config.VerificationProperties(
-                null, null, null, null, null, null, null, null, null, null, false, false);
+                null, null, null, null, null, null, null, null, null, false, false);
     }
 
     /** 출처 없는 기록을 거부하는 설정. */
     private static com.ruleup.ruleup_backend.verification.config.VerificationProperties strictOriginProperties() {
         return new com.ruleup.ruleup_backend.verification.config.VerificationProperties(
-                null, null, null, null, null, null, null, null, null, null, false, true);
+                null, null, null, null, null, null, null, null, null, false, true);
     }
 
     private static Instant at(int hour, int minute) {
@@ -54,13 +54,11 @@ class EvaluatorAccuracyTest {
 
     // ===== 설정 조립 =====
 
-    private VerificationConfig gpsConfig(GpsPresence presence, int dwellMinutes, int graceMinutes,
-                                         int accuracyMaxM) {
+    private VerificationConfig gpsConfig(int dwellMinutes, int graceMinutes, int accuracyMaxM) {
         GpsConfig gps = new GpsConfig(
-                GpsMode.PRESENCE, presence, AnchorFillMode.MANUAL, null, 1500,
+                GpsMode.PRESENCE, AnchorFillMode.MANUAL, null, 1500,
                 null, null, 200, dwellMinutes, graceMinutes, null, null,
-                presence == GpsPresence.AVOID ? Polarity.CONSTRAINT : Polarity.ACHIEVEMENT,
-                1, accuracyMaxM, 50, List.of());
+                Polarity.ACHIEVEMENT, 1, accuracyMaxM, 50, List.of());
         return new VerificationConfig(ScheduleType.FIXED_DAYS, null, MethodCombine.AND,
                 List.of(VerificationMethod.GPS_PRESENCE), gps, null, null, null, null, List.of());
     }
@@ -108,81 +106,6 @@ class EvaluatorAccuracyTest {
     }
 
     @Nested
-    @DisplayName("장소 피하기 — 스침 유예")
-    class AvoidGrace {
-
-        private final GpsPresenceEvaluator evaluator = new GpsPresenceEvaluator();
-
-        @Test
-        @DisplayName("허용 시간 안에 나오면 스침으로 보고 위반이 아니다")
-        void briefPassThroughIsNotAViolation() {
-            // 5분 유예. 2분 머물다 나왔다 — 편의점 앞을 지나친 정도다.
-            EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    gpsConfig(GpsPresence.AVOID, 0, 5, 100),
-                    List.of(geofence("ENTER", at(19, 0), false), geofence("EXIT", at(19, 2), false)),
-                    List.of(), at(20, 0)));
-
-            assertThat(outcome.failureReason()).as("스침은 위반이 아니다").isNull();
-            assertThat(outcome.status()).isEqualTo(VerificationStatus.PENDING);
-        }
-
-        @Test
-        @DisplayName("허용 시간을 넘겨 머물면 위반이다")
-        void stayingBeyondGraceIsAViolation() {
-            EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    gpsConfig(GpsPresence.AVOID, 0, 5, 100),
-                    List.of(geofence("ENTER", at(19, 0), false), geofence("EXIT", at(19, 30), false)),
-                    List.of(), at(20, 0)));
-
-            assertThat(outcome.failureReason()).isEqualTo("ENTERED_AVOID_ZONE");
-        }
-
-        @Test
-        @DisplayName("아직 안 나왔고 허용 시간도 안 지났으면 판단을 미룬다 — 이탈 신호가 늦게 올 수 있다")
-        void openStayWithinGraceWaits() {
-            EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    gpsConfig(GpsPresence.AVOID, 0, 5, 100),
-                    List.of(geofence("ENTER", at(19, 0), false)),
-                    List.of(), at(19, 3)));
-
-            assertThat(outcome.failureReason()).isNull();
-        }
-
-        @Test
-        @DisplayName("안 나온 채 허용 시간이 지나면 위반이다")
-        void openStayBeyondGraceIsAViolation() {
-            EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    gpsConfig(GpsPresence.AVOID, 0, 5, 100),
-                    List.of(geofence("ENTER", at(19, 0), false)),
-                    List.of(), at(19, 30)));
-
-            assertThat(outcome.failureReason()).isEqualTo("ENTERED_AVOID_ZONE");
-        }
-
-        @Test
-        @DisplayName("OS 가 체류를 확정한 DWELL 은 유예 없이 위반이다")
-        void dwellIsImmediateViolation() {
-            EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    gpsConfig(GpsPresence.AVOID, 0, 5, 100),
-                    List.of(geofence("DWELL", at(19, 0), false)),
-                    List.of(), at(19, 1)));
-
-            assertThat(outcome.failureReason()).isEqualTo("ENTERED_AVOID_ZONE");
-        }
-
-        @Test
-        @DisplayName("조작된 위치 신호는 위반 근거가 되지 않는다")
-        void mockLocationIsNotEvidence() {
-            EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    gpsConfig(GpsPresence.AVOID, 0, 5, 100),
-                    List.of(geofence("DWELL", at(19, 0), true)),
-                    List.of(), at(20, 0)));
-
-            assertThat(outcome.failureReason()).isNull();
-        }
-    }
-
-    @Nested
     @DisplayName("장소 방문 — 측위 품질 게이트")
     class VisitQualityGate {
 
@@ -197,7 +120,7 @@ class EvaluatorAccuracyTest {
         @DisplayName("정확도가 좋은 측위는 체류로 인정된다")
         void accuratePointsCount() {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    gpsConfig(GpsPresence.VISIT, 30, 30, 100),
+                    gpsConfig(30, 30, 100),
                     List.of(location(37.4979, 127.0276, 10.0, false, fortyMinutes())),
                     anchors, at(10, 0)));
 
@@ -209,7 +132,7 @@ class EvaluatorAccuracyTest {
         void inaccuratePointsAreExcluded() {
             // accuracy 500m > 허용 100m — 이 좌표가 정말 반경 안인지 알 수 없다.
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    gpsConfig(GpsPresence.VISIT, 30, 30, 100),
+                    gpsConfig(30, 30, 100),
                     List.of(location(37.4979, 127.0276, 500.0, false, fortyMinutes())),
                     anchors, at(10, 0)));
 
@@ -220,7 +143,7 @@ class EvaluatorAccuracyTest {
         @DisplayName("앱 수집 주기(약 30분)로 한 번씩 찍힌 측위도 체류로 이어진다 — QA SIG-24")
         void thirtyMinuteSamplingCounts() {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    gpsConfig(GpsPresence.VISIT, 60, 60, 150),
+                    gpsConfig(60, 60, 150),
                     List.of(location(37.4979, 127.0276, 120.0, false, List.of(at(9, 0))),
                             location(37.4979, 127.0276, 90.0, false, List.of(at(9, 32))),
                             location(37.4979, 127.0276, 110.0, false, List.of(at(10, 1)))),
@@ -233,7 +156,7 @@ class EvaluatorAccuracyTest {
         @DisplayName("사이에 반경 밖 측위가 끼면 그 구간은 체류가 아니다")
         void leavingBreaksContinuity() {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    gpsConfig(GpsPresence.VISIT, 30, 30, 150),
+                    gpsConfig(30, 30, 150),
                     List.of(location(37.4979, 127.0276, 20.0, false, List.of(at(9, 0))),
                             location(37.5200, 127.0600, 20.0, false, List.of(at(9, 15))),
                             location(37.4979, 127.0276, 20.0, false, List.of(at(9, 40)))),
@@ -247,7 +170,7 @@ class EvaluatorAccuracyTest {
         @DisplayName("45분을 넘는 공백은 잇지 않는다")
         void longGapIsNotBridged() {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    gpsConfig(GpsPresence.VISIT, 30, 30, 150),
+                    gpsConfig(30, 30, 150),
                     List.of(location(37.4979, 127.0276, 20.0, false, List.of(at(9, 0), at(9, 50)))),
                     anchors, at(10, 0)));
 
@@ -258,7 +181,7 @@ class EvaluatorAccuracyTest {
         @DisplayName("조작된 측위는 체류 계산에서 빠진다")
         void mockPointsAreExcluded() {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    gpsConfig(GpsPresence.VISIT, 30, 30, 100),
+                    gpsConfig(30, 30, 100),
                     List.of(location(37.4979, 127.0276, 10.0, true, fortyMinutes())),
                     anchors, at(10, 0)));
 

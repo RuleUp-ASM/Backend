@@ -37,7 +37,6 @@ class RoutineCatalogSeedIT {
     /** verificationMethod → 그 판정기가 실제로 읽는 목표값 키(VerificationConfigFactory 기준). */
     private static final Map<String, Set<String>> EXPECTED_PARAM_KEYS = Map.of(
             "GPS_PRESENCE", Set.of("duration_min"),
-            "GPS_AVOID", Set.of("duration_min"),
             "SCREEN_TIME_MAX", Set.of("duration_min"),
             "SCREEN_TIME_MIN", Set.of("duration_min"),
             "WAKE", Set.of("target_time"),
@@ -53,7 +52,6 @@ class RoutineCatalogSeedIT {
      */
     private static final Map<String, Set<String>> ALLOWED_PERMISSIONS = Map.of(
             "GPS_PRESENCE", Set.of("ACCESS_FINE_LOCATION", "ACCESS_BACKGROUND_LOCATION"),
-            "GPS_AVOID", Set.of("ACCESS_FINE_LOCATION", "ACCESS_BACKGROUND_LOCATION"),
             "SCREEN_TIME_MAX", Set.of("PACKAGE_USAGE_STATS"),
             "SCREEN_TIME_MIN", Set.of("PACKAGE_USAGE_STATS"),
             "WAKE", Set.of("PACKAGE_USAGE_STATS"),
@@ -71,10 +69,10 @@ class RoutineCatalogSeedIT {
 
     @Test
     @Transactional(readOnly = true)
-    @DisplayName("문서 §1~§7 의 74건이 전부 자동 인증 가능한 상태로 들어간다")
+    @DisplayName("문서 §1~§7 에서 장소 피하기를 뺀 64건이 전부 자동 인증 가능한 상태로 들어간다")
     void seedIsAllAutoVerifiable() {
         List<RoutineTemplate> seeded = seeded();
-        assertThat(seeded).hasSize(74);
+        assertThat(seeded).hasSize(64);
         assertThat(seeded).allSatisfy(t -> {
             assertThat(t.supportsAuto())
                     .withFailMessage("자동 인증 정의가 없는 루틴이 시드에 섞였다: %s", t.getName())
