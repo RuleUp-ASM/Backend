@@ -71,5 +71,5 @@ Incident Manager(`ssm-contacts`·`ssm-incidents`)는 조직 SCP 가 막아 쓰�
 1. 두 사람 모두 PagerDuty 앱 설치 + 프로필 알림 규칙에 **High-urgency: 즉시 푸시 + 1분 뒤 전화**를 넣는다(서비스가 아니라 사람마다 설정이다).
 2. `PAGERDUTY_API_TOKEN=… python3 infra/monitoring/alerting/pagerduty.py setup --primary <내 PD 이메일> --secondary <팀원 PD 이메일>` — 원장 `env/prod.json` 이 채워진다 → 커밋.
 3. `python3 infra/monitoring/alerting/p0_p1.py prod` — P0 경보 AlarmActions·OKActions 에 PagerDuty 토픽이 붙는다.
-4. 실수신 시험(G01): `pagerduty.py test-trigger` → 내 폰이 울리면 **ACK 하지 않고** 10분 기다려 팀원 폰이 울리는지 → `pagerduty.py test-resolve`.
+4. 실수신 시험(G01): `pagerduty.py test-trigger` — 시험 경보 `ruleup-prod-P0-ONCALL-TEST` 를 실제 P0 와 같은 경로로 ALARM 으로 바꾼다 → Slack #ruleup-alert·긴급 채널 멘션·PagerDuty 가 함께 오는지, 내 폰을 **ACK 하지 않고** 10분 뒤 팀원 폰이 울리는지 → `pagerduty.py test-resolve`(Slack 복구 알림·사건 종료).
    노션 「대시보드·알림 요약표」 P0 온콜 연결 체크표 12종은 경보별로 `aws cloudwatch set-alarm-state` 로 한 번씩 확인한다(다음 평가에서 OK 로 돌아온다).
