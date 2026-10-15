@@ -16,15 +16,23 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import javax.sql.DataSource;
+
+import java.lang.management.BufferPoolMXBean;
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryPoolMXBean;
 import java.lang.management.MemoryType;
 import java.lang.management.MemoryUsage;
+import java.lang.management.ThreadInfo;
+import java.lang.management.ThreadMXBean;
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
+import java.util.TreeMap;
+import java.util.concurrent.TimeUnit;
 
 /**
  * JVM·커넥션 풀·요청 스레드의 순간값을 30초마다({@link com.ruleup.ruleup_backend.observability.metric.MinuteMetricPublisher} 틱) 재 {@code RuleUp/Ops}(Env, Service[, Pool]) 로 보낸다 —
@@ -39,6 +47,15 @@ import java.util.Map;
  *   <li>GcPauseRatio5m — 최근 5분 GC 정지 합 ÷ 300초. 동시(concurrent) 수집 시간은 정지가 아니라 뺀다</li>
  *   <li>MaxPoolActivePct·MaxPoolPending·PoolTimeoutDelta — Hikari active/max, 커넥션 대기 스레드, 획득 timeout 증가분</li>
  *   <li>MaxBusyThreadPct — Tomcat 요청 스레드 busy/max</li>
+ * </ul>
+ *
+ * <p>대시보드 OPS-6(JVM 런타임, 노션 10/15 리뷰) 용 — 경보 없이 화면에만 쓴다.
+ * Micrometer {@code jvm.*} 를 통째로 내보내면 풀·원인별 태그 조합이 70개를 넘어(이름×차원 하나가 월 과금 단위) 필요한 것만 직접 잰다.
+ * <ul>
+ *   <li>JvmMemoryUsedMb(Area=eden·survivor·old·metaspace·codecache) · JvmHeapMaxMb</li>
+ *   <li>JvmGcPauseMaxMs — Micrometer {@code jvm.gc.pause} 의 최근 최대(백분위는 설정이 없어 최대·횟수로 본다) · JvmGcPauseCount — 정지 수집 횟수 증가분</li>
+ *   <li>JvmThreads(State=live·daemon·peak·runnable·blocked·waiting) · JvmClassesLoaded · JvmBufferUsedMb(Pool=direct·mapped)</li>
+ *   <li>ProcessCpuPct · ProcessUptimeSec — 업타임이 내려가면 재기동(Minimum 으로 본다)</li>
  * </ul>
  */
 @Slf4j
@@ -56,6 +73,7 @@ public class RuntimeOpsSampler implements MinuteSampler {
 
     private final Deque<long[]> gcSamples = new ArrayDeque<>();   // [채집 시각 ms, 누적 GC 정지 ms]
     private final Map<String, Double> lastTimeouts = new HashMap<>();
+    private long lastGcCount = -1;
 
     public RuntimeOpsSampler(MinuteMetricBuffer buffer, MetricContext ctx, ObjectProvider<DataSource> dataSources,
                              MeterRegistry registry, ApplicationContext context) {
@@ -71,6 +89,7 @@ public class RuntimeOpsSampler implements MinuteSampler {
         try { jvm(); } catch (RuntimeException e) { log.debug("jvm sample failed: {}", e.toString()); }
         try { pools(); } catch (RuntimeException e) { log.debug("pool sample failed: {}", e.toString()); }
         try { threads(); } catch (RuntimeException e) { log.debug("thread sample failed: {}", e.toString()); }
+        try { jvmPanel(); } catch (RuntimeException e) { log.debug("jvm panel sample failed: {}", e.toString()); }
     }
 
     private void jvm() {
@@ -133,8 +152,66 @@ public class RuntimeOpsSampler implements MinuteSampler {
         }
     }
 
-    private void gauge(String name, MetricKey.Unit unit, double value) {
-        buffer.gauge(new MetricKey(OpsSignals.OPS, name, ctx.dims(), unit), value);
+    private void jvmPanel() {
+        Map<String, Long> areas = new TreeMap<>();
+        for (MemoryPoolMXBean pool : ManagementFactory.getMemoryPoolMXBeans()) {
+            String area = memoryArea(pool.getName());
+            if (area != null) areas.merge(area, pool.getUsage().getUsed(), Long::sum);
+        }
+        areas.forEach((area, used) -> gauge("JvmMemoryUsedMb", MetricKey.Unit.NONE, mb(used), "Area", area));
+        long heapMax = ManagementFactory.getMemoryMXBean().getHeapMemoryUsage().getMax();
+        if (heapMax > 0) gauge("JvmHeapMaxMb", MetricKey.Unit.NONE, mb(heapMax));
+
+        double pauseMax = registry.find("jvm.gc.pause").timers().stream()
+                .mapToDouble(t -> t.max(TimeUnit.MILLISECONDS)).max().orElse(Double.NaN);
+        if (!Double.isNaN(pauseMax)) gauge("JvmGcPauseMaxMs", MetricKey.Unit.MILLISECONDS, pauseMax);
+        long gcCount = 0;
+        for (GarbageCollectorMXBean gc : ManagementFactory.getGarbageCollectorMXBeans()) {
+            if (!isConcurrent(gc.getName())) gcCount += Math.max(0, gc.getCollectionCount());
+        }
+        if (lastGcCount >= 0) buffer.add(MetricKey.count(OpsSignals.OPS, "JvmGcPauseCount", ctx.dims()), Math.max(0, gcCount - lastGcCount));
+        lastGcCount = gcCount;
+
+        ThreadMXBean threads = ManagementFactory.getThreadMXBean();
+        Map<Thread.State, Integer> states = new EnumMap<>(Thread.State.class);
+        for (ThreadInfo info : threads.getThreadInfo(threads.getAllThreadIds(), 0)) {
+            if (info != null) states.merge(info.getThreadState(), 1, Integer::sum);
+        }
+        gauge("JvmThreads", MetricKey.Unit.COUNT, threads.getThreadCount(), "State", "live");
+        gauge("JvmThreads", MetricKey.Unit.COUNT, threads.getDaemonThreadCount(), "State", "daemon");
+        gauge("JvmThreads", MetricKey.Unit.COUNT, threads.getPeakThreadCount(), "State", "peak");
+        gauge("JvmThreads", MetricKey.Unit.COUNT, states.getOrDefault(Thread.State.RUNNABLE, 0), "State", "runnable");
+        gauge("JvmThreads", MetricKey.Unit.COUNT, states.getOrDefault(Thread.State.BLOCKED, 0), "State", "blocked");
+        gauge("JvmThreads", MetricKey.Unit.COUNT, states.getOrDefault(Thread.State.WAITING, 0)
+                + states.getOrDefault(Thread.State.TIMED_WAITING, 0), "State", "waiting");
+
+        gauge("JvmClassesLoaded", MetricKey.Unit.COUNT, ManagementFactory.getClassLoadingMXBean().getLoadedClassCount());
+        for (BufferPoolMXBean pool : ManagementFactory.getPlatformMXBeans(BufferPoolMXBean.class)) {
+            String name = pool.getName().toLowerCase(Locale.ROOT);
+            if (name.equals("direct") || name.equals("mapped")) gauge("JvmBufferUsedMb", MetricKey.Unit.NONE, mb(pool.getMemoryUsed()), "Pool", name);
+        }
+        if (ManagementFactory.getOperatingSystemMXBean() instanceof com.sun.management.OperatingSystemMXBean os && os.getProcessCpuLoad() >= 0) {
+            gauge("ProcessCpuPct", MetricKey.Unit.PERCENT, 100.0 * os.getProcessCpuLoad());
+        }
+        gauge("ProcessUptimeSec", MetricKey.Unit.SECONDS, ManagementFactory.getRuntimeMXBean().getUptime() / 1000.0);
+    }
+
+    private void gauge(String name, MetricKey.Unit unit, double value, String... extraDims) {
+        buffer.gauge(new MetricKey(OpsSignals.OPS, name, ctx.dims(extraDims), unit), value);
+    }
+
+    private static double mb(long bytes) {
+        return bytes / (1024.0 * 1024.0);
+    }
+
+    /** 메모리 풀 이름 → 대시보드 영역. G1·Parallel·Serial·ZGC 이름을 묶는다. 모르는 풀(Compressed Class 등)은 null — 내보내지 않는다. */
+    static String memoryArea(String poolName) {
+        if (poolName.contains("Eden") || poolName.equals("ZGC Young Generation")) return "eden";
+        if (poolName.contains("Survivor")) return "survivor";
+        if (isOldGen(poolName)) return "old";
+        if (poolName.equals("Metaspace")) return "metaspace";
+        if (poolName.startsWith("CodeHeap") || poolName.equals("Code Cache")) return "codecache";
+        return null;
     }
 
     static boolean isOldGen(String poolName) {

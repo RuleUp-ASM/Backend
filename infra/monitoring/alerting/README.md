@@ -20,7 +20,7 @@ Slack 전달은 Amazon Q Developer in chat applications(워크스페이스 `ASM 
 | `catalog.py` · `p0_p1.py <env>` | 노션 알람 카탈로그의 경보 정의(원본)·적용, 옛 이름 경보 정리. `tests_catalog.py` 가 등급·누락 정책·리전 계약을 시험 |
 | `routing.py` | 중앙 감시 리전(us-east-1) 토픽·Slack 구성·P0 멘션 규칙 |
 | `security_events.py` | SEC-02/03/04 EventBridge 규칙 |
-| `dashboard.py [prod\|stg]` | 서버(운영) 대시보드 `ruleup-<env>-ops` — OPS-1~5 순서(런북이 패널 번호로 가리킨다), 4xx 로그 표, 최근 ERROR 로그 |
+| `dashboard.py [prod\|stg]` | 서버(운영) 대시보드 `ruleup-<env>-ops` — OPS-1~6 순서(OPS-6 JVM 런타임: 힙 영역·GC 정지·스레드·클래스·버퍼)(런북이 패널 번호로 가리킨다), 4xx 로그 표, 최근 ERROR 로그 |
 | `observe_dashboard.py [prod\|stg]` | 감시망 대시보드 `ruleup-<env>-observe`(us-east-1) — OBS-1~4 |
 | `business_dashboard.py` | 사용자 지표 대시보드 `ruleup-prod-business` — ① 로그인·가입 ② 챌린지 참여(초안 경로·생성·초안 수정률·탐색/초대 가입) ③ 인증(자동 vs 수동). 묶음마다 기간 합계·비율 숫자 칸. prod 전용 |
 | `p0_mention.py` | P0 → 긴급 채널 커스텀 알림(멘션)·복구 스레드, 긴급 채널 구성을 `ruleup-prod-p0-slack` 으로 |
