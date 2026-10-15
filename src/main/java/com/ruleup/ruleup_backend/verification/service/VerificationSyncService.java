@@ -36,6 +36,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.dao.PessimisticLockingFailureException;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -160,7 +163,26 @@ public class VerificationSyncService {
                 .collect(Collectors.toMap(MethodEvaluator::method, e -> e, (a, b) -> a));
     }
 
-    @Transactional
+    /** 데드락 재시도 — 트랜잭션 본문만 다시 돈다. 생성자가 길어 세터로 받는다. */
+    private TransactionTemplate tx;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void setTransactionManager(PlatformTransactionManager transactionManager) {
+        this.tx = new TransactionTemplate(transactionManager);
+    }
+
+    /** 데드락으로 진 트랜잭션은 이 횟수까지 처음부터 다시 돈다(MySQL 1213 「try restarting transaction」). */
+    static final int DEADLOCK_ATTEMPTS = 3;
+
+    /**
+     * 봉투 검증·빈도 제한은 <b>한 번만</b> 하고, 저장·판정 트랜잭션만 데드락이면 다시 돈다.
+     *
+     * <p>sync 한 건은 세션 갱신·신호 INSERT IGNORE·판정 갱신을 한 트랜잭션에서 한다. 같은 사용자의 sync 가 겹치면
+     * (재전송·백로그, 빈도 제한기가 태스크마다 메모리에 있어 두 태스크로 나뉘면 막지 못한다) 서로의 잠금을 잡아
+     * 한쪽이 데드락으로 진다 — 부하테스트(2026-10) 피크에서 5xx 11건이 전부 이것이었다. 진 쪽은 아무것도 남기지 않고
+     * 롤백되므로 처음부터 다시 하면 된다. 재시도를 트랜잭션 밖에 두는 이유: 안에서 잡으면 이미 롤백 표시가 된 뒤다.
+     * 빈도 제한을 재시도에 다시 태우면 자기 자신의 첫 시도에 막혀 429 가 된다.
+     */
     public SyncResponse sync(UUID userId, SyncRequest req) {
         long startedAt = System.nanoTime();
         if (req == null) throw rejectEnvelope(userId, null, EnvelopeRejection.MISSING_BODY);
@@ -183,6 +205,24 @@ public class VerificationSyncService {
                 .distinct().toList();
         List<SyncRequest.Gap> gaps = (req.gaps() != null) ? req.gaps() : List.of();   // §8.5 권한 공백 소비 입력
 
+        for (int attempt = 1; ; attempt++) {
+            try {
+                return tx.execute(status -> syncInTransaction(userId, req, signals, ignored, gaps, startedAt));
+            } catch (PessimisticLockingFailureException e) {
+                if (attempt >= DEADLOCK_ATTEMPTS) throw e;
+                log.warn("sync_deadlock_retry userId={} attempt={} cause={}", userId, attempt, e.getMostSpecificCause().getMessage());
+                try {
+                    Thread.sleep(java.util.concurrent.ThreadLocalRandom.current().nextLong(20, 80) * attempt);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
+            }
+        }
+    }
+
+    private SyncResponse syncInTransaction(UUID userId, SyncRequest req, List<SyncSignal> signals, List<String> ignored,
+                                           List<SyncRequest.Gap> gaps, long startedAt) {
         Instant now = clock.instant();
         LocalDate today = LocalDate.ofInstant(now, KST);
 
