@@ -6,8 +6,13 @@
     export PAGERDUTY_API_TOKEN=...            # PagerDuty REST API 키(User 또는 General Access, 쓰기). 저장소·원장에 넣지 않는다
     python3 infra/monitoring/alerting/pagerduty.py setup --primary <1차 PD 계정 이메일> --secondary <팀원 PD 계정 이메일>
     python3 infra/monitoring/alerting/p0_p1.py prod     # 원장 sns.pagerduty 가 채워졌으니 P0 경보에 토픽이 붙는다
-    python3 infra/monitoring/alerting/pagerduty.py test-trigger    # 시험 사고 — ACK 하지 말고 10분 뒤 팀원 폰이 울리는지 본다
-    python3 infra/monitoring/alerting/pagerduty.py test-resolve
+    python3 infra/monitoring/alerting/pagerduty.py test-trigger    # 시험 경보 ALARM — Slack 두 채널 + PagerDuty. ACK 하지 말고 10분 뒤 팀원 폰을 본다
+    python3 infra/monitoring/alerting/pagerduty.py test-resolve    # 시험 경보 OK — Slack 복구 알림 + PagerDuty 사건 종료
+
+시험은 실제 P0 와 같은 길을 탄다: 서울에 시험 경보 ruleup-prod-P0-ONCALL-TEST 를 실제 P0 와 같은 AlarmActions 로 두고
+set-alarm-state 로 상태만 바꾼다 → ruleup-prod-alerts(#ruleup-alert)·EventBridge 멘션(긴급 채널)·ruleup-prod-pagerduty 가 함께 받는다.
+시험 경보는 아무도 내지 않는 지표(RuleUp/Observe OnCallTest)를 missing=ignore 로 보므로 다음 평가에서 상태가 되돌아가지 않는다
+(다른 경보에 set-alarm-state 를 쓰면 1분 안에 OK 로 돌아가 사건이 닫혀 10분 에스컬레이션을 볼 수 없다).
 
 setup 이 하는 일
   1. 이메일로 PagerDuty 사용자를 찾는다(두 사람 모두 PagerDuty 계정·앱 설치·전화 알림 규칙이 먼저 있어야 한다).
@@ -26,7 +31,6 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LEDGER = os.path.join(HERE, '..', 'env', 'prod.json')
@@ -53,14 +57,13 @@ def service(policy_id, ack_timeout_minutes):
             'alert_creation': 'create_alerts_and_incidents'}
 
 
-def cloudwatch_message(account, region, state, now):
-    """CloudWatch 경보가 SNS 로 보내는 본문과 같은 모양 — PagerDuty CloudWatch 연동은 AlarmArn 으로 같은 사건을 묶는다."""
-    return {'AlarmName': TEST_ALARM, 'AlarmDescription': '온콜 시험 — 1차 담당이 ACK 하지 않으면 10분 뒤 팀원에게 간다',
-            'AWSAccountId': account, 'NewStateValue': state, 'OldStateValue': 'OK' if state == 'ALARM' else 'ALARM',
-            'NewStateReason': 'pagerduty.py on-call escalation test', 'StateChangeTime': now.strftime('%Y-%m-%dT%H:%M:%S.000+0000'),
-            'Region': region, 'AlarmArn': f'arn:aws:cloudwatch:{region}:{account}:alarm:{TEST_ALARM}',
-            'Trigger': {'MetricName': 'OnCallTest', 'Namespace': 'RuleUp/Observe', 'Statistic': 'MAXIMUM', 'Period': 60,
-                        'EvaluationPeriods': 1, 'ComparisonOperator': 'GreaterThanOrEqualToThreshold', 'Threshold': 1.0}}
+def test_alarm(reg, actions):
+    """실제 P0 와 같은 전달 경로를 쓰는 시험 경보. 지표는 아무도 내지 않고 missing=ignore — set-alarm-state 로만 상태가 바뀐다."""
+    return {'AlarmName': TEST_ALARM, 'ActionsEnabled': True, 'AlarmActions': actions, 'OKActions': actions,
+            'AlarmDescription': '[ONCALL-TEST] 온콜 시험 경보 — pagerduty.py test-trigger/test-resolve 로만 바뀐다. 실제 장애 아님',
+            'Namespace': 'RuleUp/Observe', 'MetricName': 'OnCallTest', 'Dimensions': [{'Name': 'Env', 'Value': reg['env']}],
+            'Statistic': 'Maximum', 'Period': 60, 'EvaluationPeriods': 1, 'DatapointsToAlarm': 1, 'Threshold': 1,
+            'ComparisonOperator': 'GreaterThanOrEqualToThreshold', 'TreatMissingData': 'ignore'}
 
 
 class PagerDuty:
@@ -158,18 +161,25 @@ def setup(args):
     print('원장 env/prod.json 갱신 — 커밋하고 p0_p1.py prod 를 다시 돌려 P0 경보에 토픽을 붙인다')
 
 
-def publish_test(state):
+def set_test_state(state):
     import boto3
+    sys.path.insert(0, HERE)
+    import p0_p1  # 실제 P0 와 같은 AlarmActions(운영 Slack·긴급 P0 토픽·PagerDuty)
     reg = load()
     if not reg['sns'].get('pagerduty'):
         sys.exit('원장 sns.pagerduty 가 비어 있다 — setup 먼저')
     region = reg['api_region']
-    arn = f"arn:aws:sns:{region}:{reg['account_id']}:{reg['sns']['pagerduty']}"
-    msg = cloudwatch_message(reg['account_id'], region, state, datetime.now(timezone.utc))
-    boto3.client('sns', region_name=region).publish(TopicArn=arn, Subject=f'{state}: "{TEST_ALARM}"', Message=json.dumps(msg, ensure_ascii=False))
-    print(state, TEST_ALARM, '→', arn)
+    cw = boto3.client('cloudwatch', region_name=region)
+    cw.put_metric_alarm(**test_alarm(reg, p0_p1.actions(reg, region, 'P0')))
+    if state == 'ALARM':   # 이미 ALARM 이면 상태 변경이 없어 아무 데도 안 간다 — OK 를 거쳐 다시 울린다
+        current = cw.describe_alarms(AlarmNames=[TEST_ALARM])['MetricAlarms'][0]['StateValue']
+        if current == 'ALARM':
+            sys.exit('시험 경보가 이미 ALARM 이다 — test-resolve 로 닫고 1분 뒤 다시')
+    cw.set_alarm_state(AlarmName=TEST_ALARM, StateValue=state, StateReason=f'pagerduty.py on-call test ({state})')
+    print(state, TEST_ALARM, region, '→', ', '.join(a.split(':')[-1] for a in p0_p1.actions(reg, region, 'P0')))
     if state == 'ALARM':
-        print('ACK 하지 말 것 — 10분 뒤 팀원에게 가는지 확인하고 test-resolve 로 닫는다', time.strftime('%H:%M:%S'))
+        print('Slack #ruleup-alert·긴급 채널 멘션·PagerDuty 가 함께 와야 한다. ACK 하지 말 것 — 10분 뒤 팀원, 확인 후 test-resolve',
+              time.strftime('%H:%M:%S'))
 
 
 if __name__ == '__main__':
@@ -184,4 +194,4 @@ if __name__ == '__main__':
     if a.cmd == 'setup':
         setup(a)
     else:
-        publish_test('ALARM' if a.cmd == 'test-trigger' else 'OK')
+        set_test_state('ALARM' if a.cmd == 'test-trigger' else 'OK')
