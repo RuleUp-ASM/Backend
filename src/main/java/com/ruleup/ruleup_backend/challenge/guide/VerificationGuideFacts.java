@@ -78,9 +78,9 @@ public record VerificationGuideFacts(
             }
             case "WAKE" -> {
                 String t = clock(params.get("target_time"));
-                conditions.add((t != null ? t : "목표 시각") + " 전에 처음 휴대폰 잠금 해제하기");
+                conditions.add((t != null ? t : "목표 시각") + "쯤 일어나 걷기(걸음 기록 기준)");
                 if (t != null) must.add(t);
-                fallback = freq + " " + (t != null ? t : "목표 시각") + " 전에 처음 휴대폰 잠금을 해제하면 자동 인증됩니다.";
+                fallback = freq + " " + (t != null ? t : "목표 시각") + "에 일어나 조금 걸으면 걸음 기록으로 자동 인증됩니다.";
             }
             case "SLEEP" -> {
                 String bed = clock(params.get("bedtime_before"));

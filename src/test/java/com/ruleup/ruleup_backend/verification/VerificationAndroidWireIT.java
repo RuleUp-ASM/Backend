@@ -194,17 +194,24 @@ class VerificationAndroidWireIT extends VerificationApiSupport {
     }
 
     @Test
-    @DisplayName("기상 — 앱 형식 firstUnlock(epoch millis)으로 인증된다")
+    @DisplayName("기상 — 앱 형식(epoch millis) 걸음 기록으로 인증된다")
     void wakeWithAndroidShape() throws Exception {
         Member me = member(uniq("wire-wake"));
-        UUID ch = insertAutoChallenge(me.id(), "WAKE", "USAGE", "{\"target_time\":\"07:00\"}");
+        UUID ch = insertAutoChallenge(me.id(), "WAKE", "HC_RECORD", "{\"target_time\":\"07:00\"}");
         UUID memberId = insertReadyMember(ch, me.id(), null, null);
 
+        Map<String, Object> reading = new LinkedHashMap<>();
+        reading.put("recordId", "hc-wake-1");
+        reading.put("value", 24.0);
+        reading.put("startTime", todayAt(7, 3).toEpochMilli());
+        reading.put("endTime", todayAt(7, 6).toEpochMilli());
+        reading.put("recordingMethod", "AUTO");
+        reading.put("originPackage", "com.sec.android.app.shealth");
         Map<String, Object> signal = new LinkedHashMap<>();
-        signal.put("type", "WAKE");
-        signal.put("firstUnlock", todayAt(6, 30).toEpochMilli());
-        signal.put("firstScreenOn", todayAt(6, 28).toEpochMilli());
-        signal.put("deviceSecure", true);
+        signal.put("type", "HEALTH");
+        signal.put("date", java.time.LocalDate.now(KST).toString());
+        signal.put("metric", "STEPS");
+        signal.put("readings", List.of(reading));
 
         sync(me.token(), List.of(signal));
 

@@ -54,7 +54,7 @@ class RoutineCatalogSeedIT {
             "GPS_PRESENCE", Set.of("ACCESS_FINE_LOCATION", "ACCESS_BACKGROUND_LOCATION"),
             "SCREEN_TIME_MAX", Set.of("PACKAGE_USAGE_STATS"),
             "SCREEN_TIME_MIN", Set.of("PACKAGE_USAGE_STATS"),
-            "WAKE", Set.of("PACKAGE_USAGE_STATS"),
+            "WAKE", Set.of("android.permission.health.READ_STEPS"),
             "HEALTH", Set.of("android.permission.health.READ_STEPS",
                              "android.permission.health.READ_DISTANCE"),
             "SLEEP", Set.of("android.permission.health.READ_SLEEP"));

@@ -66,7 +66,9 @@ public class VerificationConfigFactory {
 
         switch (tag) {
             case "WAKE" -> wake = new WakeConfig(
-                    timeParam(params, "target_time", "07:00"), Polarity.ACHIEVEMENT, 1);
+                    timeParam(params, "target_time", "07:00"),
+                    properties.wakeGraceMinutes(), properties.wakeMinSteps(),
+                    DEFAULT_TRUSTED_ORIGINS, Polarity.ACHIEVEMENT, 1);
             case "SCREEN_TIME_MIN" -> screenTime = new ScreenTimeConfig(
                     ScreenTimeMode.MIN, Polarity.ACHIEVEMENT,
                     packages(params), intParam(params, "duration_min", 30), timeWindow(params), 1);
@@ -181,7 +183,9 @@ public class VerificationConfigFactory {
         if (src == null) return "SELF_CHECK";
         return switch (src) {
             case GEOFENCE -> "GPS_PRESENCE";
-            case GPS, ACTIVITY, HC_RECORD -> "HEALTH";   // v2: 움직임은 Health Connect
+            // 기상도 걸음(Health Connect)으로 본다 — 목표 시각이 있으면 기상이다.
+            case GPS, ACTIVITY, HC_RECORD ->
+                    (params != null && params.containsKey("target_time")) ? "WAKE" : "HEALTH";
             case SLEEP -> "SLEEP";
             case USAGE -> (params != null && params.containsKey("target_time")) ? "WAKE" : "SCREEN_TIME_MIN";
             default -> "SELF_CHECK";

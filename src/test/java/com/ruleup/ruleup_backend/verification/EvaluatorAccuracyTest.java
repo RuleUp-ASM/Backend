@@ -23,7 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 평가기가 문서에 적힌 판정 기준을 실제로 지키는지 (인증 정책 §1.1 · 테크 스펙 §5-1 판정 유형).
  *
  * <p>여기 모인 네 가지는 전부 "문서에는 있는데 코드에 없던" 게이트다. 없으면 조용히 틀린 판정이 나간다 —
- * 스쳐 지나간 편의점이 위반이 되고, 조작된 위치가 인증을 통과하고, 알림 확인이 기상으로 잡힌다.
+ * 스쳐 지나간 편의점이 위반이 되고, 조작된 위치가 인증을 통과하고, 누워서 알람만 끈 것이 기상으로 잡힌다.
  */
 class EvaluatorAccuracyTest {
 
@@ -34,13 +34,13 @@ class EvaluatorAccuracyTest {
     /** 게이트 강화를 끈 기본 설정. 나머지 값은 record 가 기본값으로 채운다. */
     private static com.ruleup.ruleup_backend.verification.config.VerificationProperties lenientProperties() {
         return new com.ruleup.ruleup_backend.verification.config.VerificationProperties(
-                null, null, null, null, null, null, null, null, null, false, false);
+                null, null, null, null, null, null, null, null, null, false, false, null, null);
     }
 
     /** 출처 없는 기록을 거부하는 설정. */
     private static com.ruleup.ruleup_backend.verification.config.VerificationProperties strictOriginProperties() {
         return new com.ruleup.ruleup_backend.verification.config.VerificationProperties(
-                null, null, null, null, null, null, null, null, null, false, true);
+                null, null, null, null, null, null, null, null, null, false, true, null, null);
     }
 
     private static Instant at(int hour, int minute) {
@@ -66,7 +66,8 @@ class EvaluatorAccuracyTest {
     private VerificationConfig wakeConfig(String beforeTime) {
         return new VerificationConfig(ScheduleType.FIXED_DAYS, null, MethodCombine.AND,
                 List.of(VerificationMethod.WAKE), null, null, null,
-                new WakeConfig(beforeTime, Polarity.ACHIEVEMENT, 1), null, List.of());
+                new WakeConfig(beforeTime, 30, 10, List.of("com.sec.android.app.shealth"),
+                        Polarity.ACHIEVEMENT, 1), null, List.of());
     }
 
     private VerificationConfig sleepConfig(BigDecimal minHours) {
@@ -97,6 +98,15 @@ class EvaluatorAccuracyTest {
         return new SyncSignal("SCREEN_TIME", null, when.toString(), null, null, null, null,
                 null, null, null, TARGET.toString(), null,
                 List.of(new ScreenEvent(event, when.toString())), null, null);
+    }
+
+    private static final HealthOrigin WATCH = new HealthOrigin("com.sec.android.app.shealth", "AUTO", "WATCH");
+
+    private static SyncSignal steps(double count, Instant start, Instant end, HealthOrigin origin) {
+        HealthReading reading = new HealthReading(null, "STEPS", BigDecimal.valueOf(count), "count",
+                start.toString(), end.toString(), null, origin);
+        return new SyncSignal("HEALTH", null, end.toString(), null, null, null, List.of(reading),
+                null, null, null, TARGET.toString(), null, null, null, null);
     }
 
     private static SyncSignal sleep(Instant start, Instant end, HealthOrigin origin) {
@@ -190,27 +200,70 @@ class EvaluatorAccuracyTest {
     }
 
     @Nested
-    @DisplayName("기상 — 잠금 해제만 인정")
-    class WakeUnlockOnly {
+    @DisplayName("기상 — 목표 시각 + 30분 안의 걸음")
+    class WakeBySteps {
 
         private final WakeEvaluator evaluator = new WakeEvaluator();
 
         @Test
-        @DisplayName("잠금 해제는 기상으로 인정된다")
-        void unlockCounts() {
+        @DisplayName("목표 시각 뒤 유예 안에 걸으면 기상으로 인정된다")
+        void stepsInsideWindowCount() {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    wakeConfig("07:00"), List.of(screen("UNLOCK", at(6, 30))), List.of(), at(8, 0)));
+                    wakeConfig("07:00"), List.of(steps(40, at(7, 10), at(7, 15), WATCH)), List.of(), at(7, 20)));
 
             assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
         }
 
         @Test
-        @DisplayName("화면만 켜진 것은 기상이 아니다 — 알림 확인으로도 켜진다")
-        void screenOnAloneIsNotWakingUp() {
+        @DisplayName("잠금 해제만으로는 기상이 아니다 — 누워서 알람만 꺼도 잡힌다")
+        void unlockAloneIsNotWakingUp() {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    wakeConfig("07:00"), List.of(screen("SCREEN_ON", at(6, 30))), List.of(), at(8, 0)));
+                    wakeConfig("07:00"), List.of(screen("UNLOCK", at(6, 30))), List.of(), at(8, 0)));
 
             assertThat(outcome.status()).isNotEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.failureReason()).isEqualTo("WOKE_UP_LATE");
+        }
+
+        @Test
+        @DisplayName("유예가 지난 뒤의 걸음은 늦잠이다")
+        void stepsAfterDeadlineAreLate() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(
+                    wakeConfig("07:00"), List.of(steps(500, at(8, 0), at(8, 10), WATCH)), List.of(), at(9, 0)));
+
+            assertThat(outcome.status()).isNotEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.failureReason()).isEqualTo("WOKE_UP_LATE");
+            assertThat(outcome.evidence()).containsEntry("value", 0L).containsEntry("deadline", "07:30");
+        }
+
+        @Test
+        @DisplayName("마감에 걸친 기록은 창 안에 든 비율만큼만 센다")
+        void straddlingRecordIsProrated() {
+            // 07:20~07:40 의 16걸음 중 마감(07:30) 전은 절반, 8걸음 — 기준 10걸음에 못 미친다.
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(
+                    wakeConfig("07:00"), List.of(steps(16, at(7, 20), at(7, 40), WATCH)), List.of(), at(9, 0)));
+
+            assertThat(outcome.status()).isNotEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.evidence()).containsEntry("value", 8L);
+        }
+
+        @Test
+        @DisplayName("손으로 입력한 걸음은 기상 근거가 아니다")
+        void manualStepsAreExcluded() {
+            HealthOrigin handWritten = new HealthOrigin("com.sec.android.app.shealth", "MANUAL", "PHONE");
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(
+                    wakeConfig("07:00"), List.of(steps(100, at(7, 0), at(7, 5), handWritten)), List.of(), at(8, 0)));
+
+            assertThat(outcome.status()).isNotEqualTo(VerificationStatus.SUCCESS);
+        }
+
+        @Test
+        @DisplayName("창이 열려 있고 아직 걸음이 없으면 기다린다")
+        void waitsWhileWindowOpen() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(
+                    wakeConfig("07:00"), List.of(), List.of(), at(7, 10)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.PENDING);
+            assertThat(outcome.failureReason()).isNull();
         }
     }
 

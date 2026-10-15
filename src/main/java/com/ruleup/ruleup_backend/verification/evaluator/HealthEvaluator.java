@@ -66,7 +66,7 @@ public class HealthEvaluator implements MethodEvaluator {
                     if (cfg.exerciseType() != null && r.exerciseType() != null
                             && !cfg.exerciseType().equalsIgnoreCase(r.exerciseType())) continue; // 운동종류 불일치 제외
 
-                    String gate = gateReason(r, cfg);
+                    String gate = gateReason(r, cfg.rejectManualRecording(), cfg.trustedOrigins());
                     if (gate != null) {
                         anyRejected = true;
                         HealthOrigin o = r.origin();
@@ -105,8 +105,8 @@ public class HealthEvaluator implements MethodEvaluator {
         return EvaluationOutcome.pending(ev, windowClose(ctx));
     }
 
-    /** 구간을 가진 측정값 1건. */
-    private record Measured(Instant from, Instant to, double value) {}
+    /** 구간을 가진 측정값 1건. 기상 판정도 같은 방식으로 겹침을 걷어낸다. */
+    record Measured(Instant from, Instant to, double value) {}
 
     /**
      * 겹치는 구간을 걷어낸 합계.
@@ -115,7 +115,7 @@ public class HealthEvaluator implements MethodEvaluator {
      * 비례해 더한다. 값이 구간에 고르게 분포한다고 보는 근사지만, 겹친 만큼을 통째로 두 번 세거나
      * 통째로 버리는 것보다 실제에 가깝다. Health Connect 는 같은 활동을 기기별로 따로 기록한다.
      */
-    private double dedupedSum(List<Measured> readings) {
+    static double dedupedSum(List<Measured> readings) {
         if (readings.isEmpty()) return 0;
         List<Measured> sorted = new ArrayList<>(readings);
         sorted.sort(Comparator.comparing(Measured::from).thenComparing(Measured::to));
@@ -134,12 +134,11 @@ public class HealthEvaluator implements MethodEvaluator {
         return sum;
     }
 
-    /** 게이트 통과 여부. 통과면 null, 막히면 사유 문자열. */
-    private String gateReason(HealthReading r, HealthConfig cfg) {
+    /** 게이트 통과 여부. 통과면 null, 막히면 사유 문자열. 기상 판정의 걸음 기록에도 같은 게이트를 쓴다. */
+    static String gateReason(HealthReading r, boolean rejectManualRecording, List<String> trusted) {
         HealthOrigin o = r.origin();
         if (o == null) return "NO_ORIGIN";                                   // §6.3 메타데이터 누락
-        if (cfg.rejectManualRecording() && "MANUAL".equalsIgnoreCase(o.recordingMethod())) return "MANUAL";
-        List<String> trusted = cfg.trustedOrigins();
+        if (rejectManualRecording && "MANUAL".equalsIgnoreCase(o.recordingMethod())) return "MANUAL";
         if (trusted != null && !trusted.isEmpty()) {
             boolean ok = o.dataOrigin() != null && trusted.contains(o.dataOrigin());
             if (!ok) return "UNTRUSTED_ORIGIN";

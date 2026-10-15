@@ -27,7 +27,7 @@ public record FailureEvidence(String summary,
      * 숫자가 들어간다 — 기록하지 않는 타입은 기준값 없이 사유 코드만 남는다.
      */
     private static final List<String> EXPECTED_KEYS = List.of(
-            "goal", "goalKm", "goalMinutes", "beforeTime", "bedtimeBefore", "graceMinutes",
+            "goal", "goalKm", "goalMinutes", "beforeTime", "deadline", "bedtimeBefore", "graceMinutes",
             "unit", "metric", "mode");
 
     /** 실제 측정값 키. 나머지(내부 이월 상태·중복 제거 키)는 설명에 쓰지 않는다. */
@@ -57,7 +57,7 @@ public record FailureEvidence(String summary,
             case "INSUFFICIENT_STEPS" -> pair(ev, "걸음", "value", "걸음", "goal", "걸음");
             case "INSUFFICIENT_USAGE" -> pair(ev, "사용", "usageMinutes", "분", "goalMinutes", "분");
             case "USAGE_EXCEEDED" -> limit(ev, "사용", "usageMinutes", "goalMinutes");
-            case "WOKE_UP_LATE" -> before(ev, "첫 잠금 해제", "firstUnlockAt", "beforeTime");
+            case "WOKE_UP_LATE" -> wake(ev);
             case "SLEPT_LATE" -> before(ev, "취침", "bedtime", "bedtimeBefore");
             case "INSUFFICIENT_SLEEP" -> pair(ev, "수면", "sleepHours", "시간", "goal", "시간");
             case "PERMISSION_MISSING" -> "인증에 필요한 권한이 꺼져 있어 측정하지 못했어요.";
@@ -98,7 +98,16 @@ public record FailureEvidence(String summary,
         return "%s %s분 / 상한 %s분".formatted(label, actual, goal);
     }
 
-    /** 「첫 잠금 해제 07:20 / 목표 07:00 이전」. */
+    /** 「07:30까지 걸음 3걸음 / 목표 10걸음」 — 기상은 목표 시각 + 유예 안에 걸었는지로 본다. */
+    private static String wake(Map<String, Object> ev) {
+        Object deadline = value(ev, "deadline");
+        Object steps = value(ev, "value");
+        Object goal = value(ev, "goal");
+        if (deadline == null || steps == null || goal == null) return null;
+        return "%s까지 걸음 %s걸음 / 목표 %s걸음".formatted(deadline, steps, goal);
+    }
+
+    /** 「취침 01:20 / 목표 00:00 이전」. */
     private static String before(Map<String, Object> ev, String label, String actualKey, String goalKey) {
         Object actual = value(ev, actualKey);
         Object goal = value(ev, goalKey);
