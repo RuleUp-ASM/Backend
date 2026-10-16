@@ -239,6 +239,34 @@ class ExploreRedisFallbackIT extends ChallengeApiSupport {
                 .isEqualTo(ErrorCode.EXPLORE_TEMPORARILY_UNAVAILABLE);
     }
 
+    @Autowired com.ruleup.ruleup_backend.challenge.explore.store.ExploreIndexJobs indexJobs;
+    @Autowired org.springframework.data.redis.core.StringRedisTemplate redisTemplate;
+
+    @Test
+    @DisplayName("Redis 가 비면 다음 5분 보정이 다시 만든다 — 죽은 태스크의 재구성 잠금은 2분 안에 풀린다")
+    void sweepRebuildsAfterRedisLossAndDeadLockExpiresQuickly() throws Exception {
+        Member viewer = member(uniq("relost"));
+        seedChallenges(viewer.id(), 3);
+
+        store.flushDerived();
+        // 재구성 도중 사라진 태스크가 남긴 잠금 — 수명이 짧아야 다음 태스크가 곧 이어받는다.
+        String dead = store.tryLockRebuild(java.time.Duration.ofMinutes(2));
+        assertThat(dead).isNotNull();
+        assertThat(redisTemplate.getExpire(
+                com.ruleup.ruleup_backend.challenge.explore.store.ExploreKeys.REBUILD_LOCK)).isLessThanOrEqualTo(120L);
+        assertThat(store.extendRebuild("someone-else", java.time.Duration.ofMinutes(2))).isFalse();
+        assertThat(store.extendRebuild(dead, java.time.Duration.ofMinutes(2))).isTrue();
+
+        indexJobs.sweepPopularityDecay();
+        assertThat(store.isWarmed()).as("잠금이 남아 있는 동안은 기다린다").isFalse();
+
+        redisTemplate.delete(com.ruleup.ruleup_backend.challenge.explore.store.ExploreKeys.REBUILD_LOCK);   // 만료
+        indexJobs.sweepPopularityDecay();
+        assertThat(store.isWarmed()).isTrue();
+        assertThat(store.lastSweepAt()).as("다음 보정이 전체를 다시 세지 않게 기준 시각을 남긴다").isPresent();
+        assertThat(exploreQueryService.explore(viewer.id(), null, null, false, "POPULAR", null, 3).items()).isNotEmpty();
+    }
+
     @Test
     @DisplayName("[P1] 다음 페이지를 받기 전에 인덱스가 내려가면 503 — 반쪽 목록을 이어 붙이지 않는다")
     void pagingStopsWithUnavailableWhenTheIndexGoesDown() throws Exception {

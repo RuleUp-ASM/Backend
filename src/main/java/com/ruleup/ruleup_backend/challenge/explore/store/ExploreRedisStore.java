@@ -471,6 +471,15 @@ public class ExploreRedisStore {
         releaseIfOwner(ExploreKeys.REBUILD_LOCK, token);
     }
 
+    /** 내가 잡은 재구성 잠금의 수명을 늘린다. 이미 남의 것(또는 만료)이면 false. */
+    public boolean extendRebuild(String token, java.time.Duration ttl) {
+        Long r = redis.execute(new org.springframework.data.redis.core.script.DefaultRedisScript<>(
+                        "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('pexpire', KEYS[1], ARGV[2]) "
+                                + "else return 0 end", Long.class),
+                java.util.List.of(ExploreKeys.REBUILD_LOCK), token, String.valueOf(ttl.toMillis()));
+        return r != null && r == 1L;
+    }
+
     /** 값이 내 토큰일 때만 지운다 — 비교와 삭제를 한 스크립트로 묶어야 그 사이가 벌어지지 않는다. */
     private void releaseIfOwner(String key, String token) {
         if (token == null) return;
