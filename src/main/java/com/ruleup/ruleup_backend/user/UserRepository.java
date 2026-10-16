@@ -56,13 +56,11 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     Optional<UserStatus> findStatusById(@Param("id") UUID id);
 
     /** 닉네임 점유 여부 — excludeId(본인) 제외. 신규 가입 검사면 excludeId=null. */
+    // 위 규칙을 생성 열(active_requested_nickname·active_approved_nickname)로 건다 — 두 UNIQUE 인덱스로 바로 찾는다.
     @Query("""
             select count(u) > 0 from User u
             where (:excludeId is null or u.id <> :excludeId)
-              and u.status <> com.ruleup.ruleup_backend.user.domain.UserStatus.WITHDRAWN
-              and ((u.nicknameStatus = com.ruleup.ruleup_backend.user.domain.NicknameStatus.PENDING
-                        and u.nickname = :nickname)
-                   or u.approvedNickname = :nickname)
+              and (u.activeRequestedNickname = :nickname or u.activeApprovedNickname = :nickname)
             """)
     boolean isNicknameTaken(@Param("nickname") String nickname, @Param("excludeId") UUID excludeId);
 
