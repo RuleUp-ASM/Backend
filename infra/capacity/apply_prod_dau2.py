@@ -1,8 +1,9 @@
 """prod 사양 조정 — DAU 2만 부하테스트(2026-10-16~17, 노션 「부하테스트 및 성능개선」 9절) 결론. 재실행 안전.
-사용자가 직접 실행한다(main 머지 **전에**): python3 infra/capacity/apply_prod_dau2.py [--max-inflight 64]
+사용자가 직접 실행한다(main 머지 **전에**, 온콜 중지 상태에서): python3 infra/capacity/apply_prod_dau2.py [--cpu 1024] [--max-inflight 64]
 
 main CD 는 서비스의 현재 태스크 정의를 그대로 두고 이미지만 바꿔 다시 띄운다. 그래서 사양은 여기서 먼저 바꿔 둔다.
-  1. ECS 1 vCPU/2GB — 0.5 vCPU 는 피크 전에 CPU 100% 로 막힌다(1차 시험). Hikari 15 는 그대로.
+  1. (선택 --cpu 1024) ECS 1 vCPU — 0.5 vCPU 는 피크 전에 CPU 100% 로 막힌다(1차 시험). 2026-10-17 결정: 지금 규모(prod CPU
+     평균 5%)에선 올리지 않고, 지연·오류가 생기면 **가장 먼저** 이걸로 올린다. 기본은 현재 CPU 를 그대로 둔다.
   2. 헬스체크를 관리 포트(8081)로 분리 — 급증 때 요청 스레드 200개가 다 차면 /actuator/health 도 줄을 서 5초를 넘기고,
      ECS 가 멀쩡한 태스크를 연달아 교체했다(2차 급증 시험). 관리 포트는 자기 Tomcat 커넥터를 따로 쓴다.
      끊김 없이 옮기는 순서: ALB→ECS 8081 허용 → 헬스체크 경로를 옛·새 태스크 모두 응답하는 /health/public 으로
@@ -20,6 +21,7 @@ ALB_SG, ECS_SG = 'sg-03f6935fe4c111e77', 'sg-0ce610d9387070705'
 MGMT = 8081
 
 ap = argparse.ArgumentParser()
+ap.add_argument('--cpu', default=None, help='태스크 CPU 단위(예: 1024). 생략하면 현재 값 유지')
 ap.add_argument('--max-inflight', type=int, default=None)
 args = ap.parse_args()
 
@@ -53,25 +55,26 @@ if str(tg.get('HealthCheckPort')) != str(MGMT):
     elb.modify_target_group(TargetGroupArn=TG, HealthCheckPort='traffic-port', HealthCheckPath='/health/public')
     print('헬스체크: traffic-port /health/public (전환용)'); time.sleep(40); wait_healthy('전환 경로')
 
-# 3) 태스크 정의: 1 vCPU · 관리 포트 · (선택) 동시 상한
+# 3) 태스크 정의: 관리 포트 · (선택) CPU · (선택) 동시 상한
 svc = ecs.describe_services(cluster=CLUSTER, services=[SERVICE])['services'][0]
 td = ecs.describe_task_definition(taskDefinition=svc['taskDefinition'])['taskDefinition']
 c = next(x for x in td['containerDefinitions'] if x['name'] == 'api')
 env = {e['name']: e['value'] for e in c.get('environment', [])}
 want = {'MANAGEMENT_SERVER_PORT': str(MGMT)}
 if args.max_inflight: want['APP_HTTP_MAX_INFLIGHT'] = str(args.max_inflight)
+cpu = args.cpu or td['cpu']
 ports = c.get('portMappings', [])
-if td['cpu'] != '1024' or any(env.get(k) != v for k, v in want.items()) or not any(p['containerPort'] == MGMT for p in ports):
+if td['cpu'] != cpu or any(env.get(k) != v for k, v in want.items()) or not any(p['containerPort'] == MGMT for p in ports):
     env.update(want); c['environment'] = [{'name': k, 'value': v} for k, v in sorted(env.items())]
     if not any(p['containerPort'] == MGMT for p in ports): ports.append({'containerPort': MGMT, 'hostPort': MGMT, 'protocol': 'tcp'})
     c['portMappings'] = ports
-    if c.get('cpu'): c['cpu'] = 1024
+    if c.get('cpu'): c['cpu'] = int(cpu)
     keep = ['family', 'taskRoleArn', 'executionRoleArn', 'networkMode', 'containerDefinitions', 'volumes', 'placementConstraints',
             'requiresCompatibilities', 'runtimePlatform', 'ephemeralStorage', 'pidMode', 'ipcMode', 'proxyConfiguration']
     kw = {k: td[k] for k in keep if td.get(k) not in (None, [])}
-    new = ecs.register_task_definition(cpu='1024', memory=td['memory'], **kw)['taskDefinition']['taskDefinitionArn']
+    new = ecs.register_task_definition(cpu=cpu, memory=td['memory'], **kw)['taskDefinition']['taskDefinitionArn']
     ecs.update_service(cluster=CLUSTER, service=SERVICE, taskDefinition=new)
-    print(f'ECS: {new.split("/")[-1]} 배포 — 1 vCPU, 관리 포트 {MGMT}' + (f', 동시 상한 {args.max_inflight}' if args.max_inflight else ''))
+    print(f'ECS: {new.split("/")[-1]} 배포 — CPU {cpu}, 관리 포트 {MGMT}' + (f', 동시 상한 {args.max_inflight}' if args.max_inflight else ''))
     ecs.get_waiter('services_stable').wait(cluster=CLUSTER, services=[SERVICE], WaiterConfig={'Delay': 15, 'MaxAttempts': 60})
     wait_healthy('새 태스크(전환 경로)')
 else:
