@@ -202,10 +202,18 @@ export function aidraft() {
 }
 
 let hotId = null;
-export function joinhot() {
+/** 모든 VU 가 같은 출발 시각을 보도록 한 번만 정한다(joinhot 전용, 다른 시나리오는 쓰지 않는다). */
+export function setup() {
+  return { startAt: __ENV.START_DELAY_MS ? Date.now() + Number(__ENV.START_DELAY_MS) : 0 };
+}
+
+export function joinhot(data) {
   // 모두 같은 방 하나에 동시에 들어간다 — 첫 VU 가 방을 만들고 나머지는 explore 최신에서 같은 방을 찾는다.
-  const s = L.session(USERS + __VU);   // 이 시나리오 전용 사용자(이미 가입한 방이 없어야 한다)
+  // 이미 가입한 사용자로 로그인해 두고, 시작 뒤 START_DELAY_MS 시점에 <b>일제히</b> 들어간다 — 가입부터 하면 가입이 몰려
+  // 정원 경합 전에 풀 대기로 503 이 난다(2차 J1: 300명 중 46명만 방까지 감). 가입 없는 사용자 번호는 HOT_USER_BASE 부터.
+  const s = L.session(Number(__ENV.HOT_USER_BASE || USERS) + __VU);
   if (!hotId) hotId = __ENV.HOT_ID;
+  if (data && data.startAt) sleep(Math.max(0, (data.startAt - Date.now()) / 1000));
   const r = L.post(s, `/api/v1/challenges/${hotId}/members`, null, 'challenge.join', null, [200, 201, 409]);
   check(r, { 'join ok or full': (x) => [200, 201, 409].includes(x.status) });
 }
