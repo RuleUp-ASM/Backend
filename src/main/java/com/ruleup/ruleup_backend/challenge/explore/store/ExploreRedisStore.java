@@ -512,21 +512,29 @@ public class ExploreRedisStore {
      *
      * @return 방 id → {@code fields} 와 같은 순서의 멤버 목록(없는 필드는 {@code null})
      */
+    private static final int PIPELINE_CHUNK = 1000;
+
     public Map<UUID, List<String>> sortMembersOf(List<UUID> ids, List<String> fields) {
         if (ids.isEmpty() || fields.isEmpty()) return Map.of();
         byte[][] rawFields = fields.stream()
                 .map(f -> f.getBytes(java.nio.charset.StandardCharsets.UTF_8))
                 .toArray(byte[][]::new);
 
-        List<Object> replies = redis.executePipelined(
-                (org.springframework.data.redis.core.RedisCallback<Object>) connection -> {
-                    for (UUID id : ids) {
-                        connection.hashCommands().hMGet(
-                                ExploreKeys.stats(id).getBytes(java.nio.charset.StandardCharsets.UTF_8),
-                                rawFields);
-                    }
-                    return null;
-                });
+        // 한 파이프라인에 다 싣지 않는다 — 응답 전체가 명령 제한 시간(2초) 안에 와야 해서, 방 3.5만 개를
+        // 한 번에 보내면 타임아웃으로 재구성이 통째로 실패했다(부하테스트 2026-10 Redis 재부팅 복구).
+        List<Object> replies = new ArrayList<>(ids.size());
+        for (int from = 0; from < ids.size(); from += PIPELINE_CHUNK) {
+            List<UUID> chunk = ids.subList(from, Math.min(ids.size(), from + PIPELINE_CHUNK));
+            replies.addAll(redis.executePipelined(
+                    (org.springframework.data.redis.core.RedisCallback<Object>) connection -> {
+                        for (UUID id : chunk) {
+                            connection.hashCommands().hMGet(
+                                    ExploreKeys.stats(id).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                                    rawFields);
+                        }
+                        return null;
+                    }));
+        }
 
         Map<UUID, List<String>> out = new java.util.HashMap<>(ids.size());
         for (int i = 0; i < ids.size() && i < replies.size(); i++) {
