@@ -37,7 +37,11 @@ export function ok(res, name, allowed) {
     if (res.status >= 500 || res.status === 0) apiErrors.add(1, { api: name, status: `${res.status}`, code });
     else businessRejects.add(1, { api: name, status: `${res.status}`, code });
   }
-  if (BUSINESS.includes(name) && (res.status === 200 || res.status === 201)) businessOk.add(1, { api: name });
+  if (BUSINESS.includes(name)) {
+    if (res.status === 200 || res.status === 201) businessOk.add(1, { api: name });
+    // 허용한 거절(sync 10초 간격 429·가입 409 등)도 업무상 처리되지 않은 건이라 따로 센다 — 빨라질수록 늘 수 있다.
+    else if (okStatus) businessRejects.add(1, { api: name, status: `${res.status}`, code: 'allowed' });
+  }
   check(res, { [`${name} ${(allowed || [200, 201]).join('/')}`]: () => okStatus });
   return okStatus;
 }
