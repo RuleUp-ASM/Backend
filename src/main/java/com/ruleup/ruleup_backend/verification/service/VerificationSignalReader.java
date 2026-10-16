@@ -100,19 +100,32 @@ public class VerificationSignalReader {
      */
     @Transactional(readOnly = true)
     public Map<LocalDate, DaySignalSet> forDays(UUID userId, List<LocalDate> targetDates) {
+        // 귀속일마다 앞뒤 하루를 읽으니 이웃한 귀속일(어제·오늘)은 같은 날을 겹쳐 읽는다 — 날마다 한 번만 읽어 나눠 쓴다.
+        // sync 한 번이 18문장에서 12문장이 된다(부하테스트 2026-10 트레이스).
+        Map<String, DaySignalSet> loaded = new HashMap<>();
         Map<LocalDate, DaySignalSet> byDate = new HashMap<>();
-        for (LocalDate date : targetDates) byDate.put(date, read(userId, date));
+        for (LocalDate date : targetDates) byDate.put(date, read(userId, date, loaded));
         return byDate;
     }
 
     private DaySignalSet read(UUID userId, LocalDate targetDate) {
+        return read(userId, targetDate, new HashMap<>());
+    }
+
+    private DaySignalSet read(UUID userId, LocalDate targetDate, Map<String, DaySignalSet> loaded) {
         List<SyncSignal> out = new ArrayList<>();
         boolean complete = true;
         for (SignalDomain domain : SignalDomain.values()) {
             // 항목이 날짜 경계를 걸치므로 앞뒤 하루를 함께 읽는다. 하루씩 따로 질의해
             // 매 질의가 파티션 하나로 좁혀진다.
             for (LocalDate date : List.of(targetDate.minusDays(1), targetDate, targetDate.plusDays(1))) {
-                complete &= readDay(userId, domain, date, out);
+                DaySignalSet day = loaded.computeIfAbsent(domain.name() + '@' + date, k -> {
+                    List<SyncSignal> rows = new ArrayList<>();
+                    boolean whole = readDay(userId, domain, date, rows);
+                    return whole ? DaySignalSet.complete(rows) : DaySignalSet.truncated(rows);
+                });
+                out.addAll(day.signals());
+                complete &= day.complete();
             }
         }
         return complete ? DaySignalSet.complete(out) : DaySignalSet.truncated(out);
