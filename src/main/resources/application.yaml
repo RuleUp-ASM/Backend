@@ -55,6 +55,10 @@ spring:
         maintainTimeStats: false
 
   jpa:
+    # 요청 전체에 EntityManager 하나를 걸어 두지 않는다. 켜 두면(기본값) 첫 트랜잭션이 잡은 커넥션을 요청이
+    # 끝날 때까지 쥐어, 트랜잭션을 쪼개 둔 외부 호출(가입 닉네임 심사 등) 동안에도 풀을 차지한다 — 부하테스트
+    # (2026-10)에서 가입 60건이 몰리자 풀 15개가 Gemini 대기로 다 차 다른 API 까지 500 이 났다.
+    open-in-view: false
     hibernate:
       ddl-auto: none
       naming:
