@@ -249,6 +249,22 @@ class ChallengeTrendingCategoryIT extends ChallengeApiSupport {
         }
 
         @Test
+        @DisplayName("저장값으로 이미 찬 방은 다시 세지 않고 마감으로 본다")
+        void storedFullRoomIsNotJoinable() throws Exception {
+            String token = memberToken(uniq("tr-stfull"));
+            UUID full = publicGroup("EXERCISE", "ACTIVE", 5, 30);
+            jdbcTemplate.update("UPDATE challenges SET capacity = 5, participant_count = 5 WHERE id = ?", (Object) bytes(full));
+
+            popularityRefreshJob.runOnce();
+            evictCaches();
+
+            MvcResult res = trending(token, null);
+            List<String> ids = read(res, "$.data.items[*].challengeId");
+            List<Boolean> joinable = read(res, "$.data.items[*].joinable");
+            assertThat(joinable.get(ids.indexOf(full.toString()))).isFalse();
+        }
+
+        @Test
         @DisplayName("category를 주면 그 카테고리의 인기만 내려준다")
         void perCategory() throws Exception {
             String token = memberToken(uniq("tr-cat"));

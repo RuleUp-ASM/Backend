@@ -95,7 +95,7 @@ public class TrendingService {
             // 수천 행을 읽었다(부하테스트 2026-10 느린 쿼리 1위: 5,869행 × 678회). 정원이 없거나 저장된 참여자 수가
             // 정원보다 NEAR_FULL 넘게 남은 방은 몇 초 늦은 저장값으로도 「마감 아님」이 확실하다(가입 자체는 잠금으로 판정).
             Map<UUID, Long> activeCounts = activeMemberCounts(ids.stream()
-                    .filter(id -> nearFull(byId.get(id))).toList());
+                    .filter(id -> nearFull(byId.get(id)) && !storedFull(byId.get(id))).toList());
             // 표시값은 보일 방만 한 번에(파이프라인) 읽는다 — 방마다 HGETALL 을 따로 보내지 않는다.
             // 랭킹을 읽은 <b>뒤에</b> Redis 가 끊길 수 있다. 감싸지 않으면 그 예외가 전역
             // 핸들러까지 올라가 500 이 된다 — 같은 장애인데 계약된 503 과 다른 답이 나간다.
@@ -134,6 +134,7 @@ public class TrendingService {
                         // joinable 은 티어뿐 아니라 정원도 본다 — 티어만 보면 마감된 방이
                         // 「들어갈 수 있음」으로 보여, 눌러야 막힌다.
                         joinable(myTier, c)
+                                && !storedFull(c)
                                 && !(nearFull(c) && isFull(c, activeCounts.getOrDefault(c.getId(), 0L).intValue())),
                         myChallengeIds.contains(c.getId()),
                         c.getEndDate() == null ? null : c.getEndDate().toString()));
@@ -241,6 +242,16 @@ public class TrendingService {
 
     private static boolean nearFull(Challenge c) {
         return c != null && c.getMaxParticipants() != null && c.getParticipantCount() >= c.getMaxParticipants() - NEAR_FULL;
+    }
+
+    /**
+     * 저장된 참여자 수로 이미 정원이 찬 방. 저장값은 가입 뒤 재계산이 따라오므로 <b>늦으면 실제보다 적다</b> —
+     * 그 값으로 이미 찼다면 지금도 찼다(탈퇴 직후 몇 초만 「마감」으로 더 보일 수 있고, 가입은 잠금이 판정한다).
+     * 꽉 찬 인기 방은 Top 20 에 오래 머물러, 세면 요청마다 그 방 멤버 전체를 읽었다(부하테스트 2026-10 단계 시험:
+     * 5,200행 × 10,483회, 느린 쿼리 1위).
+     */
+    private static boolean storedFull(Challenge c) {
+        return c != null && c.getMaxParticipants() != null && c.getParticipantCount() >= c.getMaxParticipants();
     }
 
     private static boolean isFull(Challenge c, int participants) {
