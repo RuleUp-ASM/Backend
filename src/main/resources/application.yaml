@@ -54,6 +54,9 @@ spring:
         prepStmtCacheSqlLimit: 2048
         useLocalSessionState: true        # autocommit·읽기전용 상태를 드라이버가 기억 — 매 트랜잭션 확인 왕복 생략
         elideSetAutoCommits: true
+        # 읽기 전용 트랜잭션마다 SET SESSION TRANSACTION READ ONLY / READ WRITE 두 번을 서버로 보내지 않는다.
+        # 트레이스 감사(2026-10)에서 DB 왕복의 ~10% 였다. 쓰기 막기는 JPA 쪽(readOnly → flush 끔)이 계속 한다.
+        readOnlyPropagatesToServer: false
         cacheServerConfiguration: true
         maintainTimeStats: false
 
