@@ -209,6 +209,11 @@ app:
 
   # 시연·개발 확인용 요청 로그(devlog 패키지). 요청 한 건을 콘솔에 한 덩어리로 찍는다.
   # 임시 코드다 — 필요 없어지면 끄지 말고 devlog 패키지와 이 블록을 함께 지운다.
+  http:
+    # 태스크당 동시에 처리하는 /api 요청 상한(0 = 끔). 넘치면 inflight-wait-ms 만큼 기다렸다가 503 + Retry-After.
+    # 급증 때 모두가 느려지는 대신 받은 요청은 제 속도로 끝낸다(부하테스트 2026-10). 헬스체크는 관리 포트라 영향 없다.
+    max-inflight: ${APP_HTTP_MAX_INFLIGHT:0}
+    inflight-wait-ms: ${APP_HTTP_INFLIGHT_WAIT_MS:1000}
   request-log:
     enabled: ${APP_REQUEST_LOG_ENABLED:true}
     body: ${APP_REQUEST_LOG_BODY:true}      # 요청·응답 본문까지 찍을지
