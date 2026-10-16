@@ -95,6 +95,10 @@ public class CrossRankingSnapshotService {
     public void removeDeparted(ChallengeStatsRefreshRequested event) {
         if (!java.util.Set.of("LEAVE", "WITHDRAW", "KICK", "SANCTION", "DORMANT", "TIER_GATE", "ADMIN").contains(event.reason())) return;
         em.flush();
+        // 스냅샷에 없는 방(시작 전 방·랭킹 비공개 SOLO 등)이면 전역 락을 잡을 일이 없다 — 모든 이탈이 한 줄로 서지 않게.
+        // 잠금 읽기라 스냅샷 시점과 상관없이 커밋된 최신 행을 본다(일일 refresh 가 막 넣은 행도 놓치지 않는다).
+        if (jdbc.queryForList("SELECT 1 FROM challenge_cross_ranking_members WHERE challenge_id=? LIMIT 1 FOR SHARE",
+                bytes(event.challengeId())).isEmpty()) return;
         lockJob();
         int removed = jdbc.update("DELETE r FROM challenge_cross_ranking_members r LEFT JOIN challenge_members m " +
                 "ON m.challenge_id=r.challenge_id AND m.user_id=r.user_id WHERE r.challenge_id=? " +
@@ -115,13 +119,20 @@ public class CrossRankingSnapshotService {
         rerank();
     }
 
+    /**
+     * 순위를 다시 매긴다 — 모드마다 두 문장. 예전에는 방마다 UPDATE 를 따로 보내, 멤버 한 명이 나갈 때마다
+     * 진행 중인 방 수(수천)만큼의 문장이 그 사용자의 트랜잭션 안에서 전역 락을 쥔 채 돌았다(부하테스트 2026-10).
+     */
     private void rerank() {
         for (String mode : List.of("GROUP", "SOLO")) {
             int minimum = "GROUP".equals(mode) ? 50 : 10;
-            List<byte[]> eligible = jdbc.query("SELECT challenge_id FROM challenge_cross_ranking_snapshot WHERE mode=? AND total_count>=? " +
-                    "ORDER BY success_rate DESC,success_count DESC,challenge_id FOR UPDATE", (rs,n) -> rs.getBytes(1), mode, minimum);
-            jdbc.update("UPDATE challenge_cross_ranking_snapshot SET rank_no=NULL WHERE mode=?", mode);
-            for (int n=0;n<eligible.size();n++) jdbc.update("UPDATE challenge_cross_ranking_snapshot SET rank_no=? WHERE challenge_id=?", n+1,eligible.get(n));
+            jdbc.update("UPDATE challenge_cross_ranking_snapshot SET rank_no=NULL WHERE mode=? AND total_count<? AND rank_no IS NOT NULL",
+                    mode, minimum);
+            // 순번은 파생 테이블에서 미리 구해 둔다(창 함수라 구체화된다 — 같은 테이블을 고치며 읽는 1093 제약에 걸리지 않는다).
+            jdbc.update("UPDATE challenge_cross_ranking_snapshot s JOIN (SELECT challenge_id, ROW_NUMBER() OVER " +
+                    "(ORDER BY success_rate DESC,success_count DESC,challenge_id) AS rn FROM challenge_cross_ranking_snapshot " +
+                    "WHERE mode=? AND total_count>=?) x ON x.challenge_id=s.challenge_id SET s.rank_no=x.rn " +
+                    "WHERE s.mode=? AND NOT (s.rank_no <=> x.rn)", mode, minimum, mode);
         }
     }
 
