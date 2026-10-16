@@ -35,8 +35,13 @@ public class RankingService {
                          int successCount, int participations) {}
 
     public List<Ranked> rank(Challenge challenge, UUID viewerId) {
-        List<ChallengeMember> members = new ArrayList<>(memberRepository
+        return rank(challenge, viewerId, memberRepository
                 .findByChallengeIdAndStatusOrderByJoinedAtAsc(challenge.getId(), MemberStatus.ACTIVE));
+    }
+
+    /** 호출부가 이미 읽은 ACTIVE 멤버(가입순)로 순위를 낸다 — 방 홈이 같은 목록을 두 번 읽지 않게. */
+    public List<Ranked> rank(Challenge challenge, UUID viewerId, List<ChallengeMember> activeMembers) {
+        List<ChallengeMember> members = new ArrayList<>(activeMembers);
         members.sort(Comparator
                 .comparing((ChallengeMember m) -> m.getSuccessDays() + m.getFailDays() >= MIN_PARTICIPATIONS)
                 .reversed()
