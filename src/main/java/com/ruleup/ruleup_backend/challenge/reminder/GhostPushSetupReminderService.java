@@ -17,10 +17,12 @@ import org.slf4j.LoggerFactory;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -51,32 +53,45 @@ public class GhostPushSetupReminderService {
     private final ChallengeRepository challengeRepository;
     private final PushSender pushSender;
     private final NotificationPublisher notificationPublisher;
+    private final PlatformTransactionManager transactionManager;
 
     /** 1시간마다: 셋업 미완료(권한 없음) AUTO 멤버를 깨우는 무음 푸시를 보낸다. */
     @SchedulerLock(name = "GhostPushSetupReminderService.nudgeSetupPendingMembers", lockAtMostFor = "PT30M", lockAtLeastFor = "PT30M")
     @Scheduled(fixedDelay = 3_600_000L)
-    @Transactional
     public void nudgeSetupPendingMembers() {
         Instant now = Instant.now();
         Instant cooldownThreshold = now.minus(COOLDOWN);
-        List<ChallengeMember> claimed =
-                memberRepository.findSetupPendingForGhostPushForUpdate(cooldownThreshold, CLAIM_LIMIT);
-
-        int sent = 0;
-        for (ChallengeMember m : claimed) {
-            Challenge c = challengeRepository.findByIdAndDeletedAtIsNull(m.getChallengeId()).orElse(null);
-            // 소프트삭제됐거나 AUTO 인증이 아니면(수동은 즉시형 카메라뿐 → 권한 유도 대상 아님) 건너뛴다.
-            if (c == null || c.getVerificationConfig() == null
-                    || c.getVerificationConfig().selectedMethod() != SelectedMethod.AUTO) {
-                continue;
+        // 선점·쿨다운 기록·알림함 적재까지만 트랜잭션에서 한다. 무음 푸시(FCM, 건당 수백 ms·최대 5초)는 커밋 뒤에 보낸다 —
+        // 예전에는 선점한 멤버 행 잠금과 커넥션을 쥔 채 최대 200건을 순차로 보냈다(부하테스트 2026-10 점검).
+        // 발송이 실패해도 다음 쿨다운 뒤 다시 보낸다(알림함 고지는 이미 남는다).
+        List<ChallengeMember> sent = new ArrayList<>();
+        List<String> challengeIds = new ArrayList<>();
+        int claimedCount = new TransactionTemplate(transactionManager).execute(tx -> {
+            List<ChallengeMember> claimed =
+                    memberRepository.findSetupPendingForGhostPushForUpdate(cooldownThreshold, CLAIM_LIMIT);
+            for (ChallengeMember m : claimed) {
+                Challenge c = challengeRepository.findByIdAndDeletedAtIsNull(m.getChallengeId()).orElse(null);
+                // 소프트삭제됐거나 AUTO 인증이 아니면(수동은 즉시형 카메라뿐 → 권한 유도 대상 아님) 건너뛴다.
+                if (c == null || c.getVerificationConfig() == null
+                        || c.getVerificationConfig().selectedMethod() != SelectedMethod.AUTO) {
+                    continue;
+                }
+                notifyPermissionRegrant(m.getUserId(), c);
+                m.markGhostPushed(now);   // 쿨다운 기준 갱신(선점 락 유지 중)
+                sent.add(m);
+                challengeIds.add(c.getId().toString());
             }
-            pushSender.sendSilent(m.getUserId(), SilentPush.setupRequired(c.getId().toString()));
-            notifyPermissionRegrant(m.getUserId(), c);
-            m.markGhostPushed(now);   // 쿨다운 기준 갱신(같은 트랜잭션에서 선점 락 유지 중)
-            sent++;
+            return claimed.size();
+        });
+        for (int i = 0; i < sent.size(); i++) {
+            try {
+                pushSender.sendSilent(sent.get(i).getUserId(), SilentPush.setupRequired(challengeIds.get(i)));
+            } catch (RuntimeException e) {   // 한 명의 전송 실패가 나머지 발송을 막지 않게
+                log.warn("ghost_push_failed userId={} error={}", sent.get(i).getUserId(), e.getClass().getSimpleName());
+            }
         }
-        if (sent > 0) {
-            log.info("셋업 미완료 멤버 고스트 푸시 {}건 발송(대상 선점 {}건)", sent, claimed.size());
+        if (!sent.isEmpty()) {
+            log.info("셋업 미완료 멤버 고스트 푸시 {}건 발송(대상 선점 {}건)", sent.size(), claimedCount);
         }
     }
 
