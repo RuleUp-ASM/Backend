@@ -109,6 +109,30 @@ class EvaluatorAccuracyTest {
                 null, null, null, TARGET.toString(), null, null, null, null);
     }
 
+    private static SyncSignal stepsRecord(String recordId, double count, Instant start, Instant end, Instant receivedAt) {
+        HealthReading reading = new HealthReading(recordId, "STEPS", BigDecimal.valueOf(count), "count",
+                start.toString(), end.toString(), null, WATCH);
+        return new SyncSignal("HEALTH", null, end.toString(), null, null, null, List.of(reading),
+                null, null, null, TARGET.toString(), null, null, null, receivedAt);
+    }
+
+    private static UsageEvent use(String pkg, String type, Instant when) {
+        return new UsageEvent(pkg, type, when.toString());
+    }
+
+    private static SyncSignal usage(List<UsageEvent> events, Instant receivedAt) {
+        return new SyncSignal("SCREEN_TIME", null, receivedAt.toString(), null, null, null, null,
+                null, null, null, TARGET.toString(), events, null, null, receivedAt);
+    }
+
+    private VerificationConfig screenTimeConfig(ScreenTimeMode mode, int goalMinutes) {
+        return new VerificationConfig(ScheduleType.FIXED_DAYS, null, MethodCombine.AND,
+                List.of(VerificationMethod.SCREEN_TIME), null, null,
+                new ScreenTimeConfig(mode, mode == ScreenTimeMode.MAX ? Polarity.CONSTRAINT : Polarity.ACHIEVEMENT,
+                        List.of("com.instagram.android"), goalMinutes, null, 1),
+                null, null, List.of());
+    }
+
     private static SyncSignal sleep(Instant start, Instant end, HealthOrigin origin) {
         return new SyncSignal("SLEEP", null, end.toString(), null, null, null, null,
                 null, null, null, null, null, null,
@@ -254,6 +278,17 @@ class EvaluatorAccuracyTest {
                     wakeConfig("07:00"), List.of(steps(100, at(7, 0), at(7, 5), handWritten)), List.of(), at(8, 0)));
 
             assertThat(outcome.status()).isNotEqualTo(VerificationStatus.SUCCESS);
+        }
+
+        @Test
+        @DisplayName("같은 기록이 갱신돼 다시 오면 마지막 값으로 센다 — 처음 받은 3걸음에 묶이지 않는다")
+        void updatedRecordUsesLatestValue() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(wakeConfig("07:00"), List.of(
+                    stepsRecord("hc-1", 3, at(7, 0), at(7, 2), at(7, 3)),
+                    stepsRecord("hc-1", 24, at(7, 0), at(7, 8), at(7, 9))), List.of(), at(7, 10)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.evidence()).containsEntry("value", 24L);
         }
 
         @Test
