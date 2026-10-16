@@ -100,6 +100,12 @@ management:
   health:
     redis:
       enabled: ${REDIS_HEALTH_CHECK:false}
+    # DB 도 같은 이유로 뺀다. ALB 헬스체크(/actuator/health, 5초·3회)가 DB 검사를 하면, 커넥션 풀이 잠깐
+    # 차기만 해도(대기 30초) 모든 태스크가 동시에 unhealthy 로 교체돼 전면 장애가 된다 — 부하테스트(2026-10)
+    # 가입 몰림에서 실제로 태스크 2대가 함께 내려가 502 가 났다. 태스크를 재시작해도 DB 문제는 낫지 않는다.
+    # DB 상태는 RDS·풀 지표 경보(POOL-01~03 등)로 본다.
+    db:
+      enabled: ${DB_HEALTH_CHECK:false}
 
 # 우리 앱 전용 설정 (외부에서 받는 값은 전부 .env에서 주입)
 app:
