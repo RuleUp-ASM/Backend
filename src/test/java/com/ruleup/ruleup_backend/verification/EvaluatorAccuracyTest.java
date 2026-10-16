@@ -303,6 +303,51 @@ class EvaluatorAccuracyTest {
     }
 
     @Nested
+    @DisplayName("스크린타임 — 앱 형식 이벤트 짝짓기")
+    class ScreenTimePairing {
+
+        private final ScreenTimeEvaluator evaluator = new ScreenTimeEvaluator();
+        private static final String IG = "com.instagram.android";
+
+        @Test
+        @DisplayName("같은 앱 안에서 화면을 옮겨도 사용 시간이 끊기지 않는다 — 앞 화면 STOPPED 가 새 화면을 닫지 않는다")
+        void activitySwitchKeepsSession() {
+            Instant t = at(21, 0);
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(screenTimeConfig(ScreenTimeMode.MIN, 15), List.of(usage(List.of(
+                    use(IG, "RESUMED", t),
+                    use(IG, "PAUSED", t.plusSeconds(60)),
+                    use(IG, "RESUMED", t.plusSeconds(60)),
+                    use(IG, "STOPPED", t.plusSeconds(61)),
+                    use(IG, "PAUSED", t.plusSeconds(60 + 20 * 60))), at(21, 30))), List.of(), at(21, 30)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.evidence()).containsEntry("usageMinutes", 21L);
+        }
+
+        @Test
+        @DisplayName("닫힘 없이 끊긴 세션은 자정이 아니라 마지막으로 받은 시각에서 닫는다")
+        void openSessionClosesAtLastReceipt() {
+            // 20:00 에 열고 20:10 에 받은 뒤 기록이 끊겼다(배터리 꺼짐) — 자정까지 4시간을 쓴 것으로 보면 30분 한도 실패가 된다.
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(screenTimeConfig(ScreenTimeMode.MAX, 30), List.of(usage(List.of(
+                    use(IG, "RESUMED", at(20, 0))), at(20, 10))), List.of(), TARGET.plusDays(1).atStartOfDay(KST).toInstant().plusSeconds(60)));
+
+            assertThat(outcome.failureReason()).isNull();
+            assertThat(outcome.evidence()).containsEntry("usageMinutes", 10L);
+        }
+
+        @Test
+        @DisplayName("PAUSED 없이 늦게 온 STOPPED(강제 종료)는 그대로 세션을 닫는다")
+        void lateStopStillCloses() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(screenTimeConfig(ScreenTimeMode.MAX, 30), List.of(usage(List.of(
+                    use(IG, "RESUMED", at(20, 0)),
+                    use(IG, "STOPPED", at(20, 40))), at(20, 45))), List.of(), at(20, 50)));
+
+            assertThat(outcome.failureReason()).isEqualTo("USAGE_EXCEEDED");
+            assertThat(outcome.evidence()).containsEntry("usageMinutes", 40L);
+        }
+    }
+
+    @Nested
     @DisplayName("수면 — 신뢰 출처와 세그먼트 누적")
     class SleepTrustAndAccumulation {
 
