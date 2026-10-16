@@ -151,6 +151,30 @@ public class ExploreRedisStore {
     }
 
     /**
+     * 여러 방의 표시값 HASH 를 <b>왕복 한 번</b>에 읽는다. 목록 한 페이지가 방마다 HGETALL 을 따로 보내면
+     * 후보 수(최대 100)만큼 왕복이 쌓이고, 그동안 요청이 읽기 트랜잭션의 커넥션을 쥐고 있다(부하테스트 2026-10).
+     *
+     * @return 방 id → HASH(없으면 빈 맵). {@code ids} 의 순서를 따른다.
+     */
+    public Map<UUID, Map<Object, Object>> getStats(List<UUID> ids) {
+        if (ids.isEmpty()) return Map.of();
+        List<Object> replies = redis.executePipelined(
+                (org.springframework.data.redis.core.RedisCallback<Object>) connection -> {
+                    for (UUID id : ids)
+                        connection.hashCommands().hGetAll(ExploreKeys.stats(id).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    return null;
+                });
+        Map<UUID, Map<Object, Object>> out = new java.util.LinkedHashMap<>(ids.size());
+        for (int i = 0; i < ids.size(); i++) {
+            Object reply = i < replies.size() ? replies.get(i) : null;
+            @SuppressWarnings("unchecked")
+            Map<Object, Object> hash = reply instanceof Map<?, ?> m ? (Map<Object, Object>) m : Map.of();
+            out.put(ids.get(i), hash);
+        }
+        return out;
+    }
+
+    /**
      * 표시값 HASH 를 <b>통째로 갈아 끼운다.</b>
      *
      * <p>{@code putAll} 만 쓰면 이번에 사라진 필드가 남는다 — 멤버가 빠져 표본 미달이 되어

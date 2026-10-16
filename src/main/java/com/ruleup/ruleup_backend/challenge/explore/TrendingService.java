@@ -92,6 +92,16 @@ public class TrendingService {
             // 정원 판정은 <b>요청 시점 원천</b>이다(인기 API 명세). Redis 참여자 수는 표시용이라
             // 지연될 수 있고, 그 값으로 가입 가능 여부를 정하면 마감된 방이 열린 것으로 보인다.
             Map<UUID, Long> activeCounts = activeMemberCounts(ids);
+            // 표시값은 보일 방만 한 번에(파이프라인) 읽는다 — 방마다 HGETALL 을 따로 보내지 않는다.
+            // 랭킹을 읽은 <b>뒤에</b> Redis 가 끊길 수 있다. 감싸지 않으면 그 예외가 전역
+            // 핸들러까지 올라가 500 이 된다 — 같은 장애인데 계약된 503 과 다른 답이 나간다.
+            Map<UUID, Map<Object, Object>> statsById;
+            try {
+                statsById = store.getStats(ids.stream().filter(id -> isCurrentlyVisible(byId.get(id), normalized)).toList());
+            } catch (RuntimeException e) {
+                circuit.recordFailure(e);
+                throw new BusinessException(ErrorCode.EXPLORE_TEMPORARILY_UNAVAILABLE);
+            }
 
             for (TrendingRankingSource.Entry entry : ranking.entries()) {
                 if (items.size() >= TrendingRankingSource.TOP_N) break;
@@ -101,15 +111,7 @@ public class TrendingService {
 
                 // 인기 ZSET 에 있는데 표시값이 없다 = 투영이 덜 끝났다. 그 방만 빼면 순위가 한 칸씩
                 // 밀린 목록이 정상인 척 나간다 — 인기는 「서버 간 순위 동일」이 계약이라 더 나쁘다.
-                // 랭킹을 읽은 <b>뒤에</b> Redis 가 끊길 수 있다. 감싸지 않으면 그 예외가 전역
-                // 핸들러까지 올라가 500 이 된다 — 같은 장애인데 계약된 503 과 다른 답이 나간다.
-                Map<Object, Object> stats;
-                try {
-                    stats = store.getStats(c.getId());
-                } catch (RuntimeException e) {
-                    circuit.recordFailure(e);
-                    throw new BusinessException(ErrorCode.EXPLORE_TEMPORARILY_UNAVAILABLE);
-                }
+                Map<Object, Object> stats = statsById.getOrDefault(c.getId(), Map.of());
                 if (stats.isEmpty() || stats.get(ExploreRedisStore.VERSION_FIELD) == null) {
                     throw new BusinessException(ErrorCode.EXPLORE_TEMPORARILY_UNAVAILABLE);
                 }
