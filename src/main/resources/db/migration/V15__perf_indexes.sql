@@ -12,3 +12,10 @@ ALTER TABLE challenge_members
 ALTER TABLE challenge_join_events
     ADD KEY ix_join_events_time (joined_at, challenge_id),
     ALGORITHM = INPLACE, LOCK = NONE;
+
+-- 시작일 도달 활성화·종료일 지난 완료(1분마다): status + 날짜로 FOR UPDATE SKIP LOCKED 선점. 맞는 인덱스가 없어
+-- 방 전체(부하테스트 3.5만 행)를 훑었고, REPEATABLE READ 라 훑은 모든 방 행이 그 트랜잭션 동안 잠겨 가입·통계 재계산이 기다렸다.
+ALTER TABLE challenges
+    ADD KEY ix_challenges_status_start (status, start_date),
+    ADD KEY ix_challenges_status_end (status, end_date),
+    ALGORITHM = INPLACE, LOCK = NONE;

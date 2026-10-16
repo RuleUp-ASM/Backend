@@ -91,7 +91,11 @@ public class TrendingService {
                     .collect(Collectors.toMap(Challenge::getId, Function.identity()));
             // 정원 판정은 <b>요청 시점 원천</b>이다(인기 API 명세). Redis 참여자 수는 표시용이라
             // 지연될 수 있고, 그 값으로 가입 가능 여부를 정하면 마감된 방이 열린 것으로 보인다.
-            Map<UUID, Long> activeCounts = activeMemberCounts(ids);
+            // 마감 판정은 원천으로 하되, 마감 근처인 방만 센다 — 인기 방은 멤버가 많아 20곳을 다 세면 요청마다
+            // 수천 행을 읽었다(부하테스트 2026-10 느린 쿼리 1위: 5,869행 × 678회). 정원이 없거나 저장된 참여자 수가
+            // 정원보다 NEAR_FULL 넘게 남은 방은 몇 초 늦은 저장값으로도 「마감 아님」이 확실하다(가입 자체는 잠금으로 판정).
+            Map<UUID, Long> activeCounts = activeMemberCounts(ids.stream()
+                    .filter(id -> nearFull(byId.get(id))).toList());
             // 표시값은 보일 방만 한 번에(파이프라인) 읽는다 — 방마다 HGETALL 을 따로 보내지 않는다.
             // 랭킹을 읽은 <b>뒤에</b> Redis 가 끊길 수 있다. 감싸지 않으면 그 예외가 전역
             // 핸들러까지 올라가 500 이 된다 — 같은 장애인데 계약된 503 과 다른 답이 나간다.
@@ -130,7 +134,7 @@ public class TrendingService {
                         // joinable 은 티어뿐 아니라 정원도 본다 — 티어만 보면 마감된 방이
                         // 「들어갈 수 있음」으로 보여, 눌러야 막힌다.
                         joinable(myTier, c)
-                                && !isFull(c, activeCounts.getOrDefault(c.getId(), 0L).intValue()),
+                                && !(nearFull(c) && isFull(c, activeCounts.getOrDefault(c.getId(), 0L).intValue())),
                         myChallengeIds.contains(c.getId()),
                         c.getEndDate() == null ? null : c.getEndDate().toString()));
             }
@@ -233,6 +237,12 @@ public class TrendingService {
         Tier tier = scoreSummaryRepository.findById(userId).map(s -> s.getDisplayTier()).orElse(Tier.BRONZE);
         return (tier == Tier.UNRANKED) ? Tier.BRONZE : tier;
     }
+    private static final int NEAR_FULL = 5;
+
+    private static boolean nearFull(Challenge c) {
+        return c != null && c.getMaxParticipants() != null && c.getParticipantCount() >= c.getMaxParticipants() - NEAR_FULL;
+    }
+
     private static boolean isFull(Challenge c, int participants) {
         return c.getMaxParticipants() != null && participants >= c.getMaxParticipants();
     }
