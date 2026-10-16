@@ -229,8 +229,23 @@ export function join() {
 }
 
 let healthVersion = null;
+// sync 는 VU 하나가 사용자 한 명을 붙잡으면 그 사람 오늘 신호가 시험 내내 쌓인다(2차 B2~B4: 160명이 하루 ~2,400건 → sync 마다
+// 전부 다시 읽어 판정, 요청당 CPU 1.7배). 실제처럼 사용자당 몇십 분에 한 번이 되게 VU 마다 SYNC_POOL 명을 돌아가며 쓰고,
+// SYNC_SALT 로 시험마다 다른 사용자 대역을 고른다.
+const SYNC_POOL = Number(__ENV.SYNC_POOL || 1);
+const SYNC_SALT = Number(__ENV.SYNC_SALT || 0);
+const syncers = [];
+let syncTurn = 0;
+function syncUser() {
+  if (SYNC_POOL <= 1) return mine();
+  const k = syncTurn++ % SYNC_POOL;
+  if (!syncers[k]) syncers[k] = L.session((SYNC_SALT + __VU * SYNC_POOL + k) % USERS);
+  else if (Date.now() - syncers[k].at > 25 * 60 * 1000) L.refresh(syncers[k]);
+  return syncers[k];
+}
+
 export function sync() {
-  const s = mine();
+  const s = syncUser();
   if (!s.consented) {   // 실사용자는 자동 인증 전에 건강정보 동의를 한다 — 없으면 신호가 저장·판정되지 않는다
     if (!healthVersion) healthVersion = L.intro().json('data.termsVersions.healthInfo');
     L.post(s, '/api/v1/users/me/agreements', { agreements: [{ type: 'HEALTH_INFO', agreed: true, version: healthVersion }] },
