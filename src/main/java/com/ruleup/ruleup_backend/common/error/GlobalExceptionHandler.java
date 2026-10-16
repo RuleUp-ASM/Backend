@@ -82,7 +82,31 @@ public class GlobalExceptionHandler {
             ClientErrorLog.record(tooLarge);
             return ResponseEntity.status(tooLarge.getStatus()).body(ApiResponse.fail(ErrorResponse.of(tooLarge)));
         }
+        if (causedByDbUnavailable(e)) {
+            // 장애조치 동안 요청마다 스택을 남기면 로그만 수백 건이 쌓인다 — 한 줄로 남기고 503 으로 돌려보낸다.
+            log.warn("DB 일시 불가 — 503: {}", e.getMessage());
+            ErrorCode code = ErrorCode.TEMPORARILY_UNAVAILABLE;
+            ClientErrorLog.record(code);
+            return ResponseEntity.status(code.getStatus()).header("Retry-After", "2")
+                    .body(ApiResponse.fail(ErrorResponse.of(code)));
+        }
         return handleTrulyUnexpected(e);
+    }
+
+    /**
+     * 커넥션을 못 얻었거나(풀 대기 초과) DB 연결이 끊겼다 — 서버 버그가 아니라 일시 장애다.
+     * 500 이면 클라는 재시도하지 않고 경보는 코드 결함으로 읽는다(부하테스트 2026-10 RDS 장애조치: 55초간 500 수백 건).
+     */
+    static boolean causedByDbUnavailable(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof java.sql.SQLTransientConnectionException
+                    || t instanceof org.springframework.transaction.CannotCreateTransactionException
+                    || t instanceof org.springframework.jdbc.CannotGetJdbcConnectionException
+                    || t instanceof java.sql.SQLNonTransientConnectionException
+                    || "com.mysql.cj.jdbc.exceptions.CommunicationsException".equals(t.getClass().getName())) return true;
+            if (t.getCause() == t) break;
+        }
+        return false;
     }
 
     private ResponseEntity<ApiResponse<Void>> handleTrulyUnexpected(Exception e) {

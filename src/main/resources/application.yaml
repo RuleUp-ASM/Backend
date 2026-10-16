@@ -41,6 +41,9 @@ spring:
       minimum-idle: 5
       # 운영 지표 RuleUp/Ops 의 Pool 차원 — POOL-01~03 경보가 이 이름을 가리킨다(기본값 HikariPool-1 은 기동 순서에 따라 바뀔 수 있다).
       pool-name: ruleup-main
+      # 커넥션을 기다리는 상한. 기본 30초면 DB 장애조치(stg 실측 ~50초)·풀 포화 때 요청 스레드 200개가 30초씩 묶여
+      # 장애가 끝난 뒤에도 밀린 요청을 한참 소화한다. 짧게 끊고 503 + Retry-After 로 돌려보낸다(GlobalExceptionHandler).
+      connection-timeout: ${DB_CONNECTION_TIMEOUT_MS:5000}
       # MySQL 드라이버 성능 옵션 — 접속 주소(env)와 상관없이 늘 적용된다(부하테스트 2026-10).
       # 주소에만 두면 env 가 기본 주소를 통째로 덮어 빠진다: stg·prod 주소에 rewriteBatchedStatements 가 없어
       # 신호 일괄 적재가 행마다 따로 나갔다. 프로파일에서 드라이버가 CPU 의 16% 였다.
