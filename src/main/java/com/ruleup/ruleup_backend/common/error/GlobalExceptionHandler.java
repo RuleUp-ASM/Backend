@@ -97,7 +97,7 @@ public class GlobalExceptionHandler {
      * 커넥션을 못 얻었거나(풀 대기 초과) DB 연결이 끊겼다 — 서버 버그가 아니라 일시 장애다.
      * 500 이면 클라는 재시도하지 않고 경보는 코드 결함으로 읽는다(부하테스트 2026-10 RDS 장애조치: 55초간 500 수백 건).
      */
-    static boolean causedByDbUnavailable(Throwable e) {
+    public static boolean causedByDbUnavailable(Throwable e) {
         for (Throwable t = e; t != null; t = t.getCause()) {
             if (t instanceof java.sql.SQLTransientConnectionException
                     || t instanceof org.springframework.transaction.CannotCreateTransactionException
