@@ -124,6 +124,17 @@ public class User extends AssignedIdEntity {
     @Column(name = "device_id")
     private String deviceId;
 
+    /**
+     * 닉네임 점유 판정용 생성 열(DB 가 계산, 읽기 전용) — 탈퇴하지 않은 사용자의 심사 중 신청 닉네임 / 승인 닉네임.
+     * 각각 UNIQUE 인덱스가 있어 점유 확인이 인덱스 한 번으로 끝난다. 원래 열로 조건을 걸면 users 전체를 훑었다
+     * (부하테스트 2026-10 느린 쿼리 로그: 가입·닉네임 확인마다 사용자 수만큼 검사).
+     */
+    @Column(name = "active_requested_nickname", insertable = false, updatable = false)
+    private String activeRequestedNickname;
+
+    @Column(name = "active_approved_nickname", insertable = false, updatable = false)
+    private String activeApprovedNickname;
+
     /** 사용자 개인정보(생일·성별·이메일) — user_information 1:1. 조회 편의를 위해 EAGER. */
     @OneToOne(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
     private UserInformation information;

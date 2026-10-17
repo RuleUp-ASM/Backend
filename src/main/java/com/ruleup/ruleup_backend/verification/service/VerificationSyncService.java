@@ -253,14 +253,16 @@ public class VerificationSyncService {
         // 판정 입력은 저장된 원본이다. 오늘과 유예 중인 어제를 한 번씩만 읽어 멤버들이 나눠 쓴다 —
         // 같은 사용자 신호를 챌린지별로 복제해 읽지 않는다(백엔드 4-1-1 「사용자 신호 1회 저장」).
         LocalDate yesterday = today.minusDays(1);
-        Map<LocalDate, VerificationSignalReader.DaySignalSet> daySignals =
-                signalReader.forDays(userId, List.of(yesterday, today));
+        VerificationSignalReader.Window daySignals = signalReader.window(userId);
 
         List<ChallengeMember> members = challengeQuery.findActiveMemberships(userId);
+        // 방마다 따로 읽지 않고 한 번에 — 방 수만큼 PK 조회가 sync 스레드 덤프 1위였다(2차 P0 재측정).
+        Map<UUID, Challenge> challenges = challengeQuery.findActiveChallenges(
+                members.stream().map(ChallengeMember::getChallengeId).toList());
         List<SyncResponse.UpdatedChallenge> updated = new ArrayList<>();
 
         for (ChallengeMember member : members) {
-            Challenge challenge = challengeQuery.findActiveChallenge(member.getChallengeId()).orElse(null);
+            Challenge challenge = challenges.get(member.getChallengeId());
             if (challenge == null) continue;
             // 끝난 방도 유예 구간 동안은 열어 둔다. 종료 전환이 endDate 다음 날 일어나므로
             // ACTIVE 만 받으면 마지막 활동일에 늦게 도착한 신호를 반영할 길이 없다.
@@ -293,7 +295,7 @@ public class VerificationSyncService {
             VerificationDaily daily = loadOrCreateDaily(member, challenge, today);
             VerificationStatus before = daily.getStatus();
             VerificationStatus todayStatus = processMember(member, challenge, config, daily,
-                    daySignals.get(today), gaps, consentGapOf, today, now);
+                    () -> daySignals.day(today), gaps, consentGapOf, today, now);
 
             progressService.updateAfterSync(member, todayStatus, now);
             if (becameFinal(before, todayStatus) || graceChanged) {
@@ -494,7 +496,7 @@ public class VerificationSyncService {
      * @return 이 재평가로 어제 건이 확정됐으면 true
      */
     private boolean evaluateGraceDay(ChallengeMember member, Challenge challenge, VerificationConfig config,
-                                     Map<LocalDate, VerificationSignalReader.DaySignalSet> daySignals,
+                                     VerificationSignalReader.Window daySignals,
                                      List<SyncRequest.Gap> gaps,
                                      java.util.function.Predicate<VerificationMethod> consentGapOf,
                                      LocalDate today, Instant now) {
@@ -510,7 +512,7 @@ public class VerificationSyncService {
 
         VerificationStatus before = daily.getStatus();
         VerificationStatus after = processMember(member, challenge, config, daily,
-                daySignals.get(yesterday), gaps, consentGapOf, yesterday, now);
+                () -> daySignals.day(yesterday), gaps, consentGapOf, yesterday, now);
         if (!becameFinal(before, after)) return false;
         progressService.recount(member);
         return true;
@@ -530,7 +532,7 @@ public class VerificationSyncService {
 
     private VerificationStatus processMember(ChallengeMember member, Challenge challenge, VerificationConfig config,
                                              VerificationDaily daily,
-                                             VerificationSignalReader.DaySignalSet daySignals,
+                                             java.util.function.Supplier<VerificationSignalReader.DaySignalSet> signalsOfDay,
                                              List<SyncRequest.Gap> gaps,
                                              java.util.function.Predicate<VerificationMethod> consentGapOf,
                                              LocalDate today, Instant now) {
@@ -544,6 +546,8 @@ public class VerificationSyncService {
         }
         // 원본을 전부 읽지 못한 날은 평가하지 않는다. 잘린 값으로 「실패 예정」이나 성공을 찍으면
         // 사용자에게 잘못된 결과가 그대로 보인다 — 판정을 미루는 편이 낫다.
+        // 확정된 날은 위에서 끝났다 — 신호는 판정할 때만 읽는다.
+        VerificationSignalReader.DaySignalSet daySignals = signalsOfDay.get();
         if (daySignals == null || !daySignals.complete()) {
             log.warn("원본을 전부 읽지 못해 이 날 평가를 건너뛴다 userId={} targetDate={}",
                     member.getUserId(), today);

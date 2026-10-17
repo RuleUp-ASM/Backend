@@ -6,6 +6,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
+import org.springframework.data.domain.Persistable;
 
 import java.io.Serializable;
 import java.time.Instant;
@@ -27,7 +28,22 @@ import java.util.UUID;
 @IdClass(UserAgreementState.Key.class)
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class UserAgreementState {
+public class UserAgreementState implements Persistable<UserAgreementState.Key> {
+
+    /** 새로 만든 행은 save() 가 merge(PK 로 한 번 더 SELECT) 대신 persist 로 바로 INSERT 하게 한다 — 호출부가 이미 없음을 확인했다. */
+    @Transient
+    @Getter(AccessLevel.NONE)
+    private boolean fresh;
+
+    @Override
+    public Key getId() { return new Key(userId, agreementType); }
+
+    @Override
+    public boolean isNew() { return fresh; }
+
+    @PostPersist
+    @PostLoad
+    void markStored() { this.fresh = false; }
 
     @Id
     @JdbcTypeCode(SqlTypes.BINARY)
@@ -57,6 +73,7 @@ public class UserAgreementState {
         s.agreed = agreed;
         s.version = version;
         s.agreedAt = agreedAt;
+        s.fresh = true;
         return s;
     }
 

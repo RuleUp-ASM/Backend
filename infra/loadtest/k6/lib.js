@@ -18,6 +18,9 @@ export function hosts() {
 
 export const apiErrors = new Counter('ruleup_api_errors');
 export const businessRejects = new Counter('ruleup_business_rejects');
+// 업무 성공 — 5xx 0건이어도 429·409 로 거절만 했다면 사용자는 아무것도 못 한 것이다. 실제로 저장·가입된 건수를 따로 센다.
+export const businessOk = new Counter('ruleup_business_ok');
+const BUSINESS = ['auth.oauth_kakao', 'auth.signup', 'challenge.create', 'challenge.join', 'verification.sync', 'challenge.draft_ai'];
 
 const JSON_HEADERS = { 'Content-Type': 'application/json', 'User-Agent': 'ruleup-loadtest/1.0 (k6)' };
 
@@ -33,6 +36,11 @@ export function ok(res, name, allowed) {
     try { code = (res.json('error.code') || res.json('code') || '') + ''; } catch (e) { code = 'non_json'; }
     if (res.status >= 500 || res.status === 0) apiErrors.add(1, { api: name, status: `${res.status}`, code });
     else businessRejects.add(1, { api: name, status: `${res.status}`, code });
+  }
+  if (BUSINESS.includes(name)) {
+    if (res.status === 200 || res.status === 201) businessOk.add(1, { api: name });
+    // 허용한 거절(sync 10초 간격 429·가입 409 등)도 업무상 처리되지 않은 건이라 따로 센다 — 빨라질수록 늘 수 있다.
+    else if (okStatus) businessRejects.add(1, { api: name, status: `${res.status}`, code: 'allowed' });
   }
   check(res, { [`${name} ${(allowed || [200, 201]).join('/')}`]: () => okStatus });
   return okStatus;
@@ -149,6 +157,9 @@ export const GROUP_PUBLIC = { mode: 'GROUP', visibility: 'PUBLIC', capacity: 100
 export const SLO_MS = {   // 노션 SLO 지연 목표(p95) — alarm-catalog.yaml operations 와 같다
   'auth.oauth_kakao': 3000, 'auth.refresh': 1000, 'challenge.explore': 1000, 'challenge.detail': 1000,
   'challenge.join': 1500, 'verification.sync': 3000, 'verification.today': 1000, 'verification.progress': 1000,
+  // DAU 2만 재측정(2026-10)에서 추가한 핵심 흐름 — 사용자 체감 기준
+  'me.home': 1000, 'room.home': 1000, 'room.ranking': 1000, 'challenge.list': 1000, 'challenge.trending': 1000,
+  'challenge.draft_template': 1000, 'challenge.create': 2000, 'auth.signup': 3000, 'challenge.draft_ai': 5000,
 };
 
 // 요약에 API 별 지연이 나오려면 태그별 임계값이 있어야 한다(k6 는 임계값이 걸린 태그만 따로 집계한다).
@@ -160,5 +171,10 @@ export function thresholds(extra) {
   const t = { http_req_failed: ['rate<0.005'], ruleup_api_errors: ['count<1'] };
   for (const [api, ms] of Object.entries(SLO_MS)) t[`http_req_duration{api:${api}}`] = [`p(95)<${ms}`];
   for (const api of ALL_APIS) if (!t[`http_req_duration{api:${api}}`]) t[`http_req_duration{api:${api}}`] = ['p(95)<60000'];
+  // 요약에 업무 성공·거절이 API·상태별로 나오게(k6 는 임계값이 걸린 태그 조합만 따로 집계한다) — 판정용이 아니다.
+  for (const api of BUSINESS) t[`ruleup_business_ok{api:${api}}`] = ['count>=0'];
+  for (const [api, st] of [['verification.sync', '429'], ['challenge.join', '409'], ['challenge.join', '403'], ['auth.refresh', '401'],
+                           ['challenge.create', '409'], ['challenge.create', '400'], ['challenge.draft_ai', '429']])
+    t[`ruleup_business_rejects{api:${api},status:${st}}`] = ['count>=0'];
   return Object.assign(t, extra || {});
 }

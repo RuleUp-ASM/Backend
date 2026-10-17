@@ -7,6 +7,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
+import org.springframework.data.domain.Persistable;
 
 import java.io.Serializable;
 import java.time.Instant;
@@ -22,7 +23,22 @@ import java.util.UUID;
 @IdClass(SocialToken.Key.class)
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class SocialToken {
+public class SocialToken implements Persistable<SocialToken.Key> {
+
+    /** 새로 만든 행은 save() 가 merge(PK 로 한 번 더 SELECT) 대신 persist 로 바로 INSERT 하게 한다 — 호출부가 이미 없음을 확인했다. */
+    @Transient
+    @Getter(AccessLevel.NONE)
+    private boolean fresh;
+
+    @Override
+    public Key getId() { return new Key(userId, provider); }
+
+    @Override
+    public boolean isNew() { return fresh; }
+
+    @PostPersist
+    @PostLoad
+    void markStored() { this.fresh = false; }
 
     /** 복합 PK (user_id, provider). */
     public record Key(UUID userId, OAuthProvider provider) implements Serializable {}
@@ -59,6 +75,7 @@ public class SocialToken {
         t.refreshTokenEnc = refreshTokenEnc;
         t.encryptionKeyVersion = keyVersion;
         t.expiresAt = expiresAt;
+        t.fresh = true;
         return t;
     }
 

@@ -309,8 +309,9 @@ public class ExploreQueryService {
      */
     private Map<UUID, Row> withDisplayValues(Map<UUID, Row> byId) {
         Map<UUID, Row> merged = new java.util.HashMap<>(byId.size());
+        Map<UUID, Map<Object, Object>> hashes = store.getStats(List.copyOf(byId.keySet()));
         byId.forEach((id, row) -> {
-            Map<Object, Object> hash = store.getStats(id);
+            Map<Object, Object> hash = hashes.getOrDefault(id, Map.of());
             // 정렬 인덱스에는 있는데 표시값이 없다 = <b>투영이 덜 끝났다.</b> 그 방만 빼고
             // 200 을 내면 있는 방이 조용히 사라지고, MySQL 로 채우면 정렬과 숫자의 출처가
             // 갈린다. 둘 다 장애를 감추므로 드러낸다(공통 5-4).

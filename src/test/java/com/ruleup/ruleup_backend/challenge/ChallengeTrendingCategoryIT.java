@@ -230,6 +230,41 @@ class ChallengeTrendingCategoryIT extends ChallengeApiSupport {
         }
 
         @Test
+        @DisplayName("정원이 찬 방은 joinable=false, 정원이 넉넉한 방은 true — 마감 근처 방만 원천에서 센다")
+        void fullRoomIsNotJoinable() throws Exception {
+            String token = memberToken(uniq("tr-full"));
+            UUID full = publicGroup("EXERCISE", "ACTIVE", 6, 30);
+            jdbcTemplate.update("UPDATE challenges SET capacity = 5, participant_count = 4 WHERE id = ?", (Object) bytes(full));   // 저장값이 늦어도
+            UUID roomy = publicGroup("EXERCISE", "ACTIVE", 5, 30);
+            jdbcTemplate.update("UPDATE challenges SET capacity = 100 WHERE id = ?", (Object) bytes(roomy));
+
+            popularityRefreshJob.runOnce();
+            evictCaches();
+
+            MvcResult res = trending(token, null);
+            List<String> ids = read(res, "$.data.items[*].challengeId");
+            List<Boolean> joinable = read(res, "$.data.items[*].joinable");
+            assertThat(joinable.get(ids.indexOf(full.toString()))).isFalse();
+            assertThat(joinable.get(ids.indexOf(roomy.toString()))).isTrue();
+        }
+
+        @Test
+        @DisplayName("저장값으로 이미 찬 방은 다시 세지 않고 마감으로 본다")
+        void storedFullRoomIsNotJoinable() throws Exception {
+            String token = memberToken(uniq("tr-stfull"));
+            UUID full = publicGroup("EXERCISE", "ACTIVE", 5, 30);
+            jdbcTemplate.update("UPDATE challenges SET capacity = 5, participant_count = 5 WHERE id = ?", (Object) bytes(full));
+
+            popularityRefreshJob.runOnce();
+            evictCaches();
+
+            MvcResult res = trending(token, null);
+            List<String> ids = read(res, "$.data.items[*].challengeId");
+            List<Boolean> joinable = read(res, "$.data.items[*].joinable");
+            assertThat(joinable.get(ids.indexOf(full.toString()))).isFalse();
+        }
+
+        @Test
         @DisplayName("category를 주면 그 카테고리의 인기만 내려준다")
         void perCategory() throws Exception {
             String token = memberToken(uniq("tr-cat"));

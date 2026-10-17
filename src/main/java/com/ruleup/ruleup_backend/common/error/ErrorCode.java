@@ -326,6 +326,8 @@ public enum ErrorCode {
 
     // ===== 공통 =====
     TOO_MANY_REQUESTS(HttpStatus.TOO_MANY_REQUESTS, "요청이 너무 많습니다. 잠시 후 다시 시도해주세요."),
+    // DB 에 잠시 닿지 못함(장애조치·풀 포화). 요청 자체는 멀쩡하니 잠시 뒤 다시 보내면 된다.
+    TEMPORARILY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "잠시 후 다시 시도해 주세요."),
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류가 발생했습니다."),
     INVALID_REQUEST(HttpStatus.BAD_REQUEST, "요청 형식이 올바르지 않습니다.");
 

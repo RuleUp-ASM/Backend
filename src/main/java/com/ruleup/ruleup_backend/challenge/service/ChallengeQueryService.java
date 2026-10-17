@@ -39,6 +39,14 @@ public class ChallengeQueryService {
         return challengeRepository.findByIdAndDeletedAtIsNull(challengeId);
     }
 
+    /** 챌린지 여러 건(소프트 삭제 제외)을 한 번에 — id → 챌린지. 없는 id 는 빠진다. */
+    public java.util.Map<UUID, Challenge> findActiveChallenges(java.util.Collection<UUID> challengeIds) {
+        if (challengeIds.isEmpty()) return java.util.Map.of();
+        java.util.Map<UUID, Challenge> byId = new java.util.HashMap<>();
+        for (Challenge c : challengeRepository.findAllByIdInAndDeletedAtIsNull(challengeIds)) byId.put(c.getId(), c);
+        return byId;
+    }
+
     /** 멤버십 1건(PK). */
     public Optional<ChallengeMember> findMember(UUID memberId) {
         return memberRepository.findById(memberId);

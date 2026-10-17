@@ -19,6 +19,7 @@ const USERS = Number(__ENV.USERS || 3000);
 const RATE = Number(__ENV.RATE || 10);
 const VUS = Number(__ENV.VUS || 100);
 const DUR = __ENV.DURATION || '5m';
+const ROOM_EVERY = Number(__ENV.ROOM_EVERY || 1);
 const TEMPLATES = (__ENV.TEMPLATES || '1001,1002,1209,1501').split(',').map(Number);
 
 function think(min, max) { sleep(min + Math.random() * (max - min)); }
@@ -67,6 +68,25 @@ function peakMix(scale) {
   };
 }
 
+// 배수(scale)를 시간에 따라 바꾸는 혼합 — [배수, 걸리는 시간] 목록. 1 = DAU 1만 피크(동시 ~500), 2 = DAU 2만 피크.
+//   steps  500→1000→1500→500(회복): 오토스케일·RDS 가 단계마다 어떻게 버티는지
+//   spike  500→1500 을 30초 안에, 5분 유지 뒤 500 으로: 급증과 복구 시간
+function mixed(plan) {
+  const st = (base) => plan.map(([scale, d]) => ({ target: Math.max(base === 400 ? 1 : 0, Math.round(base * scale)), duration: d }));
+  const rate = (base, extra) => Object.assign({ executor: 'ramping-arrival-rate', timeUnit: '1s', startRate: 1, stages: st(base) }, extra);
+  return {
+    browse: { executor: 'ramping-vus', exec: 'browse', startVUs: 0, stages: st(400) },
+    login: rate(15, { exec: 'login', preAllocatedVUs: 100, maxVUs: 1500 }),
+    sync: rate(20, { exec: 'sync', preAllocatedVUs: 100, maxVUs: 1500 }),
+    create: rate(3, { exec: 'create', preAllocatedVUs: 30, maxVUs: 600 }),
+    join: rate(4, { exec: 'join', preAllocatedVUs: 30, maxVUs: 600 }),
+  };
+}
+const PLANS = {
+  steps: [[1, '2m'], [1, '6m'], [2, '2m'], [2, '8m'], [3, '2m'], [3, '8m'], [1, '1m'], [1, '8m']],
+  spike: [[1, '2m'], [1, '5m'], [3, '30s'], [3, '5m'], [1, '30s'], [1, '8m']],
+};
+
 function breakpoint() {
   const stages = [];
   for (const v of [200, 400, 600, 800, 1000, 1300, 1600, 2000]) stages.push({ target: v, duration: '2m' }, { target: v, duration: '2m' });
@@ -74,11 +94,15 @@ function breakpoint() {
            login: { executor: 'constant-arrival-rate', exec: 'login', rate: 5, timeUnit: '1s', duration: '32m', preAllocatedVUs: 50, maxVUs: 300 } };
 }
 
-const chosen = SC === 'peak' ? peakMix(Number(__ENV.SCALE || 1)) : SC === 'breakpoint' ? breakpoint() : { [SC]: scenarios[SC] };
+const chosen = SC === 'peak' ? peakMix(Number(__ENV.SCALE || 1)) : SC === 'breakpoint' ? breakpoint()
+  : PLANS[SC] ? mixed(PLANS[SC]) : { [SC]: scenarios[SC] };
 
 export const options = {
   hosts: L.hosts(), scenarios: chosen, discardResponseBodies: false,
-  thresholds: SC === 'breakpoint' ? { http_req_failed: [{ threshold: 'rate<0.05', abortOnFail: true, delayAbortEval: '1m' }] } : L.thresholds(),
+  // 한계점은 오류 5% 뿐 아니라 핵심 화면이 SLO 의 3배(3초)를 넘으면 멈춘다 — 5xx 없이 느려지기만 하는 붕괴도 한계다.
+  thresholds: SC === 'breakpoint' ? { http_req_failed: [{ threshold: 'rate<0.05', abortOnFail: true, delayAbortEval: '1m' }],
+    'http_req_duration{api:me.home}': [{ threshold: 'p(95)<3000', abortOnFail: true, delayAbortEval: '2m' }],
+    'http_req_duration{api:challenge.explore}': [{ threshold: 'p(95)<3000', abortOnFail: true, delayAbortEval: '2m' }] } : L.thresholds(),
   summaryTrendStats: ['avg', 'med', 'p(90)', 'p(95)', 'p(99)', 'max'],
 };
 
@@ -88,7 +112,8 @@ export function seed() {
   const n = exec.scenario.iterationInTest;
   const s = L.session(n);
   const tpl = TEMPLATES[n % TEMPLATES.length];
-  L.createFromTemplate(s, tpl, L.GROUP_PUBLIC);
+  // 방은 ROOM_EVERY 명 중 1명만 만든다(실사용은 참여자가 방장보다 훨씬 많다). 기본 1 = 모두 만든다.
+  if (n % ROOM_EVERY === 0) L.createFromTemplate(s, tpl, L.GROUP_PUBLIC);
   const ex = L.get(s, `/api/v1/challenges/explore?sort=${pick(['RECENT', 'POPULAR', 'PARTICIPANTS'])}&size=20`, 'challenge.explore');
   const items = (ex.status === 200 && ex.json('data.items')) || [];
   for (const it of items.filter((x) => !x.joined && !x.isFull && x.eligible).slice(0, 2))
@@ -177,10 +202,18 @@ export function aidraft() {
 }
 
 let hotId = null;
-export function joinhot() {
+/** 모든 VU 가 같은 출발 시각을 보도록 한 번만 정한다(joinhot 전용, 다른 시나리오는 쓰지 않는다). */
+export function setup() {
+  return { startAt: __ENV.START_DELAY_MS ? Date.now() + Number(__ENV.START_DELAY_MS) : 0 };
+}
+
+export function joinhot(data) {
   // 모두 같은 방 하나에 동시에 들어간다 — 첫 VU 가 방을 만들고 나머지는 explore 최신에서 같은 방을 찾는다.
-  const s = L.session(USERS + __VU);   // 이 시나리오 전용 사용자(이미 가입한 방이 없어야 한다)
+  // 이미 가입한 사용자로 로그인해 두고, 시작 뒤 START_DELAY_MS 시점에 <b>일제히</b> 들어간다 — 가입부터 하면 가입이 몰려
+  // 정원 경합 전에 풀 대기로 503 이 난다(2차 J1: 300명 중 46명만 방까지 감). 가입 없는 사용자 번호는 HOT_USER_BASE 부터.
+  const s = L.session(Number(__ENV.HOT_USER_BASE || USERS) + __VU);
   if (!hotId) hotId = __ENV.HOT_ID;
+  if (data && data.startAt) sleep(Math.max(0, (data.startAt - Date.now()) / 1000));
   const r = L.post(s, `/api/v1/challenges/${hotId}/members`, null, 'challenge.join', null, [200, 201, 409]);
   check(r, { 'join ok or full': (x) => [200, 201, 409].includes(x.status) });
 }
@@ -196,8 +229,23 @@ export function join() {
 }
 
 let healthVersion = null;
+// sync 는 VU 하나가 사용자 한 명을 붙잡으면 그 사람 오늘 신호가 시험 내내 쌓인다(2차 B2~B4: 160명이 하루 ~2,400건 → sync 마다
+// 전부 다시 읽어 판정, 요청당 CPU 1.7배). 실제처럼 사용자당 몇십 분에 한 번이 되게 VU 마다 SYNC_POOL 명을 돌아가며 쓰고,
+// SYNC_SALT 로 시험마다 다른 사용자 대역을 고른다.
+const SYNC_POOL = Number(__ENV.SYNC_POOL || 1);
+const SYNC_SALT = Number(__ENV.SYNC_SALT || 0);
+const syncers = [];
+let syncTurn = 0;
+function syncUser() {
+  if (SYNC_POOL <= 1) return mine();
+  const k = syncTurn++ % SYNC_POOL;
+  if (!syncers[k]) syncers[k] = L.session((SYNC_SALT + __VU * SYNC_POOL + k) % USERS);
+  else if (Date.now() - syncers[k].at > 25 * 60 * 1000) L.refresh(syncers[k]);
+  return syncers[k];
+}
+
 export function sync() {
-  const s = mine();
+  const s = syncUser();
   if (!s.consented) {   // 실사용자는 자동 인증 전에 건강정보 동의를 한다 — 없으면 신호가 저장·판정되지 않는다
     if (!healthVersion) healthVersion = L.intro().json('data.termsVersions.healthInfo');
     L.post(s, '/api/v1/users/me/agreements', { agreements: [{ type: 'HEALTH_INFO', agreed: true, version: healthVersion }] },

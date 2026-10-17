@@ -29,7 +29,20 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     Optional<User> findByOauthProviderAndOauthSubject(OAuthProvider provider, String oauthSubject);
 
+    /** 로그인 분기용 — 기존 회원인지와 id 만. 엔티티(개인정보·관심사 EAGER 포함)를 통째로 읽지 않는다. */
+    @Query("select u.id from User u where u.oauthProvider = :provider and u.oauthSubject = :subject")
+    Optional<UUID> findIdByOauth(@Param("provider") OAuthProvider provider, @Param("subject") String oauthSubject);
+
     Optional<User> findByIdAndDeletedAtIsNull(UUID id);
+
+    /**
+     * 여러 사용자를 한 번에 — 개인정보·관심사(EAGER)까지 같은 문장으로 가져온다.
+     * 기본 구현은 사용자마다 user_information·user_interests 를 따로 읽어 방 홈·랭킹·멤버 목록이
+     * 멤버 수 × 2 만큼 SQL 을 더 냈다(부하테스트 2026-10 트레이스: 멤버 3명 방 홈 16문장).
+     */
+    @Override
+    @Query("select distinct u from User u left join fetch u.information left join fetch u.interestCategories where u.id in :ids")
+    List<User> findAllById(@Param("ids") Iterable<UUID> ids);
 
     @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
     @Query("select u from User u where u.id=:id")
@@ -43,13 +56,11 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     Optional<UserStatus> findStatusById(@Param("id") UUID id);
 
     /** 닉네임 점유 여부 — excludeId(본인) 제외. 신규 가입 검사면 excludeId=null. */
+    // 위 규칙을 생성 열(active_requested_nickname·active_approved_nickname)로 건다 — 두 UNIQUE 인덱스로 바로 찾는다.
     @Query("""
             select count(u) > 0 from User u
             where (:excludeId is null or u.id <> :excludeId)
-              and u.status <> com.ruleup.ruleup_backend.user.domain.UserStatus.WITHDRAWN
-              and ((u.nicknameStatus = com.ruleup.ruleup_backend.user.domain.NicknameStatus.PENDING
-                        and u.nickname = :nickname)
-                   or u.approvedNickname = :nickname)
+              and (u.activeRequestedNickname = :nickname or u.activeApprovedNickname = :nickname)
             """)
     boolean isNicknameTaken(@Param("nickname") String nickname, @Param("excludeId") UUID excludeId);
 

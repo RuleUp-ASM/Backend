@@ -30,7 +30,10 @@ public class S3Config {
     @Bean(destroyMethod = "close")
     public S3Client s3Client(@Value("${app.upload.s3.region:}") String region,
                              @Value("${app.upload.s3.endpoint:}") String endpoint) {
-        S3ClientBuilder builder = S3Client.builder().region(resolveRegion(region));
+        // 업로드·삭제는 요청 스레드에서 돈다 — SDK 기본은 호출 시간 제한이 없어 S3 가 느리면 요청(과 쥔 커넥션)이 끝없이 붙잡힌다.
+        S3ClientBuilder builder = S3Client.builder().region(resolveRegion(region))
+                .overrideConfiguration(c -> c.apiCallTimeout(java.time.Duration.ofSeconds(15))
+                        .apiCallAttemptTimeout(java.time.Duration.ofSeconds(8)));
         applyEndpoint(endpoint, builder::endpointOverride, builder::serviceConfiguration);
         return builder.build();
     }

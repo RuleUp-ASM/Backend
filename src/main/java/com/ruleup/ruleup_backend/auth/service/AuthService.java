@@ -128,8 +128,9 @@ public class AuthService {
 
         if (sanctionService.isBanned(provider.name(), info.subject(), req.installationId()))
             throw new BusinessException(ErrorCode.ACCOUNT_BANNED);
-        User existing = userRepository.findByOauthProviderAndOauthSubject(provider, info.subject()).orElse(null);
-        if (existing != null) return loginSessionService.loginExisting(existing.getId(), provider, req, info);
+        // 기존 회원이면 id 만 알면 된다 — 세션 트랜잭션이 행을 잠그며 다시 읽는다(예전엔 여기서 엔티티 전체를 한 번 더 읽었다).
+        UUID existingId = userRepository.findIdByOauth(provider, info.subject()).orElse(null);
+        if (existingId != null) return loginSessionService.loginExisting(existingId, provider, req, info);
         return issueSignupToken(provider, req, info);
     }
 
