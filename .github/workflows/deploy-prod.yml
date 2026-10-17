@@ -119,10 +119,11 @@ jobs:
             exit 1
           fi
 
-      # 기동 확인 — 헬스체크가 DB 연결까지 본다. 스키마 누락은 기동 단계(SchemaPresenceCheck)에서 이미 걸러진다.
+      # 기동 확인 — /actuator/health 는 관리 포트(8081)로 옮겨 ALB 밖에서는 404 다(2026-10-17 apply_prod_dau2.py).
+      # 그 헬스체크는 ALB 대상 그룹이 보고, 위 rolloutState=COMPLETED 가 새 태스크 전부 통과했다는 뜻이다.
+      # 스키마 누락은 기동 단계(SchemaPresenceCheck)에서 이미 걸러진다.
       - name: Smoke test
         run: |
-          curl -fsS --retry 5 --retry-delay 10 --retry-all-errors https://prod.ruleup.co.kr/actuator/health | tee /dev/stderr | grep -q '"status":"UP"'
           # 외부 점검(EDGE-01)·Route 53(NATIVE-01)이 보는 무인증 경로 — 사용자와 같은 길(Cloudflare 경유)로 고정 본문이 와야 한다.
           curl -fsS --retry 5 --retry-delay 10 --retry-all-errors -H 'Cache-Control: no-cache' https://prod.ruleup.co.kr/health/public | grep -qx 'ruleup-ok'
 
