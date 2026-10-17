@@ -31,6 +31,17 @@ public class VerificationConfigFactory {
             List.of("com.sec.android.app.shealth", "com.google.android.apps.fitness");
 
     /**
+     * 기상 걸음의 신뢰 writer. 걸음 목표 판정(HEALTH)보다 <b>넓다</b> — 기상은 「일어나 움직였는가」만 보는
+     * 10걸음 문턱이라 위조해서 얻을 것이 적고, 삼성헬스·구글 피트니스가 없는 폰은 Health Connect 플랫폼이나
+     * 시스템 자체가 걸음을 기록한다. 두 앱만 믿으면 그런 폰의 기상은 매일 실패한다. 손입력은 여전히 뺀다.
+     */
+    private static final List<String> DEFAULT_TRUSTED_WAKE_ORIGINS = List.of(
+            "com.sec.android.app.shealth",          // 삼성헬스
+            "com.google.android.apps.fitness",      // 구글 피트니스
+            "com.google.android.apps.healthdata",   // Health Connect 플랫폼
+            "android");                             // 기기 자체 걸음 센서
+
+    /**
      * 수면 기록의 신뢰 writer. 걸음·거리보다 <b>넓다</b> — 수면은 Health Connect 플랫폼 자신과
      * Play 서비스의 Sleep API 도 기록자로 올라오기 때문이다. 목록 밖 출처는 AUTO 로 적혀 있어도
      * 판정에 쓰지 않는다(스펙 §5-1 「신뢰 가능한 Health Connect 수면 기록만 사용」).
@@ -68,7 +79,7 @@ public class VerificationConfigFactory {
             case "WAKE" -> wake = new WakeConfig(
                     timeParam(params, "target_time", "07:00"),
                     properties.wakeGraceMinutes(), properties.wakeMinSteps(),
-                    DEFAULT_TRUSTED_ORIGINS, Polarity.ACHIEVEMENT, 1);
+                    DEFAULT_TRUSTED_WAKE_ORIGINS, Polarity.ACHIEVEMENT, 1);
             case "SCREEN_TIME_MIN" -> screenTime = new ScreenTimeConfig(
                     ScreenTimeMode.MIN, Polarity.ACHIEVEMENT,
                     packages(params), intParam(params, "duration_min", 30), timeWindow(params), 1);

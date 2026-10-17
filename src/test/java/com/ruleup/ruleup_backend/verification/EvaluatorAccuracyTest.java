@@ -109,6 +109,30 @@ class EvaluatorAccuracyTest {
                 null, null, null, TARGET.toString(), null, null, null, null);
     }
 
+    private static SyncSignal stepsRecord(String recordId, double count, Instant start, Instant end, Instant receivedAt) {
+        HealthReading reading = new HealthReading(recordId, "STEPS", BigDecimal.valueOf(count), "count",
+                start.toString(), end.toString(), null, WATCH);
+        return new SyncSignal("HEALTH", null, end.toString(), null, null, null, List.of(reading),
+                null, null, null, TARGET.toString(), null, null, null, receivedAt);
+    }
+
+    private static UsageEvent use(String pkg, String type, Instant when) {
+        return new UsageEvent(pkg, type, when.toString());
+    }
+
+    private static SyncSignal usage(List<UsageEvent> events, Instant receivedAt) {
+        return new SyncSignal("SCREEN_TIME", null, receivedAt.toString(), null, null, null, null,
+                null, null, null, TARGET.toString(), events, null, null, receivedAt);
+    }
+
+    private VerificationConfig screenTimeConfig(ScreenTimeMode mode, int goalMinutes) {
+        return new VerificationConfig(ScheduleType.FIXED_DAYS, null, MethodCombine.AND,
+                List.of(VerificationMethod.SCREEN_TIME), null, null,
+                new ScreenTimeConfig(mode, mode == ScreenTimeMode.MAX ? Polarity.CONSTRAINT : Polarity.ACHIEVEMENT,
+                        List.of("com.instagram.android"), goalMinutes, null, 1),
+                null, null, List.of());
+    }
+
     private static SyncSignal sleep(Instant start, Instant end, HealthOrigin origin) {
         return new SyncSignal("SLEEP", null, end.toString(), null, null, null, null,
                 null, null, null, null, null, null,
@@ -257,6 +281,17 @@ class EvaluatorAccuracyTest {
         }
 
         @Test
+        @DisplayName("같은 기록이 갱신돼 다시 오면 마지막 값으로 센다 — 처음 받은 3걸음에 묶이지 않는다")
+        void updatedRecordUsesLatestValue() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(wakeConfig("07:00"), List.of(
+                    stepsRecord("hc-1", 3, at(7, 0), at(7, 2), at(7, 3)),
+                    stepsRecord("hc-1", 24, at(7, 0), at(7, 8), at(7, 9))), List.of(), at(7, 10)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.evidence()).containsEntry("value", 24L);
+        }
+
+        @Test
         @DisplayName("창이 열려 있고 아직 걸음이 없으면 기다린다")
         void waitsWhileWindowOpen() {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
@@ -264,6 +299,51 @@ class EvaluatorAccuracyTest {
 
             assertThat(outcome.status()).isEqualTo(VerificationStatus.PENDING);
             assertThat(outcome.failureReason()).isNull();
+        }
+    }
+
+    @Nested
+    @DisplayName("스크린타임 — 앱 형식 이벤트 짝짓기")
+    class ScreenTimePairing {
+
+        private final ScreenTimeEvaluator evaluator = new ScreenTimeEvaluator();
+        private static final String IG = "com.instagram.android";
+
+        @Test
+        @DisplayName("같은 앱 안에서 화면을 옮겨도 사용 시간이 끊기지 않는다 — 앞 화면 STOPPED 가 새 화면을 닫지 않는다")
+        void activitySwitchKeepsSession() {
+            Instant t = at(21, 0);
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(screenTimeConfig(ScreenTimeMode.MIN, 15), List.of(usage(List.of(
+                    use(IG, "RESUMED", t),
+                    use(IG, "PAUSED", t.plusSeconds(60)),
+                    use(IG, "RESUMED", t.plusSeconds(60)),
+                    use(IG, "STOPPED", t.plusSeconds(61)),
+                    use(IG, "PAUSED", t.plusSeconds(60 + 20 * 60))), at(21, 30))), List.of(), at(21, 30)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.evidence()).containsEntry("usageMinutes", 21L);
+        }
+
+        @Test
+        @DisplayName("닫힘 없이 끊긴 세션은 자정이 아니라 마지막으로 받은 시각에서 닫는다")
+        void openSessionClosesAtLastReceipt() {
+            // 20:00 에 열고 20:10 에 받은 뒤 기록이 끊겼다(배터리 꺼짐) — 자정까지 4시간을 쓴 것으로 보면 30분 한도 실패가 된다.
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(screenTimeConfig(ScreenTimeMode.MAX, 30), List.of(usage(List.of(
+                    use(IG, "RESUMED", at(20, 0))), at(20, 10))), List.of(), TARGET.plusDays(1).atStartOfDay(KST).toInstant().plusSeconds(60)));
+
+            assertThat(outcome.failureReason()).isNull();
+            assertThat(outcome.evidence()).containsEntry("usageMinutes", 10L);
+        }
+
+        @Test
+        @DisplayName("PAUSED 없이 늦게 온 STOPPED(강제 종료)는 그대로 세션을 닫는다")
+        void lateStopStillCloses() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(screenTimeConfig(ScreenTimeMode.MAX, 30), List.of(usage(List.of(
+                    use(IG, "RESUMED", at(20, 0)),
+                    use(IG, "STOPPED", at(20, 40))), at(20, 45))), List.of(), at(20, 50)));
+
+            assertThat(outcome.failureReason()).isEqualTo("USAGE_EXCEEDED");
+            assertThat(outcome.evidence()).containsEntry("usageMinutes", 40L);
         }
     }
 

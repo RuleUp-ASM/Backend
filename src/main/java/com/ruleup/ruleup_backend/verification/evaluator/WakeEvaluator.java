@@ -67,8 +67,11 @@ public class WakeEvaluator implements MethodEvaluator {
     /** 창 안 걸음 합 — 출처 게이트를 통과한 구간 기록만, 창에 겹친 비율만큼, 겹친 기록은 한 번만. */
     private double stepsInWindow(List<SyncSignal> signals, Window window, WakeConfig cfg, Set<String> rejected) {
         if (signals == null) return 0;
+        // 같은 기록은 <b>마지막에 받은 것</b>으로 센다. 앱은 sync 마다 그날 기록을 다시 보내고, 기록 앱은 같은 기록의
+        // 걸음 수·끝 시각을 키워 가며 고친다 — 처음 받은 값(예: 3걸음)에 묶이면 그날은 끝내 문턱을 못 넘는다.
+        // 신호는 받은 순서(행 id = 시간순)로 오므로 뒤에 온 것이 덮는다.
+        Map<String, HealthEvaluator.Measured> byRecord = new LinkedHashMap<>();
         List<HealthEvaluator.Measured> clipped = new ArrayList<>();
-        Set<String> seenRecords = new HashSet<>();
         for (SyncSignal s : signals) {
             if (!SignalType.HEALTH.name().equals(s.type()) || s.readings() == null) continue;
             for (HealthReading r : s.readings()) {
@@ -82,16 +85,18 @@ public class WakeEvaluator implements MethodEvaluator {
                 Instant from = TimeWindows.parseInstant(r.startTime());
                 Instant to = TimeWindows.parseInstant(r.endTime());
                 if (from == null || to == null || !to.isAfter(from) || r.value() == null) continue;
-                if (r.recordId() != null && !seenRecords.add(r.recordId())) continue;   // 재전송은 한 번만
 
                 Instant start = from.isBefore(window.start()) ? window.start() : from;
                 Instant end = to.isAfter(window.end()) ? window.end() : to;
                 if (!end.isAfter(start)) continue;                                     // 창 밖 기록
                 double share = (double) (end.getEpochSecond() - start.getEpochSecond())
                         / (to.getEpochSecond() - from.getEpochSecond());
-                clipped.add(new HealthEvaluator.Measured(start, end, r.value().doubleValue() * share));
+                HealthEvaluator.Measured m = new HealthEvaluator.Measured(start, end, r.value().doubleValue() * share);
+                if (r.recordId() != null) byRecord.put(r.recordId(), m);
+                else clipped.add(m);
             }
         }
+        clipped.addAll(byRecord.values());
         return HealthEvaluator.dedupedSum(clipped);
     }
 }

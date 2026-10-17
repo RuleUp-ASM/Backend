@@ -45,9 +45,14 @@ public class ScreenTimeEvaluator implements MethodEvaluator {
         Map<String, Instant> open = new HashMap<>();
         long accSec = processEvents(ctx.signals(), targets, window, open);
 
-        // 창 닫힘 이후면 남은 open 세션을 창 끝에서 종료(꼬리 시간 반영)
+        // 창 닫힘 이후면 남은 open 세션을 닫는다(꼬리 시간 반영). 닫는 시각은 창 끝이 아니라 <b>그 기기에서 마지막으로
+        // 받은 시각</b>까지다 — 앱은 화면 꺼짐을 보내지 않아서, 대상 앱이 앞에 뜬 채 배터리가 꺼지거나 그 뒤로 sync 가
+        // 없으면 세션이 자정까지 늘어나 최대 사용형이 쓰지 않은 시간으로 실패했다. 그 뒤에 받은 기록이 없으니
+        // 그 뒤에 썼다는 근거도 없다. 받은 시각을 모르면(옛 행) 예전처럼 창 끝에서 닫는다.
         if (!ctx.now().isBefore(window.end())) {
-            accSec += closeOpenAt(window.end(), window, open);
+            Instant lastSeen = lastReceivedAt(ctx.signals());
+            Instant closeAt = (lastSeen != null && lastSeen.isBefore(window.end())) ? lastSeen : window.end();
+            accSec += closeOpenAt(closeAt, window, open);
             open.clear();
         }
 
@@ -85,6 +90,24 @@ public class ScreenTimeEvaluator implements MethodEvaluator {
      */
     private static final Set<String> CLOSE_EVENTS =
             Set.of("PAUSED", "ACTIVITY_PAUSED", "STOPPED", "ACTIVITY_STOPPED", "MOVE_TO_BACKGROUND");
+
+    /** 앞 화면의 정지로 보고 넘기는 간격 — 화면 전환 뒤 앞 화면 STOPPED 는 보통 1초 안에 온다. */
+    private static final java.time.Duration STOP_AFTER_SWITCH = java.time.Duration.ofSeconds(5);
+
+    private static boolean isStop(String type) {
+        return "STOPPED".equals(type) || "ACTIVITY_STOPPED".equals(type);
+    }
+
+    /** 사용 기록을 실은 신호를 마지막으로 받은 시각. 모르면 null. */
+    private Instant lastReceivedAt(List<SyncSignal> signals) {
+        Instant last = null;
+        if (signals == null) return null;
+        for (SyncSignal s : signals) {
+            if (!carriesUsage(s.type()) || s.receivedAt() == null) continue;
+            if (last == null || s.receivedAt().isAfter(last)) last = s.receivedAt();
+        }
+        return last;
+    }
 
     /** 화면이 꺼지면 어떤 앱도 쓰이고 있지 않다 — 열린 세션 전부를 닫는 시스템 이벤트다. */
     private static final Set<String> SCREEN_OFF_EVENTS =
@@ -130,7 +153,12 @@ public class ScreenTimeEvaluator implements MethodEvaluator {
                 if (OPEN_EVENTS.contains(type)) {
                     open.putIfAbsent(pkg, at);                  // 이미 열려있으면 유지(가장 이른 것)
                 } else if (CLOSE_EVENTS.contains(type)) {
-                    Instant opened = open.remove(pkg);
+                    Instant opened = open.get(pkg);
+                    // 같은 앱 안에서 화면을 옮기면 PAUSED(A) → RESUMED(B) → STOPPED(A) 순으로 온다. 이벤트에 화면(액티비티)
+                    // 구분이 없어 STOPPED(A) 가 방금 연 B 를 닫으면 B 를 쓴 시간이 통째로 빠진다. 열린 직후의 정지는 앞 화면의
+                    // 것으로 보고 넘긴다 — 강제 종료로 PAUSED 없이 STOPPED 만 남는 경우는 그보다 늦게 온다.
+                    if (opened != null && isStop(type) && at.isBefore(opened.plus(STOP_AFTER_SWITCH))) continue;
+                    open.remove(pkg);
                     if (opened != null) addedSec += overlapSeconds(opened, at, window);
                 }
             }

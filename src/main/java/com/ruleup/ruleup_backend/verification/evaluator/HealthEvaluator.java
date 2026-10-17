@@ -53,7 +53,7 @@ public class HealthEvaluator implements MethodEvaluator {
         boolean anyReading = false;
         boolean anyRejected = false;
         List<Measured> intervals = new ArrayList<>();   // 구간이 있는 레코드
-        Set<String> seenRecords = new HashSet<>();
+        Map<String, Measured> latestByRecord = new LinkedHashMap<>();
         double cumulativeMax = 0;                        // 구간이 없는 레코드(그날 누적값)
 
         if (ctx.signals() != null) {
@@ -80,13 +80,15 @@ public class HealthEvaluator implements MethodEvaluator {
                         cumulativeMax = Math.max(cumulativeMax, value);   // 구간 없음 → 누적값으로 본다
                         continue;
                     }
-                    // 같은 레코드가 두 번 남아 있으면(재전송) 한 번만 센다.
-                    if (r.recordId() != null && !seenRecords.add(r.recordId())) continue;
-                    intervals.add(new Measured(from, to, value));
+                    // 같은 레코드가 여러 번 왔으면(재전송·기록 앱의 갱신) <b>마지막에 받은 것</b> 하나만 센다.
+                    // 처음 받은 값을 남기면 걸음이 늘어난 갱신이 버려져 목표에 영영 못 닿는다.
+                    if (r.recordId() != null) latestByRecord.put(r.recordId(), new Measured(from, to, value));
+                    else intervals.add(new Measured(from, to, value));
                 }
             }
         }
 
+        intervals.addAll(latestByRecord.values());
         double best = Math.max(cumulativeMax, dedupedSum(intervals));
 
         Map<String, Object> ev = new HashMap<>();
