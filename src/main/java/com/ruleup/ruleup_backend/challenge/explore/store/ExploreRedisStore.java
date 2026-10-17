@@ -31,6 +31,13 @@ public class ExploreRedisStore {
 
     private final StringRedisTemplate redis;
 
+    // ===== 연결 =====
+
+    /** 연결을 맺고 왕복 한 번 — 기동 직후 첫 연결을 워밍업 본작업과 떼어 두려고 쓴다. */
+    public void ping() {
+        redis.execute((org.springframework.data.redis.core.RedisCallback<String>) c -> c.ping());
+    }
+
     // ===== 워밍업 플래그 =====
 
     public boolean isWarmed() {
@@ -141,6 +148,30 @@ public class ExploreRedisStore {
     /** 그 방의 표시값 HASH. 없으면 비어 있다 — 아직 투영되지 않은 방이다. */
     public Map<Object, Object> getStats(UUID challengeId) {
         return redis.opsForHash().entries(ExploreKeys.stats(challengeId));
+    }
+
+    /**
+     * 여러 방의 표시값 HASH 를 <b>왕복 한 번</b>에 읽는다. 목록 한 페이지가 방마다 HGETALL 을 따로 보내면
+     * 후보 수(최대 100)만큼 왕복이 쌓이고, 그동안 요청이 읽기 트랜잭션의 커넥션을 쥐고 있다(부하테스트 2026-10).
+     *
+     * @return 방 id → HASH(없으면 빈 맵). {@code ids} 의 순서를 따른다.
+     */
+    public Map<UUID, Map<Object, Object>> getStats(List<UUID> ids) {
+        if (ids.isEmpty()) return Map.of();
+        List<Object> replies = redis.executePipelined(
+                (org.springframework.data.redis.core.RedisCallback<Object>) connection -> {
+                    for (UUID id : ids)
+                        connection.hashCommands().hGetAll(ExploreKeys.stats(id).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    return null;
+                });
+        Map<UUID, Map<Object, Object>> out = new java.util.LinkedHashMap<>(ids.size());
+        for (int i = 0; i < ids.size(); i++) {
+            Object reply = i < replies.size() ? replies.get(i) : null;
+            @SuppressWarnings("unchecked")
+            Map<Object, Object> hash = reply instanceof Map<?, ?> m ? (Map<Object, Object>) m : Map.of();
+            out.put(ids.get(i), hash);
+        }
+        return out;
     }
 
     /**
@@ -440,6 +471,15 @@ public class ExploreRedisStore {
         releaseIfOwner(ExploreKeys.REBUILD_LOCK, token);
     }
 
+    /** 내가 잡은 재구성 잠금의 수명을 늘린다. 이미 남의 것(또는 만료)이면 false. */
+    public boolean extendRebuild(String token, java.time.Duration ttl) {
+        Long r = redis.execute(new org.springframework.data.redis.core.script.DefaultRedisScript<>(
+                        "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('pexpire', KEYS[1], ARGV[2]) "
+                                + "else return 0 end", Long.class),
+                java.util.List.of(ExploreKeys.REBUILD_LOCK), token, String.valueOf(ttl.toMillis()));
+        return r != null && r == 1L;
+    }
+
     /** 값이 내 토큰일 때만 지운다 — 비교와 삭제를 한 스크립트로 묶어야 그 사이가 벌어지지 않는다. */
     private void releaseIfOwner(String key, String token) {
         if (token == null) return;
@@ -472,21 +512,29 @@ public class ExploreRedisStore {
      *
      * @return 방 id → {@code fields} 와 같은 순서의 멤버 목록(없는 필드는 {@code null})
      */
+    private static final int PIPELINE_CHUNK = 1000;
+
     public Map<UUID, List<String>> sortMembersOf(List<UUID> ids, List<String> fields) {
         if (ids.isEmpty() || fields.isEmpty()) return Map.of();
         byte[][] rawFields = fields.stream()
                 .map(f -> f.getBytes(java.nio.charset.StandardCharsets.UTF_8))
                 .toArray(byte[][]::new);
 
-        List<Object> replies = redis.executePipelined(
-                (org.springframework.data.redis.core.RedisCallback<Object>) connection -> {
-                    for (UUID id : ids) {
-                        connection.hashCommands().hMGet(
-                                ExploreKeys.stats(id).getBytes(java.nio.charset.StandardCharsets.UTF_8),
-                                rawFields);
-                    }
-                    return null;
-                });
+        // 한 파이프라인에 다 싣지 않는다 — 응답 전체가 명령 제한 시간(2초) 안에 와야 해서, 방 3.5만 개를
+        // 한 번에 보내면 타임아웃으로 재구성이 통째로 실패했다(부하테스트 2026-10 Redis 재부팅 복구).
+        List<Object> replies = new ArrayList<>(ids.size());
+        for (int from = 0; from < ids.size(); from += PIPELINE_CHUNK) {
+            List<UUID> chunk = ids.subList(from, Math.min(ids.size(), from + PIPELINE_CHUNK));
+            replies.addAll(redis.executePipelined(
+                    (org.springframework.data.redis.core.RedisCallback<Object>) connection -> {
+                        for (UUID id : chunk) {
+                            connection.hashCommands().hMGet(
+                                    ExploreKeys.stats(id).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                                    rawFields);
+                        }
+                        return null;
+                    }));
+        }
 
         Map<UUID, List<String>> out = new java.util.HashMap<>(ids.size());
         for (int i = 0; i < ids.size() && i < replies.size(); i++) {

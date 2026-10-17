@@ -7,6 +7,7 @@ import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
@@ -14,7 +15,7 @@ import org.springframework.stereotype.Component;
 import java.time.Duration;
 import java.util.List;
 
-/** 사용자별 60초 fixed window. Redis 장애 동안만 Caffeine으로 제한한다. */
+/** 사용자별 60초 fixed window. Redis 장애 동안만 Caffeine으로 제한한다. 한도는 {@code app.challenge.draft.rate-limit-per-minute}(기본 10). */
 @Component
 public class RecommendationRateLimiter {
     private static final Logger log = LoggerFactory.getLogger(RecommendationRateLimiter.class);
@@ -28,10 +29,13 @@ public class RecommendationRateLimiter {
     private final Cache<String, Window> windows = Caffeine.newBuilder()
             .expireAfterWrite(Duration.ofMinutes(1)).build();
     private volatile long retryRedisAt;
+    private final int limitPerMinute;
 
-    public RecommendationRateLimiter(StringRedisTemplate redis, MeterRegistry metrics) {
+    public RecommendationRateLimiter(StringRedisTemplate redis, MeterRegistry metrics,
+                                     @Value("${app.challenge.draft.rate-limit-per-minute:10}") int limitPerMinute) {
         this.redis = redis;
         this.metrics = metrics;
+        this.limitPerMinute = limitPerMinute;
     }
 
     public void check(String userId) {
@@ -60,8 +64,8 @@ public class RecommendationRateLimiter {
         }
     }
 
-    private static void rejectIfLimited(long count, long ttl) {
-        if (count > 10) throw BusinessException.rateLimited(ErrorCode.RECOMMENDATION_RATE_LIMITED, ttl);
+    private void rejectIfLimited(long count, long ttl) {
+        if (count > limitPerMinute) throw BusinessException.rateLimited(ErrorCode.RECOMMENDATION_RATE_LIMITED, ttl);
     }
 
     private static class Window {

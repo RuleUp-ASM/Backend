@@ -101,7 +101,9 @@ public class LoginSessionService {
 
         // ===== 설치 인계 — uq_users_active_installation_id: 하나의 설치는 한 활성 계정에만 연결 =====
         // 탈퇴 행도 installation_id 를 들고 있으므로(승계 근거) 활성 계정만 인계 대상으로 본다.
-        if (req.installationId() != null && !req.installationId().isBlank()) {
+        // 활성 계정이 이미 이 설치를 들고 있으면(같은 기기 재로그인 — 대부분) 다른 활성 보유자는 UNIQUE 상 있을 수 없다.
+        boolean alreadyHolds = !restored && req.installationId() != null && req.installationId().equals(user.getInstallationId());
+        if (!alreadyHolds && req.installationId() != null && !req.installationId().isBlank()) {
             userRepository.findActiveHolderOfInstallation(req.installationId())
                     .filter(holder -> !holder.getId().equals(user.getId()))
                     .ifPresent(holder -> {
@@ -119,9 +121,9 @@ public class LoginSessionService {
         user.attachInstallation(req.installationId(), req.deviceId());
         applyCountry(user, req.deviceInfo());
         user.touchLastLogin();
-        activity.touch(user.getId());
         userRepository.saveAndFlush(user);
-        activity.touch(user.getId());
+        // 저장 뒤에 한 번만 — 복원이면 저장 전엔 아직 WITHDRAWN 이라 기록이 무시된다.
+        activity.touchNow(user.getId());
 
         socialTokenService.upsert(user.getId(), provider, info.idpTokens());   // unlink 근거 최신화
 

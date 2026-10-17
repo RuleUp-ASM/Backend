@@ -82,8 +82,10 @@ public class PopularityRefreshJob {
         // 24시간 가입 이력은 배치 전체에서 한 번만 집계한다. 청크마다 같은 GROUP BY를
         // 반복하면 1만 방 기준으로 가입 이력 전체를 수십 번 다시 읽게 된다.
         List<Popularity> targets = jdbc.query(
+                // <b>값이 바뀐 방만</b> 쓴다 — 지금 저장된 값과 같이 읽어 비교한다. 예전에는 5분마다 공개 방 전부를 UPDATE 해
+                // (부하테스트 2026-10: 수천 행) 통계 재계산의 challenge_stats 잠금과 부딪혔다. 가입이 없던 방은 대부분 0 → 0 이다.
                 "SELECT c.id, COALESCE(j.c, 0) AS recent_joins, j.last_joined_at " +
-                        "FROM challenges c " +
+                        "FROM challenges c JOIN challenge_stats s ON s.challenge_id = c.id " +
                         "LEFT JOIN (SELECT challenge_id, COUNT(*) AS c, MAX(joined_at) AS last_joined_at " +
                         // 멤버십이 아니라 <b>가입 사건</b>을 센다 — 멤버십 한 줄로는 재입장이
                         // 잡히지 않는다(같은 이유로 인덱서도 이 표를 본다).
@@ -91,7 +93,8 @@ public class PopularityRefreshJob {
                         "           WHERE joined_at >= DATE_SUB(NOW(6), INTERVAL 24 HOUR) " +
                         "           GROUP BY challenge_id) j ON j.challenge_id = c.id " +
                         "WHERE c.mode = 'GROUP' AND c.visibility = 'PUBLIC' " +
-                        "  AND c.status IN ('UPCOMING', 'ACTIVE') AND c.deleted_at IS NULL",
+                        "  AND c.status IN ('UPCOMING', 'ACTIVE') AND c.deleted_at IS NULL " +
+                        "  AND NOT (s.recent_joins_24h <=> COALESCE(j.c, 0) AND s.last_joined_at_24h <=> j.last_joined_at)",
                 (rs, i) -> new Popularity(rs.getBytes("id"), rs.getInt("recent_joins"),
                         rs.getTimestamp("last_joined_at")));
 

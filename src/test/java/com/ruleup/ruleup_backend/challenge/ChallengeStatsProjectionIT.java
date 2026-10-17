@@ -19,10 +19,15 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.test.context.event.ApplicationEvents;
 import org.springframework.test.context.event.RecordApplicationEvents;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.WebApplicationContext;
 
 import java.math.BigDecimal;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
@@ -46,6 +51,7 @@ class ChallengeStatsProjectionIT extends ChallengeApiSupport {
     @Autowired VerificationManualService manualVerificationService;
     @Autowired ChallengeActivationService activationService;
     @Autowired ApplicationEvents applicationEvents;
+    @Autowired PlatformTransactionManager txManager;
     MockMvc mvc;
 
     @Override protected MockMvc mvc() { return mvc; }
@@ -304,6 +310,56 @@ class ChallengeStatsProjectionIT extends ChallengeApiSupport {
                     "SELECT COUNT(*) FROM challenge_stats WHERE challenge_id = ?",
                     Integer.class, bytes(challengeId));
             assertThat(rows).isEqualTo(1);
+        }
+    }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("동시 재계산 — 락을 기다린 쪽이 옛 스냅샷으로 덮어쓰지 않는다")
+    class ConcurrentRefresh {
+
+        @Test
+        @DisplayName("방 행을 다른 트랜잭션이 쥔 사이 들어온 가입도 기다렸다 센다")
+        void refreshWaitingOnLockSeesCommitsBeforeIt() throws Exception {
+            // 부하테스트(2026-10, 2배 피크)에서 5분 보정이 43건을 고쳤다. 재계산이 락을 잡기 전에 먼저
+            // 세면 그 순간 REPEATABLE READ 스냅샷이 고정되고, 락을 기다리는 동안 커밋된 가입은 못 본 채
+            // 마지막에 쓰게 된다 — 앞서 끝난 최신 재계산을 옛 값으로 덮는다.
+            UUID owner = member(uniq("race-owner")).id();
+            UUID challengeId = activeChallenge(owner);
+            insertMemberWithProgress(challengeId, 0, 0, 0);
+            projectionService.refresh(challengeId);
+            UUID joiner = member(uniq("race-joiner")).id();
+
+            CountDownLatch locked = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            CompletableFuture<Void> holder = CompletableFuture.runAsync(() ->
+                    new TransactionTemplate(txManager).executeWithoutResult(tx -> {
+                        // 다른 재계산·가입이 방 행을 쥐고, 그 안에서 가입이 하나 더 들어온다
+                        jdbcTemplate.queryForList("SELECT id FROM challenges WHERE id = ? FOR UPDATE",
+                                (Object) bytes(challengeId));
+                        jdbcTemplate.update("INSERT INTO challenge_members " +
+                                        "(id, challenge_id, user_id, role, status, success_days, fail_days, target_days) " +
+                                        "VALUES (?, ?, ?, 'MEMBER', 'ACTIVE', 0, 0, 0)",
+                                bytes(UUID.randomUUID()), bytes(challengeId), bytes(joiner));
+                        locked.countDown();
+                        try {
+                            release.await(10, TimeUnit.SECONDS);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }));
+            assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+
+            CompletableFuture<Void> refresh = CompletableFuture.runAsync(() -> projectionService.refresh(challengeId));
+            Thread.sleep(1_000);   // 재계산이 방 행 락에 걸려 기다리게 둔다
+            assertThat(refresh).isNotDone();
+            release.countDown();
+            holder.get(10, TimeUnit.SECONDS);
+            refresh.get(10, TimeUnit.SECONDS);
+
+            Integer participants = jdbcTemplate.queryForObject(
+                    "SELECT participant_count FROM challenges WHERE id = ?", Integer.class, bytes(challengeId));
+            assertThat(participants).isEqualTo(2);
         }
     }
 }

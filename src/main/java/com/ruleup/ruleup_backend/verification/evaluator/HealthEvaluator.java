@@ -53,7 +53,7 @@ public class HealthEvaluator implements MethodEvaluator {
         boolean anyReading = false;
         boolean anyRejected = false;
         List<Measured> intervals = new ArrayList<>();   // 구간이 있는 레코드
-        Set<String> seenRecords = new HashSet<>();
+        Map<String, Measured> latestByRecord = new LinkedHashMap<>();
         double cumulativeMax = 0;                        // 구간이 없는 레코드(그날 누적값)
 
         if (ctx.signals() != null) {
@@ -66,7 +66,7 @@ public class HealthEvaluator implements MethodEvaluator {
                     if (cfg.exerciseType() != null && r.exerciseType() != null
                             && !cfg.exerciseType().equalsIgnoreCase(r.exerciseType())) continue; // 운동종류 불일치 제외
 
-                    String gate = gateReason(r, cfg);
+                    String gate = gateReason(r, cfg.rejectManualRecording(), cfg.trustedOrigins());
                     if (gate != null) {
                         anyRejected = true;
                         HealthOrigin o = r.origin();
@@ -80,13 +80,15 @@ public class HealthEvaluator implements MethodEvaluator {
                         cumulativeMax = Math.max(cumulativeMax, value);   // 구간 없음 → 누적값으로 본다
                         continue;
                     }
-                    // 같은 레코드가 두 번 남아 있으면(재전송) 한 번만 센다.
-                    if (r.recordId() != null && !seenRecords.add(r.recordId())) continue;
-                    intervals.add(new Measured(from, to, value));
+                    // 같은 레코드가 여러 번 왔으면(재전송·기록 앱의 갱신) <b>마지막에 받은 것</b> 하나만 센다.
+                    // 처음 받은 값을 남기면 걸음이 늘어난 갱신이 버려져 목표에 영영 못 닿는다.
+                    if (r.recordId() != null) latestByRecord.put(r.recordId(), new Measured(from, to, value));
+                    else intervals.add(new Measured(from, to, value));
                 }
             }
         }
 
+        intervals.addAll(latestByRecord.values());
         double best = Math.max(cumulativeMax, dedupedSum(intervals));
 
         Map<String, Object> ev = new HashMap<>();
@@ -105,8 +107,8 @@ public class HealthEvaluator implements MethodEvaluator {
         return EvaluationOutcome.pending(ev, windowClose(ctx));
     }
 
-    /** 구간을 가진 측정값 1건. */
-    private record Measured(Instant from, Instant to, double value) {}
+    /** 구간을 가진 측정값 1건. 기상 판정도 같은 방식으로 겹침을 걷어낸다. */
+    record Measured(Instant from, Instant to, double value) {}
 
     /**
      * 겹치는 구간을 걷어낸 합계.
@@ -115,7 +117,7 @@ public class HealthEvaluator implements MethodEvaluator {
      * 비례해 더한다. 값이 구간에 고르게 분포한다고 보는 근사지만, 겹친 만큼을 통째로 두 번 세거나
      * 통째로 버리는 것보다 실제에 가깝다. Health Connect 는 같은 활동을 기기별로 따로 기록한다.
      */
-    private double dedupedSum(List<Measured> readings) {
+    static double dedupedSum(List<Measured> readings) {
         if (readings.isEmpty()) return 0;
         List<Measured> sorted = new ArrayList<>(readings);
         sorted.sort(Comparator.comparing(Measured::from).thenComparing(Measured::to));
@@ -134,12 +136,11 @@ public class HealthEvaluator implements MethodEvaluator {
         return sum;
     }
 
-    /** 게이트 통과 여부. 통과면 null, 막히면 사유 문자열. */
-    private String gateReason(HealthReading r, HealthConfig cfg) {
+    /** 게이트 통과 여부. 통과면 null, 막히면 사유 문자열. 기상 판정의 걸음 기록에도 같은 게이트를 쓴다. */
+    static String gateReason(HealthReading r, boolean rejectManualRecording, List<String> trusted) {
         HealthOrigin o = r.origin();
         if (o == null) return "NO_ORIGIN";                                   // §6.3 메타데이터 누락
-        if (cfg.rejectManualRecording() && "MANUAL".equalsIgnoreCase(o.recordingMethod())) return "MANUAL";
-        List<String> trusted = cfg.trustedOrigins();
+        if (rejectManualRecording && "MANUAL".equalsIgnoreCase(o.recordingMethod())) return "MANUAL";
         if (trusted != null && !trusted.isEmpty()) {
             boolean ok = o.dataOrigin() != null && trusted.contains(o.dataOrigin());
             if (!ok) return "UNTRUSTED_ORIGIN";

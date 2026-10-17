@@ -86,7 +86,12 @@ public class ChallengeDraftService {
 
     // ===== 경로 B: 설명 입력(LLM 5-Step) =====
 
-    @Transactional
+    /**
+     * <b>트랜잭션으로 감싸지 않는다.</b> LLM 호출이 수 초(재시도·폴백까지 최악 수십 초) 걸리는데, 트랜잭션이 열리면
+     * 시작 시점에 DB 커넥션을 잡아 응답이 올 때까지 쥐고 있다 — 태스크 풀 15개 중 동시 AI 초안 수만큼이 묶여 같은
+     * 태스크의 다른 API 가 커넥션을 기다렸다(부하테스트 2026-10). DB 작업은 끝의 등급 조회·초안 저장 둘뿐이고 각자
+     * 리포지토리 트랜잭션으로 충분하다(초안 저장은 한 행이라 부분 실패가 없다).
+     */
     public DraftResponse draft(UUID userId, String description) {
         validateDescription(description);
 

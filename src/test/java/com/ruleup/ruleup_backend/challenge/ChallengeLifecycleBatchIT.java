@@ -86,6 +86,20 @@ class ChallengeLifecycleBatchIT extends ChallengeApiSupport {
         }
 
         @Test
+        @DisplayName("한 번 실행에 200건을 넘는 시작 도래 방도 모두 ACTIVE — 자정에 몰려도 1분에 200건으로 밀리지 않는다")
+        void activatesBeyondOneChunkInOneRun() throws Exception {
+            Member owner = member(uniq("lc-bulk"));
+            java.util.List<UUID> ids = new java.util.ArrayList<>();
+            for (int i = 0; i < 450; i++) ids.add(insertChallenge(owner.id(), "EXERCISE", "UPCOMING", "SOLO"));
+            jdbcTemplate.update("UPDATE challenges SET start_date = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')) " +
+                    "WHERE owner_id = ? AND status = 'UPCOMING'", bytes(owner.id()));
+
+            activationService.activateDueChallenges();
+
+            assertThat(ids).allSatisfy(id -> assertThat(status(id)).isEqualTo("ACTIVE"));
+        }
+
+        @Test
         @DisplayName("종료일 경과 ACTIVE → COMPLETED")
         void completeEnded() throws Exception {
             Member owner = member(uniq("lc-done"));

@@ -54,7 +54,46 @@ public class ExploreIndexJobs {
     @EventListener(ApplicationReadyEvent.class)
     public void warmUpOnStartup() {
         if (!RuntimeRole.valueOf(runtimeRole.toUpperCase()).runsBackgroundWork()) return;
+        if (!redisReachable()) return;   // 끝내 못 붙으면 5분 스윕이 이어서 시도한다
         ensureWarmed("기동");
+    }
+
+    /**
+     * 기동 직후 첫 Redis 연결은 여러 번 시도한다.
+     *
+     * <p>배포·스케일아웃 때마다 워밍업이 「Unable to connect to Redis」로 실패해 회로가 열리고, 5분 스윕이
+     * 다시 데울 때까지 탐색이 SQL 폴백으로 돌았다(stg·prod 모두, 부하테스트 2026-10). 네트워크는 정상이었다 —
+     * 컨테이너에서 연결+PING 이 7ms. 0.5 vCPU 에서 막 뜬 JVM 이 기동 작업과 겹쳐 첫 핸드셰이크를 제때 못 끝낸
+     * 것이라, 시간을 두고 다시 붙으면 된다. 스케일아웃은 부하가 몰릴 때 일어나므로 이 5분이 가장 비싼 5분이다.
+     */
+    boolean redisReachable() {
+        RuntimeException last = null;
+        for (int attempt = 1; attempt <= STARTUP_REDIS_ATTEMPTS; attempt++) {
+            try {
+                store.ping();
+                if (attempt > 1) log.info("탐색 Redis 연결 — {}번째 시도에 성공", attempt);
+                return true;
+            } catch (RuntimeException e) {
+                last = e;
+                log.info("탐색 Redis 연결 대기 {}/{} — {}", attempt, STARTUP_REDIS_ATTEMPTS, rootCause(e));
+                sleepQuietly(STARTUP_REDIS_BACKOFF.multipliedBy(attempt));
+            }
+        }
+        circuit.openManually("워밍업 실패(기동, 연결 " + STARTUP_REDIS_ATTEMPTS + "회): " + rootCause(last));
+        return false;
+    }
+
+    private static final int STARTUP_REDIS_ATTEMPTS = 5;
+    private static final java.time.Duration STARTUP_REDIS_BACKOFF = java.time.Duration.ofSeconds(2);
+
+    static String rootCause(Throwable e) {
+        Throwable t = e;
+        while (t.getCause() != null && t.getCause() != t) t = t.getCause();
+        return t == e ? e.toString() : e.getClass().getSimpleName() + " ← " + t;
+    }
+
+    private static void sleepQuietly(java.time.Duration d) {
+        try { Thread.sleep(d.toMillis()); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
     }
 
     /**
@@ -106,24 +145,27 @@ public class ExploreIndexJobs {
             // 여러 인스턴스가 동시에 기동하거나 동시에 승격을 감지하면 전수 재구성이 겹친다.
             String token = store.tryLockRebuild(REBUILD_LOCK_TTL);
             if (token == null) return false;
+            Instant startedAt = Instant.now();
             try {
-                // 작업 표를 그대로 옮기지 않는다 — 그 값이 틀어져 있으면 틀린 채로 준비 완료가 된다.
-                // 통계를 <b>먼저</b> 맞춘다. 실패하면 인덱스를 만들지도 않는다 — 만들어 놓고
-                // 나중에 준비 상태를 내리면 그 사이 틀린 값이 정상 응답으로 나간다.
-                var stats = statsReconciliation.run();
-                if (stats.failed() > 0) {
-                    log.error("워밍업 보류 — 통계 재계산 실패 {}건. 다음 회차가 다시 시도한다", stats.failed());
-                    return false;
-                }
-                indexer.reindexAll();   // 끝나면 준비 완료까지 함께 올린다
-                store.countRebuild();
-                log.info("탐색 인덱스 워밍업 완료 reason={}", reason);
-                return true;            // 방금 원천으로 다시 만들었다 — 유령이 있을 수 없다
+                return underRebuildLease(token, () -> {
+                    // 통계는 <b>다시 세지 않고</b> 지금 값으로 바로 만든다. 통계는 MySQL 에 있어 Redis 를 잃어도
+                    // 그대로이고, 틀어질 수 있는 것은 최근에 유실된 이벤트뿐이다 — 평소에도 5분 보정이 따라잡는 범위다.
+                    // 다 세고 나서 만들면 그동안 탐색이 503 이다: 부하테스트 2026-10 Redis 재부팅에서 진행 중인 방
+                    // 3.5만 개를 세느라 25분 넘게 503 이었다(sync 가 멤버 행을 계속 고쳐, 시간 창으로 좁혀도 거의 줄지 않는다).
+                    // 대신 다음 보정이 유실 가능 구간을 다시 세도록 기준 시각을 그만큼 앞에 둔다. 전체 재계산은 03:30 대조가 맡는다.
+                    indexer.reindexAll();   // 끝나면 준비 완료까지 함께 올린다
+                    store.countRebuild();
+                    store.markCalculatedAt(startedAt);
+                    store.markSweptAt(startedAt.minus(REBUILD_STATS_LOOKBACK));
+                    log.info("탐색 인덱스 워밍업 완료 reason={} took={}s", reason,
+                            java.time.Duration.between(startedAt, Instant.now()).toSeconds());
+                    return true;            // 방금 원천으로 다시 만들었다 — 유령이 있을 수 없다
+                });
             } finally {
                 store.unlockRebuild(token);
             }
         } catch (RuntimeException e) {
-            circuit.openManually("워밍업 실패(" + reason + "): " + e);
+            circuit.openManually("워밍업 실패(" + reason + "): " + rootCause(e));
             return false;
         }
     }
@@ -252,17 +294,7 @@ public class ExploreIndexJobs {
             return;
         }
         try {
-            // <b>먼저 원천에서 통계를 다시 계산한다.</b> 이미 계산된 값을 읽어 옮기기만 하면,
-            // 그 값이 틀어졌을 때 대조가 틀린 값을 충실히 복사한다 — 그건 복구가 아니다.
-            // 스펙이 이 배치에 요구하는 것은 「원천으로 재계산하고 비교·보정」이다(백엔드 9).
-            var stats = statsReconciliation.run();
-            if (stats.failed() > 0) {
-                // 틀린 값으로 인덱스를 다시 만들면 그 값이 「최신」 표를 달고 굳는다.
-                log.error("대조 보류 — 통계 재계산 실패 {}건. 다음 회차가 다시 시도한다", stats.failed());
-                return;
-            }
-            indexer.reindexAll();
-            store.countRebuild();
+            underRebuildLease(token, () -> { reconcileLocked(); return null; });
         } catch (RuntimeException e) {
             log.error("탐색 인덱스 대조 실패 — 다음 회차가 다시 시도한다: {}", e.toString());
         } finally {
@@ -270,6 +302,59 @@ public class ExploreIndexJobs {
         }
     }
 
-    /** 전수 재구성 잠금의 수명. 한 회차가 이보다 오래 걸리면 다음 회차가 겹칠 수 있다. */
-    private static final java.time.Duration REBUILD_LOCK_TTL = java.time.Duration.ofMinutes(30);
+    private void reconcileLocked() {
+        // <b>먼저 원천에서 통계를 다시 계산한다.</b> 이미 계산된 값을 읽어 옮기기만 하면,
+        // 그 값이 틀어졌을 때 대조가 틀린 값을 충실히 복사한다 — 그건 복구가 아니다.
+        // 스펙이 이 배치에 요구하는 것은 「원천으로 재계산하고 비교·보정」이다(백엔드 9).
+        var stats = statsReconciliation.run();
+        if (stats.failed() > 0) {
+            // 틀린 값으로 인덱스를 다시 만들면 그 값이 「최신」 표를 달고 굳는다.
+            log.error("대조 보류 — 통계 재계산 실패 {}건. 다음 회차가 다시 시도한다", stats.failed());
+            return;
+        }
+        indexer.reindexAll();
+        store.countRebuild();
+    }
+
+    /**
+     * 전수 재구성 잠금은 <b>짧게 잡고 도는 동안 늘린다</b>.
+     *
+     * <p>30분짜리를 한 번에 잡으면, 잡은 태스크가 도중에 죽었을 때(배포·스케일인·DB 장애) 그 30분 동안
+     * 아무도 다시 만들지 못한다 — 부하테스트 2026-10 에서 Redis 재부팅 뒤 새 태스크가 잠금을 잡고 RDS 장애조치에
+     * 걸려 사라지자, 탐색·인기 503 이 25분 넘게 이어졌다. 살아 있는 동안만 잠금이 유지되게 한다.
+     */
+    private static final java.time.Duration REBUILD_LOCK_TTL = java.time.Duration.ofMinutes(2);
+    private static final java.time.Duration REBUILD_LOCK_RENEW = java.time.Duration.ofSeconds(30);
+    /**
+     * 워밍업 뒤 첫 보정이 통계를 다시 셀 범위. Redis 와 함께 마지막 보정 시각도 사라지므로, 그 직전 보정(최대 5분 전)과
+     * 재구성 사이에 유실됐을 이벤트를 넉넉히 덮는다. 그보다 오래된 어긋남은 03:30 대조가 잡는다.
+     */
+    private static final java.time.Duration REBUILD_STATS_LOOKBACK = java.time.Duration.ofMinutes(30);
+
+    private final java.util.concurrent.ScheduledExecutorService leaseRenewer =
+            java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "explore-rebuild-lease");
+                t.setDaemon(true);
+                return t;
+            });
+
+    private <T> T underRebuildLease(String token, java.util.function.Supplier<T> work) {
+        var renewal = leaseRenewer.scheduleAtFixedRate(() -> {
+            try {
+                if (!store.extendRebuild(token, REBUILD_LOCK_TTL)) log.warn("탐색 재구성 잠금을 잃었다 — 다른 인스턴스와 겹칠 수 있다");
+            } catch (RuntimeException e) {
+                log.warn("탐색 재구성 잠금 연장 실패: {}", e.toString());
+            }
+        }, REBUILD_LOCK_RENEW.toMillis(), REBUILD_LOCK_RENEW.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+        try {
+            return work.get();
+        } finally {
+            renewal.cancel(false);
+        }
+    }
+
+    @jakarta.annotation.PreDestroy
+    void stopLeaseRenewer() {
+        leaseRenewer.shutdownNow();
+    }
 }

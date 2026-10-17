@@ -3,6 +3,7 @@ package com.ruleup.ruleup_backend.oauth;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.user.domain.OAuthProvider;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -15,10 +16,18 @@ import java.util.stream.Collectors;
 public class OAuthClientResolver {
 
     private final Map<OAuthProvider, OAuthClient> clients;
+    private final LoadTestOAuthGate loadTest;   // stg 부하테스트 동안만 있다(prod 에는 빈이 없다)
 
-    public OAuthClientResolver(List<OAuthClient> clientList) {
+    public OAuthClientResolver(List<OAuthClient> clientList, ObjectProvider<LoadTestOAuthGate> loadTest) {
         this.clients = clientList.stream()
                 .collect(Collectors.toMap(OAuthClient::provider, Function.identity()));
+        this.loadTest = loadTest.getIfAvailable();
+    }
+
+    /** 부하테스트 우회가 켜져 있고 그 요청이 조건을 맞추면 IdP 호출 없는 클라이언트, 아니면 실제 클라이언트. */
+    public OAuthClient resolve(OAuthProvider provider, String code, String codeVerifier) {
+        if (loadTest != null && loadTest.admits(code, codeVerifier)) return loadTest.client(provider);
+        return resolve(provider);
     }
 
     public OAuthClient resolve(OAuthProvider provider) {

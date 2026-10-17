@@ -23,8 +23,8 @@ class RecommendationRateLimiterRedisIT {
         connection.afterPropertiesSet();connection.start();
         try {
             var template=new StringRedisTemplate(connection);
-            var first=new RecommendationRateLimiter(template,new SimpleMeterRegistry());
-            var second=new RecommendationRateLimiter(template,new SimpleMeterRegistry());
+            var first=new RecommendationRateLimiter(template,new SimpleMeterRegistry(),10);
+            var second=new RecommendationRateLimiter(template,new SimpleMeterRegistry(),10);
             String user=UUID.randomUUID().toString(),key="rate:challenge:draft:"+user;
             first.check(user);
             assertThat(template.getExpire(key,TimeUnit.SECONDS)).isBetween(59L,60L);

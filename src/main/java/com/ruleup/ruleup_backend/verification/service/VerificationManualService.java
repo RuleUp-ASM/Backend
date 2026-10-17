@@ -131,7 +131,8 @@ public class VerificationManualService {
 
         // 수동 체크 성공도 판정 결과다. 확정 배치는 미확정 건만 집어가고 즉시 확정된 건은
         // finalizeOne 초입의 isTerminal() 에서 걸러지므로, 여기서 고지하지 않으면 성공한 날은
-        // 알림이 영영 없다. verification_id 가 멱등 키라 취소 후 다시 체크해도 한 번만 적재된다.
+        // 알림이 영영 없다. (verification_id, variant) 가 멱등 키라 취소 후 다시 체크해도 한 번만 적재되고,
+        // 취소한 채 하루가 지나면 이틀 뒤 「실패로 확정됐어요」는 따로 쌓인다.
         // 수동 체크는 당일만 되므로 늘 「오늘」이다 — 오늘 해야 할 게 이것 하나였다면 「모두 완료」가 대신한다.
         if (!completionNotice.afterSuccess(userId, daily.getTargetDate()).replacesIndividual()) {
             notificationPublisher.publish(NotificationEvent.forChallenge(userId,

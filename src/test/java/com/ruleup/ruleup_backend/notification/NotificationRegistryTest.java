@@ -306,8 +306,9 @@ class NotificationRegistryTest {
         @Test
         @DisplayName("타입별 식별자 구성이 스펙 표와 일치한다")
         void perTypeIdentifiers() {
+            // 변형이 키에 들어간다 — 당일 취소된 수동 체크의 성공 알림이 이틀 뒤 실패 확정을 막지 않게.
             assertThat(NotificationType.VERIFICATION_RESULT.dedupKey(user, params()))
-                    .endsWith(":v-12");
+                    .endsWith(":v-12:CONFIRMED_FAILURE");
             assertThat(NotificationType.CHALLENGE_LIFECYCLE.dedupKey(user, params()))
                     .endsWith(":c-301:STARTED");
             assertThat(NotificationType.WATCHER_INVITATION_EXPIRED.dedupKey(user, params()))
@@ -430,6 +431,7 @@ class NotificationRegistryTest {
         p.put(NotificationParams.CAMPAIGN_ID, "cp-1");
         p.put(NotificationParams.DATE, "2026-09-08");
         p.put(NotificationParams.SLOT, "MORNING");
+        p.put(NotificationParams.VARIANT, "CONFIRMED_FAILURE");
         return p;
     }
 }

@@ -27,6 +27,7 @@ public class SqsNotificationQueue implements NotificationQueue {
 
     /** SQS 메시지 본문 상한 256KB. 100건 ≈ 40KB 라 여유가 있지만 넘으면 쪼갠다. */
     private static final int MAX_BODY_BYTES = 256 * 1024;
+    private static final java.time.Duration SEND_TIMEOUT = java.time.Duration.ofSeconds(3);
 
     /**
      * 큐 본문 전용 매퍼 — 웹 계층의 {@code ObjectMapper} 를 빌려 쓰지 않는다.
@@ -60,8 +61,11 @@ public class SqsNotificationQueue implements NotificationQueue {
             enqueue(messages.subList(half, messages.size()));
             return;
         }
+        // 요청 스레드에서 커밋 직후 동기로 보낸다 — SDK 기본은 호출 시간 제한이 없어, SQS 가 느려지면 요청이 그만큼 붙잡힌다.
+        // 클라이언트 전체에 걸면 소비자의 20초 롱폴링이 끊기므로 보내기에만 건다(3초, 재시도 포함).
         sqs.sendMessage(SendMessageRequest.builder()
-                .queueUrl(queueUrl).messageBody(body).build());
+                .queueUrl(queueUrl).messageBody(body)
+                .overrideConfiguration(o -> o.apiCallTimeout(SEND_TIMEOUT)).build());
     }
 
     private String serialize(List<NotificationMessage> messages) {

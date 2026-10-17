@@ -69,7 +69,7 @@ public class RoomService {
         RoomDtos.RoomResponse.Summary summary = new RoomDtos.RoomResponse.Summary(
                 title, challenge.getWeeklyCount(), roomRate(active),
                 remainingDays(challenge, now.toLocalDate()), active.size(), challenge.getMaxParticipants());
-        List<RoomDtos.RoomResponse.TopRank> top = rankingService.rank(challenge, userId).stream()
+        List<RoomDtos.RoomResponse.TopRank> top = rankingService.rank(challenge, userId, active).stream()
                 .filter(RankingService.Ranked::ranked).limit(3)
                 .map(r -> new RoomDtos.RoomResponse.TopRank(r.rank(), r.userId().toString(), r.nickname(),
                         r.profileImageUrl(), r.successRate(), r.blocked())).toList();

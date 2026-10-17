@@ -6,7 +6,7 @@
   ruleup-prod-p0-alerts (us-east-1)    → 경보 AlarmActions 용(구독 없음 — 서울과 같은 구조)
   ruleup-prod-p0-slack (us-east-1)     → EventBridge(us-east-1) 가 P0 상태 변경을 멘션 알림으로 바꿔 보낸다 → ruleup-p0-urgent
 서울 쪽 구성(slack_channels.py·p0_mention.py)은 그대로 두고 토픽 목록에 us-east-1 것을 더한다.
-SNS 는 전달만 한다 — ACK·에스컬레이션은 PagerDuty 개통 후(원장 sns.pagerduty)에 생긴다.
+SNS 는 전달만 한다 — ACK·에스컬레이션(1차 → 10분 미ACK → 팀원)은 pagerduty.py 가 만드는 PagerDuty 서비스가 한다.
 """
 import json
 import os

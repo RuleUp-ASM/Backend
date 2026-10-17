@@ -121,15 +121,16 @@ public class AuthService {
         requireValidDevice(req.deviceId(), req.deviceInfo());
         requireValidOAuthRequest(provider, req);
 
-        OAuthClient client = resolver.resolve(provider);
+        OAuthClient client = resolver.resolve(provider, req.code(), req.codeVerifier());
 
         // 1) 외부 IdP 호출 (트랜잭션 밖)
         OAuthUserInfo info = client.fetchUserInfo(req.code(), req.codeVerifier(), req.redirectUri());
 
         if (sanctionService.isBanned(provider.name(), info.subject(), req.installationId()))
             throw new BusinessException(ErrorCode.ACCOUNT_BANNED);
-        User existing = userRepository.findByOauthProviderAndOauthSubject(provider, info.subject()).orElse(null);
-        if (existing != null) return loginSessionService.loginExisting(existing.getId(), provider, req, info);
+        // 기존 회원이면 id 만 알면 된다 — 세션 트랜잭션이 행을 잠그며 다시 읽는다(예전엔 여기서 엔티티 전체를 한 번 더 읽었다).
+        UUID existingId = userRepository.findIdByOauth(provider, info.subject()).orElse(null);
+        if (existingId != null) return loginSessionService.loginExisting(existingId, provider, req, info);
         return issueSignupToken(provider, req, info);
     }
 
@@ -320,7 +321,7 @@ public class AuthService {
         user.attachInstallation(req.installationId(), req.deviceId());
         applyCountry(user, req.deviceInfo());   // 지오 헤더 → 기기 지역 → Accept-Language → 기기 타임존 → 기본값
         userRepository.saveAndFlush(user);
-        activity.touch(user.getId());
+        activity.touchNow(user.getId());
 
         UserScoreSummary summary = scoreService.initialize(user.getId());   // 브론즈 10점
         // 친구 초대 기록(선택). 설치 경로로 받은 친구 초대 링크는 코드를 따로 보내지 않아도 연동한다.

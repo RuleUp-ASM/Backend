@@ -4,7 +4,10 @@
   "account_id": "961178969292",
   "api_region": "ap-northeast-2",
   "monitor_region": "us-east-1",
-  "probe_origins": {"oregon": "us-west-2", "virginia": "us-east-1"},
+  "probe_origins": {
+    "oregon": "us-west-2",
+    "virginia": "us-east-1"
+  },
   "public_domain": "prod.ruleup.co.kr",
   "public_health_path": "/health/public",
   "public_health_token": "ruleup-ok",
@@ -16,19 +19,44 @@
   "load_balancer": "app/ruleup-prod-alb/30526d51ec29a005",
   "target_group": "targetgroup/ruleup-prod-tg/d3db371c903b8892",
   "rds_instance": "ruleup-prod-mysql-v2",
-  "redis_nodes": ["ruleup-prod-redis-001", "ruleup-prod-redis-002"],
-  "queues": ["ruleup-prod-moderation", "ruleup-prod-notifications"],
-  "dlqs": ["ruleup-prod-moderation-dlq", "ruleup-prod-notifications-dlq"],
+  "redis_nodes": [
+    "ruleup-prod-redis-001",
+    "ruleup-prod-redis-002"
+  ],
+  "queues": [
+    "ruleup-prod-moderation",
+    "ruleup-prod-notifications"
+  ],
+  "dlqs": [
+    "ruleup-prod-moderation-dlq",
+    "ruleup-prod-notifications-dlq"
+  ],
   "sns": {
     "alerts": "ruleup-prod-alerts",
     "p0": "ruleup-prod-p0-alerts",
-    "pagerduty": null
+    "pagerduty": "ruleup-prod-pagerduty"
   },
   "slack_p0_mention_member": "U0AVBAWH05Q",
   "route53_health_check_id": "26710503-030a-4b93-8df5-e7339b675632",
-  "healthchecks": {"obs03_ping_url": null, "obs04_ping_url": null},
-  "pagerduty": {"service_id": null, "api_key_secret": null},
-  "dashboards": {"ops": "ruleup-prod-ops", "observe": "ruleup-prod-observe", "business": "ruleup-prod-business"},
+  "healthchecks": {
+    "obs03_ping_url": null,
+    "obs04_ping_url": null
+  },
+  "pagerduty": {
+    "_note": "pagerduty.py setup 이 채운다. 1차 담당 → escalation_delay_minutes 분 미ACK → 팀원 → repeat_loops 회 반복. API 키·연동 키·이메일은 넣지 않는다",
+    "service_id": "PQ9NRPT",
+    "escalation_policy_id": "POF6OPH",
+    "primary_user_id": "PYEDO11",
+    "secondary_user_id": "P7VNRZB",
+    "escalation_delay_minutes": 10,
+    "repeat_loops": 2,
+    "ack_timeout_minutes": 15
+  },
+  "dashboards": {
+    "ops": "ruleup-prod-ops",
+    "observe": "ruleup-prod-observe",
+    "business": "ruleup-prod-business"
+  },
   "runbook_url": "https://app.notion.com/p/3f5ad4145fb6811da317e294cf339757",
   "catalog_url": "https://app.notion.com/p/3f5ad4145fb681bbabccefd603336193",
   "llm_daily_budget_usd": null,

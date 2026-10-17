@@ -58,7 +58,7 @@ public abstract class VerificationApiSupport extends ChallengeApiSupport {
     // ===== 챌린지 픽스처 =====
 
     /**
-     * 자동 인증 챌린지 1건. verificationMethod 로 평가기가 갈린다(GPS_PRESENCE / GPS_AVOID / SCREEN_TIME_MIN ...).
+     * 자동 인증 챌린지 1건. verificationMethod 로 평가기가 갈린다(GPS_PRESENCE / SCREEN_TIME_MAX / SCREEN_TIME_MIN ...).
      *
      * @param paramsJson 챌린지 params — 평가 기준값(dwell 분·목표 시간 등)
      * @return challengeId

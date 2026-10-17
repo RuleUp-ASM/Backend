@@ -39,7 +39,8 @@ def row(*ws, h=6):
 
 hc = REG.get('route53_health_check_id')
 text('## OBS-1 · native 백스톱·공개 점검')
-row(('공개 점검 실패(1=실패)', [['RuleUp/Edge', 'ProbeFailure', 'Env', ENV, 'Probe', 'public', 'Origin', o, {'stat': 'Maximum', 'label': o}] for o in ORIGINS], None),
+row(('공개 점검 — 분당 실패 횟수(0~2, 2=EDGE-01 leaf)', [['RuleUp/Edge', 'ProbeAttemptFailures', 'Env', ENV, 'Probe', 'public', 'Origin', o, {'stat': 'Sum', 'label': o}]
+                                                    for o in ORIGINS], {'period': 60}),
     ('Route 53 헬스체크(1=정상)' + ('' if hc else ' — 원장 route53_health_check_id 미기록'),
      [['AWS/Route53', 'HealthCheckStatus', 'HealthCheckId', hc, {'stat': 'Minimum'}]] if hc else [], None),
     ('인증서 잔여 일수', [['RuleUp/Edge', 'CertificateDaysLeft', 'Env', ENV, 'Origin', o, {'stat': 'Minimum', 'label': o}] for o in ORIGINS],

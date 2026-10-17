@@ -93,26 +93,57 @@ public class VerificationSignalReader {
     }
 
     /**
-     * 여러 귀속일을 한 번에. sync 는 오늘과 유예 중인 어제를 함께 평가한다.
+     * sync 한 번 동안 쓰는 읽기 창. 귀속일을 <b>판정이 실제로 필요할 때</b> 처음 읽고, 이웃한 귀속일(어제·오늘)이 겹쳐
+     * 읽는 날은 한 번만 읽어 나눠 쓴다 — sync 한 번이 18문장에서 12문장이 됐다(부하테스트 2026-10 트레이스).
+     *
+     * <p>미리 다 읽지 않는 이유: 어제가 이미 확정(또는 대상 아님)인 멤버뿐이면 그저께 하루치를 읽을 일이 없다.
+     * sync 는 DB 를 가장 많이 쓰는 API 다(2차 P0 재측정 스레드 덤프: 일하던 요청 스레드의 72%).
      *
      * <p>전량을 못 읽은 날은 <b>예외 대신 표시</b>로 돌려준다 — sync 요청 하나를 통째로 실패시키면
      * 그 유저의 다른 날짜·다른 챌린지 판정까지 함께 멈춘다. 호출부가 그 날만 건너뛴다.
+     * 호출부 트랜잭션 안에서 쓴다.
      */
-    @Transactional(readOnly = true)
-    public Map<LocalDate, DaySignalSet> forDays(UUID userId, List<LocalDate> targetDates) {
-        Map<LocalDate, DaySignalSet> byDate = new HashMap<>();
-        for (LocalDate date : targetDates) byDate.put(date, read(userId, date));
-        return byDate;
+    public Window window(UUID userId) {
+        return new Window(userId);
+    }
+
+    public final class Window {
+        private final UUID userId;
+        private final Map<String, DaySignalSet> loaded = new HashMap<>();
+        private final Map<LocalDate, DaySignalSet> byDate = new HashMap<>();
+
+        private Window(UUID userId) {
+            this.userId = userId;
+        }
+
+        public DaySignalSet day(LocalDate targetDate) {
+            DaySignalSet set = byDate.get(targetDate);
+            if (set == null) {
+                set = read(userId, targetDate, loaded);
+                byDate.put(targetDate, set);
+            }
+            return set;
+        }
     }
 
     private DaySignalSet read(UUID userId, LocalDate targetDate) {
+        return read(userId, targetDate, new HashMap<>());
+    }
+
+    private DaySignalSet read(UUID userId, LocalDate targetDate, Map<String, DaySignalSet> loaded) {
         List<SyncSignal> out = new ArrayList<>();
         boolean complete = true;
         for (SignalDomain domain : SignalDomain.values()) {
             // 항목이 날짜 경계를 걸치므로 앞뒤 하루를 함께 읽는다. 하루씩 따로 질의해
             // 매 질의가 파티션 하나로 좁혀진다.
             for (LocalDate date : List.of(targetDate.minusDays(1), targetDate, targetDate.plusDays(1))) {
-                complete &= readDay(userId, domain, date, out);
+                DaySignalSet day = loaded.computeIfAbsent(domain.name() + '@' + date, k -> {
+                    List<SyncSignal> rows = new ArrayList<>();
+                    boolean whole = readDay(userId, domain, date, rows);
+                    return whole ? DaySignalSet.complete(rows) : DaySignalSet.truncated(rows);
+                });
+                out.addAll(day.signals());
+                complete &= day.complete();
             }
         }
         return complete ? DaySignalSet.complete(out) : DaySignalSet.truncated(out);

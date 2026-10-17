@@ -86,7 +86,10 @@ public class AutomaticKickService {
                 "kick_count=VALUES(kick_count),available_at=VALUES(available_at)", bytes(challengeId), bytes(userId), count + 1, DbTime.utc(availableAt));
 
         if (member != null && member.isActive() && challenge != null) {
-            if (challenge.isOwner(userId)) challenge.convertToBotOwner(now);
+            // 자진 탈퇴와 같은 규칙 — 마지막 멤버가 빠지면 봇방장으로 넘기지 않고 방을 닫는다.
+            if (members.countByChallengeIdAndStatus(challengeId,
+                    com.ruleup.ruleup_backend.challenge.domain.MemberStatus.ACTIVE) <= 1) challenge.softDelete();
+            else if (challenge.isOwner(userId)) challenge.convertToBotOwner(now);
             if (permanent) member.kickPermanently(reason.name(), now);
             else member.kick(reason.name(), now, availableAt);
             challenge.bumpVersion();

@@ -24,6 +24,9 @@ public interface ChallengeRepository extends JpaRepository<Challenge, UUID> {
     /** 삭제되지 않은 챌린지 1건 */
     Optional<Challenge> findByIdAndDeletedAtIsNull(UUID id);
 
+    /** 삭제되지 않은 챌린지 여러 건 — sync 가 사용자 방들을 한 번에 읽는다. */
+    List<Challenge> findAllByIdInAndDeletedAtIsNull(java.util.Collection<UUID> ids);
+
     /**
      * 삭제되지 않은 챌린지 1건을 비관적 쓰기 잠금으로 로드(가입 정원 경합·삭제 0명 판정 직렬화, §5·§8).
      * 잠금 하에서 참여자 수를 세고 삽입/삭제해 "마지막 1자리 동시 가입"·"0명 판정 vs 신규 가입"을 차단한다.

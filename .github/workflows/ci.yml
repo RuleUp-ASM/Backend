@@ -35,6 +35,8 @@ jobs:
         run: python3 -m unittest discover -s infra/monitoring/lambdas/tests -v
       - name: Alarm catalog
         run: python3 -c "import sys,types; sys.modules['boto3']=types.ModuleType('boto3'); sys.path.insert(0,'infra/monitoring/alerting'); import unittest; r=unittest.main(module='tests_catalog', argv=['x','-v'], exit=False); sys.exit(not r.result.wasSuccessful())"
+      - name: On-call (PagerDuty)
+        run: python3 -c "import sys,types; sys.modules['boto3']=types.ModuleType('boto3'); sys.path.insert(0,'infra/monitoring/alerting'); import unittest; r=unittest.main(module='tests_pagerduty', argv=['x','-v'], exit=False); sys.exit(not r.result.wasSuccessful())"
       - name: Deployment preflight
         run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
 

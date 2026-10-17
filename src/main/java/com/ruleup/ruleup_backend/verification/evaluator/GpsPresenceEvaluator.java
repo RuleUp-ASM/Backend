@@ -11,9 +11,9 @@ import java.util.*;
 
 /**
  * GPS PRESENCE 평가기(테크스펙 v2 §5, §7.2).
- *  - VISIT(도달형): 지오펜스 체류 ≥ dwellMinutes. DWELL 트랜지션(OS가 loiteringDelay 체류 확정)→즉시 SUCCESS.
+ *  - 방문(도달형): 지오펜스 체류 ≥ dwellMinutes. DWELL 트랜지션(OS가 loiteringDelay 체류 확정)→즉시 SUCCESS.
  *    DWELL 없으면 ENTER/EXIT 페어 누적 ≥ 목표. fallback LOCATION: 멤버 앵커(OR) 반경 내 측위 시간폭 근사(§7.2, 부록 A).
- *  - AVOID(제약형, v2): 창/하루 내 ENTER가 하나라도 있으면 즉시 FAILED(ENTERED_AVOID_ZONE). 없으면 마감 배치가 SUCCESS.
+ *  - 장소 피하기(AVOID)는 2026-10-15 유형째 제거했다 — 방문형만 남는다.
  *
  *  앵커는 PER_MEMBER(challenge_members.anchors). 트랜지션은 geofenceId=challengeMemberId라
  *  좌표 없이도 처리되고, 좌표는 LOCATION fallback 반경 판정에서만 쓴다(멤버 앵커 OR, 없으면 config 레거시 단일앵커).
@@ -45,10 +45,7 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
         List<GeofenceTransition> trans = collectTransitions(ctx);
         trans.sort(Comparator.comparing(t -> nz(safe(t.at()))));
 
-        // ===== AVOID(제약형): 유효한 진입만 위반. 허용 시간 안에 나왔으면 "스침"이다 =====
-        if (cfg.isAvoid()) return evaluateAvoid(ctx, cfg, trans, windowClose);
-
-        // ===== VISIT(도달형): dwell 누적 =====
+        // ===== 도달형: dwell 누적 =====
         int goalMin = (cfg.dwellMinutes() != null) ? cfg.dwellMinutes() : 0;
         long dwellSec = 0;
         Instant openEnter = null;
@@ -106,66 +103,9 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
     }
 
     /**
-     * AVOID(장소 피하기) 판정 — 진입했다고 바로 위반이 아니다.
-     *
-     * <p>정책은 "허용 시간 안에 이탈한 것이 확인되면 스침으로 처리"다. 금지 장소 앞을 지나가기만 해도
-     * 지오펜스는 ENTER 를 쏘기 때문에, 그대로 위반 처리하면 편의점 앞을 지난 사람이 실패한다.
-     *
-     * <ul>
-     *   <li>ENTER→EXIT 쌍의 체류가 허용 시간 이하 → 스침(위반 아님)</li>
-     *   <li>체류가 허용 시간 초과 → 위반</li>
-     *   <li>아직 EXIT 이 안 왔고 허용 시간도 안 지났으면 판단 보류 — 이탈 신호가 늦게 올 수 있다</li>
-     *   <li>OS 가 체류를 확정한 DWELL 은 유예 없이 위반 — 이미 "머물렀다"는 판정이다</li>
-     * </ul>
-     * 허용 시간은 서버 설정({@code loiteringDelayMin})이라 실기기 테스트로 조절할 수 있다.
-     */
-    private EvaluationOutcome evaluateAvoid(DayContext ctx, GpsConfig cfg,
-                                            List<GeofenceTransition> trans, Instant windowClose) {
-        long graceSec = 60L * ((cfg.loiteringDelayMin() != null) ? cfg.loiteringDelayMin() : 0);
-        boolean violated = false;
-        Instant openEnter = null;
-        long longestStaySec = 0;
-
-        for (GeofenceTransition t : trans) {
-            Instant at = safe(t.at());
-            if (at == null) continue;
-            switch (nzStr(t.transition())) {
-                case "DWELL" -> violated = true;
-                case "ENTER" -> { if (openEnter == null) openEnter = at; }
-                case "EXIT" -> {
-                    if (openEnter != null) {
-                        long staySec = Math.max(at.getEpochSecond() - openEnter.getEpochSecond(), 0);
-                        longestStaySec = Math.max(longestStaySec, staySec);
-                        if (staySec > graceSec) violated = true;
-                        openEnter = null;
-                    }
-                }
-                default -> { }
-            }
-        }
-        // 아직 안 나온 진입: 허용 시간을 이미 넘겼으면 이탈 신호를 기다릴 것 없이 위반이다.
-        if (!violated && openEnter != null) {
-            long stayedSec = Math.max(ctx.now().getEpochSecond() - openEnter.getEpochSecond(), 0);
-            longestStaySec = Math.max(longestStaySec, stayedSec);
-            if (stayedSec > graceSec) violated = true;
-        }
-
-        Map<String, Object> ev = new HashMap<>();
-        ev.put("avoid", true);
-        ev.put("entered", violated);
-        ev.put("graceMinutes", graceSec / 60);
-        ev.put("dwellSeconds", longestStaySec);          // 가장 오래 머문 시간
-        if (openEnter != null) ev.put("enterAt", openEnter.toString());
-        putHygiene(ev, ctx, cfg);
-        return violated
-                ? EvaluationOutcome.violated("ENTERED_AVOID_ZONE", ev, windowClose)
-                : EvaluationOutcome.pending(ev, windowClose);   // 무위반은 확정 배치가 SUCCESS 로 잠근다
-    }
-
-    /**
      * 이 멤버(=memberId)의 지오펜스 전환만 수집한다.
      * geofenceId=challengeMemberId 계약(§6.2)상 sync에 여러 챌린지 전환이 섞여 오므로, 여기서 memberId로
-     * 필터하지 않으면 다른 챌린지 지오펜스의 ENTER/DWELL이 이 챌린지를 인증(또는 AVOID 위반)시킨다(교차 인증 버그).
+     * 필터하지 않으면 다른 챌린지 지오펜스의 ENTER/DWELL이 이 챌린지를 인증시킨다(교차 인증 버그).
      * memberId가 없으면(레거시/단일 멤버 컨텍스트) 필터하지 않는다.
      */
     private List<GeofenceTransition> collectTransitions(DayContext ctx) {

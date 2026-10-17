@@ -14,5 +14,9 @@ ARG ADOT_JAVA_AGENT_VERSION=v2.31.0
 ADD https://github.com/aws-observability/aws-otel-java-instrumentation/releases/download/${ADOT_JAVA_AGENT_VERSION}/aws-opentelemetry-agent.jar /app/otel/aws-opentelemetry-agent.jar
 COPY --from=build /src/build/libs/*.jar app.jar
 COPY infra/monitoring/tracing/entrypoint.sh /app/entrypoint.sh
+# glibc 는 스레드마다 64MB 단위 malloc 아레나를 늘려 가며 돌려주지 않는다. stg(1GB 태스크)에서 JVM RSS 800MB 중
+# 힙은 256MB 였고 아레나가 ~200MB 를 차지해, 하루쯤마다 하드 메모리 80% 경보(ECS-06-80)를 다시 울렸다(2026-10-14 smaps 실측).
+# 아레나 수를 묶으면 네이티브 할당이 몇 개 아레나를 같이 쓰게 되어 RSS 가 천천히 차오르지 않는다.
+ENV MALLOC_ARENA_MAX=2
 EXPOSE 8080
 ENTRYPOINT ["sh","/app/entrypoint.sh"]

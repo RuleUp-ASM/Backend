@@ -23,7 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 평가기가 문서에 적힌 판정 기준을 실제로 지키는지 (인증 정책 §1.1 · 테크 스펙 §5-1 판정 유형).
  *
  * <p>여기 모인 네 가지는 전부 "문서에는 있는데 코드에 없던" 게이트다. 없으면 조용히 틀린 판정이 나간다 —
- * 스쳐 지나간 편의점이 위반이 되고, 조작된 위치가 인증을 통과하고, 알림 확인이 기상으로 잡힌다.
+ * 스쳐 지나간 편의점이 위반이 되고, 조작된 위치가 인증을 통과하고, 누워서 알람만 끈 것이 기상으로 잡힌다.
  */
 class EvaluatorAccuracyTest {
 
@@ -34,13 +34,13 @@ class EvaluatorAccuracyTest {
     /** 게이트 강화를 끈 기본 설정. 나머지 값은 record 가 기본값으로 채운다. */
     private static com.ruleup.ruleup_backend.verification.config.VerificationProperties lenientProperties() {
         return new com.ruleup.ruleup_backend.verification.config.VerificationProperties(
-                null, null, null, null, null, null, null, null, null, null, false, false);
+                null, null, null, null, null, null, null, null, null, false, false, null, null);
     }
 
     /** 출처 없는 기록을 거부하는 설정. */
     private static com.ruleup.ruleup_backend.verification.config.VerificationProperties strictOriginProperties() {
         return new com.ruleup.ruleup_backend.verification.config.VerificationProperties(
-                null, null, null, null, null, null, null, null, null, null, false, true);
+                null, null, null, null, null, null, null, null, null, false, true, null, null);
     }
 
     private static Instant at(int hour, int minute) {
@@ -54,13 +54,11 @@ class EvaluatorAccuracyTest {
 
     // ===== 설정 조립 =====
 
-    private VerificationConfig gpsConfig(GpsPresence presence, int dwellMinutes, int graceMinutes,
-                                         int accuracyMaxM) {
+    private VerificationConfig gpsConfig(int dwellMinutes, int graceMinutes, int accuracyMaxM) {
         GpsConfig gps = new GpsConfig(
-                GpsMode.PRESENCE, presence, AnchorFillMode.MANUAL, null, 1500,
+                GpsMode.PRESENCE, AnchorFillMode.MANUAL, null, 1500,
                 null, null, 200, dwellMinutes, graceMinutes, null, null,
-                presence == GpsPresence.AVOID ? Polarity.CONSTRAINT : Polarity.ACHIEVEMENT,
-                1, accuracyMaxM, 50, List.of());
+                Polarity.ACHIEVEMENT, 1, accuracyMaxM, 50, List.of());
         return new VerificationConfig(ScheduleType.FIXED_DAYS, null, MethodCombine.AND,
                 List.of(VerificationMethod.GPS_PRESENCE), gps, null, null, null, null, List.of());
     }
@@ -68,7 +66,8 @@ class EvaluatorAccuracyTest {
     private VerificationConfig wakeConfig(String beforeTime) {
         return new VerificationConfig(ScheduleType.FIXED_DAYS, null, MethodCombine.AND,
                 List.of(VerificationMethod.WAKE), null, null, null,
-                new WakeConfig(beforeTime, Polarity.ACHIEVEMENT, 1), null, List.of());
+                new WakeConfig(beforeTime, 30, 10, List.of("com.sec.android.app.shealth"),
+                        Polarity.ACHIEVEMENT, 1), null, List.of());
     }
 
     private VerificationConfig sleepConfig(BigDecimal minHours) {
@@ -101,85 +100,43 @@ class EvaluatorAccuracyTest {
                 List.of(new ScreenEvent(event, when.toString())), null, null);
     }
 
+    private static final HealthOrigin WATCH = new HealthOrigin("com.sec.android.app.shealth", "AUTO", "WATCH");
+
+    private static SyncSignal steps(double count, Instant start, Instant end, HealthOrigin origin) {
+        HealthReading reading = new HealthReading(null, "STEPS", BigDecimal.valueOf(count), "count",
+                start.toString(), end.toString(), null, origin);
+        return new SyncSignal("HEALTH", null, end.toString(), null, null, null, List.of(reading),
+                null, null, null, TARGET.toString(), null, null, null, null);
+    }
+
+    private static SyncSignal stepsRecord(String recordId, double count, Instant start, Instant end, Instant receivedAt) {
+        HealthReading reading = new HealthReading(recordId, "STEPS", BigDecimal.valueOf(count), "count",
+                start.toString(), end.toString(), null, WATCH);
+        return new SyncSignal("HEALTH", null, end.toString(), null, null, null, List.of(reading),
+                null, null, null, TARGET.toString(), null, null, null, receivedAt);
+    }
+
+    private static UsageEvent use(String pkg, String type, Instant when) {
+        return new UsageEvent(pkg, type, when.toString());
+    }
+
+    private static SyncSignal usage(List<UsageEvent> events, Instant receivedAt) {
+        return new SyncSignal("SCREEN_TIME", null, receivedAt.toString(), null, null, null, null,
+                null, null, null, TARGET.toString(), events, null, null, receivedAt);
+    }
+
+    private VerificationConfig screenTimeConfig(ScreenTimeMode mode, int goalMinutes) {
+        return new VerificationConfig(ScheduleType.FIXED_DAYS, null, MethodCombine.AND,
+                List.of(VerificationMethod.SCREEN_TIME), null, null,
+                new ScreenTimeConfig(mode, mode == ScreenTimeMode.MAX ? Polarity.CONSTRAINT : Polarity.ACHIEVEMENT,
+                        List.of("com.instagram.android"), goalMinutes, null, 1),
+                null, null, List.of());
+    }
+
     private static SyncSignal sleep(Instant start, Instant end, HealthOrigin origin) {
         return new SyncSignal("SLEEP", null, end.toString(), null, null, null, null,
                 null, null, null, null, null, null,
                 List.of(new SleepSegment(start.toString(), end.toString(), "ASLEEP", origin)), null);
-    }
-
-    @Nested
-    @DisplayName("장소 피하기 — 스침 유예")
-    class AvoidGrace {
-
-        private final GpsPresenceEvaluator evaluator = new GpsPresenceEvaluator();
-
-        @Test
-        @DisplayName("허용 시간 안에 나오면 스침으로 보고 위반이 아니다")
-        void briefPassThroughIsNotAViolation() {
-            // 5분 유예. 2분 머물다 나왔다 — 편의점 앞을 지나친 정도다.
-            EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    gpsConfig(GpsPresence.AVOID, 0, 5, 100),
-                    List.of(geofence("ENTER", at(19, 0), false), geofence("EXIT", at(19, 2), false)),
-                    List.of(), at(20, 0)));
-
-            assertThat(outcome.failureReason()).as("스침은 위반이 아니다").isNull();
-            assertThat(outcome.status()).isEqualTo(VerificationStatus.PENDING);
-        }
-
-        @Test
-        @DisplayName("허용 시간을 넘겨 머물면 위반이다")
-        void stayingBeyondGraceIsAViolation() {
-            EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    gpsConfig(GpsPresence.AVOID, 0, 5, 100),
-                    List.of(geofence("ENTER", at(19, 0), false), geofence("EXIT", at(19, 30), false)),
-                    List.of(), at(20, 0)));
-
-            assertThat(outcome.failureReason()).isEqualTo("ENTERED_AVOID_ZONE");
-        }
-
-        @Test
-        @DisplayName("아직 안 나왔고 허용 시간도 안 지났으면 판단을 미룬다 — 이탈 신호가 늦게 올 수 있다")
-        void openStayWithinGraceWaits() {
-            EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    gpsConfig(GpsPresence.AVOID, 0, 5, 100),
-                    List.of(geofence("ENTER", at(19, 0), false)),
-                    List.of(), at(19, 3)));
-
-            assertThat(outcome.failureReason()).isNull();
-        }
-
-        @Test
-        @DisplayName("안 나온 채 허용 시간이 지나면 위반이다")
-        void openStayBeyondGraceIsAViolation() {
-            EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    gpsConfig(GpsPresence.AVOID, 0, 5, 100),
-                    List.of(geofence("ENTER", at(19, 0), false)),
-                    List.of(), at(19, 30)));
-
-            assertThat(outcome.failureReason()).isEqualTo("ENTERED_AVOID_ZONE");
-        }
-
-        @Test
-        @DisplayName("OS 가 체류를 확정한 DWELL 은 유예 없이 위반이다")
-        void dwellIsImmediateViolation() {
-            EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    gpsConfig(GpsPresence.AVOID, 0, 5, 100),
-                    List.of(geofence("DWELL", at(19, 0), false)),
-                    List.of(), at(19, 1)));
-
-            assertThat(outcome.failureReason()).isEqualTo("ENTERED_AVOID_ZONE");
-        }
-
-        @Test
-        @DisplayName("조작된 위치 신호는 위반 근거가 되지 않는다")
-        void mockLocationIsNotEvidence() {
-            EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    gpsConfig(GpsPresence.AVOID, 0, 5, 100),
-                    List.of(geofence("DWELL", at(19, 0), true)),
-                    List.of(), at(20, 0)));
-
-            assertThat(outcome.failureReason()).isNull();
-        }
     }
 
     @Nested
@@ -197,7 +154,7 @@ class EvaluatorAccuracyTest {
         @DisplayName("정확도가 좋은 측위는 체류로 인정된다")
         void accuratePointsCount() {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    gpsConfig(GpsPresence.VISIT, 30, 30, 100),
+                    gpsConfig(30, 30, 100),
                     List.of(location(37.4979, 127.0276, 10.0, false, fortyMinutes())),
                     anchors, at(10, 0)));
 
@@ -209,7 +166,7 @@ class EvaluatorAccuracyTest {
         void inaccuratePointsAreExcluded() {
             // accuracy 500m > 허용 100m — 이 좌표가 정말 반경 안인지 알 수 없다.
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    gpsConfig(GpsPresence.VISIT, 30, 30, 100),
+                    gpsConfig(30, 30, 100),
                     List.of(location(37.4979, 127.0276, 500.0, false, fortyMinutes())),
                     anchors, at(10, 0)));
 
@@ -220,7 +177,7 @@ class EvaluatorAccuracyTest {
         @DisplayName("앱 수집 주기(약 30분)로 한 번씩 찍힌 측위도 체류로 이어진다 — QA SIG-24")
         void thirtyMinuteSamplingCounts() {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    gpsConfig(GpsPresence.VISIT, 60, 60, 150),
+                    gpsConfig(60, 60, 150),
                     List.of(location(37.4979, 127.0276, 120.0, false, List.of(at(9, 0))),
                             location(37.4979, 127.0276, 90.0, false, List.of(at(9, 32))),
                             location(37.4979, 127.0276, 110.0, false, List.of(at(10, 1)))),
@@ -233,7 +190,7 @@ class EvaluatorAccuracyTest {
         @DisplayName("사이에 반경 밖 측위가 끼면 그 구간은 체류가 아니다")
         void leavingBreaksContinuity() {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    gpsConfig(GpsPresence.VISIT, 30, 30, 150),
+                    gpsConfig(30, 30, 150),
                     List.of(location(37.4979, 127.0276, 20.0, false, List.of(at(9, 0))),
                             location(37.5200, 127.0600, 20.0, false, List.of(at(9, 15))),
                             location(37.4979, 127.0276, 20.0, false, List.of(at(9, 40)))),
@@ -247,7 +204,7 @@ class EvaluatorAccuracyTest {
         @DisplayName("45분을 넘는 공백은 잇지 않는다")
         void longGapIsNotBridged() {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    gpsConfig(GpsPresence.VISIT, 30, 30, 150),
+                    gpsConfig(30, 30, 150),
                     List.of(location(37.4979, 127.0276, 20.0, false, List.of(at(9, 0), at(9, 50)))),
                     anchors, at(10, 0)));
 
@@ -258,7 +215,7 @@ class EvaluatorAccuracyTest {
         @DisplayName("조작된 측위는 체류 계산에서 빠진다")
         void mockPointsAreExcluded() {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    gpsConfig(GpsPresence.VISIT, 30, 30, 100),
+                    gpsConfig(30, 30, 100),
                     List.of(location(37.4979, 127.0276, 10.0, true, fortyMinutes())),
                     anchors, at(10, 0)));
 
@@ -267,27 +224,126 @@ class EvaluatorAccuracyTest {
     }
 
     @Nested
-    @DisplayName("기상 — 잠금 해제만 인정")
-    class WakeUnlockOnly {
+    @DisplayName("기상 — 목표 시각 + 30분 안의 걸음")
+    class WakeBySteps {
 
         private final WakeEvaluator evaluator = new WakeEvaluator();
 
         @Test
-        @DisplayName("잠금 해제는 기상으로 인정된다")
-        void unlockCounts() {
+        @DisplayName("목표 시각 뒤 유예 안에 걸으면 기상으로 인정된다")
+        void stepsInsideWindowCount() {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    wakeConfig("07:00"), List.of(screen("UNLOCK", at(6, 30))), List.of(), at(8, 0)));
+                    wakeConfig("07:00"), List.of(steps(40, at(7, 10), at(7, 15), WATCH)), List.of(), at(7, 20)));
 
             assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
         }
 
         @Test
-        @DisplayName("화면만 켜진 것은 기상이 아니다 — 알림 확인으로도 켜진다")
-        void screenOnAloneIsNotWakingUp() {
+        @DisplayName("잠금 해제만으로는 기상이 아니다 — 누워서 알람만 꺼도 잡힌다")
+        void unlockAloneIsNotWakingUp() {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
-                    wakeConfig("07:00"), List.of(screen("SCREEN_ON", at(6, 30))), List.of(), at(8, 0)));
+                    wakeConfig("07:00"), List.of(screen("UNLOCK", at(6, 30))), List.of(), at(8, 0)));
 
             assertThat(outcome.status()).isNotEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.failureReason()).isEqualTo("WOKE_UP_LATE");
+        }
+
+        @Test
+        @DisplayName("유예가 지난 뒤의 걸음은 늦잠이다")
+        void stepsAfterDeadlineAreLate() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(
+                    wakeConfig("07:00"), List.of(steps(500, at(8, 0), at(8, 10), WATCH)), List.of(), at(9, 0)));
+
+            assertThat(outcome.status()).isNotEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.failureReason()).isEqualTo("WOKE_UP_LATE");
+            assertThat(outcome.evidence()).containsEntry("value", 0L).containsEntry("deadline", "07:30");
+        }
+
+        @Test
+        @DisplayName("마감에 걸친 기록은 창 안에 든 비율만큼만 센다")
+        void straddlingRecordIsProrated() {
+            // 07:20~07:40 의 16걸음 중 마감(07:30) 전은 절반, 8걸음 — 기준 10걸음에 못 미친다.
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(
+                    wakeConfig("07:00"), List.of(steps(16, at(7, 20), at(7, 40), WATCH)), List.of(), at(9, 0)));
+
+            assertThat(outcome.status()).isNotEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.evidence()).containsEntry("value", 8L);
+        }
+
+        @Test
+        @DisplayName("손으로 입력한 걸음은 기상 근거가 아니다")
+        void manualStepsAreExcluded() {
+            HealthOrigin handWritten = new HealthOrigin("com.sec.android.app.shealth", "MANUAL", "PHONE");
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(
+                    wakeConfig("07:00"), List.of(steps(100, at(7, 0), at(7, 5), handWritten)), List.of(), at(8, 0)));
+
+            assertThat(outcome.status()).isNotEqualTo(VerificationStatus.SUCCESS);
+        }
+
+        @Test
+        @DisplayName("같은 기록이 갱신돼 다시 오면 마지막 값으로 센다 — 처음 받은 3걸음에 묶이지 않는다")
+        void updatedRecordUsesLatestValue() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(wakeConfig("07:00"), List.of(
+                    stepsRecord("hc-1", 3, at(7, 0), at(7, 2), at(7, 3)),
+                    stepsRecord("hc-1", 24, at(7, 0), at(7, 8), at(7, 9))), List.of(), at(7, 10)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.evidence()).containsEntry("value", 24L);
+        }
+
+        @Test
+        @DisplayName("창이 열려 있고 아직 걸음이 없으면 기다린다")
+        void waitsWhileWindowOpen() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(
+                    wakeConfig("07:00"), List.of(), List.of(), at(7, 10)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.PENDING);
+            assertThat(outcome.failureReason()).isNull();
+        }
+    }
+
+    @Nested
+    @DisplayName("스크린타임 — 앱 형식 이벤트 짝짓기")
+    class ScreenTimePairing {
+
+        private final ScreenTimeEvaluator evaluator = new ScreenTimeEvaluator();
+        private static final String IG = "com.instagram.android";
+
+        @Test
+        @DisplayName("같은 앱 안에서 화면을 옮겨도 사용 시간이 끊기지 않는다 — 앞 화면 STOPPED 가 새 화면을 닫지 않는다")
+        void activitySwitchKeepsSession() {
+            Instant t = at(21, 0);
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(screenTimeConfig(ScreenTimeMode.MIN, 15), List.of(usage(List.of(
+                    use(IG, "RESUMED", t),
+                    use(IG, "PAUSED", t.plusSeconds(60)),
+                    use(IG, "RESUMED", t.plusSeconds(60)),
+                    use(IG, "STOPPED", t.plusSeconds(61)),
+                    use(IG, "PAUSED", t.plusSeconds(60 + 20 * 60))), at(21, 30))), List.of(), at(21, 30)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.evidence()).containsEntry("usageMinutes", 21L);
+        }
+
+        @Test
+        @DisplayName("닫힘 없이 끊긴 세션은 자정이 아니라 마지막으로 받은 시각에서 닫는다")
+        void openSessionClosesAtLastReceipt() {
+            // 20:00 에 열고 20:10 에 받은 뒤 기록이 끊겼다(배터리 꺼짐) — 자정까지 4시간을 쓴 것으로 보면 30분 한도 실패가 된다.
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(screenTimeConfig(ScreenTimeMode.MAX, 30), List.of(usage(List.of(
+                    use(IG, "RESUMED", at(20, 0))), at(20, 10))), List.of(), TARGET.plusDays(1).atStartOfDay(KST).toInstant().plusSeconds(60)));
+
+            assertThat(outcome.failureReason()).isNull();
+            assertThat(outcome.evidence()).containsEntry("usageMinutes", 10L);
+        }
+
+        @Test
+        @DisplayName("PAUSED 없이 늦게 온 STOPPED(강제 종료)는 그대로 세션을 닫는다")
+        void lateStopStillCloses() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(screenTimeConfig(ScreenTimeMode.MAX, 30), List.of(usage(List.of(
+                    use(IG, "RESUMED", at(20, 0)),
+                    use(IG, "STOPPED", at(20, 40))), at(20, 45))), List.of(), at(20, 50)));
+
+            assertThat(outcome.failureReason()).isEqualTo("USAGE_EXCEEDED");
+            assertThat(outcome.evidence()).containsEntry("usageMinutes", 40L);
         }
     }
 

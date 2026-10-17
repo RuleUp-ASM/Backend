@@ -26,7 +26,7 @@ public final class MethodSignalTypes {
                     Set.of("GEOFENCE", "GEOFENCE_TRANSITION", "LOCATION", "RUNNING_SESSION");
             case HEALTH -> Set.of("HEALTH");
             case SCREEN_TIME -> Set.of("SCREEN_TIME", "USAGE", "APP_USAGE");
-            case WAKE -> Set.of("SCREEN_TIME", "WAKE", "UNLOCK", "USAGE");
+            case WAKE -> Set.of("HEALTH");   // 기상은 일어나 걸은 걸음으로 본다(2026-10-15)
             case SLEEP -> Set.of("SLEEP");
             default -> Set.of();
         };

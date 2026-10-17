@@ -19,7 +19,7 @@ class RecommendationRateLimiterTest {
         StringRedisTemplate redis=mock(StringRedisTemplate.class);
         when(redis.execute(any(),anyList())).thenReturn(List.of(11L,42L));
         var metrics=new SimpleMeterRegistry();
-        var limiter=new RecommendationRateLimiter(redis,metrics);
+        var limiter=new RecommendationRateLimiter(redis,metrics,10);
         assertThatThrownBy(()->limiter.check("user")).isInstanceOf(BusinessException.class);
         assertThat(metrics.find("challenge.draft.rate_limiter.fallback").counter()).isNull();
     }
@@ -28,7 +28,7 @@ class RecommendationRateLimiterTest {
     @Test void limitedResponseCarriesRemainingSecondsAsNumber() {
         StringRedisTemplate redis=mock(StringRedisTemplate.class);
         when(redis.execute(any(),anyList())).thenReturn(List.of(11L,42L));
-        var limiter=new RecommendationRateLimiter(redis,new SimpleMeterRegistry());
+        var limiter=new RecommendationRateLimiter(redis,new SimpleMeterRegistry(),10);
         assertThatThrownBy(()->limiter.check("user"))
                 .isInstanceOfSatisfying(BusinessException.class,limited->{
                     assertThat(limited.getRetryAfterSeconds()).isEqualTo(42);
@@ -40,7 +40,7 @@ class RecommendationRateLimiterTest {
     @Test void remainingSecondsIsAtLeastOne() {
         StringRedisTemplate redis=mock(StringRedisTemplate.class);
         when(redis.execute(any(),anyList())).thenReturn(List.of(11L,-1L));
-        var limiter=new RecommendationRateLimiter(redis,new SimpleMeterRegistry());
+        var limiter=new RecommendationRateLimiter(redis,new SimpleMeterRegistry(),10);
         assertThatThrownBy(()->limiter.check("user"))
                 .isInstanceOfSatisfying(BusinessException.class,
                         limited->assertThat(limited.getRetryAfterSeconds()).isEqualTo(1));
@@ -50,7 +50,7 @@ class RecommendationRateLimiterTest {
         StringRedisTemplate redis=mock(StringRedisTemplate.class);
         when(redis.execute(any(),anyList())).thenThrow(new IllegalStateException("offline"));
         var metrics=new SimpleMeterRegistry();
-        var limiter=new RecommendationRateLimiter(redis,metrics);
+        var limiter=new RecommendationRateLimiter(redis,metrics,10);
         try(var pool=Executors.newVirtualThreadPerTaskExecutor()) {
             var calls=IntStream.range(0,40).mapToObj(i->(Callable<Boolean>)()->{
                 try{limiter.check("same-user");return true;}catch(BusinessException limited){return false;}

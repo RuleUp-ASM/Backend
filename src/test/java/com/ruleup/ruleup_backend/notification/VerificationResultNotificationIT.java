@@ -47,12 +47,19 @@ class VerificationResultNotificationIT extends VerificationApiSupport {
     @Autowired NotificationRepository notificationRepository;
     @Autowired VerificationManualService manualService;
     @Autowired com.ruleup.ruleup_backend.verification.service.FailExpectedNoticeJob failExpectedJob;
+    @Autowired com.ruleup.ruleup_backend.verification.service.VerificationFinalizeService finalizeService;
+    @Autowired TestcontainersConfiguration.MutableClock clock;
 
     private MockMvc mvc;
 
     @BeforeEach
     void setUp() {
         mvc = MockMvcBuilders.webAppContextSetup(wac).apply(springSecurity()).build();
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void resetClock() {
+        clock.reset();
     }
 
     @Override protected MockMvc mvc() { return mvc; }
@@ -124,6 +131,35 @@ class VerificationResultNotificationIT extends VerificationApiSupport {
                 assertThat(n.getChallengeId()).isEqualTo(challengeId);
                 assertThat(n.getTitle()).isEqualTo("[테스트 챌린지] 인증이 완료됐어요");
             });
+        }
+    }
+
+    // =====================================================================
+    @Nested
+    @DisplayName("결과가 바뀐 판정")
+    class ChangedOutcome {
+
+        @Test
+        @DisplayName("수동 체크를 당일 취소하면 이틀 뒤 실패 확정 알림이 앞선 성공 알림에 막히지 않는다")
+        void canceledManualCheckStillGetsConfirmedFailure() throws Exception {
+            Member me = member(uniq("vrc"));
+            UUID challengeId = insertChallenge(me.id(), "EXERCISE", "ACTIVE", "GROUP");
+            insertActiveMembership(challengeId, me.id(), "OWNER");
+            anotherPendingRoutine(me);
+
+            String verificationId = manualService.submit(me.id(), challengeId,
+                    new ManualVerificationRequest(null, null)).verificationId();
+            manualService.cancel(me.id(), UUID.fromString(verificationId));
+            manualService.submit(me.id(), challengeId, new ManualVerificationRequest(null, null));
+            manualService.cancel(me.id(), UUID.fromString(verificationId));
+            assertThat(resultsOf(me.id())).as("취소 후 다시 체크해도 성공 알림은 한 번").hasSize(1);
+
+            clock.advance(java.time.Duration.ofDays(2).plusMinutes(1));
+            finalizeService.finalizeDue();
+
+            assertThat(resultsOf(me.id())).extracting(Notification::getTitle).containsExactly(
+                    "[테스트 챌린지] 인증이 실패로 확정됐어요",
+                    "[테스트 챌린지] 인증이 완료됐어요");
         }
     }
 
@@ -242,9 +278,8 @@ class VerificationResultNotificationIT extends VerificationApiSupport {
         @DisplayName("규칙 지키기형은 위반 없이 하루가 끝나면 실패 예정이 아니다 — 알리지 않는다")
         void constraintWithoutViolationIsQuiet() throws Exception {
             Member me = member(uniq("vfc"));
-            UUID challengeId = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE",
-                    "{\"duration_min\":30,\"radius_m\":100,\"gps_presence\":\"AVOID\"}");
-            UUID memberId = insertReadyMember(challengeId, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "편의점"), null);
+            UUID challengeId = insertAutoChallenge(me.id(), "SCREEN_TIME_MAX", "USAGE", "{\"duration_min\":30}");
+            UUID memberId = insertReadyMember(challengeId, me.id(), null, screenApps("com.instagram.android"));
             pendingYesterday(me, challengeId, memberId, null);
 
             failExpectedJob.notifyFor(java.time.LocalDate.now(KST).minusDays(1));
@@ -253,16 +288,14 @@ class VerificationResultNotificationIT extends VerificationApiSupport {
         }
 
         @Test
-        @DisplayName("장소 피하기 위반이 잡힌 sync 에서 곧바로 알린다 — 확정 알림과 따로 쌓인다")
+        @DisplayName("앱 최대 사용 위반이 잡힌 sync 에서 곧바로 알린다 — 확정 알림과 따로 쌓인다")
         void violationDuringSync() throws Exception {
             Member me = member(uniq("vfv"));
-            UUID challengeId = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE",
-                    "{\"duration_min\":30,\"radius_m\":100,\"gps_presence\":\"AVOID\"}");
-            UUID memberId = insertReadyMember(challengeId, me.id(), anchor(GYM_LAT, GYM_LNG, 100, "편의점"), null);
+            UUID challengeId = insertAutoChallenge(me.id(), "SCREEN_TIME_MAX", "USAGE", "{\"duration_min\":30}");
+            insertReadyMember(challengeId, me.id(), null, screenApps("com.instagram.android"));
 
             postJsonAuth("/api/v1/verifications/sync", me.token(), syncBody(List.of(
-                    geofenceSignal(memberId, "ENTER", todayAt(0, 5)),
-                    geofenceSignal(memberId, "EXIT", todayAt(0, 45)))));
+                    usageSignal("com.instagram.android", todayAt(0, 5), todayAt(0, 45)))));
 
             assertThat(failExpectedOf(me.id())).singleElement().satisfies(n ->
                     assertThat(n.getDeeplink())

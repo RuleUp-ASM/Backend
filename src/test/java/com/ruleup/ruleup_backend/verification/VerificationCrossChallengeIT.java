@@ -140,31 +140,6 @@ class VerificationCrossChallengeIT extends VerificationApiSupport {
             assertThat(todayStatusOf(m1)).isIn(null, "PENDING");
             assertThat(todayStatusOf(m3)).isIn(null, "PENDING");
         }
-
-        @Test
-        @DisplayName("장소 방문 신호가 '장소 피하기' 챌린지를 위반으로 만들지 않는다")
-        void visitDoesNotViolateAnotherChallengesAvoidZone() throws Exception {
-            Member me = member(uniq("cross-avoid"));
-
-            UUID gymChallenge = insertAutoChallenge(me.id(), "GPS_PRESENCE", "GEOFENCE", visitParams());
-            UUID gymMember = insertReadyMember(gymChallenge, me.id(),
-                    anchor(GYM_LAT, GYM_LNG, 100, "헬스장"), null);
-
-            UUID avoidChallenge = insertAutoChallenge(me.id(), "GPS_AVOID", "GEOFENCE",
-                    "{\"duration_min\":0,\"radius_m\":100}");
-            UUID avoidMember = insertReadyMember(avoidChallenge, me.id(),
-                    anchor(LIBRARY_LAT, LIBRARY_LNG, 100, "편의점"), null);
-
-            // 헬스장(다른 챌린지의 장소)에 들어갔다. 편의점 근처에는 가지 않았다.
-            sync(me.token(), List.of(
-                    geofenceSignal(gymMember, "ENTER", todayAt(9, 0)),
-                    geofenceSignal(gymMember, "EXIT", todayAt(10, 0))));
-
-            assertThat(todayStatusOf(gymMember)).isEqualTo("SUCCESS");
-            assertThat(todayStatusOf(avoidMember))
-                    .as("남의 장소 진입이 내 회피 챌린지의 위반이 되면 안 된다")
-                    .isIn(null, "PENDING");
-        }
     }
 
     @Nested

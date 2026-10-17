@@ -60,6 +60,12 @@ public class ChallengeStatsProjectionService {
     public void refresh(UUID challengeId) {
         byte[] id = toBytes(challengeId);
 
+        // <b>세기 전에 방 행부터 잠근다.</b> InnoDB 는 첫 일반 SELECT 에서 REPEATABLE READ 스냅샷을
+        // 고정한다. 먼저 세고 나서 락을 기다리면, 기다리는 동안 커밋된 가입·판정은 못 본 채 앞서 끝난
+        // 재계산의 최신 값을 옛 값으로 덮는다(부하테스트 2026-10: 2배 피크에서 5분 보정이 43건을 고쳤다).
+        // 잠금 읽기는 스냅샷을 만들지 않으므로, 락을 얻은 뒤의 첫 SELECT 가 그 사이 커밋을 모두 본다.
+        jdbc.queryForList("SELECT id FROM challenges WHERE id = ? FOR UPDATE", (Object) id);
+
         // 참여자 수는 <b>원천에서 다시 센다</b>. 가입·탈퇴 트랜잭션은 더 이상 표시값을 올리고
         // 내리지 않는다(탐색 백엔드 5-2·12) — 같은 방의 모든 가입이 그 한 행에서 직렬화되기
         // 때문이다. 세어 둔 값을 challenges 에 되써 주는 이유는 다른 모듈(자동 삭제·추천 집계·
@@ -69,7 +75,7 @@ public class ChallengeStatsProjectionService {
                 Integer.class, id);
         if (participantCount == null) participantCount = 0;
 
-        // <b>challenges 를 먼저, 그리고 배타로 잡는다.</b> 순서를 뒤집으면 락을 승격하게 된다 —
+        // <b>challenges 를 먼저, 그리고 배타로 잡는다</b>(위 FOR UPDATE). 순서를 뒤집으면 락을 승격하게 된다 —
         // challenge_stats 에 INSERT 하는 순간 외래키 검사가 부모 행에 공유 락을 걸고, 그 뒤의
         // 이 UPDATE 가 같은 행을 배타 락으로 올린다. 그사이 다른 트랜잭션(강퇴·설정 변경처럼
         // challenges 를 처음부터 배타로 잡는 경로)이 같은 행의 배타 락을 기다리고 있으면,

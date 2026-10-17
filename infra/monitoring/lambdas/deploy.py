@@ -37,7 +37,7 @@ def functions(reg):
     out = [dict(name=f'ruleup-{env}-slo-calculator', handler='slo_calculator.handler', region=mon, role='slo', timeout=55, memory=512),
            dict(name=f'ruleup-{env}-resource-monitor', handler='resource_monitor.handler', region=mon, role='resource', timeout=55, memory=256)]
     for origin, region in reg['probe_origins'].items():
-        out.append(dict(name=f'ruleup-{env}-edge-probe', handler='edge_probe.handler', region=region, role='edge', timeout=20,
+        out.append(dict(name=f'ruleup-{env}-edge-probe', handler='edge_probe.handler', region=region, role='edge', timeout=50,
                         memory=128, extra_env={'PROBE_ORIGIN': origin}))
     return out
 

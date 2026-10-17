@@ -20,7 +20,7 @@ Slack 전달은 Amazon Q Developer in chat applications(워크스페이스 `ASM 
 | `catalog.py` · `p0_p1.py <env>` | 노션 알람 카탈로그의 경보 정의(원본)·적용, 옛 이름 경보 정리. `tests_catalog.py` 가 등급·누락 정책·리전 계약을 시험 |
 | `routing.py` | 중앙 감시 리전(us-east-1) 토픽·Slack 구성·P0 멘션 규칙 |
 | `security_events.py` | SEC-02/03/04 EventBridge 규칙 |
-| `dashboard.py [prod\|stg]` | 서버(운영) 대시보드 `ruleup-<env>-ops` — OPS-1~5 순서(런북이 패널 번호로 가리킨다), 4xx 로그 표, 최근 ERROR 로그 |
+| `dashboard.py [prod\|stg]` | 서버(운영) 대시보드 `ruleup-<env>-ops` — OPS-1~6 순서(OPS-6 JVM 런타임: 힙 영역·GC 정지·스레드·클래스·버퍼)(런북이 패널 번호로 가리킨다), 4xx 로그 표, 최근 ERROR 로그 |
 | `observe_dashboard.py [prod\|stg]` | 감시망 대시보드 `ruleup-<env>-observe`(us-east-1) — OBS-1~4 |
 | `business_dashboard.py` | 사용자 지표 대시보드 `ruleup-prod-business` — ① 로그인·가입 ② 챌린지 참여(초안 경로·생성·초안 수정률·탐색/초대 가입) ③ 인증(자동 vs 수동). 묶음마다 기간 합계·비율 숫자 칸. prod 전용 |
 | `p0_mention.py` | P0 → 긴급 채널 커스텀 알림(멘션)·복구 스레드, 긴급 채널 구성을 `ruleup-prod-p0-slack` 으로 |
@@ -43,12 +43,14 @@ EventBridge 규칙이 서울·버지니아 모두 `ruleup-prod-P0-` 접두어로
 | 등급 | ID | 조건(요약) | 리전 |
 |---|---|---|---|
 | P0 | SLO-01 / SLO-02 | BR(1h·5m) ≥14.4 / BR(6h·30m) ≥6, 짧은 창 표본·실패 게이트 | 버지니아 |
-| P0 | API-01 | 5분 실패율 ≥50%·요청 ≥20·실패 ≥10 | 버지니아 |
-| P0 | EDGE-01 | 오리건·버지니아 공개 점검 둘 다 1분×3 실패 | 버지니아 |
-| P0 | NATIVE-01 / NATIVE-02 | Route 53 3분 / ALB Target 5xx ≥50%(5분·요청 ≥20·오류 ≥10) | 버지니아 / 서울 |
+| P0 | API-01 | 2분 실패율 ≥50%·요청 ≥20·실패 ≥10 | 버지니아 |
+| P0 | EDGE-01 | 오리건·버지니아 공개 점검 둘 다 30초 간격 2회 연속 실패 | 버지니아 |
+| P0 | NATIVE-01 / NATIVE-02 | Route 53 1분 / ALB Target 5xx ≥50%(2분·요청 ≥20·오류 ≥10) | 버지니아 / 서울 |
+| P0 | DB-10 / DB-11 | RDS CPU ≥99% 1분 / Freeable ≤RAM 5% 1분 + Swap 증가 (10/15 리뷰) | 서울 |
+| P0 | OBS-04 | slo-calculator·resource-monitor 하트비트 5분 누락 (Healthchecks.io 전 대체) | 버지니아 |
 | P0 | RES-01~04 (`res_enabled`) | 마지막 정상 태스크까지 하드 메모리 ≥99% · OOM 반복 + 정상 ≤1 · CPU 99% + 확장 불능 + 포화 · RDS 소진 임박 + 확장 불가 | 버지니아 |
-| P1 | SLO-03/04 · LAT-01 · API-02 | 느린 소진 · 지연 BR ≥3 · 실패율 ≥5% | 버지니아 |
-| P1 | ECS-01~09 · JVM · POOL · THREAD | 카탈로그 §4·§5 (CPU 80/90/99%, 하드 메모리 80/90%, OOM ≥1 …) | 서울 |
+| P1 | SLO-03/04 · LAT-01 · API-02 | 느린 소진 · 지연 BR ≥3 · 3분 실패율 ≥5% | 버지니아 |
+| P1 | ECS-01~09 · JVM · POOL · THREAD | 카탈로그 §4·§5 (CPU 80% 3분/90% 1분/99%, 하드 메모리 80% 3분/90% 1분, OOM ≥1 즉시 …) | 서울 |
 | P1 | DB-01~08 · REDIS · QUEUE · JOB · EXT · TOKEN | 카탈로그 §5·§6 | 서울 |
 | P1 | SEC-01/05 · INV-01 · BACKUP-01~04 · OBS-01 | 카탈로그 §6.1·§7 | 서울·버지니아 |
 | P1 | SEC-02/03/04 | EventBridge 규칙(`security_events.py`) | 서울·버지니아 |
@@ -60,5 +62,14 @@ EventBridge 규칙이 서울·버지니아 모두 `ruleup-prod-P0-` 접두어로
 누락 정책: 커스텀 P0·EDGE leaf = `ignore`(입력이 끊겨도 정상으로 돌아가지 않는다 — 재무장은 정상 Flag=0 또는 `../lambdas/rearm.py`),
 하트비트·NATIVE-01 = `breaching`, 나머지 = `notBreaching`.
 
-**온콜**: Incident Manager(`ssm-contacts`·`ssm-incidents`)는 조직 SCP 가 막는다. 노션은 PagerDuty 를 채택했지만 아직 계약 전이라,
-지금 P0 의 호출 수단은 긴급 채널 멘션(`p0_mention.py`·`routing.py`)뿐이다. 원장 `sns.pagerduty` 가 생기면 P0 경보 AlarmActions 에 붙는다.
+**온콜**(`pagerduty.py`, prod 만): **1차 담당(이성은)에게 먼저 → 10분 안에 ACK 가 없으면 팀원 → 그래도 없으면 처음부터 다시(2회)**.
+PagerDuty 서비스 「RuleUp prod P0」 — 긴급도 항상 high, ACK 후 15분 안에 해결 안 되면 다시 울림, 시간 기반 자동 종료 끔.
+CloudWatch → 같은 리전 SNS `ruleup-prod-pagerduty`(서울·버지니아) → PagerDuty 공식 CloudWatch 연동. 경보가 OK 로 돌아오면 사건이 닫힌다.
+Incident Manager(`ssm-contacts`·`ssm-incidents`)는 조직 SCP 가 막아 쓰지 않는다. 긴급 채널 멘션(`p0_mention.py`)은 보조로 그대로 둔다.
+
+개통 순서(PagerDuty 계정·API 키가 생긴 뒤):
+1. 두 사람 모두 PagerDuty 앱 설치 + 프로필 알림 규칙에 **High-urgency: 즉시 푸시 + 1분 뒤 전화**를 넣는다(서비스가 아니라 사람마다 설정이다).
+2. `PAGERDUTY_API_TOKEN=… python3 infra/monitoring/alerting/pagerduty.py setup --primary <내 PD 이메일> --secondary <팀원 PD 이메일>` — 원장 `env/prod.json` 이 채워진다 → 커밋.
+3. `python3 infra/monitoring/alerting/p0_p1.py prod` — P0 경보 AlarmActions·OKActions 에 PagerDuty 토픽이 붙는다.
+4. 실수신 시험(G01): `pagerduty.py test-trigger` — 시험 경보 `ruleup-prod-P0-ONCALL-TEST` 를 실제 P0 와 같은 경로로 ALARM 으로 바꾼다 → Slack #ruleup-alert·긴급 채널 멘션·PagerDuty 가 함께 오는지, 내 폰을 **ACK 하지 않고** 10분 뒤 팀원 폰이 울리는지 → `pagerduty.py test-resolve`(Slack 복구 알림·사건 종료).
+   노션 「대시보드·알림 요약표」 P0 온콜 연결 체크표 12종은 경보별로 `aws cloudwatch set-alarm-state` 로 한 번씩 확인한다(다음 평가에서 OK 로 돌아온다).

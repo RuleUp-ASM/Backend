@@ -1,28 +1,32 @@
 package com.ruleup.ruleup_backend.verification.evaluator;
 
+import com.ruleup.ruleup_backend.verification.domain.HealthMetric;
 import com.ruleup.ruleup_backend.verification.domain.VerificationMethod;
 import com.ruleup.ruleup_backend.verification.domain.WakeConfig;
-import com.ruleup.ruleup_backend.verification.signal.ScreenEvent;
+import com.ruleup.ruleup_backend.verification.signal.HealthReading;
 import com.ruleup.ruleup_backend.verification.signal.SignalType;
 import com.ruleup.ruleup_backend.verification.signal.SyncSignal;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
 
 /**
- * WAKE(기상) 평가기 — 도달형(§2.6, §2.11).
- *  - 신호: WAKE·SCREEN_TIME 의 screenEvents(UNLOCK/SCREEN_ON) 중 당일 첫 발생 = firstUnlockAt.
- *    두 타입을 모두 읽는다 — 기상만 보내는 기기는 WAKE 로, 앱 사용과 함께 보내는 기기는
- *    SCREEN_TIME 에 실어 보낸다. 한쪽만 읽으면 기기에 따라 기상이 영영 안 잡힌다.
- *  - 창: [하루 시작, beforeTime]. beforeTime에 창이 닫힌다(자정 아님).
- *  - 판정: firstUnlockAt ≤ beforeTime → SUCCESS / 창 닫힘·미발생 → FAILED(WOKE_UP_LATE) / 그 외 → PENDING.
- *  - 그날 원본 전부에서 가장 이른 잠금해제를 매번 다시 고른다 — 이월 상태가 없어 도착 순서와 무관하다.
+ * WAKE(기상) 평가기 — 도달형(§2.6, §2.11). <b>일어나서 걸었는가</b>로 본다.
+ *  - 신호: HEALTH 의 STEPS 기록(Health Connect StepsRecord). 구간(startTime~endTime)이 있는 기록만 쓴다 —
+ *    「언제 걸었는지」가 판정의 전부라, 구간 없는 하루 누적값은 근거가 되지 못한다.
+ *  - 창: [하루 시작, beforeTime + graceMinutes]. 창에 걸친 기록은 겹친 비율만큼만 센다.
+ *  - 판정: 창 안 걸음 ≥ minSteps → SUCCESS / 창 닫힘·미달 → FAILED(WOKE_UP_LATE) / 그 외 → PENDING.
+ *  - 출처 게이트는 움직임(HEALTH)과 같다 — 손입력·신뢰 밖 출처는 뺀다. 폰과 워치가 같은 걸음을 각자
+ *    기록하면 겹친 구간은 한 번만 센다.
+ *  - 그날 원본 전부를 매번 다시 읽는다 — 이월 상태가 없어 도착 순서와 무관하다.
  */
 @Component
 public class WakeEvaluator implements MethodEvaluator {
+
+    private static final DateTimeFormatter HHMM = DateTimeFormatter.ofPattern("HH:mm");
 
     @Override
     public VerificationMethod method() { return VerificationMethod.WAKE; }
@@ -34,47 +38,65 @@ public class WakeEvaluator implements MethodEvaluator {
             return EvaluationOutcome.pending(null, null);   // 잘못된 config는 무시(PENDING 유지)
         }
 
-        Instant windowCloses = TimeWindows.atTime(ctx.targetDate(), cfg.beforeTime(), ctx.zone());
-        Instant dayStart = TimeWindows.startOfDay(ctx.targetDate(), ctx.zone());
-        Window window = new Window(dayStart, windowCloses);
+        Instant target = TimeWindows.atTime(ctx.targetDate(), cfg.beforeTime(), ctx.zone());
+        Instant windowCloses = target.plusSeconds(60L * Math.max(cfg.graceMinutes(), 0));
+        Window window = new Window(TimeWindows.startOfDay(ctx.targetDate(), ctx.zone()), windowCloses);
 
-        // 그날 원본 중 창 안에서 가장 이른 잠금해제
-        Instant firstUnlock = earliestUnlockInWindow(ctx.signals(), window);
+        Set<String> rejected = new LinkedHashSet<>();
+        double steps = stepsInWindow(ctx.signals(), window, cfg, rejected);
 
         Map<String, Object> evidence = new HashMap<>();
         evidence.put("beforeTime", cfg.beforeTime());
-        if (firstUnlock != null) evidence.put("firstUnlockAt", firstUnlock.toString());
+        evidence.put("graceMinutes", cfg.graceMinutes());
+        evidence.put("deadline", LocalTime.ofInstant(windowCloses, ctx.zone()).format(HHMM));
+        evidence.put("metric", HealthMetric.STEPS.name());
+        evidence.put("unit", "count");
+        evidence.put("value", Math.round(steps));
+        evidence.put("goal", cfg.minSteps());
+        if (!rejected.isEmpty()) evidence.put("rejectedOrigins", new ArrayList<>(rejected));
 
-        EvaluationOutcome outcome;
-        if (firstUnlock != null) {
-            outcome = EvaluationOutcome.success(evidence, windowCloses);        // 창 내 기상 → 즉시 성공
-        } else if (window.isClosed(ctx.now())) {
-            outcome = EvaluationOutcome.violated("WOKE_UP_LATE", evidence, windowCloses);  // 창 닫힘·미발생
-        } else {
-            outcome = EvaluationOutcome.pending(evidence, windowCloses);        // 아직 대기
+        if (cfg.minSteps() > 0 && steps >= cfg.minSteps()) {
+            return EvaluationOutcome.success(evidence, windowCloses);          // 창 안에서 움직였다 → 즉시 성공
         }
-        return outcome;
+        if (window.isClosed(ctx.now())) {
+            return EvaluationOutcome.violated("WOKE_UP_LATE", evidence, windowCloses);
+        }
+        return EvaluationOutcome.pending(evidence, windowCloses);
     }
 
-    /** 화면 이벤트를 실어 오는 입력 타입. 기상 전용(WAKE)과 앱 사용과 함께 오는 것(SCREEN_TIME) 둘 다다. */
-    private boolean carriesScreenEvents(String type) {
-        return SignalType.WAKE.name().equals(type) || SignalType.SCREEN_TIME.name().equals(type);
-    }
-
-    private Instant earliestUnlockInWindow(List<SyncSignal> signals, Window window) {
-        if (signals == null) return null;
-        Instant earliest = null;
+    /** 창 안 걸음 합 — 출처 게이트를 통과한 구간 기록만, 창에 겹친 비율만큼, 겹친 기록은 한 번만. */
+    private double stepsInWindow(List<SyncSignal> signals, Window window, WakeConfig cfg, Set<String> rejected) {
+        if (signals == null) return 0;
+        // 같은 기록은 <b>마지막에 받은 것</b>으로 센다. 앱은 sync 마다 그날 기록을 다시 보내고, 기록 앱은 같은 기록의
+        // 걸음 수·끝 시각을 키워 가며 고친다 — 처음 받은 값(예: 3걸음)에 묶이면 그날은 끝내 문턱을 못 넘는다.
+        // 신호는 받은 순서(행 id = 시간순)로 오므로 뒤에 온 것이 덮는다.
+        Map<String, HealthEvaluator.Measured> byRecord = new LinkedHashMap<>();
+        List<HealthEvaluator.Measured> clipped = new ArrayList<>();
         for (SyncSignal s : signals) {
-            if (!carriesScreenEvents(s.type()) || s.screenEvents() == null) continue;
-            for (ScreenEvent e : s.screenEvents()) {
-                // 기상 판정은 "당일 첫 잠금 해제"다(인증 정책 §1.1). 화면만 켜지는 일은 알림 확인으로도
-                // 흔해서, SCREEN_ON 을 기상으로 세면 자는 사람이 깬 것으로 잡힌다.
-                if (!"UNLOCK".equalsIgnoreCase(e.event())) continue;
-                Instant at = TimeWindows.parseInstant(e.at());
-                if (at == null || !window.contains(at)) continue;
-                if (earliest == null || at.isBefore(earliest)) earliest = at;
+            if (!SignalType.HEALTH.name().equals(s.type()) || s.readings() == null) continue;
+            for (HealthReading r : s.readings()) {
+                if (r == null || !HealthMetric.STEPS.name().equalsIgnoreCase(r.metric())) continue;
+                String gate = HealthEvaluator.gateReason(r, true, cfg.trustedOrigins());
+                if (gate != null) {
+                    String origin = (r.origin() != null && r.origin().dataOrigin() != null) ? r.origin().dataOrigin() : "?";
+                    rejected.add(origin + ":" + gate);
+                    continue;
+                }
+                Instant from = TimeWindows.parseInstant(r.startTime());
+                Instant to = TimeWindows.parseInstant(r.endTime());
+                if (from == null || to == null || !to.isAfter(from) || r.value() == null) continue;
+
+                Instant start = from.isBefore(window.start()) ? window.start() : from;
+                Instant end = to.isAfter(window.end()) ? window.end() : to;
+                if (!end.isAfter(start)) continue;                                     // 창 밖 기록
+                double share = (double) (end.getEpochSecond() - start.getEpochSecond())
+                        / (to.getEpochSecond() - from.getEpochSecond());
+                HealthEvaluator.Measured m = new HealthEvaluator.Measured(start, end, r.value().doubleValue() * share);
+                if (r.recordId() != null) byRecord.put(r.recordId(), m);
+                else clipped.add(m);
             }
         }
-        return earliest;
+        clipped.addAll(byRecord.values());
+        return HealthEvaluator.dedupedSum(clipped);
     }
 }

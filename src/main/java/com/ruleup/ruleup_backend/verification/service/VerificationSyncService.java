@@ -36,6 +36,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.dao.PessimisticLockingFailureException;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -160,7 +163,26 @@ public class VerificationSyncService {
                 .collect(Collectors.toMap(MethodEvaluator::method, e -> e, (a, b) -> a));
     }
 
-    @Transactional
+    /** 데드락 재시도 — 트랜잭션 본문만 다시 돈다. 생성자가 길어 세터로 받는다. */
+    private TransactionTemplate tx;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void setTransactionManager(PlatformTransactionManager transactionManager) {
+        this.tx = new TransactionTemplate(transactionManager);
+    }
+
+    /** 데드락으로 진 트랜잭션은 이 횟수까지 처음부터 다시 돈다(MySQL 1213 「try restarting transaction」). */
+    static final int DEADLOCK_ATTEMPTS = 3;
+
+    /**
+     * 봉투 검증·빈도 제한은 <b>한 번만</b> 하고, 저장·판정 트랜잭션만 데드락이면 다시 돈다.
+     *
+     * <p>sync 한 건은 세션 갱신·신호 INSERT IGNORE·판정 갱신을 한 트랜잭션에서 한다. 같은 사용자의 sync 가 겹치면
+     * (재전송·백로그, 빈도 제한기가 태스크마다 메모리에 있어 두 태스크로 나뉘면 막지 못한다) 서로의 잠금을 잡아
+     * 한쪽이 데드락으로 진다 — 부하테스트(2026-10) 피크에서 5xx 11건이 전부 이것이었다. 진 쪽은 아무것도 남기지 않고
+     * 롤백되므로 처음부터 다시 하면 된다. 재시도를 트랜잭션 밖에 두는 이유: 안에서 잡으면 이미 롤백 표시가 된 뒤다.
+     * 빈도 제한을 재시도에 다시 태우면 자기 자신의 첫 시도에 막혀 429 가 된다.
+     */
     public SyncResponse sync(UUID userId, SyncRequest req) {
         long startedAt = System.nanoTime();
         if (req == null) throw rejectEnvelope(userId, null, EnvelopeRejection.MISSING_BODY);
@@ -183,6 +205,24 @@ public class VerificationSyncService {
                 .distinct().toList();
         List<SyncRequest.Gap> gaps = (req.gaps() != null) ? req.gaps() : List.of();   // §8.5 권한 공백 소비 입력
 
+        for (int attempt = 1; ; attempt++) {
+            try {
+                return tx.execute(status -> syncInTransaction(userId, req, signals, ignored, gaps, startedAt));
+            } catch (PessimisticLockingFailureException e) {
+                if (attempt >= DEADLOCK_ATTEMPTS) throw e;
+                log.warn("sync_deadlock_retry userId={} attempt={} cause={}", userId, attempt, e.getMostSpecificCause().getMessage());
+                try {
+                    Thread.sleep(java.util.concurrent.ThreadLocalRandom.current().nextLong(20, 80) * attempt);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
+            }
+        }
+    }
+
+    private SyncResponse syncInTransaction(UUID userId, SyncRequest req, List<SyncSignal> signals, List<String> ignored,
+                                           List<SyncRequest.Gap> gaps, long startedAt) {
         Instant now = clock.instant();
         LocalDate today = LocalDate.ofInstant(now, KST);
 
@@ -213,14 +253,16 @@ public class VerificationSyncService {
         // 판정 입력은 저장된 원본이다. 오늘과 유예 중인 어제를 한 번씩만 읽어 멤버들이 나눠 쓴다 —
         // 같은 사용자 신호를 챌린지별로 복제해 읽지 않는다(백엔드 4-1-1 「사용자 신호 1회 저장」).
         LocalDate yesterday = today.minusDays(1);
-        Map<LocalDate, VerificationSignalReader.DaySignalSet> daySignals =
-                signalReader.forDays(userId, List.of(yesterday, today));
+        VerificationSignalReader.Window daySignals = signalReader.window(userId);
 
         List<ChallengeMember> members = challengeQuery.findActiveMemberships(userId);
+        // 방마다 따로 읽지 않고 한 번에 — 방 수만큼 PK 조회가 sync 스레드 덤프 1위였다(2차 P0 재측정).
+        Map<UUID, Challenge> challenges = challengeQuery.findActiveChallenges(
+                members.stream().map(ChallengeMember::getChallengeId).toList());
         List<SyncResponse.UpdatedChallenge> updated = new ArrayList<>();
 
         for (ChallengeMember member : members) {
-            Challenge challenge = challengeQuery.findActiveChallenge(member.getChallengeId()).orElse(null);
+            Challenge challenge = challenges.get(member.getChallengeId());
             if (challenge == null) continue;
             // 끝난 방도 유예 구간 동안은 열어 둔다. 종료 전환이 endDate 다음 날 일어나므로
             // ACTIVE 만 받으면 마지막 활동일에 늦게 도착한 신호를 반영할 길이 없다.
@@ -253,7 +295,7 @@ public class VerificationSyncService {
             VerificationDaily daily = loadOrCreateDaily(member, challenge, today);
             VerificationStatus before = daily.getStatus();
             VerificationStatus todayStatus = processMember(member, challenge, config, daily,
-                    daySignals.get(today), gaps, consentGapOf, today, now);
+                    () -> daySignals.day(today), gaps, consentGapOf, today, now);
 
             progressService.updateAfterSync(member, todayStatus, now);
             if (becameFinal(before, todayStatus) || graceChanged) {
@@ -454,7 +496,7 @@ public class VerificationSyncService {
      * @return 이 재평가로 어제 건이 확정됐으면 true
      */
     private boolean evaluateGraceDay(ChallengeMember member, Challenge challenge, VerificationConfig config,
-                                     Map<LocalDate, VerificationSignalReader.DaySignalSet> daySignals,
+                                     VerificationSignalReader.Window daySignals,
                                      List<SyncRequest.Gap> gaps,
                                      java.util.function.Predicate<VerificationMethod> consentGapOf,
                                      LocalDate today, Instant now) {
@@ -470,7 +512,7 @@ public class VerificationSyncService {
 
         VerificationStatus before = daily.getStatus();
         VerificationStatus after = processMember(member, challenge, config, daily,
-                daySignals.get(yesterday), gaps, consentGapOf, yesterday, now);
+                () -> daySignals.day(yesterday), gaps, consentGapOf, yesterday, now);
         if (!becameFinal(before, after)) return false;
         progressService.recount(member);
         return true;
@@ -490,7 +532,7 @@ public class VerificationSyncService {
 
     private VerificationStatus processMember(ChallengeMember member, Challenge challenge, VerificationConfig config,
                                              VerificationDaily daily,
-                                             VerificationSignalReader.DaySignalSet daySignals,
+                                             java.util.function.Supplier<VerificationSignalReader.DaySignalSet> signalsOfDay,
                                              List<SyncRequest.Gap> gaps,
                                              java.util.function.Predicate<VerificationMethod> consentGapOf,
                                              LocalDate today, Instant now) {
@@ -504,6 +546,8 @@ public class VerificationSyncService {
         }
         // 원본을 전부 읽지 못한 날은 평가하지 않는다. 잘린 값으로 「실패 예정」이나 성공을 찍으면
         // 사용자에게 잘못된 결과가 그대로 보인다 — 판정을 미루는 편이 낫다.
+        // 확정된 날은 위에서 끝났다 — 신호는 판정할 때만 읽는다.
+        VerificationSignalReader.DaySignalSet daySignals = signalsOfDay.get();
         if (daySignals == null || !daySignals.complete()) {
             log.warn("원본을 전부 읽지 못해 이 날 평가를 건너뛴다 userId={} targetDate={}",
                     member.getUserId(), today);

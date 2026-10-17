@@ -14,9 +14,9 @@
 | 앱 원천 | `observability/sli` · `observability/ops` · `observability/metric` | CUJ 10개 Operation 의 `RuleUp/SLI`(Eligible·Bad·LatencyBad·DurationMs, **0 포함 매분**), `RuleUp/Ops`(JVM·Hikari·Tomcat·하드 메모리·공급자 호출·토큰·캐시·불변식), `RuleUp/DB`(연결·락·데드락·장기 트랜잭션), `RuleUp/Traffic`(FLOW·4xx), `RuleUp/Security`. 태스크마다 1분 버퍼 → PutMetricData |
 | 공개 점검 경로 | `GET /health/public` | 무인증·고정 본문 `ruleup-ok`·no-store. DB·Redis 를 묻지 않는다 |
 | 감시 Lambda | `lambdas/` | 버지니아 `slo-calculator`(Rule Flag·버짓·이상 탐지) · `resource-monitor`(ECS·RES·RDS·백업), 오리건·버지니아 `edge-probe` |
-| 경보 | `alerting/catalog.py` → `p0_p1.py` | 카탈로그 ID 그대로. P0 = SLO-01/02·API-01·EDGE-01·NATIVE-01/02·RES-01~04 |
+| 경보 | `alerting/catalog.py` → `p0_p1.py` | 카탈로그 ID 그대로. P0 = SLO-01/02·API-01·EDGE-01·NATIVE-01/02·RES-01~04·DB-10/11·OBS-04. 1분 주기 평가, P0 는 충족 후 1~2분 안에 호출(10/15 리뷰) |
 | 전달 | `alerting/routing.py` · `slack_channels.py` · `p0_mention.py` · `slack_fallback.py` · `security_events.py` | 서울·버지니아 토픽 → Amazon Q Slack, P0 멘션, 전달 실패 → 이메일, 보안 이벤트 |
-| 대시보드 | `alerting/dashboard.py` · `observe_dashboard.py` · `business_dashboard.py` | `ruleup-<env>-ops`(OPS-1~5) · `ruleup-<env>-observe`(OBS-1~4) · `ruleup-prod-business` |
+| 대시보드 | `alerting/dashboard.py` · `observe_dashboard.py` · `business_dashboard.py` | `ruleup-<env>-ops`(OPS-1~6) · `ruleup-<env>-observe`(OBS-1~4) · `ruleup-prod-business` |
 | 배포 보호 | `.github/scripts/monitoring_preflight.py` | ALARM·stale·EligibleCount 누락·계측 불일치·BudgetFreeze (기본 warn) |
 | 재무장 | `lambdas/rearm.py` | 저트래픽 예외 — 독립 정상 증거가 있을 때만 P0 Flag=0 1회 + 감사 로그 |
 
@@ -44,10 +44,13 @@
 
 - **분 버킷 DynamoDB 없음** — CloudWatch 가 1분 해상도를 15일 보관하고 GetMetricData 는 지표 개수로 과금돼, 72시간을 매분 다시 읽는 비용이 노션 추정(월 약 130만 조회 단위)과 같다. 30일 버짓은 1시간 해상도로 15분마다.
 - **DB 수집기는 앱 안**(ShedLock 1분) — 서울 전용 VPC Lambda·읽기 계정 대신. 앱과 함께 멈추는 한계는 DB 지표가 전부 P1 이라 받아들인다. `information_schema.innodb_trx`·`INNODB_METRICS` 는 PROCESS 권한이 필요하다 — 없으면 db-collector 하트비트가 빠져 OBS-01 이 운다.
+- **30초 간격 점검은 한 실행 안에서 두 번** — Scheduler 최소 주기가 1분이라 edge-probe 가 30초 쉬고 한 번 더 부른다(함수 timeout 50초). EDGE-01 leaf 는 「그 분 두 번 모두 실패」, EDGE-02 는 「2분(4회) 중 2회」 — 노션의 「3회 중 2회」와 같은 민감도.
+- **RDS CPU·메모리 P0(DB-10/11)** — 10/15 리뷰 결정. 카탈로그 §4.2 는 「RDS CPU 99% 는 단독 P0 아님」이었다. 메모리는 resource-monitor 가 Freeable ≤RAM 5% 1분 + Swap 증가를 `DbMemoryCritical` Flag 로 낸다(CloudWatch 지연 탓에 실제 호출은 충족 후 2~3분).
+- **OBS-04 는 CloudWatch 로 대신** — Healthchecks.io 미계약. slo-calculator·resource-monitor 하트비트 5분 누락이 P0. 버지니아 리전 전체 장애는 못 잡는다.
 - **외부 점검은 도쿄 대신 오리건(us-west-2)** — 조직 SCP 가 아시아 리전(ap-northeast-1·3, ap-southeast-1)을 전부 막는다. 버지니아와 다른 리전이라 EDGE-01 의 「두 지점 독립 확인」은 그대로다.
 - **점검 릴레이 함수 없음** — edge-probe 가 결과를 검증하고 버지니아로 직접 PutMetricData.
 - **하드 메모리는 태스크가 직접 잰다**(ECS 메타데이터 v4) — Container Insights 태스크 지표 대신. TaskId 차원 없이 같은 시계열에 쓰고 Maximum/Minimum/SampleCount 로 「가장 찬·가장 여유 있는·보고한 태스크 수」를 본다.
-- **EXT-01·TOKEN-01·EXT-02 는 경보 metric math**(10분 창·표본 게이트) — 별도 Flag 계산기 없이 같은 의미.
+- **EXT-01·TOKEN-01·EXT-02 는 경보 metric math**(5분 창·표본 게이트) — 별도 Flag 계산기 없이 같은 의미.
 - **OR 조건은 행마다 경보를 따로**(Composite 과금 없이). EDGE-01 만 AND Composite.
 - **사전 점검의 계측 불일치는 ALB 요청 수 대신 앱의 `RuleUp/Traffic ApiRequestCount`**(`/api/**`, 합성 점검 제외)와 비교 — ALB 는 경로를 못 나눠 Route 53·외부 점검의 `/health/public` 호출(분당 십수 건)이 섞이고, 트래픽이 적을 때 늘 「계측 누락」으로 걸렸다.
 - **OPS-4 Redis 칸에 히트율** — 노션 §4.2 에는 없다. 경보 없이 화면에만. 앱 캐시(`@Cacheable`)는 Caffeine 이라 탐색 ZSET·rate limit 같은 Redis 직접 조회의 적중률이다.
@@ -56,8 +59,8 @@
 
 | 항목 | 막는 것 | 그 전까지 |
 |---|---|---|
-| PagerDuty(G01·G03), OBS-03/05/06 | 계약·계정 없음 | P0 = Slack 긴급 채널 멘션. 원장 `sns.pagerduty` 에 토픽 이름을 넣으면 P0 경보에 붙는다 |
-| OBS-04 외부 watchdog | Healthchecks.io 없음 | 원장 `healthchecks.obs04_ping_url` 이 생기면 계산기가 바로 ping. OBS-01(slo-calculator) P1 |
+| PagerDuty 개통(G01·G03), OBS-03/05/06 | 계약·계정·API 키 없음 | 설정은 `alerting/pagerduty.py` 로 준비됨(1차 → 10분 미ACK → 팀원). 개통 전 P0 = Slack 긴급 채널 멘션 |
+| OBS-04 외부 watchdog | Healthchecks.io 없음 | CloudWatch 하트비트 5분 누락 P0 로 대신(같은 리전 장애는 못 잡음). 원장 `healthchecks.obs04_ping_url` 이 생기면 계산기가 외부 ping 도 한다 |
 | APP-01~04·ERR-01 (G06) | Crashlytics·Sentry 연결 미검증 | SLO·ERROR 로그 패널 |
 | AUTH-01 | 지점별 격리 시험 계정·Secrets | C01 SLO(실사용 로그인) |
 | COST-01/02 (G07) | 승인된 일 예산 없음 | — (LLM 호출 실패·지연은 EXT-01/02) |
@@ -67,8 +70,8 @@
 
 ## G02·G03 재현 (stg)
 
-- API-01: stg 에 5분간 같은 Operation 으로 실패 ≥10건(예: 계약 회귀 400 을 내는 잘못된 sync 본문) → `ruleup-stg-P0-API-01-sync` ALARM → 정상 요청 20건 이상 → Flag=0 → OK 2회.
-- 입력 중단 유지: slo-calculator 스케줄을 끄면 P0 는 ALARM 그대로(ignore), OBS-01(slo-calculator) 이 3분 뒤 운다.
+- API-01: stg 에 2분간 같은 Operation 으로 요청 ≥20·실패 ≥10건(예: 계약 회귀 400 을 내는 잘못된 sync 본문) → `ruleup-stg-P0-API-01-sync` ALARM → 정상 요청 20건 이상 → Flag=0 → OK 2회.
+- 입력 중단 유지: slo-calculator 스케줄을 끄면 P0 는 ALARM 그대로(ignore), OBS-01(slo-calculator) 이 2분 뒤, OBS-04(P0) 가 5분 뒤 운다.
 - 저표본 재무장: `lambdas/rearm.py stg --operation sync --rule API-01 --incident … --approver … --evidence …`.
 - EDGE-01: 한 지점만 실패 → EDGE-02 만, 두 지점 → EDGE-01.
 

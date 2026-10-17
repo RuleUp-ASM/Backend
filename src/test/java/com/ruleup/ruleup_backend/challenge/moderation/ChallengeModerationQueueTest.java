@@ -50,4 +50,19 @@ class ChallengeModerationQueueTest {
         queue().handle(message);
         verify(sqs).deleteMessage(any(DeleteMessageRequest.class));
     }
+    @Test void stopsPollingOnceShutdownBegins() {
+        // 배포 때 옛 태스크는 SqsClient 가 닫힌 뒤에도 폴러가 돌아 ERROR 를 남겼다 — 종료 신호 뒤엔 수신하지 않는다.
+        var queue=queue();
+        queue.stop();
+        queue.poll();
+        verifyNoInteractions(sqs);
+    }
+    @Test void receiveFailureDuringShutdownIsSwallowed() {
+        var queue=queue();
+        when(sqs.receiveMessage(any(ReceiveMessageRequest.class))).thenAnswer(inv -> {
+            queue.stop();
+            throw new IllegalStateException("Connection pool shut down");
+        });
+        assertThatCode(queue::poll).doesNotThrowAnyException();
+    }
 }

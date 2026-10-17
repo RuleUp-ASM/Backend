@@ -1,7 +1,9 @@
 package com.ruleup.ruleup_backend.security;
 
+import com.ruleup.ruleup_backend.common.error.ClientErrorLog;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.error.ErrorResponse;
+import com.ruleup.ruleup_backend.common.error.GlobalExceptionHandler;
 import com.ruleup.ruleup_backend.common.response.ApiResponse;
 import com.ruleup.ruleup_backend.sanction.SanctionService;
 import com.ruleup.ruleup_backend.sanction.domain.FeatureCode;
@@ -14,6 +16,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
@@ -52,6 +55,7 @@ import java.util.UUID;
  * <p>상태를 JWT 클레임이 아니라 DB 에서 읽는 이유: 제재는 운영자가 언제든 걸 수 있는데 클레임에
  * 넣으면 액세스 토큰 수명(30분)만큼 우회가 생긴다.
  */
+@Slf4j
 @RequiredArgsConstructor
 public class AccountStatusFilter extends OncePerRequestFilter {
 
@@ -104,10 +108,23 @@ public class AccountStatusFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
         UUID userId = currentUserId();
-        if (userId != null) activity.touch(userId);
-        Blocked blocked = blockedReason(request);
+        Blocked blocked;
+        try {
+            if (userId != null) activity.touch(userId);
+            blocked = blockedReason(request);
+        } catch (RuntimeException e) {
+            // 필터에서 난 예외는 GlobalExceptionHandler 를 거치지 않고 /error 로 가는데, 거기엔 인증이 없어 401
+            // LOGIN_REQUIRED 가 된다 — 풀 대기 초과 한 번에 앱이 로그아웃 화면으로 간다(부하테스트 2026-10 J2: 49건).
+            // 컨트롤러 안과 같게 503 + Retry-After 로 돌려보낸다.
+            if (!GlobalExceptionHandler.causedByDbUnavailable(e)) throw e;
+            log.warn("DB 일시 불가(계정 상태 확인) — 503: {}", e.getMessage());
+            ClientErrorLog.record(request, ErrorCode.TEMPORARILY_UNAVAILABLE);
+            response.setHeader("Retry-After", "2");
+            writeError(response, new Blocked(ErrorCode.TEMPORARILY_UNAVAILABLE, null));
+            return;
+        }
         if (blocked != null) {
-            com.ruleup.ruleup_backend.common.error.ClientErrorLog.record(request, blocked.code());
+            ClientErrorLog.record(request, blocked.code());
             writeError(response, blocked);
             return;
         }
