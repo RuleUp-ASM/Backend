@@ -6,6 +6,7 @@ import com.ruleup.ruleup_backend.challenge.domain.ChallengeMember;
 import com.ruleup.ruleup_backend.verification.domain.Frequency;
 import com.ruleup.ruleup_backend.common.verification.PeriodUnit;
 import com.ruleup.ruleup_backend.verification.domain.VerificationConfig;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
@@ -19,9 +20,26 @@ import java.util.List;
  *  - FREQUENCY : 주기 경계(시작일 기준 롤링) + 필요 완료 횟수(온전한 주기=N, 잘린 주기=ceil(N×겹친 날/주기)).
  */
 @Component
+@RequiredArgsConstructor
 public class VerificationMemberSetup {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+
+    private final VerificationConfigFactory configFactory;
+
+    /**
+     * 고를 것이 없는 자동 방(기상·걸음·수면 등)은 들어오는 즉시 평가 대상(READY)으로 둔다.
+     *
+     * <p>READY 로 가는 길이 POST /setup·장소·앱 지정뿐이라, 앱이 「설정할 것 없음」을 보고 POST /setup 을
+     * 건너뛰면 그 멤버는 영영 PENDING_SETUP 이었다 — sync 가 평가를 건너뛰고 확정 배치도 행을 열지 않아
+     * 성공도 실패도 뜨지 않는다(2026-10-21 prod 기상 방). 수동 방은 셋업과 무관하게 체크하므로 건드리지 않는다.
+     */
+    public void readyIfNothingToBind(ChallengeMember member, Challenge challenge) {
+        if (member.isSetupReady()) return;
+        VerificationConfig config = configFactory.build(challenge);
+        if (config.isManual() || config.needsBinding()) return;
+        member.markSetupReady();
+    }
 
     public void apply(ChallengeMember member, Challenge challenge, VerificationConfig config) {
         if (config != null && config.isFrequency() && config.frequency() != null) {
