@@ -28,6 +28,7 @@ import com.ruleup.ruleup_backend.score.repository.UserScoreSummaryRepository;
 import com.ruleup.ruleup_backend.score.domain.Tier;
 import com.ruleup.ruleup_backend.challenge.moderation.ChallengeModerationRequested;
 import com.ruleup.ruleup_backend.challenge.guide.VerificationGuideRequested;
+import com.ruleup.ruleup_backend.verification.service.VerificationMemberSetup;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -86,6 +87,7 @@ public class ChallengeCreationService {
     private final UserScoreSummaryRepository scoreSummaryRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final com.ruleup.ruleup_backend.observability.BusinessMetrics businessMetrics;
+    private final VerificationMemberSetup memberSetup;
 
     @Transactional
     public CreateChallengeResponse create(UUID userId, String idempotencyKey, CreateChallengeRequest req) {
@@ -164,7 +166,9 @@ public class ChallengeCreationService {
         challenge.recordOrigin(draft);
         challengeRepository.saveAndFlush(challenge);
 
-        memberRepository.save(ChallengeMember.owner(challenge.getId(), userId));
+        ChallengeMember owner = ChallengeMember.owner(challenge.getId(), userId);
+        memberSetup.readyIfNothingToBind(owner, challenge);
+        memberRepository.save(owner);
         // 방장은 만드는 순간 그 방의 ACTIVE 멤버다. 생성은 가입과 달리 경합할 상대가 없고
         // (그 방의 첫 행이다) 표시값이 커밋 뒤 채워지길 기다리면 만든 직후 「참여자 0명」이 보인다.
         // 가입 경로에서 이 갱신을 걷어낸 이유는 같은 방의 가입들이 그 한 행에서 줄 서기 때문이다.

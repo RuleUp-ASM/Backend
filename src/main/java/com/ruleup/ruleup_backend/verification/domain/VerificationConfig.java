@@ -41,4 +41,12 @@ public record VerificationConfig(
     public boolean hasMethod(VerificationMethod m) {
         return methods != null && methods.contains(m);
     }
+
+    /**
+     * 처음 들어올 때 사용자가 골라야 할 것(인증 장소·대상 앱)이 있는가. POST /setup 이 모자란 항목으로 보는
+     * 것과 같은 기준이다 — 없으면 셋업 없이도 평가 대상이다.
+     */
+    public boolean needsBinding() {
+        return hasMethod(VerificationMethod.GPS_PRESENCE) || hasMethod(VerificationMethod.SCREEN_TIME);
+    }
 }

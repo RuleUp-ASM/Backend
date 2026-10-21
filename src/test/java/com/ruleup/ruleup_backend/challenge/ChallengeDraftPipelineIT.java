@@ -151,7 +151,7 @@ class ChallengeDraftPipelineIT extends ChallengeApiSupport {
             assertThat((String) read(res, "$.data.draft.description")).contains("아침형 인간");
             assertThat((String) read(res, "$.data.draft.category")).isEqualTo("WAKE_SLEEP");
 
-            // 서버 기본값: 솔로·정원 50·랭킹 노출 true·visibility null
+            // LLM 이 혼자라고 본 문장은 솔로 그대로: 정원 1·랭킹 노출 true·visibility null
             assertThat((String) read(res, "$.data.draft.mode")).isEqualTo("SOLO");
             assertThat((Object) read(res, "$.data.draft.visibility")).isNull();
             assertThat((Boolean) read(res, "$.data.draft.rankingVisible")).isTrue();
@@ -246,6 +246,25 @@ class ChallengeDraftPipelineIT extends ChallengeApiSupport {
         }
 
         @Test
+        @DisplayName("LLM 이 참여 방식을 주지 않거나 모르는 값이면 그룹이 기본")
+        void groupByDefault() throws Exception {
+            String token = memberToken(uniq("draft-group"));
+            for (String participation : new String[]{"", "\"participationType\":\"TEAM\","}) {
+                LLM_RESPONSE.set("""
+                        {"usable":true,"title":"매일 아침 물 마시기","description":"아침마다 물 한 잔 마셔요.",
+                         "category":"DIET_HEALTH","templateId":null,"params":[],%s"weeklyCount":7}
+                        """.formatted(participation));
+
+                MvcResult res = postJsonAuth("/api/v1/challenges/draft", token,
+                        Map.of("description", "매일 아침 물 한 잔 마시기"));
+
+                assertThat(res.getResponse().getStatus()).isEqualTo(200);
+                assertThat((String) read(res, "$.data.draft.mode")).isEqualTo("GROUP");
+                assertThat((Integer) read(res, "$.data.draft.capacity")).isEqualTo(30);
+            }
+        }
+
+        @Test
         @DisplayName("LLM 주 3회 → 요일 없이 weeklyCount=3만 생성 진입 응답에 노출")
         void weeklyFrequency() throws Exception {
             String token = memberToken(uniq("draft-freq"));
@@ -317,8 +336,10 @@ class ChallengeDraftPipelineIT extends ChallengeApiSupport {
             // 템플릿 기본값 — 제목 = 템플릿명(임시 제목 역할)
             assertThat((String) read(res, "$.data.draft.title")).isEqualTo("헬스장 가기");
             assertThat((String) read(res, "$.data.draft.category")).isEqualTo("EXERCISE");
-            assertThat((String) read(res, "$.data.draft.mode")).isEqualTo("SOLO");
-            assertThat((Integer) read(res, "$.data.draft.capacity")).isEqualTo(1);
+            // 기본 참여 방식은 그룹 — 공개·기본 정원 30
+            assertThat((String) read(res, "$.data.draft.mode")).isEqualTo("GROUP");
+            assertThat((String) read(res, "$.data.draft.visibility")).isEqualTo("PUBLIC");
+            assertThat((Integer) read(res, "$.data.draft.capacity")).isEqualTo(30);
             assertThat((String) read(res, "$.data.draft.minTier")).isEqualTo("BRONZE");
             assertThat(res.getResponse().getContentAsString()).doesNotContain("\"repeatDays\"");
             assertThat((Integer) read(res, "$.data.draft.weeklyCount")).isEqualTo(7);

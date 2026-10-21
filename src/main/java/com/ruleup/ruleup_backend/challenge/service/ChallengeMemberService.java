@@ -18,6 +18,7 @@ import com.ruleup.ruleup_backend.score.domain.IncidentType;
 import com.ruleup.ruleup_backend.score.repository.UserScoreSummaryRepository;
 import com.ruleup.ruleup_backend.score.domain.Tier;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
+import com.ruleup.ruleup_backend.verification.service.VerificationMemberSetup;
 import com.ruleup.ruleup_backend.user.domain.User;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -67,6 +68,7 @@ public class ChallengeMemberService {
     private final UserRepository userRepository;
     private final UserScoreSummaryRepository scoreSummaryRepository;
     private final VerificationDailyRepository verificationDailyRepository;
+    private final VerificationMemberSetup memberSetup;
     private final NotificationMuteCleaner muteCleaner;
     private final ApplicationEventPublisher eventPublisher;
     /**
@@ -158,10 +160,13 @@ public class ChallengeMemberService {
         // 즉시 ACTIVE 등록. uq_member 로 동시 INSERT는 1건만 성공, 나머지는 중복으로 변환.
         if (existing != null) {
             existing.rejoin(Instant.now());
+            memberSetup.readyIfNothingToBind(existing, c);
             recordJoinEvent(challengeId, userId);
         } else {
             try {
-                memberRepository.saveAndFlush(ChallengeMember.join(challengeId, userId, MemberStatus.ACTIVE));
+                ChallengeMember joined = ChallengeMember.join(challengeId, userId, MemberStatus.ACTIVE);
+                memberSetup.readyIfNothingToBind(joined, c);
+                memberRepository.saveAndFlush(joined);
                 recordJoinEvent(challengeId, userId);
             } catch (DataIntegrityViolationException dup) {
                 throw blocked(JoinBlockReason.ALREADY_JOINED);
