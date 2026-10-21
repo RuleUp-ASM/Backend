@@ -467,6 +467,22 @@ public class VerificationSyncService {
         return (signals != null) ? (long) signals.size() * APPROX_BYTES_PER_SIGNAL : 0L;
     }
 
+    /**
+     * 규칙 지키기형(앱 사용 「적게 쓰기」)이 위반 없이 귀속일을 넘겼는지 — 넘겼으면 그 자리에서 성공이다.
+     *
+     * <p>위반이 없으면 확정 배치도 D+2 00:00 에 같은 건을 성공으로 닫는다. 그때까지 기다리게 하면
+     * 결과가 이틀 뒤에야 나오는데, 성공에는 이의를 낼 일이 없어 유예 하루를 둘 이유도 없다. 그래서
+     * 귀속일이 끝난 뒤 들어온 첫 sync 가 그날 원본 전부로 다시 재고 위반이 없으면 바로 확정한다.
+     * 권한·동의 공백이 있는 날은 못 잰 구간에 위반이 숨어 있을 수 있어 확정 배치에 맡긴다.
+     */
+    private boolean keptWholeDay(VerificationConfig config, EvaluationOutcome outcome, boolean gap,
+                                 LocalDate targetDate, Instant now) {
+        return VerificationPolarity.of(config) == Polarity.CONSTRAINT
+                && outcome.status() == VerificationStatus.PENDING && outcome.failureReason() == null
+                && outcome.evidence() != null && !gap
+                && VerificationDeadlines.targetDateEnded(targetDate, now);
+    }
+
     private boolean becameFinal(VerificationStatus before, VerificationStatus after) {
         return after.isTerminal() && before != after;
     }
@@ -611,6 +627,9 @@ public class VerificationSyncService {
                 memberAnchors, memberScreenApps, member.getId().toString(),
                 member.getUserId(), member.getChallengeId());
         EvaluationOutcome outcome = evaluator.evaluate(ctx);
+        if (keptWholeDay(config, outcome, gap, today, now)) {
+            outcome = EvaluationOutcome.success(outcome.evidence(), outcome.windowClosesAt());
+        }
 
         // ③ 권한 공백(gaps) 반영: 신호 없이 PENDING이고 해당 신호타입에 비회복 권한 공백이 있으면
         //    마감 배치가 NO_SIGNAL_RECEIVED 대신 PERMISSION_MISSING으로 확정하도록 힌트를 남긴다(§8.5).
