@@ -7,16 +7,19 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
@@ -80,6 +83,44 @@ class SetupReadyOnEntryIT extends ChallengeApiSupport {
         UUID challengeId = createFromTemplate(owner, GYM_TEMPLATE, "duration_min", "60");
 
         assertThat(setupStatus(challengeId, owner.id())).isEqualTo("PENDING_SETUP");
+    }
+
+    @Test
+    @DisplayName("V18: 이미 갇힌 멤버 중 고를 것 없는 자동 방만 READY 로 올린다")
+    void migrationLiftsOnlyStuckMembersOfRoomsWithoutBinding() throws Exception {
+        Member user = member(uniq("v18"));
+        UUID wakeAuto = insertTemplateChallenge(user.id(), WAKE_TEMPLATE, "AUTO");
+        UUID wakeManual = insertTemplateChallenge(user.id(), WAKE_TEMPLATE, "MANUAL");
+        UUID gymAuto = insertTemplateChallenge(user.id(), GYM_TEMPLATE, "AUTO");
+        for (UUID id : List.of(wakeAuto, wakeManual, gymAuto)) {
+            jdbcTemplate.update("INSERT INTO challenge_members (id, challenge_id, user_id, role, status, setup_status) " +
+                    "VALUES (?, ?, ?, 'OWNER', 'ACTIVE', 'PENDING_SETUP')", bytes(UUID.randomUUID()), bytes(id), bytes(user.id()));
+        }
+
+        String sql = new String(new ClassPathResource("db/migration/V18__ready_members_without_binding.sql")
+                .getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        jdbcTemplate.update(sql.lines().filter(l -> !l.startsWith("--")).collect(Collectors.joining("\n")));
+
+        assertThat(setupStatus(wakeAuto, user.id())).isEqualTo("READY");
+        assertThat(setupStatus(wakeManual, user.id())).as("직접 인증으로 바꾼 방은 셋업과 무관하다").isEqualTo("PENDING_SETUP");
+        assertThat(setupStatus(gymAuto, user.id())).as("장소를 골라야 하는 방").isEqualTo("PENDING_SETUP");
+    }
+
+    private UUID insertTemplateChallenge(UUID ownerId, long templateId, String selectedMethod) {
+        UUID id = UUID.randomUUID();
+        jdbcTemplate.update("INSERT INTO challenges " +
+                        "(id, owner_id, title, ai_title, description, category, mode, capacity, repeat_days, " +
+                        " duration_days, start_date, end_date, template_id, verification_config, params, " +
+                        " penalty_config, reward_config, anonymity, status, moderation_status, ai_assisted, participant_count) " +
+                        "VALUES (?, ?, '방', '방', '설명', 'WAKE_SLEEP', 'GROUP', 30, " +
+                        " '[\"MON\",\"TUE\",\"WED\",\"THU\",\"FRI\",\"SAT\",\"SUN\"]', 14, " +
+                        " DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), " +
+                        " DATE_ADD(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')), INTERVAL 14 DAY), ?, ?, '{}', " +
+                        " '{\"mannerDeduction\":1.0}', '{\"mannerGain\":1.0}', 'REAL', 'ACTIVE', 'NONE', 1, 1)",
+                bytes(id), bytes(ownerId), templateId,
+                "{\"selectedMethod\":\"" + selectedMethod + "\",\"verificationType\":\"PHONE\",\"signalSource\":\"HC_RECORD\"," +
+                        "\"wearableReq\":\"NONE\",\"requiredPermissions\":[]}");
+        return id;
     }
 
     /** 경로 A(by-template) 초안을 그대로 그룹 방으로 만든다. */
