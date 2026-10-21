@@ -265,6 +265,47 @@ class VerificationDecisionTimingIT extends VerificationApiSupport {
     }
 
     @Nested
+    @DisplayName("규칙 지키기형 — 귀속일이 끝난 뒤 첫 sync")
+    class ConstraintAfterTargetDate {
+
+        @Test
+        @DisplayName("위반 없이 하루를 넘겼으면 다음 날 sync 에서 바로 성공이다 — 확정 배치를 기다리지 않는다")
+        void cleanDayConfirmsOnNextDaySync() throws Exception {
+            Member me = member(uniq("keep-clean"));
+            UUID challenge = insertAutoChallenge(me.id(), "SCREEN_TIME_MAX", "USAGE", "{\"duration_min\":10}");
+            UUID memberId = insertReadyMember(challenge, me.id(), null, screenApps("com.instagram.android"));
+
+            // 10분 제한에 5분 — 귀속일 중에는 아직 넘길 수 있으니 진행중이다.
+            sync(me.token(), List.of(usageSignal("com.instagram.android", todayAt(20, 0), todayAt(20, 5))));
+            assertThat(todayStatusOf(memberId)).isEqualTo("PENDING");
+
+            clock.advance(Duration.ofDays(1));
+            assertThat(todayStatusOf(memberId))
+                    .as("sync 가 들어오기 전에는 그대로다 — 그날 기록을 다 받았는지 모른다")
+                    .isEqualTo("PENDING");
+
+            sync(me.token(), List.of());
+            assertThat(todayStatusOf(memberId)).isEqualTo("SUCCESS");
+            assertThat(failureReasonOf(memberId)).isNull();
+        }
+
+        @Test
+        @DisplayName("위반이 있던 날은 다음 날 sync 가 와도 실패 예정 그대로다 — 이의 창이 남는다")
+        void breachedDayStaysFailExpected() throws Exception {
+            Member me = member(uniq("keep-breach"));
+            UUID challenge = insertAutoChallenge(me.id(), "SCREEN_TIME_MAX", "USAGE", "{\"duration_min\":10}");
+            UUID memberId = insertReadyMember(challenge, me.id(), null, screenApps("com.instagram.android"));
+
+            sync(me.token(), List.of(usageSignal("com.instagram.android", todayAt(20, 0), todayAt(20, 40))));
+            clock.advance(Duration.ofDays(1));
+            sync(me.token(), List.of());
+
+            assertThat(todayStatusOf(memberId)).isEqualTo("PENDING");
+            assertThat(failureReasonOf(memberId)).isEqualTo("USAGE_EXCEEDED");
+        }
+    }
+
+    @Nested
     @DisplayName("확정 배치")
     class Finalization {
 
