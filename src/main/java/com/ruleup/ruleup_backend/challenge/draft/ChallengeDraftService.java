@@ -67,6 +67,8 @@ public class ChallengeDraftService {
     private static final int TITLE_MAX = 30;
     /** 기본 정원은 고를 수 있는 값이어야 한다 — {@link ChallengeCapacity} 가 정본이다. */
     private static final int DEFAULT_CAPACITY = ChallengeCapacity.DEFAULT;
+    /** 초안의 기본 참여 방식은 그룹이다. 혼자 하겠다고 말했을 때만(LLM 이 SOLO 를 줄 때) 솔로로 둔다. */
+    private static final String DEFAULT_MODE = ParticipationType.GROUP.name();
     private static final int DEFAULT_WEEKLY_COUNT = 7;
     private static final int START_OFFSET_DAYS = 1;      // 시작일 = 생성일 + 1일
     private static final int PERIOD_DAYS = 14;           // 종료일 = 시작일 + 2주
@@ -153,7 +155,7 @@ public class ChallengeDraftService {
 
         DraftView view = assemble(userId, truncate(template.getName(), TITLE_MAX),
                 template.getDescription(), template.getCategory().name(),
-                ParticipationType.SOLO.name(), DEFAULT_WEEKLY_COUNT, template, Map.of());
+                DEFAULT_MODE, DEFAULT_WEEKLY_COUNT, template, Map.of());
 
         ChallengeDraft saved = draftRepository.save(ChallengeDraft.of(
                 userId, ChallengeDraft.Origin.TEMPLATE, template.getId(), null,
@@ -345,11 +347,11 @@ public class ChallengeDraftService {
     }
 
     private String sanitizeMode(String mode) {
-        if (mode == null) return ParticipationType.SOLO.name();
+        if (mode == null) return DEFAULT_MODE;
         try {
             return ParticipationType.valueOf(mode.trim().toUpperCase()).name();
         } catch (IllegalArgumentException e) {
-            return ParticipationType.SOLO.name();
+            return DEFAULT_MODE;
         }
     }
 
