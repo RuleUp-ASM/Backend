@@ -321,6 +321,26 @@ class EvaluatorAccuracyTest {
         }
 
         @Test
+        @DisplayName("창 안에 걸었는데 출처 때문에 전부 빠졌으면 늦잠이 아니라 「인정되지 않는 출처」다")
+        void untrustedStepsInsideWindowAreNotLateWakeUp() {
+            HealthOrigin unknownApp = new HealthOrigin("com.example.steps", "AUTO", null);
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(
+                    wakeConfig("07:00"), List.of(steps(40, at(7, 2), at(7, 5), unknownApp)), List.of(), at(9, 0)));
+
+            assertThat(outcome.failureReason()).isEqualTo("UNTRUSTED_HEALTH_SOURCE");
+        }
+
+        @Test
+        @DisplayName("출처 밖 기록이 창 밖에만 있으면 그대로 늦잠이다")
+        void untrustedStepsOutsideWindowStayLate() {
+            HealthOrigin unknownApp = new HealthOrigin("com.example.steps", "AUTO", null);
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(
+                    wakeConfig("07:00"), List.of(steps(40, at(8, 0), at(8, 5), unknownApp)), List.of(), at(9, 0)));
+
+            assertThat(outcome.failureReason()).isEqualTo("WOKE_UP_LATE");
+        }
+
+        @Test
         @DisplayName("창이 열려 있고 아직 걸음이 없으면 기다린다")
         void waitsWhileWindowOpen() {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
@@ -417,6 +437,20 @@ class EvaluatorAccuracyTest {
             assertThat(evaluator.evaluate(ctx(
                     sleepConfig(new BigDecimal("7"), allow),
                     List.of(sleep(at(23, 0), at(23, 0).plusSeconds(8 * 3600), TRUSTED)),
+                    List.of(), now)).status())
+                    .isEqualTo(VerificationStatus.SUCCESS);
+        }
+
+        @Test
+        @DisplayName("Health Connect 가 폰에서 직접 쓴 수면 기록도 접두사 항목으로 인정된다")
+        void healthConnectPhoneSleepIsTrustedByPrefix() {
+            Instant now = at(23, 0).plusSeconds(10 * 3600);
+            HealthOrigin hcPhone = new HealthOrigin(
+                    "com.android.healthconnect.phone.0a1b2c3d4e5f60718293a4b5c6d7e8f9", "AUTO", "PHONE");
+
+            assertThat(evaluator.evaluate(ctx(
+                    sleepConfig(new BigDecimal("7"), List.of("com.android.healthconnect.phone.*")),
+                    List.of(sleep(at(23, 0), at(23, 0).plusSeconds(8 * 3600), hcPhone)),
                     List.of(), now)).status())
                     .isEqualTo(VerificationStatus.SUCCESS);
         }

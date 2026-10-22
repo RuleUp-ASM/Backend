@@ -142,21 +142,25 @@ public class HealthEvaluator implements MethodEvaluator {
         if (o == null) return "NO_ORIGIN";                                   // §6.3 메타데이터 누락
         if (rejectManualRecording && "MANUAL".equalsIgnoreCase(o.recordingMethod())) return "MANUAL";
         if (trusted != null && !trusted.isEmpty()) {
-            boolean ok = o.dataOrigin() != null && trusted.stream().anyMatch(t -> trusts(t, o.dataOrigin()));
-            if (!ok) return "UNTRUSTED_ORIGIN";
+            if (!listed(trusted, o.dataOrigin())) return "UNTRUSTED_ORIGIN";
         }
         return null;
     }
 
     /**
-     * 신뢰 목록 한 항목이 이 출처를 인정하는지. {@code *} 로 끝나는 항목은 접두사로 본다 — Health Connect 가
-     * 폰에서 직접 센 걸음은 {@code com.android.healthconnect.phone.<기기별 해시>} 처럼 끝이 기기마다 달라
-     * 패키지명 하나로는 적을 수 없다.
+     * 신뢰 목록이 이 출처를 인정하는지. {@code *} 로 끝나는 항목은 접두사로 본다 — Health Connect 가
+     * 폰에서 직접 센 기록은 {@code com.android.healthconnect.phone.<기기별 해시>} 처럼 끝이 기기마다 달라
+     * 패키지명 하나로는 적을 수 없다. 수면 판정도 같은 규칙을 쓴다.
      */
-    private static boolean trusts(String entry, String origin) {
-        return entry.endsWith("*")
-                ? origin.startsWith(entry.substring(0, entry.length() - 1))
-                : entry.equals(origin);
+    static boolean listed(List<String> trusted, String origin) {
+        if (origin == null) return false;
+        for (String entry : trusted) {
+            boolean hit = entry.endsWith("*")
+                    ? origin.startsWith(entry.substring(0, entry.length() - 1))
+                    : entry.equals(origin);
+            if (hit) return true;
+        }
+        return false;
     }
 
     private Instant windowClose(DayContext ctx) {

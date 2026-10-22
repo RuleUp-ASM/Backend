@@ -48,6 +48,19 @@ class SignalHygieneMappingTest {
     }
 
     @Test
+    @DisplayName("로그용 비신뢰 출처 이름 — 목록 밖 출처만, 끝의 기기별 해시는 * 로 접는다")
+    void untrustedOriginNamesHideDeviceHash() {
+        Map<String, Object> evidence = Map.of("rejectedOrigins", List.of(
+                "com.android.healthconnect.phone.j0a1b2c3d4e5f60718293a4b5c6d7e8:UNTRUSTED_ORIGIN",
+                "com.example.steps:UNTRUSTED_ORIGIN",
+                "com.sec.android.app.shealth:MANUAL",
+                "?:NO_ORIGIN"));
+
+        assertThat(SignalExclusionRecorder.untrustedOrigins(evidence))
+                .containsExactly("com.android.healthconnect.phone.*", "com.example.steps");
+    }
+
+    @Test
     @DisplayName("직접 입력과 비신뢰 출처를 가른다 — 유저가 할 일이 다르다")
     void healthOriginsSplitManualFromUntrusted() {
         Map<String, Object> evidence = Map.of(

@@ -167,7 +167,7 @@ public class SleepEvaluator implements MethodEvaluator {
         if ("MANUAL".equalsIgnoreCase(origin.recordingMethod())) return false;
         List<String> allow = (cfg != null) ? cfg.trustedOrigins() : null;
         if (allow == null || allow.isEmpty()) return true;
-        return origin.dataOrigin() != null && allow.contains(origin.dataOrigin());
+        return HealthEvaluator.listed(allow, origin.dataOrigin());
     }
 
     /**

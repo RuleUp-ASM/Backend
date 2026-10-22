@@ -194,6 +194,31 @@ class VerificationAndroidWireIT extends VerificationApiSupport {
     }
 
     @Test
+    @DisplayName("건강 — Health Connect 가 폰에서 직접 센 걸음도 걸음 목표에 들어간다")
+    void healthWithHealthConnectPhoneSteps() throws Exception {
+        Member me = member(uniq("wire-health-hc"));
+        UUID ch = insertAutoChallenge(me.id(), "HEALTH", "HC_RECORD", "{\"metric\":\"STEPS\",\"steps\":8000}");
+        UUID memberId = insertReadyMember(ch, me.id(), null, null);
+
+        Map<String, Object> reading = new LinkedHashMap<>();
+        reading.put("recordId", "hc-phone-1");
+        reading.put("value", 8200.0);
+        reading.put("startTime", todayAt(9, 0).toEpochMilli());
+        reading.put("endTime", todayAt(10, 0).toEpochMilli());
+        reading.put("recordingMethod", "AUTO");
+        reading.put("originPackage", "com.android.healthconnect.phone.0a1b2c3d4e5f60718293a4b5c6d7e8f9");
+        Map<String, Object> signal = new LinkedHashMap<>();
+        signal.put("type", "HEALTH");
+        signal.put("date", java.time.LocalDate.now(KST).toString());
+        signal.put("metric", "STEPS");
+        signal.put("readings", List.of(reading));
+
+        sync(me.token(), List.of(signal));
+
+        assertThat(todayStatusOf(memberId)).isEqualTo("SUCCESS");
+    }
+
+    @Test
     @DisplayName("기상 — 앱 형식(epoch millis) 걸음 기록으로 인증된다")
     void wakeWithAndroidShape() throws Exception {
         Member me = member(uniq("wire-wake"));

@@ -27,33 +27,45 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class VerificationConfigFactory {
 
-    private static final List<String> DEFAULT_TRUSTED_ORIGINS =
-            List.of("com.sec.android.app.shealth", "com.google.android.apps.fitness");
+    /**
+     * 센서로 기록하는 시스템·웨어러블 출처 — 걸음·수면 목록이 함께 쓴다.
+     *
+     * <p>신뢰 게이트가 막아야 하는 것은 <b>손입력과 아무 앱이나 쓴 기록</b>이지, 실제 센서가 센 기록이 아니다.
+     * 시스템 출처는 서드파티 앱이 그 이름으로 쓸 수 없고, 웨어러블 동반 앱은 기기가 잰 값을 옮겨 적는다.
+     * 예전에는 삼성헬스·구글 피트니스 두 앱만 믿어서, 그 외 경로로 걸음이 쌓이는 폰은 걸어도 0걸음이었다
+     * (2026-10-21·22 prod 기상 방: Health Connect 가 폰에서 직접 센 걸음이 전부 빠졌다).
+     * 목록 밖 출처는 판정 확정 때 로그({@code health_origin_untrusted})로 남아 새 출처를 알아챌 수 있다.
+     */
+    private static final List<String> SENSOR_ORIGINS = List.of(
+            "com.sec.android.app.shealth",            // 삼성헬스(갤럭시 워치 포함)
+            "com.google.android.apps.fitness",        // 구글 피트니스(픽셀 워치 포함)
+            "com.google.android.apps.healthdata",     // Health Connect 플랫폼
+            "com.android.healthconnect.phone.*",      // Health Connect 가 폰 센서로 직접 센 기록 — 끝에 기기별 해시
+            "com.fitbit.FitbitMobile",                // Fitbit
+            "com.garmin.android.apps.connectmobile",  // Garmin Connect
+            "com.xiaomi.wearable",                    // 샤오미 Mi Fitness
+            "com.huami.watch.hmwatchmanager",         // Zepp(어메이즈핏)
+            "com.withings.wiscale2",                  // Withings
+            "com.ouraring.oura");                     // Oura
+
+    /** 걸음·거리·운동 기록의 신뢰 writer. 기상 걸음도 같은 목록을 쓴다. 손입력은 따로 뺀다. */
+    private static final List<String> DEFAULT_TRUSTED_ORIGINS = with(SENSOR_ORIGINS,
+            "android");                               // 기기 자체 걸음 센서
+
+    private static final List<String> DEFAULT_TRUSTED_WAKE_ORIGINS = DEFAULT_TRUSTED_ORIGINS;
 
     /**
-     * 기상 걸음의 신뢰 writer. 걸음 목표 판정(HEALTH)보다 <b>넓다</b> — 기상은 「일어나 움직였는가」만 보는
-     * 10걸음 문턱이라 위조해서 얻을 것이 적고, 삼성헬스·구글 피트니스가 없는 폰은 Health Connect 플랫폼이나
-     * 시스템 자체가 걸음을 기록한다. 두 앱만 믿으면 그런 폰의 기상은 매일 실패한다. 손입력은 여전히 뺀다.
+     * 수면 기록의 신뢰 writer. Play 서비스의 Sleep API 도 기록자로 올라온다. 목록 밖 출처는 AUTO 로
+     * 적혀 있어도 판정에 쓰지 않는다(스펙 §5-1 「신뢰 가능한 Health Connect 수면 기록만 사용」).
      */
-    private static final List<String> DEFAULT_TRUSTED_WAKE_ORIGINS = List.of(
-            "com.sec.android.app.shealth",          // 삼성헬스
-            "com.google.android.apps.fitness",      // 구글 피트니스
-            "com.google.android.apps.healthdata",   // Health Connect 플랫폼
-            // Health Connect 가 폰 센서로 직접 센 걸음. 끝에 기기별 해시가 붙는다(….phone.<해시>).
-            // 빠져 있던 동안 삼성헬스 없이 이 출처만 쓰는 폰은 걸어도 0걸음으로 실패했다(2026-10-21·22 prod).
-            "com.android.healthconnect.phone.*",
-            "android");                             // 기기 자체 걸음 센서
+    private static final List<String> DEFAULT_TRUSTED_SLEEP_ORIGINS = with(SENSOR_ORIGINS,
+            "com.google.android.gms");                // Play 서비스 Sleep API
 
-    /**
-     * 수면 기록의 신뢰 writer. 걸음·거리보다 <b>넓다</b> — 수면은 Health Connect 플랫폼 자신과
-     * Play 서비스의 Sleep API 도 기록자로 올라오기 때문이다. 목록 밖 출처는 AUTO 로 적혀 있어도
-     * 판정에 쓰지 않는다(스펙 §5-1 「신뢰 가능한 Health Connect 수면 기록만 사용」).
-     */
-    private static final List<String> DEFAULT_TRUSTED_SLEEP_ORIGINS = List.of(
-            "com.sec.android.app.shealth",          // 삼성헬스
-            "com.google.android.apps.fitness",      // 구글 피트니스
-            "com.google.android.apps.healthdata",   // Health Connect 플랫폼
-            "com.google.android.gms");              // Play 서비스 Sleep API
+    private static List<String> with(List<String> base, String... more) {
+        List<String> all = new java.util.ArrayList<>(base);
+        all.addAll(List.of(more));
+        return List.copyOf(all);
+    }
 
     private final RoutineCatalog catalog;
     private final com.ruleup.ruleup_backend.verification.config.VerificationProperties properties;
