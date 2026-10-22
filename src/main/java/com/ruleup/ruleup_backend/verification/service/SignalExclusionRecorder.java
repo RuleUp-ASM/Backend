@@ -70,7 +70,32 @@ public class SignalExclusionRecorder {
     public void recordEvaluationHygiene(UUID userId, UUID verificationDailyId,
                                         VerificationMethod method, Map<String, Object> evidence,
                                         Instant at) {
+        List<String> untrusted = untrustedOrigins(evidence);
+        if (!untrusted.isEmpty()) {
+            // 신뢰 목록에 없는 기록 앱. 실제 센서 기록인데 목록이 모르는 것일 수 있다 — Health Connect 가
+            // 폰에서 직접 센 걸음이 이렇게 빠져 기상이 매일 실패했다(2026-10-21·22). 새 출처를 알아채는 자리다.
+            log.warn("health_origin_untrusted method={} origins={} verificationId={}",
+                    method, untrusted, verificationDailyId);
+        }
         save(hygieneRows(userId, verificationDailyId, method, evidence, at));
+    }
+
+    /**
+     * evidence 의 {@code rejectedOrigins} 중 목록 밖이라 빠진 출처 이름. 끝의 기기별 해시는 {@code *} 로 접는다 —
+     * 기기 식별자를 로그에 남기지 않고, 같은 출처가 기기마다 다른 줄로 흩어지지 않게 한다.
+     */
+    @SuppressWarnings("unchecked")
+    static List<String> untrustedOrigins(Map<String, Object> evidence) {
+        if (evidence == null || !(evidence.get("rejectedOrigins") instanceof List<?> list)) return List.of();
+        java.util.Set<String> out = new java.util.TreeSet<>();
+        for (Object item : (List<Object>) list) {
+            if (item == null) continue;
+            String text = item.toString();
+            int sep = text.lastIndexOf(':');
+            if (sep < 0 || !"UNTRUSTED_ORIGIN".equals(text.substring(sep + 1))) continue;
+            out.add(text.substring(0, sep).replaceAll("\\.[0-9A-Za-z]{20,}$", ".*"));
+        }
+        return List.copyOf(out);
     }
 
     /**
