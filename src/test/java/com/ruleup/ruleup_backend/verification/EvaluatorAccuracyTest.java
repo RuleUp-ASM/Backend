@@ -64,10 +64,13 @@ class EvaluatorAccuracyTest {
     }
 
     private VerificationConfig wakeConfig(String beforeTime) {
+        return wakeConfig(beforeTime, List.of("com.sec.android.app.shealth"));
+    }
+
+    private VerificationConfig wakeConfig(String beforeTime, List<String> trustedOrigins) {
         return new VerificationConfig(ScheduleType.FIXED_DAYS, null, MethodCombine.AND,
                 List.of(VerificationMethod.WAKE), null, null, null,
-                new WakeConfig(beforeTime, 30, 10, List.of("com.sec.android.app.shealth"),
-                        Polarity.ACHIEVEMENT, 1), null, List.of());
+                new WakeConfig(beforeTime, 30, 10, trustedOrigins, Polarity.ACHIEVEMENT, 1), null, List.of());
     }
 
     private VerificationConfig sleepConfig(BigDecimal minHours) {
@@ -292,6 +295,52 @@ class EvaluatorAccuracyTest {
         }
 
         @Test
+        @DisplayName("Health Connect 가 폰에서 직접 센 걸음도 기상 근거다 — 출처 끝의 기기별 해시는 접두사로 인정한다")
+        void healthConnectPhoneStepsCount() {
+            // 2026-10-22 prod 실측: 07:02 의 16걸음이 이 출처로 왔는데 목록에 없어 0걸음으로 실패했다.
+            HealthOrigin hcPhone = new HealthOrigin(
+                    "com.android.healthconnect.phone.0a1b2c3d4e5f60718293a4b5c6d7e8f9", "AUTO", null);
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(wakeConfig("07:00",
+                    List.of("com.sec.android.app.shealth", "com.android.healthconnect.phone.*")),
+                    List.of(steps(16, at(7, 2), at(7, 3), hcPhone)), List.of(), at(9, 0)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.evidence()).containsEntry("value", 16L).doesNotContainKey("rejectedOrigins");
+        }
+
+        @Test
+        @DisplayName("접두사가 아닌 항목은 여전히 정확히 같은 출처만 인정한다")
+        void exactEntriesStayExact() {
+            HealthOrigin lookalike = new HealthOrigin("com.sec.android.app.shealth.fake", "AUTO", null);
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(wakeConfig("07:00",
+                    List.of("com.sec.android.app.shealth", "com.android.healthconnect.phone.*")),
+                    List.of(steps(100, at(7, 2), at(7, 3), lookalike)), List.of(), at(9, 0)));
+
+            assertThat(outcome.status()).isNotEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.evidence()).containsEntry("value", 0L);
+        }
+
+        @Test
+        @DisplayName("창 안에 걸었는데 출처 때문에 전부 빠졌으면 늦잠이 아니라 「인정되지 않는 출처」다")
+        void untrustedStepsInsideWindowAreNotLateWakeUp() {
+            HealthOrigin unknownApp = new HealthOrigin("com.example.steps", "AUTO", null);
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(
+                    wakeConfig("07:00"), List.of(steps(40, at(7, 2), at(7, 5), unknownApp)), List.of(), at(9, 0)));
+
+            assertThat(outcome.failureReason()).isEqualTo("UNTRUSTED_HEALTH_SOURCE");
+        }
+
+        @Test
+        @DisplayName("출처 밖 기록이 창 밖에만 있으면 그대로 늦잠이다")
+        void untrustedStepsOutsideWindowStayLate() {
+            HealthOrigin unknownApp = new HealthOrigin("com.example.steps", "AUTO", null);
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(
+                    wakeConfig("07:00"), List.of(steps(40, at(8, 0), at(8, 5), unknownApp)), List.of(), at(9, 0)));
+
+            assertThat(outcome.failureReason()).isEqualTo("WOKE_UP_LATE");
+        }
+
+        @Test
         @DisplayName("창이 열려 있고 아직 걸음이 없으면 기다린다")
         void waitsWhileWindowOpen() {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
@@ -388,6 +437,20 @@ class EvaluatorAccuracyTest {
             assertThat(evaluator.evaluate(ctx(
                     sleepConfig(new BigDecimal("7"), allow),
                     List.of(sleep(at(23, 0), at(23, 0).plusSeconds(8 * 3600), TRUSTED)),
+                    List.of(), now)).status())
+                    .isEqualTo(VerificationStatus.SUCCESS);
+        }
+
+        @Test
+        @DisplayName("Health Connect 가 폰에서 직접 쓴 수면 기록도 접두사 항목으로 인정된다")
+        void healthConnectPhoneSleepIsTrustedByPrefix() {
+            Instant now = at(23, 0).plusSeconds(10 * 3600);
+            HealthOrigin hcPhone = new HealthOrigin(
+                    "com.android.healthconnect.phone.0a1b2c3d4e5f60718293a4b5c6d7e8f9", "AUTO", "PHONE");
+
+            assertThat(evaluator.evaluate(ctx(
+                    sleepConfig(new BigDecimal("7"), List.of("com.android.healthconnect.phone.*")),
+                    List.of(sleep(at(23, 0), at(23, 0).plusSeconds(8 * 3600), hcPhone)),
                     List.of(), now)).status())
                     .isEqualTo(VerificationStatus.SUCCESS);
         }
