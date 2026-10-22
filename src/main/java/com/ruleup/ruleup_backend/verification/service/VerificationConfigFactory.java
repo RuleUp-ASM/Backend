@@ -39,6 +39,9 @@ public class VerificationConfigFactory {
             "com.sec.android.app.shealth",          // 삼성헬스
             "com.google.android.apps.fitness",      // 구글 피트니스
             "com.google.android.apps.healthdata",   // Health Connect 플랫폼
+            // Health Connect 가 폰 센서로 직접 센 걸음. 끝에 기기별 해시가 붙는다(….phone.<해시>).
+            // 빠져 있던 동안 삼성헬스 없이 이 출처만 쓰는 폰은 걸어도 0걸음으로 실패했다(2026-10-21·22 prod).
+            "com.android.healthconnect.phone.*",
             "android");                             // 기기 자체 걸음 센서
 
     /**

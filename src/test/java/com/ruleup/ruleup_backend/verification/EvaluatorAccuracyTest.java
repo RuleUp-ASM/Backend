@@ -64,10 +64,13 @@ class EvaluatorAccuracyTest {
     }
 
     private VerificationConfig wakeConfig(String beforeTime) {
+        return wakeConfig(beforeTime, List.of("com.sec.android.app.shealth"));
+    }
+
+    private VerificationConfig wakeConfig(String beforeTime, List<String> trustedOrigins) {
         return new VerificationConfig(ScheduleType.FIXED_DAYS, null, MethodCombine.AND,
                 List.of(VerificationMethod.WAKE), null, null, null,
-                new WakeConfig(beforeTime, 30, 10, List.of("com.sec.android.app.shealth"),
-                        Polarity.ACHIEVEMENT, 1), null, List.of());
+                new WakeConfig(beforeTime, 30, 10, trustedOrigins, Polarity.ACHIEVEMENT, 1), null, List.of());
     }
 
     private VerificationConfig sleepConfig(BigDecimal minHours) {
@@ -289,6 +292,32 @@ class EvaluatorAccuracyTest {
 
             assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
             assertThat(outcome.evidence()).containsEntry("value", 24L);
+        }
+
+        @Test
+        @DisplayName("Health Connect 가 폰에서 직접 센 걸음도 기상 근거다 — 출처 끝의 기기별 해시는 접두사로 인정한다")
+        void healthConnectPhoneStepsCount() {
+            // 2026-10-22 prod 실측: 07:02 의 16걸음이 이 출처로 왔는데 목록에 없어 0걸음으로 실패했다.
+            HealthOrigin hcPhone = new HealthOrigin(
+                    "com.android.healthconnect.phone.0a1b2c3d4e5f60718293a4b5c6d7e8f9", "AUTO", null);
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(wakeConfig("07:00",
+                    List.of("com.sec.android.app.shealth", "com.android.healthconnect.phone.*")),
+                    List.of(steps(16, at(7, 2), at(7, 3), hcPhone)), List.of(), at(9, 0)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.evidence()).containsEntry("value", 16L).doesNotContainKey("rejectedOrigins");
+        }
+
+        @Test
+        @DisplayName("접두사가 아닌 항목은 여전히 정확히 같은 출처만 인정한다")
+        void exactEntriesStayExact() {
+            HealthOrigin lookalike = new HealthOrigin("com.sec.android.app.shealth.fake", "AUTO", null);
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(wakeConfig("07:00",
+                    List.of("com.sec.android.app.shealth", "com.android.healthconnect.phone.*")),
+                    List.of(steps(100, at(7, 2), at(7, 3), lookalike)), List.of(), at(9, 0)));
+
+            assertThat(outcome.status()).isNotEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.evidence()).containsEntry("value", 0L);
         }
 
         @Test

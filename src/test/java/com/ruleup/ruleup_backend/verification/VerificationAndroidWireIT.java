@@ -219,6 +219,32 @@ class VerificationAndroidWireIT extends VerificationApiSupport {
     }
 
     @Test
+    @DisplayName("기상 — Health Connect 가 폰에서 직접 센 걸음(출처 끝에 기기별 해시)으로도 인증된다")
+    void wakeWithHealthConnectPhoneSteps() throws Exception {
+        Member me = member(uniq("wire-wake-hc"));
+        UUID ch = insertAutoChallenge(me.id(), "WAKE", "HC_RECORD", "{\"target_time\":\"07:00\"}");
+        UUID memberId = insertReadyMember(ch, me.id(), null, null);
+
+        // 2026-10-22 prod 에서 받은 모양 그대로 — 출처가 목록에 없어 16걸음이 0걸음으로 셈해졌다.
+        Map<String, Object> reading = new LinkedHashMap<>();
+        reading.put("recordId", "hc-wake-phone-1");
+        reading.put("value", 16.0);
+        reading.put("startTime", todayAt(7, 2).toEpochMilli());
+        reading.put("endTime", todayAt(7, 3).toEpochMilli());
+        reading.put("recordingMethod", "AUTO");
+        reading.put("originPackage", "com.android.healthconnect.phone.0a1b2c3d4e5f60718293a4b5c6d7e8f9");
+        Map<String, Object> signal = new LinkedHashMap<>();
+        signal.put("type", "HEALTH");
+        signal.put("date", java.time.LocalDate.now(KST).toString());
+        signal.put("metric", "STEPS");
+        signal.put("readings", List.of(reading));
+
+        sync(me.token(), List.of(signal));
+
+        assertThat(todayStatusOf(memberId)).isEqualTo("SUCCESS");
+    }
+
+    @Test
     @DisplayName("측위 fallback — 앱 형식(epoch millis) 좌표로 체류가 쌓여 인증된다")
     void locationFallbackWithEpochMillis() throws Exception {
         Member me = member(uniq("wire-loc"));
