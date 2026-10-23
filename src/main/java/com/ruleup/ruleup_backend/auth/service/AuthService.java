@@ -96,6 +96,7 @@ public class AuthService {
     private final com.ruleup.ruleup_backend.applink.InstallReferrerInvitation installReferrerInvitation;
     private final com.ruleup.ruleup_backend.notification.service.NotificationPublisher notificationPublisher;
     private final com.ruleup.ruleup_backend.observability.BusinessMetrics businessMetrics;
+    private final com.ruleup.ruleup_backend.observability.ops.SignupSlackAlert signupSlackAlert;
 
     // ===== OAuth 로그인 =====
     // ⚠️ 일부러 @Transactional 을 붙이지 않는다.
@@ -185,7 +186,10 @@ public class AuthService {
         // 정지 계정 복귀는 복원이 커밋돼도 응답이 403 이라 실패로 센다 — 사용자는 들어오지 못했다.
         try {
             SignupResponse res = completeSignup(req);
-            if (res.isNewUser() || res.restored()) businessMetrics.signupSucceeded();
+            if (res.isNewUser() || res.restored()) {
+                businessMetrics.signupSucceeded();
+                signupSlackAlert.signedUp(res.user().id(), res.user().provider(), res.restored());
+            }
             return res;
         } catch (RuntimeException e) {
             businessMetrics.signupFailed();
