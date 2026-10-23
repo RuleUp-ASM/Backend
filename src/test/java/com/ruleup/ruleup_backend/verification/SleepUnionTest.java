@@ -64,7 +64,7 @@ class SleepUnionTest {
     private EvaluationOutcome evaluate(BigDecimal goalHours, Instant now, SyncSignal... signals) {
         VerificationConfig config = new VerificationConfig(ScheduleType.FIXED_DAYS, null,
                 MethodCombine.AND, List.of(VerificationMethod.SLEEP), null, null, null, null,
-                new SleepConfig(null, goalHours, Polarity.ACHIEVEMENT, 12, List.of(TRUSTED_ORIGIN), 60, 100, List.of()),
+                new SleepConfig(null, goalHours, Polarity.ACHIEVEMENT, 12, List.of(TRUSTED_ORIGIN), 60, 30),
                 List.of());
         return evaluator.evaluate(new DayContext(NIGHT, KST, now, config,
                 List.of(signals), List.of(), List.of(), "member"));
