@@ -603,7 +603,8 @@ public class VerificationSyncService {
                 .findByVerificationDailyIdAndMethod(daily.getId(), method.name()).orElse(null);
 
         // 신호는 도착 시각이 아니라 발생 시각으로 귀속한다 — 한 배치에 어제치와 오늘치가 섞여 온다.
-        List<SyncSignal> ofDay = DaySignals.forDate(signals, today, KST);
+        List<SyncSignal> ofDay = (method == VerificationMethod.SLEEP)
+                ? DaySignals.forNight(signals, today, KST) : DaySignals.forDate(signals, today, KST);
 
         /*
          * 판정을 막고 있는 것이 「사용자가 덜 한 것」이 아니라 「서버가 잴 수 없는 것」인가.
