@@ -27,7 +27,7 @@ public record FailureEvidence(String summary,
      * 숫자가 들어간다 — 기록하지 않는 타입은 기준값 없이 사유 코드만 남는다.
      */
     private static final List<String> EXPECTED_KEYS = List.of(
-            "goal", "goalKm", "goalMinutes", "beforeTime", "deadline", "bedtimeBefore", "graceMinutes",
+            "goal", "goalKm", "goalMinutes", "beforeTime", "windowStart", "deadline", "bedtimeBefore", "graceMinutes",
             "unit", "metric", "mode");
 
     /** 실제 측정값 키. 나머지(내부 이월 상태·중복 제거 키)는 설명에 쓰지 않는다. */
@@ -58,7 +58,8 @@ public record FailureEvidence(String summary,
             case "INSUFFICIENT_USAGE" -> pair(ev, "사용", "usageMinutes", "분", "goalMinutes", "분");
             case "USAGE_EXCEEDED" -> limit(ev, "사용", "usageMinutes", "goalMinutes");
             case "WOKE_UP_LATE" -> wake(ev);
-            case "SLEPT_LATE" -> before(ev, "취침", "bedtime", "bedtimeBefore");
+            // 마감은 목표 + 유예다 — 목표 시각만 보여 주면 「23:10 에 잤는데 왜 23:00 이전이 아니라고?」가 된다.
+            case "SLEPT_LATE" -> before(ev, "취침", "bedtime", ev != null && ev.containsKey("deadline") ? "deadline" : "bedtimeBefore");
             case "INSUFFICIENT_SLEEP" -> pair(ev, "수면", "sleepHours", "시간", "goal", "시간");
             case "PERMISSION_MISSING" -> "인증에 필요한 권한이 꺼져 있어 측정하지 못했어요.";
             case "NO_SIGNAL_RECEIVED" -> "판정에 쓸 신호가 도착하지 않았어요.";
@@ -98,13 +99,15 @@ public record FailureEvidence(String summary,
         return "%s %s분 / 상한 %s분".formatted(label, actual, goal);
     }
 
-    /** 「07:30까지 걸음 3걸음 / 목표 10걸음」 — 기상은 목표 시각 + 유예 안에 걸었는지로 본다. */
+    /** 「06:00~07:30 걸음 3걸음 / 목표 10걸음」 — 기상은 목표 시각 앞뒤 창 안에 걸었는지로 본다. */
     private static String wake(Map<String, Object> ev) {
+        Object opens = value(ev, "windowStart");
         Object deadline = value(ev, "deadline");
         Object steps = value(ev, "value");
         Object goal = value(ev, "goal");
         if (deadline == null || steps == null || goal == null) return null;
-        return "%s까지 걸음 %s걸음 / 목표 %s걸음".formatted(deadline, steps, goal);
+        String window = (opens != null) ? opens + "~" + deadline + " " : deadline + "까지 ";
+        return "%s걸음 %s걸음 / 목표 %s걸음".formatted(window, steps, goal);
     }
 
     /** 「취침 01:20 / 목표 00:00 이전」. */

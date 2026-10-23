@@ -93,7 +93,7 @@ public class VerificationConfigFactory {
         switch (tag) {
             case "WAKE" -> wake = new WakeConfig(
                     timeParam(params, "target_time", "07:00"),
-                    properties.wakeGraceMinutes(), properties.wakeMinSteps(),
+                    properties.wakeLeadMinutes(), properties.wakeGraceMinutes(), properties.wakeMinSteps(),
                     DEFAULT_TRUSTED_WAKE_ORIGINS, Polarity.ACHIEVEMENT, 1);
             case "SCREEN_TIME_MIN" -> screenTime = new ScreenTimeConfig(
                     ScreenTimeMode.MIN, Polarity.ACHIEVEMENT,
@@ -107,7 +107,8 @@ public class VerificationConfigFactory {
             case "SLEEP" -> sleep = new SleepConfig(
                     timeParamOrNull(params, "bedtime_before"),
                     decimalParamOrNull(params, "sleep_hours"),
-                    Polarity.ACHIEVEMENT, 12, DEFAULT_TRUSTED_SLEEP_ORIGINS);
+                    Polarity.ACHIEVEMENT, 12, DEFAULT_TRUSTED_SLEEP_ORIGINS,
+                    properties.bedtimeLeadMinutes(), properties.bedtimeGraceMinutes());
             default -> { /* SELF_CHECK: 수동 — 자동 신호 설정 없음 */ }
         }
 

@@ -15,7 +15,9 @@ import java.util.*;
 /**
  * SLEEP 평가기 (§2.17) — 도달형. 익일 아침 도착 세그먼트로 판정.
  *  - 자정 넘김 귀속: start가 18:00~익일06:00이면 그 "저녁의 날짜"에 귀속 → targetDate 밤 세그먼트만 본다.
- *  - 판정: bedtimeBefore("HH:mm") → 취침(첫 start) ≤ 목표 / minSleepHours → 수면합 ≥ 목표.
+ *  - 판정: bedtimeBefore("HH:mm") → [목표 - lead, 목표 + grace] 창 안에 잠들었는가 / minSleepHours → 수면합 ≥ 목표.
+ *    창보다 일찍 잠든 덩어리는 목표 시각에도 이어서 자고 있어야 인정한다 — 저녁 낮잠이 그 밤의 취침이 되면
+ *    낮잠 뒤 새벽까지 깨어 있어도 성공한다.
  *  - 데이터는 회고적(밤은 이미 끝남)이라 세그먼트 도착 시 확정(SUCCESS/FAILED), 없으면 PENDING.
  */
 @Component
@@ -102,9 +104,20 @@ public class SleepEvaluator implements MethodEvaluator {
 
         // bedtimeBefore 판정(우선) → SLEPT_LATE
         if (cfg.bedtimeBefore() != null && bedtime != null) {
-            Instant threshold = bedtimeThreshold(cfg.bedtimeBefore(), ctx.targetDate(), zone);
+            Instant target = bedtimeThreshold(cfg.bedtimeBefore(), ctx.targetDate(), zone);
+            Instant opens = target.minus(Duration.ofMinutes(Math.max(cfg.bedtimeLeadMinutes(), 0)));
+            Instant deadline = target.plus(Duration.ofMinutes(Math.max(cfg.bedtimeGraceMinutes(), 0)));
             ev.put("bedtimeBefore", cfg.bedtimeBefore());
-            return bedtime.isAfter(threshold)
+            ev.put("windowStart", LocalTime.ofInstant(opens, zone).format(HHMM));
+            ev.put("deadline", LocalTime.ofInstant(deadline, zone).format(HHMM));
+            Instant fellAsleep = fellAsleep(merged(intervals), opens, target);
+            if (fellAsleep == null) {
+                // 창 전에 깬 잠(낮잠)뿐이다 — 그 밤의 잠은 아직 오지 않았을 수 있어 기다린다.
+                ev.remove("bedtime");
+                return EvaluationOutcome.pending(ev, windowClose);
+            }
+            ev.put("bedtime", fellAsleep.toString());
+            return fellAsleep.isAfter(deadline)
                     ? EvaluationOutcome.violated("SLEPT_LATE", ev, windowClose)
                     : EvaluationOutcome.success(ev, windowClose);
         }
@@ -178,21 +191,42 @@ public class SleepEvaluator implements MethodEvaluator {
      * 정렬이 도착 순서를 지운다.
      */
     private static long unionSeconds(List<Instant[]> intervals) {
-        if (intervals.isEmpty()) return 0;
-        intervals.sort(java.util.Comparator.comparing(i -> i[0]));
         long total = 0;
-        Instant start = intervals.getFirst()[0];
-        Instant end = intervals.getFirst()[1];
-        for (Instant[] next : intervals.subList(1, intervals.size())) {
+        for (Instant[] block : merged(intervals)) total += block[1].getEpochSecond() - block[0].getEpochSecond();
+        return total;
+    }
+
+    /** 이어지거나 겹치는 구간을 하나로 합친 잠 덩어리들(시작 시각 순). */
+    private static List<Instant[]> merged(List<Instant[]> intervals) {
+        List<Instant[]> blocks = new ArrayList<>();
+        if (intervals.isEmpty()) return blocks;
+        List<Instant[]> sorted = new ArrayList<>(intervals);
+        sorted.sort(java.util.Comparator.comparing(i -> i[0]));
+        Instant start = sorted.getFirst()[0];
+        Instant end = sorted.getFirst()[1];
+        for (Instant[] next : sorted.subList(1, sorted.size())) {
             if (next[0].isAfter(end)) {                 // 끊긴 구간 — 앞 묶음을 닫는다
-                total += end.getEpochSecond() - start.getEpochSecond();
+                blocks.add(new Instant[]{start, end});
                 start = next[0];
                 end = next[1];
             } else if (next[1].isAfter(end)) {          // 겹치거나 맞닿음 — 끝만 늘린다
                 end = next[1];
             }                                           // 완전히 포함되면 버릴 것이 없다
         }
-        return total + (end.getEpochSecond() - start.getEpochSecond());
+        blocks.add(new Instant[]{start, end});
+        return blocks;
+    }
+
+    /**
+     * 그 밤에 <b>잠든 시각</b> — 창이 열린 뒤 시작한 덩어리, 또는 창 전에 시작해 목표 시각에도 자고 있던
+     * 덩어리 중 가장 이른 시작. 창 전에 시작해 목표 시각 전에 깬 덩어리(저녁 낮잠)는 취침이 아니다.
+     * 일찍 잠들어 그대로 잔 사람은 목표를 지킨 것이라 실패시키지 않는다. 해당 덩어리가 없으면 null.
+     */
+    private static Instant fellAsleep(List<Instant[]> blocks, Instant opens, Instant target) {
+        for (Instant[] block : blocks) {                // 시작 시각 순이라 처음 맞는 것이 가장 이르다
+            if (!block[0].isBefore(opens) || block[1].isAfter(target)) return block[0];
+        }
+        return null;
     }
 
     /**
@@ -206,6 +240,9 @@ public class SleepEvaluator implements MethodEvaluator {
     }
 
     /** 기기 시계가 조금 빠른 경우까지 미래로 몰지 않기 위한 허용치. */
+    private static final java.time.format.DateTimeFormatter HHMM =
+            java.time.format.DateTimeFormatter.ofPattern("HH:mm");
+
     private static final Duration CLOCK_SKEW =
             Duration.ofSeconds(com.ruleup.ruleup_backend.common.ClockSkew.TOLERANCE_SECONDS);
 
