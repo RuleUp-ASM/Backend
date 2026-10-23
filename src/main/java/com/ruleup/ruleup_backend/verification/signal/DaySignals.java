@@ -37,6 +37,19 @@ public final class DaySignals {
         return out;
     }
 
+    /**
+     * 수면 판정용 — targetDate 신호에 <b>다음 날 걸음</b>을 더한다. 취침 창은 자정을 넘을 수 있어(00:00 목표면
+     * 00:00~01:00) 그 걸음이 다음 날로 귀속된다. 평가기가 걸음 기록을 창 시각으로 다시 자르므로 하루를 더 넘겨도
+     * 창 밖 걸음이 판정에 섞이지 않는다.
+     */
+    public static List<SyncSignal> forNight(List<SyncSignal> signals, LocalDate targetDate, ZoneId zone) {
+        List<SyncSignal> out = new ArrayList<>(forDate(signals, targetDate, zone));
+        for (SyncSignal s : forDate(signals, targetDate.plusDays(1), zone)) {
+            if (SignalType.HEALTH.name().equals(s.type())) out.add(s);
+        }
+        return out;
+    }
+
     private static SyncSignal narrow(SyncSignal s, LocalDate targetDate, Instant from, Instant until) {
         if (s == null || s.type() == null) return null;
 

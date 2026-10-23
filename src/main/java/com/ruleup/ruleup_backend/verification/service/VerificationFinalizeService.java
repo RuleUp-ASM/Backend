@@ -538,8 +538,9 @@ public class VerificationFinalizeService {
         if (evaluator == null || member == null) return null;
 
         LocalDate targetDate = daily.getTargetDate();
-        List<SyncSignal> ofDay = DaySignals.forDate(
-                signalReader.forDay(daily.getUserId(), targetDate), targetDate, KST);
+        List<SyncSignal> raw = signalReader.forDay(daily.getUserId(), targetDate);
+        List<SyncSignal> ofDay = (method == VerificationMethod.SLEEP)
+                ? DaySignals.forNight(raw, targetDate, KST) : DaySignals.forDate(raw, targetDate, KST);
 
         VerificationMethodResult mr = methodResultRepo
                 .findByVerificationDailyIdAndMethod(daily.getId(), method.name())

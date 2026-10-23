@@ -57,7 +57,8 @@ class RoutineCatalogSeedIT {
             "WAKE", Set.of("android.permission.health.READ_STEPS"),
             "HEALTH", Set.of("android.permission.health.READ_STEPS",
                              "android.permission.health.READ_DISTANCE"),
-            "SLEEP", Set.of("android.permission.health.READ_SLEEP"));
+            // 취침 시각은 걸음(V19), 수면 시간은 수면 기록으로 본다.
+            "SLEEP", Set.of("android.permission.health.READ_SLEEP", "android.permission.health.READ_STEPS"));
 
     @Autowired RoutineTemplateRepository templateRepository;
 
