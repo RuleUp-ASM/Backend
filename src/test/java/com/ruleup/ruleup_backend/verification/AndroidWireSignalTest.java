@@ -94,11 +94,11 @@ class AndroidWireSignalTest {
         Instant morning = Instant.ofEpochMilli(millis(18, 8, 0));
         VerificationConfig config = new VerificationConfig(ScheduleType.FIXED_DAYS, null,
                 MethodCombine.AND, List.of(VerificationMethod.SLEEP), null, null, null, null,
-                new SleepConfig(null, BigDecimal.valueOf(7), Polarity.ACHIEVEMENT, 12, List.of(SHEALTH)),
+                new SleepConfig(null, BigDecimal.valueOf(7), Polarity.ACHIEVEMENT, 12, List.of(SHEALTH), 60, 30),
                 List.of());
         EvaluationOutcome outcome = new SleepEvaluator(
                 new com.ruleup.ruleup_backend.verification.config.VerificationProperties(
-                        null, null, null, null, null, null, null, null, null, false, false, null, null))
+                        null, null, null, null, null, null, null, null, null, false, false, null, null, null, null, null))
                 .evaluate(new DayContext(LocalDate.of(2026, 9, 17), KST, morning, config,
                         List.of(wire.withReceivedAt(morning)), List.of(), List.of(), "member"));
 

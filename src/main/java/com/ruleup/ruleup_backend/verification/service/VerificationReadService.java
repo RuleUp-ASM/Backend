@@ -196,12 +196,18 @@ public class VerificationReadService {
             case GPS_PRESENCE -> (config.gps() != null) ? config.gps().timeWindow() : null;
             case SCREEN_TIME -> (config.screenTime() != null) ? config.screenTime().timeWindow() : null;
             case WAKE -> (config.wake() != null && config.wake().beforeTime() != null)
-                    ? "~" + java.time.LocalTime.parse(config.wake().beforeTime())
-                            .plusMinutes(config.wake().graceMinutes()) : null;
+                    ? around(config.wake().beforeTime(), config.wake().leadMinutes(), config.wake().graceMinutes()) : null;
             case SLEEP -> (config.sleep() != null && config.sleep().bedtimeBefore() != null)
-                    ? "~" + config.sleep().bedtimeBefore() : null;
+                    ? around(config.sleep().bedtimeBefore(), config.sleep().bedtimeLeadMinutes(),
+                            config.sleep().bedtimeGraceMinutes()) : null;
             default -> null;
         };
+    }
+
+    /** 목표 시각 앞뒤 창 「06:00~07:30」 — 판정기가 보는 창과 같은 값으로 만든다. */
+    private static String around(String hhmm, int leadMinutes, int graceMinutes) {
+        java.time.LocalTime t = java.time.LocalTime.parse(hhmm);
+        return t.minusMinutes(Math.max(leadMinutes, 0)) + "~" + t.plusMinutes(Math.max(graceMinutes, 0));
     }
 
     /** 아직 확인하지 않은 종결 판정 — 클라는 이게 있으면 결과 모달을 띄우고 ack 를 호출한다. */

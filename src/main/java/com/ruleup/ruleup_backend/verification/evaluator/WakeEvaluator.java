@@ -17,7 +17,8 @@ import java.util.*;
  * WAKE(기상) 평가기 — 도달형(§2.6, §2.11). <b>일어나서 걸었는가</b>로 본다.
  *  - 신호: HEALTH 의 STEPS 기록(Health Connect StepsRecord). 구간(startTime~endTime)이 있는 기록만 쓴다 —
  *    「언제 걸었는지」가 판정의 전부라, 구간 없는 하루 누적값은 근거가 되지 못한다.
- *  - 창: [하루 시작, beforeTime + graceMinutes]. 창에 걸친 기록은 겹친 비율만큼만 센다.
+ *  - 창: [beforeTime - leadMinutes, beforeTime + graceMinutes] — 07:00 목표면 06:00~07:30.
+ *    하루 시작(00:00)부터 보면 새벽에 잠깐 깨서 걸은 걸음이 기상이 된다. 창에 걸친 기록은 겹친 비율만큼만 센다.
  *  - 판정: 창 안 걸음 ≥ minSteps → SUCCESS / 창 닫힘·미달 → FAILED(WOKE_UP_LATE) / 그 외 → PENDING.
  *  - 출처 게이트는 움직임(HEALTH)과 같다 — 손입력·신뢰 밖 출처는 뺀다. 폰과 워치가 같은 걸음을 각자
  *    기록하면 겹친 구간은 한 번만 센다.
@@ -39,8 +40,9 @@ public class WakeEvaluator implements MethodEvaluator {
         }
 
         Instant target = TimeWindows.atTime(ctx.targetDate(), cfg.beforeTime(), ctx.zone());
+        Instant windowOpens = target.minusSeconds(60L * Math.max(cfg.leadMinutes(), 0));
         Instant windowCloses = target.plusSeconds(60L * Math.max(cfg.graceMinutes(), 0));
-        Window window = new Window(TimeWindows.startOfDay(ctx.targetDate(), ctx.zone()), windowCloses);
+        Window window = new Window(windowOpens, windowCloses);
 
         Set<String> rejected = new LinkedHashSet<>();
         boolean[] rejectedInWindow = {false};
@@ -48,7 +50,9 @@ public class WakeEvaluator implements MethodEvaluator {
 
         Map<String, Object> evidence = new HashMap<>();
         evidence.put("beforeTime", cfg.beforeTime());
+        evidence.put("leadMinutes", cfg.leadMinutes());
         evidence.put("graceMinutes", cfg.graceMinutes());
+        evidence.put("windowStart", LocalTime.ofInstant(windowOpens, ctx.zone()).format(HHMM));
         evidence.put("deadline", LocalTime.ofInstant(windowCloses, ctx.zone()).format(HHMM));
         evidence.put("metric", HealthMetric.STEPS.name());
         evidence.put("unit", "count");
