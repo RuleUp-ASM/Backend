@@ -34,7 +34,7 @@ class SleepUnionTest {
 
     private final SleepEvaluator evaluator = new SleepEvaluator(
             new com.ruleup.ruleup_backend.verification.config.VerificationProperties(
-                    null, null, null, null, null, null, null, null, null, false, false, null, null));
+                    null, null, null, null, null, null, null, null, null, false, false, null, null, null, null, null));
 
     private static Instant at(int day, int hour, int minute) {
         return LocalDate.of(2026, 9, day).atTime(hour, minute).atZone(KST).toInstant();
@@ -64,7 +64,7 @@ class SleepUnionTest {
     private EvaluationOutcome evaluate(BigDecimal goalHours, Instant now, SyncSignal... signals) {
         VerificationConfig config = new VerificationConfig(ScheduleType.FIXED_DAYS, null,
                 MethodCombine.AND, List.of(VerificationMethod.SLEEP), null, null, null, null,
-                new SleepConfig(null, goalHours, Polarity.ACHIEVEMENT, 12, List.of(TRUSTED_ORIGIN)),
+                new SleepConfig(null, goalHours, Polarity.ACHIEVEMENT, 12, List.of(TRUSTED_ORIGIN), 60, 30),
                 List.of());
         return evaluator.evaluate(new DayContext(NIGHT, KST, now, config,
                 List.of(signals), List.of(), List.of(), "member"));

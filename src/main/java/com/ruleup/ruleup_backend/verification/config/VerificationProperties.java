@@ -13,6 +13,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param syncBacklogMinIntervalSec 복구 전송(backlog=true) 최소 간격(초). 밀린 구간을 나눠 올려야 해서 더 짧다
  * @param wakeGraceMinutes 기상 판정에서 목표 시각 뒤로 걸음을 더 기다리는 시간(분). 일어나 바로 걷지 않거나
  *                          걸음 기록이 조금 늦게 잡혀도 인정한다. 기본 30
+ * @param wakeLeadMinutes  기상 판정에서 목표 시각 <b>앞</b>으로 걸음을 보는 시간(분). 예전에는 하루 시작(00:00)부터
+ *                          봐서 새벽에 화장실 다녀온 걸음도 기상으로 잡혔다. 기본 60 — 07:00 목표면 06:00~07:30
+ * @param bedtimeLeadMinutes  취침 판정에서 목표 시각 앞으로 잠든 시각을 보는 시간(분). 그보다 이른 잠은 목표 시각에도
+ *                          이어서 자고 있어야 인정한다 — 저녁 낮잠이 그 밤의 취침이 되지 않게 한다. 기본 60
+ * @param bedtimeGraceMinutes 취침 목표 시각 뒤로 잠든 것을 더 인정하는 시간(분). 기본 30 — 23:00 목표면 23:30 까지
  * @param wakeMinSteps      기상으로 인정할 걸음 수(창 안 합계). 휴대폰을 집어 드는 정도의 오탐 걸음과
  *                          실제로 일어나 움직인 것을 가르는 문턱이라 실기기 테스트로 찾는다. 기본 10
  * @param signalRetentionDays 판정 원본을 유지할 <b>일수</b>. raw 는 현재 귀속일과 직전 유예
@@ -63,7 +68,9 @@ public record VerificationProperties(Integer geofenceRadiusM, Integer maxPayload
                                      Integer gpsRetentionDays, Integer anomalyRetentionDays,
                                      Integer materializeCatchupDays,
                                      Boolean requireActiveDevice, Boolean requireSignalOrigin,
-                                     Integer wakeGraceMinutes, Integer wakeMinSteps) {
+                                     Integer wakeGraceMinutes, Integer wakeMinSteps,
+                                     Integer wakeLeadMinutes, Integer bedtimeLeadMinutes,
+                                     Integer bedtimeGraceMinutes) {
 
     private static final int DEFAULT_GEOFENCE_RADIUS_M = 200;
     private static final int DEFAULT_MAX_PAYLOAD_BYTES = 1_048_576;
@@ -76,6 +83,9 @@ public record VerificationProperties(Integer geofenceRadiusM, Integer maxPayload
     private static final int DEFAULT_MATERIALIZE_CATCHUP_DAYS = 7;
     private static final int DEFAULT_WAKE_GRACE_MINUTES = 30;
     private static final int DEFAULT_WAKE_MIN_STEPS = 10;
+    private static final int DEFAULT_WAKE_LEAD_MINUTES = 60;
+    private static final int DEFAULT_BEDTIME_LEAD_MINUTES = 60;
+    private static final int DEFAULT_BEDTIME_GRACE_MINUTES = 30;
 
     public VerificationProperties {
         geofenceRadiusM = positiveOrDefault(geofenceRadiusM, DEFAULT_GEOFENCE_RADIUS_M);
@@ -105,6 +115,10 @@ public record VerificationProperties(Integer geofenceRadiusM, Integer maxPayload
         // 0 은 「목표 시각까지만」이라는 유효한 값이다.
         wakeGraceMinutes = nonNegativeOrDefault(wakeGraceMinutes, DEFAULT_WAKE_GRACE_MINUTES);
         wakeMinSteps = positiveOrDefault(wakeMinSteps, DEFAULT_WAKE_MIN_STEPS);
+        // 앞쪽 창은 0 을 받지 않는다 — 0 이면 목표 시각 전에 일어난 사람이 모두 실패한다.
+        wakeLeadMinutes = positiveOrDefault(wakeLeadMinutes, DEFAULT_WAKE_LEAD_MINUTES);
+        bedtimeLeadMinutes = positiveOrDefault(bedtimeLeadMinutes, DEFAULT_BEDTIME_LEAD_MINUTES);
+        bedtimeGraceMinutes = nonNegativeOrDefault(bedtimeGraceMinutes, DEFAULT_BEDTIME_GRACE_MINUTES);
     }
 
     private static int positiveOrDefault(Integer value, int fallback) {

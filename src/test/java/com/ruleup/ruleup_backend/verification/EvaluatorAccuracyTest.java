@@ -34,13 +34,13 @@ class EvaluatorAccuracyTest {
     /** 게이트 강화를 끈 기본 설정. 나머지 값은 record 가 기본값으로 채운다. */
     private static com.ruleup.ruleup_backend.verification.config.VerificationProperties lenientProperties() {
         return new com.ruleup.ruleup_backend.verification.config.VerificationProperties(
-                null, null, null, null, null, null, null, null, null, false, false, null, null);
+                null, null, null, null, null, null, null, null, null, false, false, null, null, null, null, null);
     }
 
     /** 출처 없는 기록을 거부하는 설정. */
     private static com.ruleup.ruleup_backend.verification.config.VerificationProperties strictOriginProperties() {
         return new com.ruleup.ruleup_backend.verification.config.VerificationProperties(
-                null, null, null, null, null, null, null, null, null, false, true, null, null);
+                null, null, null, null, null, null, null, null, null, false, true, null, null, null, null, null);
     }
 
     private static Instant at(int hour, int minute) {
@@ -70,7 +70,13 @@ class EvaluatorAccuracyTest {
     private VerificationConfig wakeConfig(String beforeTime, List<String> trustedOrigins) {
         return new VerificationConfig(ScheduleType.FIXED_DAYS, null, MethodCombine.AND,
                 List.of(VerificationMethod.WAKE), null, null, null,
-                new WakeConfig(beforeTime, 30, 10, trustedOrigins, Polarity.ACHIEVEMENT, 1), null, List.of());
+                new WakeConfig(beforeTime, 60, 30, 10, trustedOrigins, Polarity.ACHIEVEMENT, 1), null, List.of());
+    }
+
+    private VerificationConfig bedtimeConfig(String bedtimeBefore) {
+        return new VerificationConfig(ScheduleType.FIXED_DAYS, null, MethodCombine.AND,
+                List.of(VerificationMethod.SLEEP), null, null, null, null,
+                new SleepConfig(bedtimeBefore, null, Polarity.ACHIEVEMENT, 12, List.of(), 60, 30), List.of());
     }
 
     private VerificationConfig sleepConfig(BigDecimal minHours) {
@@ -80,7 +86,7 @@ class EvaluatorAccuracyTest {
     private VerificationConfig sleepConfig(BigDecimal minHours, List<String> trustedOrigins) {
         return new VerificationConfig(ScheduleType.FIXED_DAYS, null, MethodCombine.AND,
                 List.of(VerificationMethod.SLEEP), null, null, null, null,
-                new SleepConfig(null, minHours, Polarity.ACHIEVEMENT, 12, trustedOrigins), List.of());
+                new SleepConfig(null, minHours, Polarity.ACHIEVEMENT, 12, trustedOrigins, 60, 30), List.of());
     }
 
     private static SyncSignal geofence(String transition, Instant when, Boolean isMock) {
@@ -227,7 +233,7 @@ class EvaluatorAccuracyTest {
     }
 
     @Nested
-    @DisplayName("기상 — 목표 시각 + 30분 안의 걸음")
+    @DisplayName("기상 — 목표 1시간 전 ~ 30분 후 안의 걸음")
     class WakeBySteps {
 
         private final WakeEvaluator evaluator = new WakeEvaluator();
@@ -341,6 +347,39 @@ class EvaluatorAccuracyTest {
         }
 
         @Test
+        @DisplayName("새벽에 잠깐 깨서 걸은 걸음은 기상이 아니다 — 00:30 화장실 걸음으로 07:00 기상이 성공했다")
+        void nightStepsBeforeWindowAreNotWakingUp() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(
+                    wakeConfig("07:00"), List.of(steps(80, at(0, 30), at(0, 35), WATCH)), List.of(), at(9, 0)));
+
+            assertThat(outcome.status()).isNotEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.failureReason()).isEqualTo("WOKE_UP_LATE");
+            assertThat(outcome.evidence()).containsEntry("value", 0L).containsEntry("windowStart", "06:00");
+            assertThat(FailureEvidence.of("WOKE_UP_LATE", outcome.evidence()).summary())
+                    .contains("06:00~07:30");
+        }
+
+        @Test
+        @DisplayName("목표 1시간 전부터의 걸음은 기상으로 인정한다")
+        void stepsWithinLeadCount() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(
+                    wakeConfig("07:00"), List.of(steps(40, at(6, 10), at(6, 15), WATCH)), List.of(), at(6, 20)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
+        }
+
+        @Test
+        @DisplayName("창 시작에 걸친 기록은 창 안에 든 비율만큼만 센다")
+        void recordStraddlingOpenIsProrated() {
+            // 05:50~06:10 의 16걸음 중 06:00 이후는 절반, 8걸음 — 기준 10걸음에 못 미친다.
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(
+                    wakeConfig("07:00"), List.of(steps(16, at(5, 50), at(6, 10), WATCH)), List.of(), at(9, 0)));
+
+            assertThat(outcome.status()).isNotEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.evidence()).containsEntry("value", 8L);
+        }
+
+        @Test
         @DisplayName("창이 열려 있고 아직 걸음이 없으면 기다린다")
         void waitsWhileWindowOpen() {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
@@ -393,6 +432,80 @@ class EvaluatorAccuracyTest {
 
             assertThat(outcome.failureReason()).isEqualTo("USAGE_EXCEEDED");
             assertThat(outcome.evidence()).containsEntry("usageMinutes", 40L);
+        }
+    }
+
+    @Nested
+    @DisplayName("취침 — 목표 1시간 전 ~ 30분 후 안에 잠들었는가")
+    class BedtimeWindow {
+
+        private final SleepEvaluator evaluator = new SleepEvaluator(lenientProperties());
+        private static final HealthOrigin TRUSTED =
+                new HealthOrigin("com.sec.android.app.shealth", "AUTO", "WATCH");
+        private final Instant nextMorning = at(8, 0).plusSeconds(24 * 3600);
+
+        private Instant nextDay(int hour, int minute) {
+            return at(hour, minute).plusSeconds(24 * 3600);
+        }
+
+        @Test
+        @DisplayName("목표 30분 뒤까지 잠들면 인정한다")
+        void sleepWithinGraceSucceeds() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(bedtimeConfig("23:00"),
+                    List.of(sleep(at(23, 20), nextDay(6, 30), TRUSTED)), List.of(), nextMorning));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.evidence()).containsEntry("windowStart", "22:00").containsEntry("deadline", "23:30");
+        }
+
+        @Test
+        @DisplayName("목표 30분이 지나 잠들면 늦게 잔 것이다 — 요약은 마감 시각을 보여 준다")
+        void sleepAfterGraceIsLate() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(bedtimeConfig("23:00"),
+                    List.of(sleep(at(23, 40), nextDay(6, 30), TRUSTED)), List.of(), nextMorning));
+
+            assertThat(outcome.failureReason()).isEqualTo("SLEPT_LATE");
+            assertThat(FailureEvidence.of("SLEPT_LATE", outcome.evidence()).summary()).contains("목표 23:30 이전");
+        }
+
+        @Test
+        @DisplayName("저녁 낮잠은 그 밤의 취침이 아니다 — 낮잠 뒤 새벽 1시에 자면 늦게 잔 것이다")
+        void eveningNapIsNotBedtime() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(bedtimeConfig("23:00"), List.of(
+                    sleep(at(19, 0), at(20, 0), TRUSTED),
+                    sleep(nextDay(1, 0), nextDay(7, 0), TRUSTED)), List.of(), nextMorning));
+
+            assertThat(outcome.failureReason()).isEqualTo("SLEPT_LATE");
+            assertThat(outcome.evidence()).containsEntry("bedtime", nextDay(1, 0).toString());
+        }
+
+        @Test
+        @DisplayName("일찍 잠들어 목표 시각에도 자고 있었으면 지킨 것이다")
+        void earlySleepThroughTargetSucceeds() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(bedtimeConfig("23:00"),
+                    List.of(sleep(at(21, 30), nextDay(6, 30), TRUSTED)), List.of(), nextMorning));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
+        }
+
+        @Test
+        @DisplayName("창 전에 깬 낮잠뿐이면 그 밤의 잠을 기다린다")
+        void napOnlyWaits() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(bedtimeConfig("23:00"),
+                    List.of(sleep(at(19, 0), at(20, 0), TRUSTED)), List.of(), at(21, 0)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.PENDING);
+            assertThat(outcome.evidence()).doesNotContainKey("bedtime");
+        }
+
+        @Test
+        @DisplayName("자정 목표는 전날 23:00 부터 본다")
+        void midnightTargetOpensBeforeMidnight() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(bedtimeConfig("00:00"),
+                    List.of(sleep(at(23, 10), nextDay(7, 0), TRUSTED)), List.of(), nextMorning));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.evidence()).containsEntry("windowStart", "23:00").containsEntry("deadline", "00:30");
         }
     }
 
