@@ -76,8 +76,7 @@ class EvaluatorAccuracyTest {
     private VerificationConfig bedtimeConfig(String bedtimeBefore) {
         return new VerificationConfig(ScheduleType.FIXED_DAYS, null, MethodCombine.AND,
                 List.of(VerificationMethod.SLEEP), null, null, null, null,
-                new SleepConfig(bedtimeBefore, null, Polarity.ACHIEVEMENT, 12, List.of(), 60, 100,
-                        List.of("com.sec.android.app.shealth")), List.of());
+                new SleepConfig(bedtimeBefore, null, Polarity.ACHIEVEMENT, 12, List.of(), 60, 30), List.of());
     }
 
     private VerificationConfig sleepConfig(BigDecimal minHours) {
@@ -87,7 +86,7 @@ class EvaluatorAccuracyTest {
     private VerificationConfig sleepConfig(BigDecimal minHours, List<String> trustedOrigins) {
         return new VerificationConfig(ScheduleType.FIXED_DAYS, null, MethodCombine.AND,
                 List.of(VerificationMethod.SLEEP), null, null, null, null,
-                new SleepConfig(null, minHours, Polarity.ACHIEVEMENT, 12, trustedOrigins, 60, 100, List.of()), List.of());
+                new SleepConfig(null, minHours, Polarity.ACHIEVEMENT, 12, trustedOrigins, 60, 30), List.of());
     }
 
     private static SyncSignal geofence(String transition, Instant when, Boolean isMock) {
@@ -437,108 +436,76 @@ class EvaluatorAccuracyTest {
     }
 
     @Nested
-    @DisplayName("취침 — 목표 시각부터 1시간 동안 100걸음 이하")
-    class BedtimeBySteps {
+    @DisplayName("취침 — 목표 1시간 전 ~ 30분 후 안에 잠들었는가")
+    class BedtimeWindow {
 
         private final SleepEvaluator evaluator = new SleepEvaluator(lenientProperties());
-        private final Instant nextMorning = nextDay(8, 0);
+        private static final HealthOrigin TRUSTED =
+                new HealthOrigin("com.sec.android.app.shealth", "AUTO", "WATCH");
+        private final Instant nextMorning = at(8, 0).plusSeconds(24 * 3600);
 
         private Instant nextDay(int hour, int minute) {
             return at(hour, minute).plusSeconds(24 * 3600);
         }
 
         @Test
-        @DisplayName("창 안 걸음이 100걸음 이하이고 창 뒤에 걸음 보고가 왔으면 잠든 것이다")
-        void fewStepsThenReportSucceeds() {
+        @DisplayName("목표 30분 뒤까지 잠들면 인정한다")
+        void sleepWithinGraceSucceeds() {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(bedtimeConfig("23:00"),
-                    List.of(stepsRecord("hc-1", 40, at(23, 10), at(23, 15), nextDay(0, 10))), List.of(), nextMorning));
+                    List.of(sleep(at(23, 20), nextDay(6, 30), TRUSTED)), List.of(), nextMorning));
 
             assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
-            assertThat(outcome.evidence()).containsEntry("windowStart", "23:00").containsEntry("deadline", "00:00")
-                    .containsEntry("value", 40L).containsEntry("maxSteps", 100);
+            assertThat(outcome.evidence()).containsEntry("windowStart", "22:00").containsEntry("deadline", "23:30");
         }
 
         @Test
-        @DisplayName("창 안에서 100걸음을 넘기면 그 자리에서 늦게 잔 것이다 — 요약은 걸음과 상한을 보여 준다")
-        void manyStepsIsLate() {
+        @DisplayName("목표 30분이 지나 잠들면 늦게 잔 것이다 — 요약은 마감 시각을 보여 준다")
+        void sleepAfterGraceIsLate() {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(bedtimeConfig("23:00"),
-                    List.of(steps(300, at(23, 20), at(23, 30), WATCH)), List.of(), at(23, 31)));
+                    List.of(sleep(at(23, 40), nextDay(6, 30), TRUSTED)), List.of(), nextMorning));
 
             assertThat(outcome.failureReason()).isEqualTo("SLEPT_LATE");
-            assertThat(FailureEvidence.of("SLEPT_LATE", outcome.evidence()).summary())
-                    .isEqualTo("23:00~00:00 걸음 300걸음 / 상한 100걸음");
+            assertThat(FailureEvidence.of("SLEPT_LATE", outcome.evidence()).summary()).contains("목표 23:30 이전");
         }
 
         @Test
-        @DisplayName("목표 시각 전 걸음은 세지 않는다 — 자기 전 씻고 정리하는 움직임")
-        void stepsBeforeTargetDoNotCount() {
+        @DisplayName("저녁 낮잠은 그 밤의 취침이 아니다 — 낮잠 뒤 새벽 1시에 자면 늦게 잔 것이다")
+        void eveningNapIsNotBedtime() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(bedtimeConfig("23:00"), List.of(
+                    sleep(at(19, 0), at(20, 0), TRUSTED),
+                    sleep(nextDay(1, 0), nextDay(7, 0), TRUSTED)), List.of(), nextMorning));
+
+            assertThat(outcome.failureReason()).isEqualTo("SLEPT_LATE");
+            assertThat(outcome.evidence()).containsEntry("bedtime", nextDay(1, 0).toString());
+        }
+
+        @Test
+        @DisplayName("일찍 잠들어 목표 시각에도 자고 있었으면 지킨 것이다")
+        void earlySleepThroughTargetSucceeds() {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(bedtimeConfig("23:00"),
-                    List.of(stepsRecord("hc-1", 2000, at(22, 30), at(22, 50), nextDay(0, 10))), List.of(), nextMorning));
-
-            assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
-            assertThat(outcome.evidence()).containsEntry("value", 0L);
-        }
-
-        @Test
-        @DisplayName("창이 열려 있으면 기다린다")
-        void waitsWhileWindowOpen() {
-            EvaluationOutcome outcome = evaluator.evaluate(ctx(bedtimeConfig("23:00"),
-                    List.of(steps(10, at(23, 5), at(23, 6), WATCH)), List.of(), at(23, 30)));
-
-            assertThat(outcome.status()).isEqualTo(VerificationStatus.PENDING);
-            assertThat(outcome.failureReason()).isNull();
-        }
-
-        @Test
-        @DisplayName("창이 닫힌 뒤 걸음 보고가 없으면 성공시키지 않는다 — 걷지 않은 것과 폰이 보고하지 않은 것을 가른다")
-        void noReportAfterWindowWaits() {
-            EvaluationOutcome outcome = evaluator.evaluate(ctx(bedtimeConfig("23:00"),
-                    List.of(stepsRecord("hc-1", 500, at(21, 0), at(21, 10), at(22, 15))), List.of(), nextMorning));
-
-            assertThat(outcome.status()).isEqualTo(VerificationStatus.PENDING);
-            assertThat(outcome.evidence()).containsEntry("note", "no_steps_report_after_window");
-        }
-
-        @Test
-        @DisplayName("걸음 보고 없이 마감에 닿으면 수면 부족이 아니라 신호 없음으로 확정한다")
-        void unreportedBedtimeIsNoSignal() {
-            assertThat(FailureReasons.of(VerificationMethod.SLEEP, bedtimeConfig("23:00"))).isEqualTo("NO_SIGNAL_RECEIVED");
-            assertThat(FailureReasons.of(VerificationMethod.SLEEP, sleepConfig(new BigDecimal("7")))).isEqualTo("INSUFFICIENT_SLEEP");
-        }
-
-        @Test
-        @DisplayName("손으로 입력한 걸음은 넘김 판정에 쓰지 않는다")
-        void manualStepsDoNotFail() {
-            HealthOrigin handWritten = new HealthOrigin("com.sec.android.app.shealth", "MANUAL", "PHONE");
-            EvaluationOutcome outcome = evaluator.evaluate(ctx(bedtimeConfig("23:00"),
-                    List.of(steps(500, at(23, 10), at(23, 20), handWritten)), List.of(), nextMorning));
+                    List.of(sleep(at(21, 30), nextDay(6, 30), TRUSTED)), List.of(), nextMorning));
 
             assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
         }
 
         @Test
-        @DisplayName("자정 목표는 다음 날 00:00~01:00 을 본다")
-        void midnightTargetLooksAtNextDay() {
+        @DisplayName("창 전에 깬 낮잠뿐이면 그 밤의 잠을 기다린다")
+        void napOnlyWaits() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(bedtimeConfig("23:00"),
+                    List.of(sleep(at(19, 0), at(20, 0), TRUSTED)), List.of(), at(21, 0)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.PENDING);
+            assertThat(outcome.evidence()).doesNotContainKey("bedtime");
+        }
+
+        @Test
+        @DisplayName("자정 목표는 전날 23:00 부터 본다")
+        void midnightTargetOpensBeforeMidnight() {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(bedtimeConfig("00:00"),
-                    List.of(steps(200, nextDay(0, 20), nextDay(0, 30), WATCH)), List.of(), nextDay(0, 31)));
+                    List.of(sleep(at(23, 10), nextDay(7, 0), TRUSTED)), List.of(), nextMorning));
 
-            assertThat(outcome.failureReason()).isEqualTo("SLEPT_LATE");
-            assertThat(outcome.evidence()).containsEntry("windowStart", "00:00").containsEntry("deadline", "01:00");
-        }
-
-        @Test
-        @DisplayName("수면 판정은 다음 날로 귀속된 걸음도 읽는다 — 수면 신호는 한 번만 담는다")
-        void forNightAddsNextDaySteps() {
-            HealthReading reading = new HealthReading(null, "STEPS", BigDecimal.valueOf(200), "count",
-                    nextDay(0, 20).toString(), nextDay(0, 30).toString(), null, WATCH);
-            SyncSignal nextDaySteps = new SyncSignal("HEALTH", null, nextDay(0, 30).toString(), null, null, null,
-                    List.of(reading), null, null, null, TARGET.plusDays(1).toString(), null, null, null, null);
-            SyncSignal night = sleep(at(23, 0), nextDay(7, 0), WATCH);
-
-            List<SyncSignal> ofNight = DaySignals.forNight(List.of(nextDaySteps, night), TARGET, KST);
-
-            assertThat(ofNight).containsExactlyInAnyOrder(night, nextDaySteps);
-            assertThat(DaySignals.forDate(List.of(nextDaySteps, night), TARGET, KST)).containsExactly(night);
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.evidence()).containsEntry("windowStart", "23:00").containsEntry("deadline", "00:30");
         }
     }
 

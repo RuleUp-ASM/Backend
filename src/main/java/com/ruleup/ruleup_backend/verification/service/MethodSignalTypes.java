@@ -27,8 +27,7 @@ public final class MethodSignalTypes {
             case HEALTH -> Set.of("HEALTH");
             case SCREEN_TIME -> Set.of("SCREEN_TIME", "USAGE", "APP_USAGE");
             case WAKE -> Set.of("HEALTH");   // 기상은 일어나 걸은 걸음으로 본다(2026-10-15)
-            // 취침 시각은 걸음(2026-10-23), 수면 시간은 수면 기록으로 본다.
-            case SLEEP -> Set.of("SLEEP", "HEALTH");
+            case SLEEP -> Set.of("SLEEP");
             default -> Set.of();
         };
     }

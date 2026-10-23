@@ -15,9 +15,9 @@ import java.util.*;
 /**
  * SLEEP 평가기 (§2.17) — 도달형. 익일 아침 도착 세그먼트로 판정.
  *  - 자정 넘김 귀속: start가 18:00~익일06:00이면 그 "저녁의 날짜"에 귀속 → targetDate 밤 세그먼트만 본다.
- *  - 판정: bedtimeBefore("HH:mm") → <b>걸음</b>으로 본다. [목표, 목표 + window] 동안 걸음 ≤ maxSteps 면 잠자리에 든 것.
- *    수면 기록은 워치 없이는 잘 남지 않아 취침 루틴 대부분이 기록 없음으로 실패했다(2026-10-23 전환).
- *    minSleepHours → 수면 기록 세그먼트 합 ≥ 목표.
+ *  - 판정: bedtimeBefore("HH:mm") → [목표 - lead, 목표 + grace] 창 안에 잠들었는가 / minSleepHours → 수면합 ≥ 목표.
+ *    창보다 일찍 잠든 덩어리는 목표 시각에도 이어서 자고 있어야 인정한다 — 저녁 낮잠이 그 밤의 취침이 되면
+ *    낮잠 뒤 새벽까지 깨어 있어도 성공한다.
  *  - 데이터는 회고적(밤은 이미 끝남)이라 세그먼트 도착 시 확정(SUCCESS/FAILED), 없으면 PENDING.
  */
 @Component
@@ -36,7 +36,6 @@ public class SleepEvaluator implements MethodEvaluator {
     public EvaluationOutcome evaluate(DayContext ctx) {
         SleepConfig cfg = ctx.config().sleep();
         if (cfg == null) return EvaluationOutcome.pending(null, null);
-        if (cfg.bedtimeBefore() != null) return bedtimeBySteps(ctx, cfg);
 
         ZoneId zone = ctx.zone();
         List<NightSegment> segs = nightSegments(ctx.signals(), ctx.targetDate(), zone);
@@ -103,6 +102,25 @@ public class SleepEvaluator implements MethodEvaluator {
         if (originMissing > 0) ev.put("originMissing", originMissing);
         if (future > 0) ev.put("excludedFuture", future);
 
+        // bedtimeBefore 판정(우선) → SLEPT_LATE
+        if (cfg.bedtimeBefore() != null && bedtime != null) {
+            Instant target = bedtimeThreshold(cfg.bedtimeBefore(), ctx.targetDate(), zone);
+            Instant opens = target.minus(Duration.ofMinutes(Math.max(cfg.bedtimeLeadMinutes(), 0)));
+            Instant deadline = target.plus(Duration.ofMinutes(Math.max(cfg.bedtimeGraceMinutes(), 0)));
+            ev.put("bedtimeBefore", cfg.bedtimeBefore());
+            ev.put("windowStart", LocalTime.ofInstant(opens, zone).format(HHMM));
+            ev.put("deadline", LocalTime.ofInstant(deadline, zone).format(HHMM));
+            Instant fellAsleep = fellAsleep(merged(intervals), opens, target);
+            if (fellAsleep == null) {
+                // 창 전에 깬 잠(낮잠)뿐이다 — 그 밤의 잠은 아직 오지 않았을 수 있어 기다린다.
+                ev.remove("bedtime");
+                return EvaluationOutcome.pending(ev, windowClose);
+            }
+            ev.put("bedtime", fellAsleep.toString());
+            return fellAsleep.isAfter(deadline)
+                    ? EvaluationOutcome.violated("SLEPT_LATE", ev, windowClose)
+                    : EvaluationOutcome.success(ev, windowClose);
+        }
         // minSleepHours 판정 → INSUFFICIENT_SLEEP
         if (cfg.minSleepHours() != null) {
             double goal = cfg.minSleepHours().doubleValue();
@@ -200,50 +218,15 @@ public class SleepEvaluator implements MethodEvaluator {
     }
 
     /**
-     * 취침 — 목표 시각부터 window 동안 거의 걷지 않았는가.
-     *
-     * <ul>
-     *   <li>창 안 걸음이 상한을 넘으면 그 자리에서 SLEPT_LATE — 더 기다려도 줄지 않는다.</li>
-     *   <li>창이 닫혔고 상한 이하이면, 창이 닫힌 <b>뒤에 받은</b> 걸음 신호가 있어야 성공이다. 걸음 기록이 없는 것과
-     *       폰이 그 시간을 보고하지 않은 것을 가르기 위해서다 — 앱은 sync 마다 그날 걸음 기록을 다시 보내므로,
-     *       창 뒤에 받은 신호에 창 안 기록이 없으면 정말 걷지 않은 것이다. 그런 신호가 없으면 기다린다.</li>
-     * </ul>
-     * 자정을 넘는 창(00:00 목표)은 다음 날 걸음까지 읽어야 해서, 판정 경로가 SLEEP 에 한해 다음 날 걸음 신호도
-     * 넘긴다(DaySignals.forNight).
+     * 그 밤에 <b>잠든 시각</b> — 창이 열린 뒤 시작한 덩어리, 또는 창 전에 시작해 목표 시각에도 자고 있던
+     * 덩어리 중 가장 이른 시작. 창 전에 시작해 목표 시각 전에 깬 덩어리(저녁 낮잠)는 취침이 아니다.
+     * 일찍 잠들어 그대로 잔 사람은 목표를 지킨 것이라 실패시키지 않는다. 해당 덩어리가 없으면 null.
      */
-    private EvaluationOutcome bedtimeBySteps(DayContext ctx, SleepConfig cfg) {
-        ZoneId zone = ctx.zone();
-        Instant target = bedtimeThreshold(cfg.bedtimeBefore(), ctx.targetDate(), zone);
-        Instant closes = target.plus(Duration.ofMinutes(Math.max(cfg.bedtimeWindowMinutes(), 1)));
-        Window window = new Window(target, closes);
-
-        Set<String> rejected = new LinkedHashSet<>();
-        double steps = StepCounter.inWindow(ctx.signals(), window, cfg.stepOrigins(), rejected, new boolean[1]);
-
-        Map<String, Object> ev = new HashMap<>();
-        ev.put("bedtimeBefore", cfg.bedtimeBefore());
-        ev.put("windowStart", LocalTime.ofInstant(target, zone).format(HHMM));
-        ev.put("deadline", LocalTime.ofInstant(closes, zone).format(HHMM));
-        ev.put("metric", "STEPS");
-        ev.put("unit", "count");
-        ev.put("value", Math.round(steps));
-        ev.put("maxSteps", cfg.bedtimeMaxSteps());
-        if (!rejected.isEmpty()) ev.put("rejectedOrigins", new ArrayList<>(rejected));
-
-        if (steps > cfg.bedtimeMaxSteps()) return EvaluationOutcome.violated("SLEPT_LATE", ev, closes);
-        if (!window.isClosed(ctx.now())) return EvaluationOutcome.pending(ev, closes);
-        if (reportedSince(ctx, closes)) return EvaluationOutcome.success(ev, closes);
-        ev.put("note", "no_steps_report_after_window");
-        return EvaluationOutcome.pending(ev, closes);
-    }
-
-    /** 창이 닫힌 뒤에 받은 걸음 신호가 있는가 — 수신 시각은 {@link #claimedAt} 처럼 현재로 상한을 건다. */
-    private static boolean reportedSince(DayContext ctx, Instant closes) {
-        if (ctx.signals() == null) return false;
-        for (SyncSignal s : ctx.signals()) {
-            if (SignalType.HEALTH.name().equals(s.type()) && !claimedAt(s.receivedAt(), ctx).isBefore(closes)) return true;
+    private static Instant fellAsleep(List<Instant[]> blocks, Instant opens, Instant target) {
+        for (Instant[] block : blocks) {                // 시작 시각 순이라 처음 맞는 것이 가장 이르다
+            if (!block[0].isBefore(opens) || block[1].isAfter(target)) return block[0];
         }
-        return false;
+        return null;
     }
 
     /**
