@@ -198,13 +198,12 @@ public class VerificationReadService {
             case WAKE -> (config.wake() != null && config.wake().beforeTime() != null)
                     ? around(config.wake().beforeTime(), config.wake().leadMinutes(), config.wake().graceMinutes()) : null;
             case SLEEP -> (config.sleep() != null && config.sleep().bedtimeBefore() != null)
-                    ? around(config.sleep().bedtimeBefore(), config.sleep().bedtimeLeadMinutes(),
-                            config.sleep().bedtimeGraceMinutes()) : null;
+                    ? around(config.sleep().bedtimeBefore(), 0, config.sleep().bedtimeWindowMinutes()) : null;
             default -> null;
         };
     }
 
-    /** 목표 시각 앞뒤 창 「06:00~07:30」 — 판정기가 보는 창과 같은 값으로 만든다. */
+    /** 목표 시각 앞뒤 창 「06:00~07:30」·「23:00~00:00」 — 판정기가 보는 창과 같은 값으로 만든다. */
     private static String around(String hhmm, int leadMinutes, int graceMinutes) {
         java.time.LocalTime t = java.time.LocalTime.parse(hhmm);
         return t.minusMinutes(Math.max(leadMinutes, 0)) + "~" + t.plusMinutes(Math.max(graceMinutes, 0));

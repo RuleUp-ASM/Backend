@@ -6,9 +6,9 @@ import java.util.List;
 
 /**
  * 수면 인증 파라미터(§4.3, §2.17). 둘 중 하나로 판정:
- *  - bedtimeBefore("HH:mm"): [목표 - bedtimeLeadMinutes, 목표 + bedtimeGraceMinutes] 창 안에 잠들었는가 → SLEPT_LATE 방지.
- *    창보다 일찍 시작한 잠은 목표 시각에도 이어서 자고 있어야 인정한다(저녁 낮잠은 그 밤의 취침이 아니다)
- *  - minSleepHours: 수면시간(세그먼트 합) ≥ 목표 → INSUFFICIENT_SLEEP 방지
+ *  - bedtimeBefore("HH:mm"): <b>걸음으로 본다</b> — [목표, 목표 + bedtimeWindowMinutes] 동안 걸음 ≤ bedtimeMaxSteps
+ *    면 잠자리에 든 것이다 → SLEPT_LATE 방지. 수면 기록은 워치가 없으면 잘 안 남아 2026-10-23 부터 걸음으로 바꿨다
+ *  - minSleepHours: 수면시간(수면 기록 세그먼트 합) ≥ 목표 → INSUFFICIENT_SLEEP 방지
  * 신호가 익일 아침 도착이라 maxSignalLagHours ≈ 12h.
  *
  * <p>{@code trustedOrigins} 는 걸음·거리(HealthConfig)와 같은 뜻의 화이트리스트다 — 스펙이
@@ -21,7 +21,8 @@ public record SleepConfig(
         BigDecimal minSleepHours,     // (없으면 null)
         Polarity polarity,            // ACHIEVEMENT
         int maxSignalLagHours,
-        List<String> trustedOrigins,  // dataOrigin 화이트리스트(비면 게이트 미적용)
-        int bedtimeLeadMinutes,       // 취침 창: 목표 시각 앞(분)
-        int bedtimeGraceMinutes       // 취침 창: 목표 시각 뒤(분)
+        List<String> trustedOrigins,  // 수면 기록 dataOrigin 화이트리스트(비면 게이트 미적용)
+        int bedtimeWindowMinutes,     // 취침 창: 목표 시각부터(분)
+        int bedtimeMaxSteps,          // 취침 창 안에서 허용하는 걸음 수
+        List<String> stepOrigins      // 취침 걸음 기록의 신뢰 출처(기상과 같은 목록)
 ) {}
