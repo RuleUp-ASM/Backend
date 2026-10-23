@@ -22,9 +22,7 @@ public final class FailureReasons {
             case GPS_PRESENCE -> "INSUFFICIENT_DWELL";
             case GPS_DISTANCE -> "INSUFFICIENT_DISTANCE";
             case HEALTH -> health(config);
-            // 취침(걸음)은 넘겼으면 그 자리에서 SLEPT_LATE 다 — 사유 없이 마감에 닿았다면 창 뒤 걸음 보고가 끝내 오지 않은 것이다.
-            case SLEEP -> (config != null && config.sleep() != null && config.sleep().bedtimeBefore() != null)
-                    ? "NO_SIGNAL_RECEIVED" : "INSUFFICIENT_SLEEP";
+            case SLEEP -> "INSUFFICIENT_SLEEP";
             default -> "NO_SIGNAL_RECEIVED";
         };
     }

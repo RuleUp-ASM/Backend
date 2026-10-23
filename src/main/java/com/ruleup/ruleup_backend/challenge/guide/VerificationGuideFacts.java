@@ -86,12 +86,10 @@ public record VerificationGuideFacts(
                 String bed = clock(params.get("bedtime_before"));
                 String hours = hours(params.get("sleep_hours"));
                 List<String> parts = new ArrayList<>();
-                // 취침은 걸음으로 본다 — 목표 시각부터 1시간 동안 100걸음 이하(app.verification.bedtime-*)
-                if (bed != null) { conditions.add(bed + "부터 1시간 동안 거의 걷지 않기(100걸음 이하, 걸음 기록 기준)"); must.add(bed); parts.add(bed + "부터 1시간 동안 거의 걷지 않으면"); }
+                if (bed != null) { conditions.add(bed + " 전에 잠들기(수면 기록 기준)"); must.add(bed); parts.add(bed + " 전에 잠들면"); }
                 if (hours != null) { conditions.add(hours + " 이상 자기(수면 기록 기준)"); must.add(hours); parts.add(hours + " 이상 자면"); }
-                String record = (bed != null && hours == null) ? "걸음 기록" : (bed != null) ? "걸음·수면 기록" : "수면 기록";
                 fallback = freq + " " + (parts.isEmpty() ? "목표만큼 자면" : String.join(", ", parts))
-                        + " " + record + "으로 자동 인증됩니다.";
+                        + " 수면 기록으로 자동 인증됩니다.";
             }
             default -> {
                 conditions.add("루틴을 한 날 그날 안에 앱에서 직접 인증하기");

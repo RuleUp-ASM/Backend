@@ -108,7 +108,7 @@ public class VerificationConfigFactory {
                     timeParamOrNull(params, "bedtime_before"),
                     decimalParamOrNull(params, "sleep_hours"),
                     Polarity.ACHIEVEMENT, 12, DEFAULT_TRUSTED_SLEEP_ORIGINS,
-                    properties.bedtimeWindowMinutes(), properties.bedtimeMaxSteps(), DEFAULT_TRUSTED_WAKE_ORIGINS);
+                    properties.bedtimeLeadMinutes(), properties.bedtimeGraceMinutes());
             default -> { /* SELF_CHECK: 수동 — 자동 신호 설정 없음 */ }
         }
 
