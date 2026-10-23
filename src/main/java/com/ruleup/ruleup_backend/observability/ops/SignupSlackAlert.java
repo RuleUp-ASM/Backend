@@ -59,7 +59,9 @@ public class SignupSlackAlert {
     public void signedUp(String userId, String provider, boolean restored) {
         if (sns == null) return;
         try {
-            Long members = jdbc.queryForObject("SELECT COUNT(*) FROM users WHERE status <> 'WITHDRAWN'", Long.class);
+            // 관리자 대시보드의 회원 수와 같은 정의 — 운영자 콘솔 계정은 회원이 아니다(AdminDashboardService).
+            Long members = jdbc.queryForObject("SELECT COUNT(*) FROM users WHERE status <> 'WITHDRAWN'"
+                    + " AND deleted_at IS NULL AND role = 'MEMBER'", Long.class);
             sns.publish(r -> r.topicArn(topicArn)
                     .message(message(envOf(topicArn), provider, restored, members, Instant.now(), userId)));
         } catch (RuntimeException e) {
