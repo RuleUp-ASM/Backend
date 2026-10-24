@@ -55,6 +55,26 @@ RETIRED = {
 
 LLM_PROVIDERS = (('generation', 'gemini'), ('generation', 'nova'), ('moderation', 'gemini'), ('moderation', 'nova'))
 
+# 야간 보류 큐 — 앱 컨슈머가 21:00~08:00 KST 에 일부러 수신하지 않는다(NotificationWindow). 밤에는 가장 오래된 메시지가
+# 쌓이는 게 정상이라 이 큐의 QUEUE-01 은 night_hold.py 가 밤에 동작을 끄고 아침에 OK 로 되돌린 뒤 켠다.
+NIGHT_HOLD_QUEUES = ('notifications',)
+NIGHT_HOLD_OFF = (21, 0)    # DisableAlarmActions
+NIGHT_HOLD_ON = (8, 10)     # EnableAlarmActions — 08:00 에 밀린 메시지가 나가고 08:02 쯤 OK 로 돌아온 뒤
+NIGHT_HOLD_RESET = (8, 11)  # SetAlarmState OK — 밤새 ALARM 이던 경보가 다음 평가에서 다시 울릴 수 있게
+
+
+def night_held(reg):
+    """야간에 동작을 끄는 경보 이름 — build() 의 QUEUE-01 이름 규칙과 같다."""
+    p = f"ruleup-{reg['env']}"
+    short = [q.removeprefix(f'{p}-') for q in reg['queues']]
+    return [f'{p}-P1-QUEUE-01-{s}' for s in short if s in NIGHT_HOLD_QUEUES]
+
+
+def night_hold_quiet(kst_time):
+    """KST 시각(datetime.time)이 경보 동작을 꺼 둔 구간(21:00~08:10)인지."""
+    t = (kst_time.hour, kst_time.minute)
+    return t >= NIGHT_HOLD_OFF or t < NIGHT_HOLD_ON
+
 
 def build(reg, health_check_id=None):
     """[(region, spec)] — spec 은 {'kind': 'metric'|'composite', 'id', 'severity', 'name', 'params'}."""

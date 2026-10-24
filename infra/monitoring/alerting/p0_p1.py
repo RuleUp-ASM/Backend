@@ -15,6 +15,8 @@ import argparse
 import json
 import os
 import sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import boto3
 
@@ -22,6 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import catalog  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+KST = ZoneInfo('Asia/Seoul')
 
 
 def load(env):
@@ -54,6 +57,8 @@ def actions(reg, region, severity):
 
 def apply(reg, dry_run=False):
     specs = catalog.build(reg, None if dry_run else health_check_id(reg))
+    # 밤에 다시 돌려도 night_hold.py 가 꺼 둔 야간 보류 경보를 켜 버리지 않는다.
+    quiet = set(catalog.night_held(reg)) if catalog.night_hold_quiet(datetime.now(KST).time()) else set()
     clients = {}
     for region, spec in specs:
         if dry_run:
@@ -65,7 +70,7 @@ def apply(reg, dry_run=False):
             params.update(ActionsEnabled=False, AlarmActions=[], OKActions=[])
         else:
             acts = actions(reg, region, spec['severity'])
-            params.update(ActionsEnabled=True, AlarmActions=acts, OKActions=acts)
+            params.update(ActionsEnabled=spec['name'] not in quiet, AlarmActions=acts, OKActions=acts)
         if spec['kind'] == 'composite':
             cw.put_composite_alarm(**params)
         else:
