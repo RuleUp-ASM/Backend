@@ -206,6 +206,7 @@ alarms:
   - id: QUEUE-01
     status: active
     severity: P1
+    notes: notifications 큐는 21:00~08:10 KST 경보 동작을 끈다 — 앱 야간 보류(alerting/night_hold.py)
   - id: QUEUE-02
     status: active
     severity: P1
