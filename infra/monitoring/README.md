@@ -16,7 +16,7 @@
 | 감시 Lambda | `lambdas/` | 버지니아 `slo-calculator`(Rule Flag·버짓·이상 탐지) · `resource-monitor`(ECS·RES·RDS·백업), 오리건·버지니아 `edge-probe` |
 | 경보 | `alerting/catalog.py` → `p0_p1.py` | 카탈로그 ID 그대로. P0 = SLO-01/02·API-01·EDGE-01·NATIVE-01/02·RES-01~04·DB-10/11·OBS-04. 1분 주기 평가, P0 는 충족 후 1~2분 안에 호출(10/15 리뷰) |
 | 전달 | `alerting/routing.py` · `slack_channels.py` · `p0_mention.py` · `slack_fallback.py` · `security_events.py` | 서울·버지니아 토픽 → Amazon Q Slack, P0 멘션, 전달 실패 → 이메일, 보안 이벤트 |
-| 대시보드 | `alerting/dashboard.py` · `observe_dashboard.py` · `business_dashboard.py` | `ruleup-<env>-ops`(OPS-1~6) · `ruleup-<env>-observe`(OBS-1~4) · `ruleup-prod-business` |
+| 대시보드 | `alerting/dashboard.py` · `observe_dashboard.py` · `business_dashboard.py` | `ruleup-<env>-ops`(OPS-1~6) · `ruleup-<env>-observe`(OBS-1~4) · `ruleup-prod-business`(①~④) · `ruleup-stg-business`(④ 회원 구성만, `business_dashboard.py stg`) |
 | 배포 보호 | `.github/scripts/monitoring_preflight.py` | ALARM·stale·EligibleCount 누락·계측 불일치·BudgetFreeze (기본 warn) |
 | 재무장 | `lambdas/rearm.py` | 저트래픽 예외 — 독립 정상 증거가 있을 때만 P0 Flag=0 1회 + 감사 로그 |
 
