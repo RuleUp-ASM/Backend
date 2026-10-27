@@ -36,6 +36,7 @@ report_snapshots: SELECT
 reports: SELECT,UPDATE
 room_job_locks: SELECT,UPDATE
 sanctions: SELECT,INSERT,UPDATE
+user_agreement_states: SELECT
 user_information: SELECT,INSERT
 user_interests: SELECT
 users: SELECT,INSERT,UPDATE

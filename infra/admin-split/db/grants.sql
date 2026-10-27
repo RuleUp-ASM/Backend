@@ -46,6 +46,7 @@ GRANT SELECT ON `__SCHEMA__`.`report_snapshots` TO 'ruleup_admin'@'%';
 GRANT SELECT, UPDATE ON `__SCHEMA__`.`reports` TO 'ruleup_admin'@'%';
 GRANT SELECT, UPDATE ON `__SCHEMA__`.`room_job_locks` TO 'ruleup_admin'@'%';
 GRANT SELECT, INSERT, UPDATE ON `__SCHEMA__`.`sanctions` TO 'ruleup_admin'@'%';
+GRANT SELECT ON `__SCHEMA__`.`user_agreement_states` TO 'ruleup_admin'@'%';
 GRANT SELECT, INSERT ON `__SCHEMA__`.`user_information` TO 'ruleup_admin'@'%';
 GRANT SELECT ON `__SCHEMA__`.`user_interests` TO 'ruleup_admin'@'%';
 GRANT SELECT, INSERT, UPDATE ON `__SCHEMA__`.`users` TO 'ruleup_admin'@'%';
