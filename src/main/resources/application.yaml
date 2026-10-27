@@ -201,6 +201,8 @@ app:
   admin:
     passcode: ${ADMIN_PASSCODE:}
     operator-id: ${ADMIN_OPERATOR_ID:}
+    # 회원 구성 집계(콘솔·biz.members.* 게이지)에서 뺄 계정 — 개발자 시험 계정 UUID 를 쉼표로. 비우면 운영자만 뺀다.
+    stats-excluded-user-ids: ${ADMIN_STATS_EXCLUDED_USER_IDS:}
 
   # 개발용 토큰 발급. 시크릿이 비어 있으면 헤더가 무엇이든 404 라, 미설정이 곧 비활성이다.
   # prod 프로필에서는 빈 자체가 등록되지 않는다(@Profile("!prod")).

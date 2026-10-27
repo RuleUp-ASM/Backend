@@ -34,6 +34,8 @@ import java.util.Set;
  *
  * <p>서비스 지표({@value #BUSINESS_PREFIX}*)는 prod 에서만 보낸다. stg 의 가입·로그인·인증 수는 QA 가 만든
  * 값이라 볼 일이 없고, 이름마다 과금만 된다. stg 대시보드는 서버 지표(ruleup-stg-ops)만 둔다.
+ * 예외는 회원 구성({@value #STG_BUSINESS_PREFIX}*) 하나다 — 집계·대시보드를 prod 에 올리기 전에 stg 에서 값이
+ * 들어오는지 확인하려고 둔다(31개). 확인이 끝나 stg 값을 볼 일이 없어지면 이 예외를 지운다.
  */
 @Configuration
 @Profile({"prod", "stg"})
@@ -60,9 +62,18 @@ public class CloudWatchMetricsConfig {
             "biz.verification.finalized_by_type",      // 같은 값을 인증 방식별로(type=auto|manual)
             "biz.challenge.draft",                     // 초안(origin=ai|template|clone, result=success|blocked|failure)
             "biz.challenge.created",                   // 생성(origin, edited=yes|no) — 초안 수정률
-            "biz.challenge.joined");                   // 가입(source=explore|invite)
+            "biz.challenge.joined",                    // 가입(source=explore|invite)
+            // 회원 구성(MemberProfileMetrics) — 태그는 고정 열거, 합쳐서 31개
+            "biz.members.total",                       // 회원 수
+            "biz.members.age",                         // 나잇대(band=10s|20s|30s|40s|50s_plus|unknown)
+            "biz.members.gender",                      // 성별(gender=male|female|non_binary|undisclosed)
+            "biz.members.provider",                    // 가입 소셜(provider=kakao|naver|google|apple)
+            "biz.members.interest",                    // 관심사 12종(category)
+            "biz.members.consent",                     // 선택 동의(type=marketing|event)
+            "biz.members.active");                     // 최근 활동(window=1d|7d)
 
     static final String BUSINESS_PREFIX = "biz.";
+    static final String STG_BUSINESS_PREFIX = "biz.members.";
 
     @Bean
     public SimpleMeterRegistry simpleMeterRegistry() {
@@ -85,7 +96,8 @@ public class CloudWatchMetricsConfig {
         CloudWatchMeterRegistry registry = new CloudWatchMeterRegistry(config, Clock.SYSTEM, client);
         registry.config()
                 .meterFilter(MeterFilter.denyUnless(id -> EXPORTED.contains(id.getName())
-                        && ("prod".equals(profile) || !id.getName().startsWith(BUSINESS_PREFIX))));
+                        && ("prod".equals(profile) || !id.getName().startsWith(BUSINESS_PREFIX)
+                            || id.getName().startsWith(STG_BUSINESS_PREFIX))));
         return registry;
     }
 }

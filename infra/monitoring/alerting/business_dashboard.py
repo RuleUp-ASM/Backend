@@ -1,12 +1,15 @@
 """사용자 행동 지표 대시보드 ruleup-<env>-business. 노션 「RuleUp 모니터링」 2절 — 서버 지표(ruleup-prod-ops)와 분리해서 본다.
 지표 원천은 앱 BusinessMetrics·VerificationRateMetrics(biz.*). 경보는 걸지 않는다 — 추세와 자료용 화면이다. 재실행 안전.
 prod 전용 — stg 의 가입·로그인 수는 QA 가 만든 값이라 추세로 볼 의미가 없어 stg 는 biz.* 를 내보내지도 않는다(CloudWatchMetricsConfig).
+예외는 ④ 회원 구성(biz.members.*) — prod 반영 전 확인용으로 stg 도 내보내므로, stg 대시보드에는 ④ 만 그린다.
 
-세 묶음: ① 로그인·가입 ② 챌린지 참여(초안·생성·가입) ③ 인증(자동 vs 수동).
+네 묶음: ① 로그인·가입 ② 챌린지 참여(초안·생성·가입) ③ 인증(자동 vs 수동) ④ 회원 구성(나잇대·성별·소셜·관심사·동의·활동).
 묶음마다 첫 줄은 「대시보드에서 고른 기간 전체」의 합계·비율(숫자 칸) — 발표·보고 자료에 그대로 옮긴다. 그 아래가 1시간 단위 추세.
-사용: python business_dashboard.py"""
-import boto3, json
-R='ap-northeast-2'; ENV='prod'
+④ 는 게이지라 합계가 아니라 「지금 값」이고, 분포 칸(막대·원)도 가장 최근 값을 그린다.
+사용: python business_dashboard.py [prod|stg]   (기본 prod)"""
+import boto3, json, sys
+R='ap-northeast-2'; ENV=sys.argv[1] if len(sys.argv)>1 else 'prod'
+assert ENV in ('prod','stg'), ENV
 NS=f'RuleUp/App/{ENV}'
 cw=boto3.client('cloudwatch',region_name=R)
 widgets=[]; y=0
@@ -25,6 +28,37 @@ def totals(*ws): row(*ws, view='singleValue', height=4)
 m=lambda name,*tags,stat='Sum',**o:[NS,name,*tags,{'stat':stat,**o}]
 expr=lambda e,label,id,**o:[{'expression':e,'label':label,'id':id,**o}]
 pct={'yAxis':{'left':{'min':0,'max':100}}}
+
+def members_section():
+    """④ 회원 구성 — MemberProfileMetrics. 게이지라 Maximum(두 태스크가 같은 값을 쓴다)."""
+    g=lambda name,*tags,**o:m(f'biz.members.{name}.value',*tags,stat='Maximum',**o)
+    latest={'setPeriodToTimeRange':False,'period':900}
+    ages=[('10s','10대(14~19)'),('20s','20대'),('30s','30대'),('40s','40대'),('50s_plus','50대+'),('unknown','미입력')]
+    genders=[('male','남'),('female','여'),('non_binary','논바이너리'),('undisclosed','밝히지 않음')]
+    providers=[('kakao','카카오'),('naver','네이버'),('google','구글'),('apple','애플')]
+    interests=[('exercise','운동'),('wake_sleep','기상·수면'),('diet_health','식습관·건강'),('study','학습'),('reading','독서'),
+               ('mind','마음'),('finance','재테크'),('hobby','취미'),('housekeeping','정리·살림'),
+               ('career_productivity','커리어·생산성'),('detox','절제·디톡스'),('etc','기타')]
+    text(f'## ④ 회원 구성 ({ENV}) — 탈퇴·운영자·제외 계정 빼고, 10분마다 갱신. 상세(앱 버전·OS·국가·방 참여·탈퇴 시점)는 관리자 콘솔')
+    totals(('지금 회원',[g('total',label='회원 수'),g('active','window','1d',label='1일 안 활동'),
+                       g('active','window','7d',label='7일 안 활동')],latest),
+           ('선택 동의율(%)',[g('total',id='t',visible=False),g('consent','type','marketing',id='mk',visible=False),
+                        g('consent','type','event',id='ev',visible=False),
+                        expr('IF(FILL(t,0)>0, 100*FILL(mk,0)/FILL(t,0))','마케팅','mkr'),
+                        expr('IF(FILL(t,0)>0, 100*FILL(ev,0)/FILL(t,0))','이벤트','evr')],latest))
+    row(('나잇대(만 나이)',[g('age','band',k,label=l) for k,l in ages],latest),
+        ('성별',[g('gender','gender',k,label=l) for k,l in genders],latest),
+        ('가입 소셜',[g('provider','provider',k,label=l) for k,l in providers],latest),
+        view='pie')
+    row(('관심사(복수 선택)',[g('interest','category',k,label=l) for k,l in interests],latest), view='bar')
+    row(('회원 수 · 활동 추이',[g('total',label='회원 수'),g('active','window','1d',label='1일 안 활동'),
+                          g('active','window','7d',label='7일 안 활동')],None),
+        ('나잇대 추이',[g('age','band',k,label=l) for k,l in ages],None))
+
+if ENV=='stg':
+    members_section()
+    cw.put_dashboard(DashboardName=f'ruleup-{ENV}-business',DashboardBody=json.dumps({'widgets':widgets},ensure_ascii=False))
+    print('ok', len(widgets)); sys.exit(0)
 
 # ---------------------------------------------------------------- ① 로그인 · 가입
 text(f'## ① 로그인 · 가입 ({ENV})')
@@ -100,5 +134,8 @@ row(('오늘 진행률(%) — 판정 행이 열린 멤버 중 성공',[m('biz.ve
     ('전체 인증 성공률(%) — 그제',[m('biz.verification.finalized.value','status','success',stat='Maximum',id='fs',visible=False),
                         m('biz.verification.finalized.value','status','failed',stat='Maximum',id='ff',visible=False),
                         expr('IF(FILL(fs,0)+FILL(ff,0)>0, 100*FILL(fs,0)/(FILL(fs,0)+FILL(ff,0)))','인증 성공률','sr')],{**pct,'period':300}))
+
+# ---------------------------------------------------------------- ④ 회원 구성
+members_section()
 cw.put_dashboard(DashboardName=f'ruleup-{ENV}-business',DashboardBody=json.dumps({'widgets':widgets},ensure_ascii=False))
 print('ok', len(widgets))

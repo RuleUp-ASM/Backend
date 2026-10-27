@@ -387,6 +387,62 @@ public final class AdminDtos {
     @Schema(name = "AdminDashboardChallenges")
     public record Challenges(long active, long createdInRange) {}
 
+    // ===== 회원 구성 =====
+
+    @Schema(name = "AdminMemberProfile", description = """
+            지금 회원(탈퇴·운영자·제외 계정 빼고)의 구성. 고정 열거 칸(나잇대·성별·소셜·관심사·동의)은 0 이어도 같은 순서로
+            전부 온다. 앱이 보내는 값(플랫폼·앱 버전·OS·국가)은 있는 것만 많은 순이고, 비어 있으면 `UNKNOWN` 이다.""")
+    public record MemberProfile(
+            @Schema(description = "기준일(KST) — 만 나이 계산 기준") String asOf,
+            @Schema(description = "회원 수") long members,
+            AgeSummary age,
+            @Schema(description = "10살 단위 — 10(14~19) · 20 · 30 · 40 · 50+ · UNKNOWN") List<Bucket> ageDecades,
+            @Schema(description = "5살 단위 — 14-19 · 20-24 · 25-29 · 30-34 · 35-39 · 40-49 · 50+ · UNKNOWN") List<Bucket> ageFiveYear,
+            @Schema(description = "MALE · FEMALE · NON_BINARY · PREFER_NOT_TO_SAY · UNKNOWN") List<Bucket> genders,
+            @Schema(description = "10살 단위 나잇대별 성별") List<AgeGender> ageByGender,
+            @Schema(description = "가입 소셜 — KAKAO · NAVER · GOOGLE · APPLE") List<Bucket> providers,
+            List<Bucket> platforms,
+            List<Bucket> appVersions,
+            List<Bucket> osVersions,
+            @Schema(description = "기기 국가 코드(ISO 3166-1 alpha-2)") List<Bucket> countries,
+            @Schema(description = "관심사 12종 — 복수 선택이라 합이 회원 수보다 크다") List<Bucket> interests,
+            @Schema(description = "고른 관심사 개수별 회원 수(key = 개수)") List<Bucket> interestsPerMember,
+            @Schema(description = "동의 항목 7종") List<Consent> consents,
+            Activity activity,
+            Engagement engagement,
+            Withdrawals withdrawals) {}
+
+    @Schema(name = "AdminMemberBucket")
+    public record Bucket(String key, long count) {}
+
+    @Schema(name = "AdminMemberAge")
+    public record AgeSummary(
+            @Schema(description = "평균 만 나이 — 생일이 있는 회원만") Double average,
+            Integer min,
+            Integer max,
+            @Schema(description = "생일 미입력") long unknown) {}
+
+    @Schema(name = "AdminMemberAgeGender")
+    public record AgeGender(String band, long male, long female, long nonBinary,
+                            @Schema(description = "밝히지 않음 + 미입력") long undisclosed) {}
+
+    @Schema(name = "AdminMemberConsent", description = "위치·건강 정보 개별 동의는 그 기능을 켤 때 생겨 agreed + notAgreed 가 회원 수보다 작다")
+    public record Consent(String type, long agreed, long notAgreed) {}
+
+    @Schema(name = "AdminMemberActivity", description = "마지막 활동이 최근 N일 안인 회원 수 — 활동 시각은 하루 한 번 갱신된다")
+    public record Activity(long last1d, long last3d, long last7d) {}
+
+    @Schema(name = "AdminMemberEngagement")
+    public record Engagement(
+            @Schema(description = "방에 한 번이라도 들어간 적 있음(지워진 방 포함)") long joinedRoom,
+            @Schema(description = "지금 참여 중인 방이 있음") long inRoomNow,
+            @Schema(description = "방장인 방이 있음") long ownedRoom,
+            @Schema(description = "확정 판정(성공·실패)을 받은 적 있음") long judged,
+            @Schema(description = "인증에 성공한 적 있음") long succeeded) {}
+
+    @Schema(name = "AdminMemberWithdrawals", description = "탈퇴자 — 가입에서 탈퇴까지 걸린 시간")
+    public record Withdrawals(long total, long within1h, long within1d, long within7d, long later) {}
+
     // ===== 일별 서비스 지표 =====
 
     @Schema(name = "AdminDailyStatsResponse", description = """
