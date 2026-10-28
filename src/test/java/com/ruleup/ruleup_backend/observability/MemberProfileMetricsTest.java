@@ -46,7 +46,7 @@ class MemberProfileMetricsTest {
     }
 
     @Test
-    @DisplayName("콘솔 집계를 고정 칸 게이지로 옮긴다 — 성별 미입력은 밝히지 않음에 합친다")
+    @DisplayName("콘솔 집계를 고정 칸 게이지로 옮긴다 — 성별은 남·여 두 칸만")
     void mapsSnapshotToGauges() {
         when(service.snapshot()).thenReturn(profile());
         metrics.refresh();
@@ -56,7 +56,7 @@ class MemberProfileMetricsTest {
         assertThat(gauge("biz.members.age", "band", "50s_plus")).isEqualTo(5);
         assertThat(gauge("biz.members.age", "band", "unknown")).isZero();
         assertThat(gauge("biz.members.gender", "gender", "female")).isEqualTo(14);
-        assertThat(gauge("biz.members.gender", "gender", "undisclosed")).isEqualTo(2);
+        assertThat(registry.find("biz.members.gender").tag("gender", "undisclosed").gauge()).isNull();
         assertThat(gauge("biz.members.provider", "provider", "google")).isEqualTo(12);
         assertThat(gauge("biz.members.interest", "category", "wake_sleep")).isEqualTo(25);
         assertThat(gauge("biz.members.interest", "category", "reading")).as("집계에 없던 칸은 0").isZero();
@@ -71,12 +71,12 @@ class MemberProfileMetricsTest {
     }
 
     @Test
-    @DisplayName("지표 수는 고정 39개 — 열거 밖 값이 와도 새 지표가 생기지 않는다(과금 단위가 몰래 늘지 않게)")
+    @DisplayName("지표 수는 고정 37개 — 열거 밖 값이 와도 새 지표가 생기지 않는다(과금 단위가 몰래 늘지 않게)")
     void fixedMeterCount() {
         when(service.snapshot()).thenReturn(profile());
         metrics.refresh();
 
-        assertThat(registry.getMeters()).hasSize(39);
+        assertThat(registry.getMeters()).hasSize(37);
         assertThat(registry.find("biz.members.interest").tag("category", "legacy_category").gauge()).isNull();
         assertThat(registry.find("biz.members.consent").tag("type", "tos").gauge()).isNull();
     }

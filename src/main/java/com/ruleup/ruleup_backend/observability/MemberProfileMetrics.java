@@ -21,11 +21,12 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <p>콘솔은 지금 한 장면이고, 이건 <b>구성이 어떻게 변해 가는가</b>를 본다(대시보드 ruleup-&lt;env&gt;-business ④).
  * 칸은 분포를 읽는 데 필요한 것만 둔다 — 태그 조합 하나가 CloudWatch 지표 하나로 과금되므로 앱 버전·OS·국가처럼
- * 값이 열려 있는 칸은 콘솔에만 있다. 지금 39개다.
+ * 값이 열려 있는 칸은 콘솔에만 있다. 지금 37개다.
  * <ul>
  *   <li>{@code biz.members.total} — 회원 수</li>
  *   <li>{@code biz.members.age{band}} — 10s·20s·30s·40s·50s_plus·unknown (만 나이, 10s 는 14~19)</li>
- *   <li>{@code biz.members.gender{gender}} — male·female·non_binary·undisclosed(밝히지 않음 + 미입력)</li>
+ *   <li>{@code biz.members.gender{gender}} — male·female. 앱이 성별을 남·여 둘로만 받는다 — 다른 값(옛 계정의 미입력 등)은
+ *       콘솔에만 있다</li>
  *   <li>{@code biz.members.provider{provider}} — kakao·naver·google·apple</li>
  *   <li>{@code biz.members.interest{category}} — 관심사 12종(복수 선택)</li>
  *   <li>{@code biz.members.consent{type}} — 선택 동의(marketing·event)에 동의한 회원 수</li>
@@ -47,7 +48,7 @@ public class MemberProfileMetrics {
 
     private static final Map<String, String> AGE_TAGS = Map.of(
             "10", "10s", "20", "20s", "30", "30s", "40", "40s", "50+", "50s_plus", "UNKNOWN", "unknown");
-    private static final List<String> GENDER_TAGS = List.of("male", "female", "non_binary", "undisclosed");
+    private static final List<String> GENDER_TAGS = List.of("male", "female");
     private static final List<String> CONSENT_TAGS = List.of("marketing", "event");
     private static final List<String> PATH_TAGS = List.of("created_only", "joined_only", "both");
     private static final Map<String, String> ROOM_COUNT_TAGS = Map.of(
@@ -113,13 +114,7 @@ public class MemberProfileMetrics {
     void apply(AdminDtos.MemberProfile p) {
         total.set(p.members());
         p.ageDecades().forEach(b -> set(age, AGE_TAGS.get(b.key()), b.count()));
-
-        Map<String, Long> genders = new LinkedHashMap<>();
-        p.genders().forEach(b -> genders.merge(switch (b.key()) {
-            case "MALE", "FEMALE", "NON_BINARY" -> b.key().toLowerCase(Locale.ROOT);
-            default -> "undisclosed";
-        }, b.count(), Long::sum));
-        GENDER_TAGS.forEach(g -> set(gender, g, genders.getOrDefault(g, 0L)));
+        p.genders().forEach(b -> set(gender, b.key().toLowerCase(Locale.ROOT), b.count()));
 
         p.providers().forEach(b -> set(provider, b.key().toLowerCase(Locale.ROOT), b.count()));
         p.interests().forEach(b -> set(interest, b.key().toLowerCase(Locale.ROOT), b.count()));
