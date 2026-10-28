@@ -3,7 +3,8 @@
 prod 전용 — stg 의 가입·로그인 수는 QA 가 만든 값이라 추세로 볼 의미가 없어 stg 는 biz.* 를 내보내지도 않는다(CloudWatchMetricsConfig).
 예외는 ④ 회원 구성(biz.members.*) — prod 반영 전 확인용으로 stg 도 내보내므로, stg 대시보드에는 ④ 만 그린다.
 
-네 묶음: ① 로그인·가입 ② 챌린지 참여(초안·생성·가입) ③ 인증(자동 vs 수동) ④ 회원 구성(나잇대·성별·소셜·관심사·동의·활동).
+네 묶음: ① 로그인·가입 ② 챌린지 참여(초안·생성·가입) ③ 인증(자동 vs 수동)
+④ 회원 구성(나잇대·성별·소셜·관심사·동의·활동·방 참여 경로·참여 방 수 순위).
 묶음마다 첫 줄은 「대시보드에서 고른 기간 전체」의 합계·비율(숫자 칸) — 발표·보고 자료에 그대로 옮긴다. 그 아래가 1시간 단위 추세.
 ④ 는 게이지라 합계가 아니라 「지금 값」이고, 분포 칸(막대·원)도 가장 최근 값을 그린다.
 사용: python business_dashboard.py [prod|stg]   (기본 prod)"""
@@ -51,9 +52,43 @@ def members_section():
         ('가입 소셜',[g('provider','provider',k,label=l) for k,l in providers],latest),
         view='pie')
     row(('관심사(복수 선택)',[g('interest','category',k,label=l) for k,l in interests],latest), view='bar')
+    rooms_section(g, latest)
     row(('회원 수 · 활동 추이',[g('total',label='회원 수'),g('active','window','1d',label='1일 안 활동'),
                           g('active','window','7d',label='7일 안 활동')],None),
         ('나잇대 추이',[g('age','band',k,label=l) for k,l in ages],None))
+
+def rooms_section(g, latest):
+    """④ 안의 방 참여 — 방 개수가 아니라 사람 수. 만든 방은 가입 사건이 없는 멤버십이라 탐색·초대(들어간 방)와 갈린다.
+    세 경로 칸(created_only·joined_only·both)은 겹치지 않아, 「만든 방이 있는 사람」은 created_only+both 로 더한다."""
+    global y
+    p=lambda k,**o:g('rooms','path',k,**o)
+    paths=[('created_only','만든 방만'),('joined_only','들어간 방만(탐색·초대)'),('both','둘 다')]
+    counts=[('1','1개'),('2','2개'),('3','3개'),('4','4개'),('5_plus','5개 이상')]
+    totals(('챌린지 참여 중인 회원 — 사람 수(시작 전·진행 중인 방)',
+            [p('created_only',id='co',visible=False),p('joined_only',id='jo',visible=False),p('both',id='bo',visible=False),
+             expr('FILL(co,0)+FILL(jo,0)+FILL(bo,0)','참여 중','pa'),
+             expr('FILL(co,0)+FILL(bo,0)','만든 방이 있음','pc'),
+             expr('FILL(jo,0)+FILL(bo,0)','탐색·초대로 들어간 방이 있음','pj')],latest),
+           ('참여율(%) — 회원 중',
+            [g('total',id='mt',visible=False),p('created_only',id='c2',visible=False),
+             p('joined_only',id='j2',visible=False),p('both',id='b2',visible=False),
+             expr('IF(FILL(mt,0)>0, 100*(FILL(c2,0)+FILL(j2,0)+FILL(b2,0))/FILL(mt,0))','참여 중','pr'),
+             expr('IF(FILL(mt,0)>0, 100*(FILL(c2,0)+FILL(b2,0))/FILL(mt,0))','만든 방이 있음','pcr'),
+             expr('IF(FILL(mt,0)>0, 100*(FILL(j2,0)+FILL(b2,0))/FILL(mt,0))','들어간 방이 있음','pjr')],latest))
+    row(('참여 경로 — 겹치지 않게 나눈 사람 수',[p(k,label=l) for k,l in paths],latest),
+        ('참여 중인 방 개수별 회원 수',[g('rooms_per_member','rooms',k,label=l) for k,l in counts],latest),
+        view='pie')
+    # 순위는 사람을 가리켜 게이지로 못 만든다 — 앱이 10분마다 남기는 member_room_rank 로그(회원 ID 만, 닉네임은 콘솔)를 표로.
+    # 가장 최근 10분 칸의 줄이 지금 순위다. 두 태스크가 같은 값을 남기므로 회원·칸으로 묶어 한 줄로 만든다.
+    widgets.append({'type':'log','x':0,'y':y,'width':24,'height':8,'properties':{
+        'title':'참여 방 수 순위 — 상위 10명(최근 10분 칸, 닉네임은 콘솔 /admin/dashboard/members/room-ranking)',
+        'region':R,'view':'table',
+        'query':f"SOURCE '/ecs/ruleup-{ENV}-api' | filter @message like /member_room_rank / "
+                "| parse @message 'rank=* user=* rooms=* created=* joined=*' as r_rank, r_user, r_rooms, r_created, r_joined "
+                "| stats min(r_rank) as rank_no, max(r_rooms) as rooms, max(r_created) as created, max(r_joined) as joined "
+                "by bin(10m) as at, r_user | sort at desc, rank_no asc | limit 10"}})
+    y+=8
+    row(('참여 경로 추이',[p(k,label=l) for k,l in paths],None))
 
 if ENV=='stg':
     members_section()

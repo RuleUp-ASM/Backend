@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <p>콘솔은 지금 한 장면이고, 이건 <b>구성이 어떻게 변해 가는가</b>를 본다(대시보드 ruleup-&lt;env&gt;-business ④).
  * 칸은 분포를 읽는 데 필요한 것만 둔다 — 태그 조합 하나가 CloudWatch 지표 하나로 과금되므로 앱 버전·OS·국가처럼
- * 값이 열려 있는 칸은 콘솔에만 있다. 지금 31개다.
+ * 값이 열려 있는 칸은 콘솔에만 있다. 지금 39개다.
  * <ul>
  *   <li>{@code biz.members.total} — 회원 수</li>
  *   <li>{@code biz.members.age{band}} — 10s·20s·30s·40s·50s_plus·unknown (만 나이, 10s 는 14~19)</li>
@@ -30,7 +30,13 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>{@code biz.members.interest{category}} — 관심사 12종(복수 선택)</li>
  *   <li>{@code biz.members.consent{type}} — 선택 동의(marketing·event)에 동의한 회원 수</li>
  *   <li>{@code biz.members.active{window}} — 최근 1d·7d 안에 활동한 회원 수</li>
+ *   <li>{@code biz.members.rooms{path}} — 참여 중인 방이 있는 사람을 경로로: created_only·joined_only·both (겹치지 않는다)</li>
+ *   <li>{@code biz.members.rooms_per_member{rooms}} — 참여 중인 방 1·2·3·4·5_plus 개인 회원 수</li>
  * </ul>
+ *
+ * <p>참여 방 수 순위는 사람을 가리키므로 게이지로 만들 수 없다(사람마다 지표 하나 = 과금). 대신 갱신마다 상위
+ * {@value #RANK_LOG_SIZE}명을 {@code member_room_rank} 로그로 남기고 대시보드가 Logs Insights 표로 그린다 —
+ * 닉네임은 로그에 남기지 않고 회원 ID 만 쓴다. 닉네임이 필요하면 콘솔 {@code /admin/dashboard/members/room-ranking}.
  *
  * <p>구성은 천천히 변하므로 10분마다 센다. 읽기 전용 집계라 태스크마다 같은 값을 내 ShedLock 을 걸지 않는다
  * ({@link VerificationRateMetrics} 와 같다). 대시보드는 Maximum 으로 본다.
@@ -43,6 +49,10 @@ public class MemberProfileMetrics {
             "10", "10s", "20", "20s", "30", "30s", "40", "40s", "50+", "50s_plus", "UNKNOWN", "unknown");
     private static final List<String> GENDER_TAGS = List.of("male", "female", "non_binary", "undisclosed");
     private static final List<String> CONSENT_TAGS = List.of("marketing", "event");
+    private static final List<String> PATH_TAGS = List.of("created_only", "joined_only", "both");
+    private static final Map<String, String> ROOM_COUNT_TAGS = Map.of(
+            "1", "1", "2", "2", "3", "3", "4", "4", "5+", "5_plus");
+    static final int RANK_LOG_SIZE = 10;
 
     private final MemberProfileService profileService;
     private final AtomicLong total = new AtomicLong();
@@ -53,6 +63,8 @@ public class MemberProfileMetrics {
     private final Map<String, AtomicLong> consent = new LinkedHashMap<>();
     private final AtomicLong active1d = new AtomicLong();
     private final AtomicLong active7d = new AtomicLong();
+    private final Map<String, AtomicLong> roomPath = new LinkedHashMap<>();
+    private final Map<String, AtomicLong> roomsPerMember = new LinkedHashMap<>();
 
     public MemberProfileMetrics(MemberProfileService profileService, MeterRegistry registry) {
         this.profileService = profileService;
@@ -72,6 +84,10 @@ public class MemberProfileMetrics {
                 .description("최근 N일 안에 활동한 회원 수").tag("window", "1d").register(registry);
         Gauge.builder("biz.members.active", active7d, AtomicLong::doubleValue)
                 .description("최근 N일 안에 활동한 회원 수").tag("window", "7d").register(registry);
+        for (String path : PATH_TAGS)
+            register(registry, "biz.members.rooms", "path", path, roomPath, "참여 중인 방이 있는 회원 수 — 들어간 경로별");
+        for (String n : ROOM_COUNT_TAGS.values().stream().sorted().toList())
+            register(registry, "biz.members.rooms_per_member", "rooms", n, roomsPerMember, "참여 중인 방 개수별 회원 수");
     }
 
     private static void register(MeterRegistry registry, String name, String key, String value,
@@ -85,6 +101,9 @@ public class MemberProfileMetrics {
     public void refresh() {
         try {
             apply(profileService.snapshot());
+            profileService.roomRanking(RANK_LOG_SIZE).forEach(r -> log.info(
+                    "member_room_rank rank={} user={} rooms={} created={} joined={}",
+                    r.rank(), r.userId(), r.rooms(), r.created(), r.joined()));
         } catch (RuntimeException e) {
             // 지표 갱신 실패가 아무것도 막으면 안 된다. 다음 주기가 다시 센다.
             log.warn("회원 구성 지표 갱신 실패: {}", e.toString());
@@ -107,6 +126,10 @@ public class MemberProfileMetrics {
         p.consents().forEach(c -> set(consent, c.type().toLowerCase(Locale.ROOT), c.agreed()));
         active1d.set(p.activity().last1d());
         active7d.set(p.activity().last7d());
+        set(roomPath, "created_only", p.participation().createdOnly());
+        set(roomPath, "joined_only", p.participation().joinedOnly());
+        set(roomPath, "both", p.participation().both());
+        p.participation().roomsPerMember().forEach(b -> set(roomsPerMember, ROOM_COUNT_TAGS.get(b.key()), b.count()));
     }
 
     /** 미리 만든 칸만 채운다 — 열거에 없는 값(옛 값)으로 새 지표가 생기면 과금 단위가 몰래 늘어난다. */
