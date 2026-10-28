@@ -9,6 +9,7 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
@@ -18,12 +19,13 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 class SafeSearchClientTest {
 
     private static final byte[] IMAGE = {1, 2, 3};
-    private static final String URL = "https://vision.googleapis.com/v1/images:annotate?key=test-key";
+    private static final String URL = "https://vision.googleapis.com/v1/images:annotate";
 
     private static ModerationResult checkWith(String json) {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         server.expect(requestTo(URL)).andExpect(method(HttpMethod.POST))
+                .andExpect(header("x-goog-api-key", "test-key"))
                 .andRespond(withSuccess(json, MediaType.APPLICATION_JSON));
         ModerationResult result = new SafeSearchClient("test-key", builder.build()).check(IMAGE);
         server.verify();

@@ -68,7 +68,8 @@ public class SafeSearchClient {
             Map<String, Object> body = Map.of("requests", List.of(Map.of(
                     "image", Map.of("content", Base64.getEncoder().encodeToString(image)),
                     "features", List.of(Map.of("type", "SAFE_SEARCH_DETECTION")))));
-            Response res = http.post().uri(ENDPOINT + "?key={key}", apiKey)
+            // 키는 헤더로 — 쿼리에 두면 URL 을 남기는 트레이스(X-Ray)·접근 로그에 그대로 찍힌다.
+            Response res = http.post().uri(ENDPOINT).header("x-goog-api-key", apiKey)
                     .contentType(MediaType.APPLICATION_JSON).body(body)
                     .retrieve().body(Response.class);
             if (res == null || res.responses() == null || res.responses().isEmpty()) return unavailable("빈 응답");
