@@ -352,12 +352,14 @@ public class ExploreIndexer {
         // 먼저 불일치한 방을 모은다. 유예 대상을 Redis 조회 전에 읽으면 그 직후 커밋된 방은
         // 기대집합과 유예집합에 없고 Redis 에만 있어서 정상 투영도 손상으로 보인다.
         java.util.Set<String> mismatched = new java.util.HashSet<>();
+        // 방마다 처음 걸린 이유 — 재확인 뒤에도 남으면 경고에 함께 남겨, 무엇이 어긋났는지 로그만으로 가린다.
+        Map<String, String> why = new java.util.HashMap<>();
 
         for (Map.Entry<String, java.util.Set<String>> e : expectedSets.entrySet()) {
-            collectMismatches(store.membersOf(e.getKey()), e.getValue(), mismatched);
+            collectMismatches(store.membersOf(e.getKey()), e.getValue(), mismatched, why, e.getKey());
         }
         for (Map.Entry<String, java.util.Set<String>> e : expectedZsets.entrySet()) {
-            collectMismatches(store.zsetMembersOf(e.getKey()), e.getValue(), mismatched);
+            collectMismatches(store.zsetMembersOf(e.getKey()), e.getValue(), mismatched, why, e.getKey());
         }
         for (ExploreSort sort : ExploreSort.values()) {
             // 멤버에 정렬값이 박혀 있으므로 id 로 되짚어 구성을 본다 — 수만 세면 「하나 빠지고
@@ -374,7 +376,7 @@ public class ExploreIndexer {
                         sort, members.size(), actual.size());
                 return false;
             }
-            collectMismatches(actual, expectedSorted.get(sort), mismatched);
+            collectMismatches(actual, expectedSorted.get(sort), mismatched, why, ExploreKeys.sorted(sort));
         }
 
         if (deep) {
@@ -384,6 +386,7 @@ public class ExploreIndexer {
                 Object version = hash.get(ExploreRedisStore.VERSION_FIELD);
                 if (hash.isEmpty() || version == null) {
                     mismatched.add(hex);
+                    why.putIfAbsent(hex, "no-hash");
                     continue;
                 }
                 // 버전이 원천 리비전보다 한참 뒤처졌는지 본다. 방금 커밋된 변경의 투영은
@@ -393,20 +396,25 @@ public class ExploreIndexer {
                     projected = Long.parseLong(String.valueOf(version));
                 } catch (NumberFormatException e) {
                     mismatched.add(hex);
+                    why.putIfAbsent(hex, "bad-version");
                     continue;
                 }
                 if (row.full().version() - projected > STALE_PROJECTION_TOLERANCE_MICROS) {
                     mismatched.add(hex);
+                    why.putIfAbsent(hex, "lag=" + (row.full().version() - projected) / 1_000_000L + "s");
                     continue;
                 }
-                if (!valuesMatch(row.full(), hash, projected)) mismatched.add(hex);
+                if (!valuesMatch(row.full(), hash, projected)) {
+                    mismatched.add(hex);
+                    why.putIfAbsent(hex, projected == row.full().version() ? "values" : "trending");
+                }
             }
         }
 
         // 모든 Redis 읽기가 끝난 뒤에 원천을 다시 본다. 첫 대조와 재확인 사이뿐 아니라
         // 각 대조 도중의 변경까지 포함하며, 무관한 방의 실제 손상은 그대로 남긴다.
         return mismatched.isEmpty() || onlyConcurrentChanges(
-                mismatched, expectedSets.get(ExploreKeys.VISIBLE), changedSince);
+                mismatched, expectedSets.get(ExploreKeys.VISIBLE), changedSince, why);
     }
 
     /**
@@ -436,9 +444,10 @@ public class ExploreIndexer {
     /** 아직 손상으로 확정하지 않고 양방향 차집합의 방 id만 모은다. */
     private static void collectMismatches(java.util.Set<String> actual,
                                           java.util.Set<String> expected,
-                                          java.util.Set<String> mismatched) {
-        for (String id : expected) if (!actual.contains(id)) mismatched.add(id);
-        for (String id : actual) if (!expected.contains(id)) mismatched.add(id);
+                                          java.util.Set<String> mismatched,
+                                          Map<String, String> why, String key) {
+        for (String id : expected) if (!actual.contains(id) && mismatched.add(id)) why.putIfAbsent(id, "missing:" + key);
+        for (String id : actual) if (!expected.contains(id) && mismatched.add(id)) why.putIfAbsent(id, "ghost:" + key);
     }
 
     /**
@@ -791,7 +800,8 @@ public class ExploreIndexer {
      */
     private boolean onlyConcurrentChanges(java.util.Set<String> mismatched,
                                            java.util.Set<String> sourceSnapshotIds,
-                                           String changedSince) {
+                                           String changedSince,
+                                           Map<String, String> why) {
         List<String> ids = new ArrayList<>(mismatched);
         java.util.Set<String> existing = new java.util.HashSet<>();
         String cutoff = "CAST(? AS DATETIME(6))";
@@ -818,7 +828,9 @@ public class ExploreIndexer {
         // Redis 유령은 제외하지 않는다 — 그쪽은 실제 손상이므로 복구되어야 한다.
         mismatched.removeIf(hex -> sourceSnapshotIds.contains(hex) && !existing.contains(hex));
         if (mismatched.isEmpty()) return true;
-        log.warn("원천 재확인 후에도 파생이 다른 방 {}건 (대조한 불일치 {}건)", mismatched.size(), ids.size());
+        log.warn("원천 재확인 후에도 파생이 다른 방 {}건 (대조한 불일치 {}건) {}", mismatched.size(), ids.size(),
+                mismatched.stream().sorted().limit(10).map(hex -> hex + "=" + why.getOrDefault(hex, "?"))
+                        .collect(java.util.stream.Collectors.joining(", ")));
         return false;
     }
 
