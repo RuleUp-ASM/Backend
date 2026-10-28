@@ -25,6 +25,7 @@ Slack 전달은 Amazon Q Developer in chat applications(워크스페이스 `ASM 
 | `business_dashboard.py` | 사용자 지표 대시보드 `ruleup-prod-business` — ① 로그인·가입 ② 챌린지 참여(초안 경로·생성·초안 수정률·탐색/초대 가입) ③ 인증(자동 vs 수동). 묶음마다 기간 합계·비율 숫자 칸. prod 전용 |
 | `p0_mention.py` | P0 → 긴급 채널 커스텀 알림(멘션)·복구 스레드, 긴급 채널 구성을 `ruleup-prod-p0-slack` 으로 |
 | `slack_fallback.py` | Slack 전달 실패 감지 경보 → 이메일 대체 토픽 |
+| `night_hold.py <env>` | 야간 보류 큐(notifications)의 QUEUE-01 을 21:00 에 끄고 08:10 에 켠 뒤 08:11 에 OK 로 되돌리는 EventBridge Scheduler 일정·역할 |
 
 이메일은 Slack 이 실패했을 때만 온다. 대체 토픽 확인 링크를 누른 뒤 기존 Slack 토픽의 이메일 구독을 해지했다:
 `aws sns unsubscribe --region ap-northeast-2 --subscription-arn <arn>` (`ruleup-prod-alerts`·`ruleup-stg-alerts`·삭제된 `ruleup-prod-alarms`).
@@ -58,6 +59,12 @@ EventBridge 규칙이 서울·버지니아 모두 `ruleup-prod-P0-` 접두어로
 
 **예전 P0 는 내렸다**: ECS CPU 95%·메모리 97%·p95 3초·RDS 5GB·sync 5xx 30건·정상 서버 0대. 숫자 하나로 야간 호출하지 않는다 —
 실제 장애는 SLO·API-01·EDGE·NATIVE 가, 임박한 고갈은 RES 가 잡는다.
+
+**야간 보류 큐(QUEUE-01-notifications)**: 앱 알림 컨슈머는 21:00~08:00 KST 에 큐를 읽지 않는다(`NotificationWindow`). 밤에 들어온
+메시지는 08:00 에 한꺼번에 나가는 게 설계라 >10분 조건이 매일 밤 울렸다(2026-10-20~). `night_hold.py` 가 Scheduler 로
+21:00 `DisableAlarmActions` → 08:10 `EnableAlarmActions` → 08:11 `SetAlarmState OK`. 마지막 단계가 있어야 밤새 ALARM 이던 경보가
+아침에 컨슈머가 정말 멈췄을 때 다시 울린다(그 경우 Slack 에 OK·ALARM 이 연달아 온다). `p0_p1.py` 를 밤에 돌려도 이 경보는 꺼 둔 채로 둔다.
+DLQ(QUEUE-02)·moderation 큐는 밤에도 그대로 감시한다.
 
 누락 정책: 커스텀 P0·EDGE leaf = `ignore`(입력이 끊겨도 정상으로 돌아가지 않는다 — 재무장은 정상 Flag=0 또는 `../lambdas/rearm.py`),
 하트비트·NATIVE-01 = `breaching`, 나머지 = `notBreaching`.

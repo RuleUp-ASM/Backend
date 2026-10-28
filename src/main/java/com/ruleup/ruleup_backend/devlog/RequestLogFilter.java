@@ -76,6 +76,8 @@ public class RequestLogFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
+        // 기동 워밍업이 자기 자신에게 보내는 수천 건 — 사용자 요청이 아니다.
+        if (request.getHeader(com.ruleup.ruleup_backend.observability.health.StartupWarmup.HEADER) != null) return true;
         String uri = request.getRequestURI();
         for (String prefix : SKIP_PREFIXES) {
             if (uri.startsWith(prefix)) return true;

@@ -63,6 +63,18 @@ public class AdminController {
         return ApiResponse.ok(dashboardService.summary(UUID.fromString(userId), range));
     }
 
+    @Operation(summary = "회원 구성", description = """
+            지금 회원의 **나잇대·성별·가입 소셜·기기·관심사·동의·활동·방 참여·탈퇴 시점**을 센다.
+
+            탈퇴자·운영자 계정·`app.admin.stats-excluded-user-ids`(개발자 시험 계정)는 뺀다. 나이는 KST 오늘 기준 만 나이다.
+            건수만 내려가고 개인을 가리키는 값은 없다. 같은 값이 CloudWatch `biz.members.*` 게이지로도 나간다.
+            """)
+    @ApiErrorCodes({ErrorCode.ADMIN_FORBIDDEN, ErrorCode.LOGIN_REQUIRED})
+    @GetMapping("/dashboard/members")
+    public ApiResponse<AdminDtos.MemberProfile> memberProfile(@AuthenticationPrincipal String userId) {
+        return ApiResponse.ok(dashboardService.memberProfile(UUID.fromString(userId)));
+    }
+
     // ===== 일별 서비스 지표 =====
 
     @Operation(summary = "일별 서비스 지표", description = """

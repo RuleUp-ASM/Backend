@@ -34,6 +34,7 @@ class SchedulerLockCoverageTest {
             "OutboxMetrics.refresh",
             "VerificationBacklogMetrics.refresh",
             "VerificationRateMetrics.refresh",
+            "MemberProfileMetrics.refresh",
             "WatcherHealth.sample",
             "SegmentScoreService.evictLocalCaches");
 

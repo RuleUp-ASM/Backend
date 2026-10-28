@@ -92,6 +92,25 @@ class CatalogTest(unittest.TestCase):
         built = {s['id'] for _, s in self.specs('prod', res_enabled=True, detectors_enabled=True)}
         self.assertEqual(implemented - built, set(), 'yaml 에는 구현됐다고 적었는데 정의가 없다')
 
+    def test_night_hold_targets_real_queue_alarm(self):
+        """night_hold.py 가 끄는 이름이 실제 QUEUE-01 경보와 같아야 한다 — 이름 규칙이 바뀌면 조용히 빗나간다."""
+        for env in ('prod', 'stg'):
+            names = catalog.night_held(reg(env))
+            self.assertEqual(names, [f'ruleup-{env}-P1-QUEUE-01-notifications'])
+            built = {s['name'] for _, s in self.specs(env)}
+            self.assertTrue(set(names) <= built, env)
+
+    def test_night_hold_window(self):
+        """앱 야간 보류(21:00~08:00)를 덮고, 08:00 에 밀린 메시지가 나간 뒤 08:10 에 켠다."""
+        from datetime import time
+        quiet = catalog.night_hold_quiet
+        self.assertFalse(quiet(time(20, 59)))
+        self.assertTrue(quiet(time(21, 0)))
+        self.assertTrue(quiet(time(3, 0)))
+        self.assertTrue(quiet(time(8, 9)))
+        self.assertFalse(quiet(time(8, 10)))
+        self.assertLess(catalog.NIGHT_HOLD_ON, catalog.NIGHT_HOLD_RESET)
+
 
 if __name__ == '__main__':
     unittest.main()

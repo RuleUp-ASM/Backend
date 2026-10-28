@@ -4,6 +4,7 @@ import com.ruleup.ruleup_backend.common.DbTime;
 import com.ruleup.ruleup_backend.admin.domain.AdminAction;
 import com.ruleup.ruleup_backend.admin.dto.AdminDtos;
 import com.ruleup.ruleup_backend.admin.repository.AnomalySignalRepository;
+import com.ruleup.ruleup_backend.admin.stats.MemberProfileService;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.inquiry.InquiryRepository;
@@ -43,6 +44,7 @@ public class AdminDashboardService {
     private final SanctionRepository sanctionRepository;
     private final AnomalySignalRepository anomalyRepository;
     private final AdminAuditService auditService;
+    private final MemberProfileService memberProfileService;
 
     @Transactional(readOnly = true)
     public AdminDtos.DashboardSummary summary(UUID operatorId, String range) {
@@ -62,6 +64,13 @@ public class AdminDashboardService {
                 range == null ? "7d" : range, from.toString(), to.toString(),
                 guardrails(from, to), reports(from, to), inquiries(from, to),
                 sanctions(from, to), anomalies(from, to), members(from, to), challenges(from, to));
+    }
+
+    /** 회원 구성 — 건수만이라 개인정보 열람(SNAPSHOT_VIEW)이 아니라 대시보드 조회로 남긴다. */
+    @Transactional(readOnly = true)
+    public AdminDtos.MemberProfile memberProfile(UUID operatorId) {
+        auditService.allowed(operatorId, AdminAction.DASHBOARD_VIEW, null, null, "members");
+        return memberProfileService.snapshot();
     }
 
     // ===== 가드레일 — 전부 0이어야 한다 =====

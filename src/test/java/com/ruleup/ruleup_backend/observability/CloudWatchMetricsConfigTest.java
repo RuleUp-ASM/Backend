@@ -66,6 +66,26 @@ class CloudWatchMetricsConfigTest {
     }
 
     @Test
+    @DisplayName("회원 구성(biz.members.*)만은 stg 에서도 나간다 — prod 반영 전 확인용 예외")
+    void exportsMemberProfileInStgToo() {
+        for (String profile : new String[]{"stg", "prod"}) {
+            CloudWatchMeterRegistry registry = new CloudWatchMetricsConfig()
+                    .cloudWatchMeterRegistry(mock(CloudWatchAsyncClient.class), profile);
+            try {
+                registry.gauge("biz.members.total", 3.0);
+                Counter.builder("biz.login").register(registry).increment();
+
+                assertThat(registry.getMeters()).extracting(m -> m.getId().getName()).as(profile)
+                        .containsExactlyInAnyOrderElementsOf("prod".equals(profile)
+                                ? List.of("biz.members.total", "biz.login")
+                                : List.of("biz.members.total"));
+            } finally {
+                registry.stop();
+            }
+        }
+    }
+
+    @Test
     @DisplayName("stg·prod 에서는 기본 레지스트리와 CloudWatch 를 묶은 레지스트리가 주입된다 — 로컬 조회는 그대로다")
     void injectsCompositeOfSimpleAndCloudWatch() {
         CloudWatchAsyncClient client = mock(CloudWatchAsyncClient.class);

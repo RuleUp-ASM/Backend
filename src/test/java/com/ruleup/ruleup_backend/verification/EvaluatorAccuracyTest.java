@@ -233,6 +233,70 @@ class EvaluatorAccuracyTest {
     }
 
     @Nested
+    @DisplayName("장소 방문 — 지오펜스 전환으로 센 체류")
+    class VisitByTransitions {
+
+        private final GpsPresenceEvaluator evaluator = new GpsPresenceEvaluator();
+        private final List<GeoAnchor> anchors = List.of(new GeoAnchor(37.4979, 127.0276, 200, "스터디 카페"));
+
+        @Test
+        @DisplayName("ENTER 몇 초 뒤 DWELL 은 체류가 아니다 — 지나가다 들어간 반경으로 60분 목표가 통과됐다")
+        void dwellRightAfterEnterIsNotStay() {
+            // 2026-10-28 prod 실측: 13:12:53 ENTER, 13:12:56 DWELL(앱이 sync 때 다시 등록 → 초기 트리거).
+            Instant enter = at(13, 12).plusSeconds(53);
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(gpsConfig(60, 60, 150), List.of(
+                    geofence("ENTER", enter, false),
+                    geofence("DWELL", enter.plusSeconds(3), false)), anchors, at(14, 48)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.PENDING);
+            assertThat(outcome.evidence()).containsEntry("dwellMinutes", 0L);
+        }
+
+        @Test
+        @DisplayName("ENTER 없이 온 DWELL 만으로는 인증되지 않는다")
+        void dwellWithoutEnterIsNotStay() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(gpsConfig(30, 30, 150), List.of(
+                    geofence("DWELL", at(9, 30), false)), anchors, at(10, 0)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.PENDING);
+        }
+
+        @Test
+        @DisplayName("목표보다 짧게 머물고 나가면 DWELL 이 와도 미달이다")
+        void shortStayWithDwellIsInsufficient() {
+            // 2026-10-27 prod 실측: 13:43 ENTER → 13:48 DWELL → 13:51 EXIT, 목표 60분.
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(gpsConfig(60, 60, 150), List.of(
+                    geofence("ENTER", at(13, 43), false),
+                    geofence("DWELL", at(13, 48), false),
+                    geofence("EXIT", at(13, 51), false)), anchors, at(14, 0)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.PENDING);
+            assertThat(outcome.evidence()).containsEntry("dwellMinutes", 8L);
+        }
+
+        @Test
+        @DisplayName("ENTER 뒤 목표만큼 지나 DWELL 이 오면 나가기 전이라도 체류로 인정된다")
+        void dwellAfterGoalCountsWhileInside() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(gpsConfig(60, 60, 150), List.of(
+                    geofence("ENTER", at(9, 0), false),
+                    geofence("DWELL", at(10, 0), false)), anchors, at(10, 5)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.evidence()).containsEntry("dwellMinutes", 60L);
+        }
+
+        @Test
+        @DisplayName("ENTER~EXIT 가 목표를 넘으면 DWELL 없이도 인정된다")
+        void enterExitPairCounts() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(gpsConfig(30, 30, 150), List.of(
+                    geofence("ENTER", at(9, 0), false),
+                    geofence("EXIT", at(9, 40), false)), anchors, at(10, 0)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
+        }
+    }
+
+    @Nested
     @DisplayName("기상 — 목표 1시간 전 ~ 30분 후 안의 걸음")
     class WakeBySteps {
 
@@ -377,6 +441,50 @@ class EvaluatorAccuracyTest {
 
             assertThat(outcome.status()).isNotEqualTo(VerificationStatus.SUCCESS);
             assertThat(outcome.evidence()).containsEntry("value", 8L);
+        }
+
+        @Test
+        @DisplayName("하루 전체 구간의 합계 기록은 기상 근거가 아니다 — 11시에 걸은 걸음이 창 몫으로 잘려 들어왔다")
+        void dayLongTotalRecordIsNotWakingUp() {
+            // 2026-10-27 prod 실측: 삼성헬스가 00:00~23:59:59 에 4,801걸음 기록 하나를 쓰고, 실제 걸음은 08:59 부터였다.
+            // 비율로 나누면 06:00~07:30 몫이 300걸음이라 매일 성공했다.
+            HealthOrigin hcPhone = new HealthOrigin(
+                    "com.android.healthconnect.phone.0a1b2c3d4e5f60718293a4b5c6d7e8f9", "AUTO", null);
+            HealthOrigin shealthTotal = new HealthOrigin("com.sec.android.app.shealth", "UNKNOWN", null);
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(wakeConfig("07:00",
+                    List.of("com.sec.android.app.shealth", "com.android.healthconnect.phone.*")), List.of(
+                    steps(4801, at(0, 0), at(23, 59), shealthTotal),
+                    steps(7, at(8, 59), at(9, 0), hcPhone),
+                    steps(16, at(11, 0), at(11, 1), hcPhone)), List.of(), at(13, 7)));
+
+            assertThat(outcome.status()).isNotEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.failureReason()).isEqualTo("WOKE_UP_LATE");
+            assertThat(outcome.evidence()).containsEntry("value", 0L).containsEntry("coarseRecordsSkipped", 1);
+        }
+
+        @Test
+        @DisplayName("하루 합계 기록이 있어도 창 안의 잘게 쪼갠 기록으로는 기상이 인정된다")
+        void fineRecordsCountBesideDayLongTotal() {
+            HealthOrigin hcPhone = new HealthOrigin(
+                    "com.android.healthconnect.phone.0a1b2c3d4e5f60718293a4b5c6d7e8f9", "AUTO", null);
+            HealthOrigin shealthTotal = new HealthOrigin("com.sec.android.app.shealth", "UNKNOWN", null);
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(wakeConfig("07:00",
+                    List.of("com.sec.android.app.shealth", "com.android.healthconnect.phone.*")), List.of(
+                    steps(4801, at(0, 0), at(23, 59), shealthTotal),
+                    steps(24, at(6, 50), at(6, 52), hcPhone)), List.of(), at(9, 0)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.evidence()).containsEntry("value", 24L);
+        }
+
+        @Test
+        @DisplayName("창 길이(90분) 안의 기록은 그대로 비율로 센다")
+        void recordUpToWindowLengthStillCounts() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(
+                    wakeConfig("07:00"), List.of(steps(90, at(6, 0), at(7, 30), WATCH)), List.of(), at(9, 0)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.evidence()).containsEntry("value", 90L).doesNotContainKey("coarseRecordsSkipped");
         }
 
         @Test
