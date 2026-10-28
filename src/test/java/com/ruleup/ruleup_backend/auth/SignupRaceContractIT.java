@@ -81,6 +81,7 @@ class SignupRaceContractIT extends AuthApiSupport {
             assertThat(first.getResponse().getStatus()).isEqualTo(200);
             String userId = read(first, "$.data.user.id");
             long afterFirst = userRepository.count();
+            awaitModeration();   // 뒤에서 도는 심사가 스파이를 건드리는 중에 스텁을 바꾸지 않는다
 
             // B 는 A 의 INSERT 직전에 조회를 마친 상태 — 경합 창을 재현한다(첫 조회만 "없음").
             // (JPA 리포지토리는 인터페이스라 스파이가 실제 메서드를 호출할 수 없어, 이후 조회 결과는

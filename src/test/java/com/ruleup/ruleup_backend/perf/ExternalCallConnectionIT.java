@@ -20,6 +20,8 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.context.WebApplicationContext;
 
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -51,8 +53,10 @@ class ExternalCallConnectionIT extends AuthApiSupport {
     @DisplayName("가입 직후 닉네임 심사를 기다리는 동안 DB 커넥션을 쥐지 않는다")
     void signupModerationDoesNotHoldConnection() throws Exception {
         AtomicReference<String> during = new AtomicReference<>("not-called");
+        CountDownLatch called = new CountDownLatch(1);
         when(moderationClient.moderateNickname(anyString())).thenAnswer(inv -> {
             during.set(connectionState());
+            called.countDown();
             return ModerationResult.APPROVED;
         });
 
@@ -60,6 +64,8 @@ class ExternalCallConnectionIT extends AuthApiSupport {
         var res = signup(tag, "커넥션" + seq());
 
         assertThat(res.getResponse().getStatus()).isEqualTo(200);
+        // 심사는 가입 응답 뒤에 돈다 — 돌아올 때까지 기다렸다가 본다.
+        assertThat(called.await(10, TimeUnit.SECONDS)).isTrue();
         assertThat(during.get()).isEqualTo("no-connection");
     }
 

@@ -102,7 +102,8 @@ public class ProfileService {
     public ProfileImageResponse uploadImage(UUID userId, MultipartFile image) {
         // Early check avoids uploading known-invalid changes. Recheck under lock after external I/O.
         tx.executeWithoutResult(ignored -> requireImageEditable(loadLocked(userId),Instant.now()));
-        String url = imageStorage.urlOf(imageStorage.store(image));
+        var validated = imageStorage.validate(image);
+        String url = imageStorage.urlOf(imageStorage.storeValidated(validated));
         try {
             tx.executeWithoutResult(ignored -> {
                 User user=loadLocked(userId);
@@ -116,7 +117,8 @@ public class ProfileService {
             try { imageStorage.deleteByUrl(url); } catch (RuntimeException cleanup) { failed.addSuppressed(cleanup); }
             throw failed;
         }
-        User reviewed=moderation.moderate(userId);
+        User reviewed=moderation.moderate(userId,
+                new com.ruleup.ruleup_backend.moderation.UserModerationService.UploadedImage(url, validated.bytes(), validated.mimeType()));
         return ProfileImageResponse.of(reviewed.visibleProfileImageTo(userId),reviewed.getProfileImageStatus());
     }
 
