@@ -68,7 +68,8 @@ class OnboardingSpecIT extends ChallengeApiSupport {
             return ModerationResult.APPROVED;
         });
         String nickname = "뒤검수" + uniq("").substring(0, 5);
-        var result = signup(uniq("async-moderation"), nickname);
+        // 공용 signup() 은 심사가 끝나길 기다리므로 직접 보낸다 — 여기선 심사가 막힌 채 응답이 와야 한다.
+        var result = postJson("/api/v1/auth/signup", preparedSignup(uniq("async-moderation"), nickname));
         // 심사가 막혀 있어도 가입은 끝난다 — 본인에게는 입력한 닉네임이 심사 중으로 보인다.
         assertThat(result.getResponse().getStatus()).isEqualTo(200);
         assertThat((String) read(result, "$.data.user.nicknameStatus")).isEqualTo("PENDING");

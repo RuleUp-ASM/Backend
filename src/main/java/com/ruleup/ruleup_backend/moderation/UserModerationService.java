@@ -18,6 +18,7 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.nio.ByteBuffer;
+import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -71,6 +72,16 @@ public class UserModerationService {
         } catch (RejectedExecutionException full) {
             log.warn("user_moderation_deferred userId={} reason=queue_full", userId);
         }
+    }
+
+    /** 뒤에서 도는 심사가 모두 끝날 때까지 기다린다(테스트가 가입 뒤 심사 결과를 전제할 때). */
+    public boolean awaitBackgroundIdle(Duration timeout) throws InterruptedException {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (background.getTaskCount() != background.getCompletedTaskCount()) {
+            if (System.nanoTime() > deadline) return false;
+            Thread.sleep(10);
+        }
+        return true;
     }
 
     /** 종료 때 진행 중인 심사는 마저 끝낸다 — 못 끝낸 건 PENDING 으로 남아 05:00 스캔이 집는다. */

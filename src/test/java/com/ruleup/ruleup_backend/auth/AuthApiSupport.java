@@ -2,11 +2,14 @@ package com.ruleup.ruleup_backend.auth;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jayway.jsonpath.JsonPath;
+import com.ruleup.ruleup_backend.moderation.UserModerationService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -169,7 +172,15 @@ public abstract class AuthApiSupport {
     protected MvcResult signup(String tag, String nickname) throws Exception {
         MvcResult res = postJson("/api/v1/auth/signup", preparedSignup(tag, nickname));
         assertThat(res.getResponse().getStatus()).isEqualTo(200);
+        awaitModeration();
         return res;
+    }
+
+    @Autowired private UserModerationService userModeration;
+
+    /** 가입 심사는 응답 뒤에 돈다 — 승인된 닉네임·조용한 SQL 을 전제하는 테스트는 끝날 때까지 기다린다. */
+    protected void awaitModeration() throws InterruptedException {
+        assertThat(userModeration.awaitBackgroundIdle(Duration.ofSeconds(10))).as("가입 심사 대기").isTrue();
     }
 
     // ===== 응답 =====
