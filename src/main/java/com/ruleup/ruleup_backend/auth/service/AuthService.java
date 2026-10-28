@@ -205,11 +205,9 @@ public class AuthService {
             try {
                 final int current = attempt;
                 SignupResponse response = requireNotBanned(transactionTemplate.execute(status -> register(req, tokenConsumed, current)));
-                User reviewed = moderation.moderate(UUID.fromString(response.user().id()));
-                return new SignupResponse(response.isNewUser(), response.restored(), response.accessToken(),
-                        response.refreshToken(), response.tokenType(), response.expiresIn(), response.flushIntervalSec(),
-                        UserResponse.from(reviewed, scoreSummaryRepository.findById(reviewed.getId()).orElse(null),
-                                lockOf(reviewed)));
+                // 가입부터 시킨다 — 닉네임·사진 심사는 응답 뒤에 돈다(LLM 왕복 ~0.9초를 기다리지 않는다).
+                moderation.moderateLater(UUID.fromString(response.user().id()));
+                return response;
             } catch (DataIntegrityViolationException e) {
                 // 동시 가입 경합 — 사전 조회 후 다른 요청이 먼저 가입했다.
                 // 계약: "후발 요청은 기존 유저 로그인으로 수렴"(테크 스펙 4-3).

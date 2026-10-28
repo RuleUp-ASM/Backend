@@ -19,7 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-/** Only the daily sweep publishes user moderation retries; request paths remain synchronous. */
+/** Only the daily sweep publishes user moderation retries; request paths review in-process (signup in the background). */
 @Component
 public class UserModerationQueue {
     private static final Logger log = LoggerFactory.getLogger(UserModerationQueue.class);
