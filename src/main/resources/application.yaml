@@ -216,6 +216,11 @@ app:
     # 급증 때 모두가 느려지는 대신 받은 요청은 제 속도로 끝낸다(부하테스트 2026-10). 헬스체크는 관리 포트라 영향 없다.
     max-inflight: ${APP_HTTP_MAX_INFLIGHT:0}
     inflight-wait-ms: ${APP_HTTP_INFLIGHT_WAIT_MS:1000}
+  # 기동 워밍업(StartupWarmup). 새 태스크가 이 시간 동안 자기 자신에게 공개 요청을 보내 JVM 을 데우고,
+  # 그동안 헬스체크는 503 이라 ALB 가 트래픽을 보내지 않는다. 0 이면 끈다.
+  warmup:
+    enabled: ${APP_WARMUP_ENABLED:true}
+    duration-seconds: ${APP_WARMUP_DURATION_SECONDS:20}
   request-log:
     enabled: ${APP_REQUEST_LOG_ENABLED:true}
     body: ${APP_REQUEST_LOG_BODY:true}      # 요청·응답 본문까지 찍을지
