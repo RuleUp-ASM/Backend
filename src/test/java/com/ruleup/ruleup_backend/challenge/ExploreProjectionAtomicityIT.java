@@ -497,6 +497,25 @@ class ExploreProjectionAtomicityIT extends ChallengeApiSupport {
     }
 
     @Test
+    @org.junit.jupiter.api.extension.ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
+    @DisplayName("재확인 뒤에도 남은 불일치는 방 id 와 어긋난 자리를 경고에 남긴다 — 로그만으로 원인을 가린다")
+    void persistentMismatchWarningNamesRoomAndReason(org.springframework.boot.test.system.CapturedOutput output)
+            throws Exception {
+        UUID room = publicRoom();
+        settle(room);
+        indexer.reindexAll();
+        String hex = ExploreKeys.hex(room);
+
+        redis.opsForSet().remove(ExploreKeys.VISIBLE, hex);
+        try {
+            assertThat(indexer.projectionMatchesSource(false)).isFalse();
+            assertThat(output.getOut()).contains(hex + "=missing:" + ExploreKeys.VISIBLE);
+        } finally {
+            indexer.reindexAll();
+        }
+    }
+
+    @Test
     @DisplayName("[P1] 가라앉은 방의 실제 구조 유실은 여전히 잡아낸다")
     void realLossOnASettledRoomIsStillDetected() throws Exception {
         UUID room = publicRoom();
