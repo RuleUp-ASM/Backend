@@ -19,6 +19,9 @@ import java.util.*;
  *    「언제 걸었는지」가 판정의 전부라, 구간 없는 하루 누적값은 근거가 되지 못한다.
  *  - 창: [beforeTime - leadMinutes, beforeTime + graceMinutes] — 07:00 목표면 06:00~07:30.
  *    하루 시작(00:00)부터 보면 새벽에 잠깐 깨서 걸은 걸음이 기상이 된다. 창에 걸친 기록은 겹친 비율만큼만 센다.
+ *  - 창보다 긴 기록은 세지 않는다. 삼성헬스는 하루 걸음을 00:00~23:59 기록 하나로 쓰는데, 비율로 나누면
+ *    11시에 걸은 걸음도 창 몫(1.5/24)이 생겨 매일 성공했다(2026-10-25~28 prod). 창보다 긴 구간은 걸음이
+ *    창 안에서 났는지 말해 주지 못한다.
  *  - 판정: 창 안 걸음 ≥ minSteps → SUCCESS / 창 닫힘·미달 → FAILED(WOKE_UP_LATE) / 그 외 → PENDING.
  *  - 출처 게이트는 움직임(HEALTH)과 같다 — 손입력·신뢰 밖 출처는 뺀다. 폰과 워치가 같은 걸음을 각자
  *    기록하면 겹친 구간은 한 번만 센다.
@@ -46,7 +49,8 @@ public class WakeEvaluator implements MethodEvaluator {
 
         Set<String> rejected = new LinkedHashSet<>();
         boolean[] rejectedInWindow = {false};
-        double steps = stepsInWindow(ctx.signals(), window, cfg, rejected, rejectedInWindow);
+        int[] coarseSkipped = {0};
+        double steps = stepsInWindow(ctx.signals(), window, cfg, rejected, rejectedInWindow, coarseSkipped);
 
         Map<String, Object> evidence = new HashMap<>();
         evidence.put("beforeTime", cfg.beforeTime());
@@ -59,6 +63,7 @@ public class WakeEvaluator implements MethodEvaluator {
         evidence.put("value", Math.round(steps));
         evidence.put("goal", cfg.minSteps());
         if (!rejected.isEmpty()) evidence.put("rejectedOrigins", new ArrayList<>(rejected));
+        if (coarseSkipped[0] > 0) evidence.put("coarseRecordsSkipped", coarseSkipped[0]);
 
         if (cfg.minSteps() > 0 && steps >= cfg.minSteps()) {
             return EvaluationOutcome.success(evidence, windowCloses);          // 창 안에서 움직였다 → 즉시 성공
@@ -72,9 +77,10 @@ public class WakeEvaluator implements MethodEvaluator {
         return EvaluationOutcome.pending(evidence, windowCloses);
     }
 
-    /** 창 안 걸음 합 — 출처 게이트를 통과한 구간 기록만, 창에 겹친 비율만큼, 겹친 기록은 한 번만. */
+    /** 창 안 걸음 합 — 출처 게이트를 통과한 창보다 짧은 구간 기록만, 창에 겹친 비율만큼, 겹친 기록은 한 번만. */
     private double stepsInWindow(List<SyncSignal> signals, Window window, WakeConfig cfg, Set<String> rejected,
-                                 boolean[] rejectedInWindow) {
+                                 boolean[] rejectedInWindow, int[] coarseSkipped) {
+        long windowSec = window.end().getEpochSecond() - window.start().getEpochSecond();
         if (signals == null) return 0;
         // 같은 기록은 <b>마지막에 받은 것</b>으로 센다. 앱은 sync 마다 그날 기록을 다시 보내고, 기록 앱은 같은 기록의
         // 걸음 수·끝 시각을 키워 가며 고친다 — 처음 받은 값(예: 3걸음)에 묶이면 그날은 끝내 문턱을 못 넘는다.
@@ -100,6 +106,10 @@ public class WakeEvaluator implements MethodEvaluator {
                     continue;
                 }
                 if (!inWindow || r.value() == null) continue;                          // 구간 없음·창 밖 기록
+                if (to.getEpochSecond() - from.getEpochSecond() > windowSec) {         // 하루 합계 같은 굵은 기록
+                    coarseSkipped[0]++;
+                    continue;
+                }
                 double share = (double) (end.getEpochSecond() - start.getEpochSecond())
                         / (to.getEpochSecond() - from.getEpochSecond());
                 HealthEvaluator.Measured m = new HealthEvaluator.Measured(start, end, r.value().doubleValue() * share);
