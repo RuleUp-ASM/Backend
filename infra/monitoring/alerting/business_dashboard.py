@@ -35,7 +35,7 @@ def members_section():
     g=lambda name,*tags,**o:m(f'biz.members.{name}.value',*tags,stat='Maximum',**o)
     latest={'setPeriodToTimeRange':False,'period':900}
     ages=[('10s','10대(14~19)'),('20s','20대'),('30s','30대'),('40s','40대'),('50s_plus','50대+'),('unknown','미입력')]
-    genders=[('male','남'),('female','여'),('non_binary','논바이너리'),('undisclosed','밝히지 않음')]
+    genders=[('male','남'),('female','여')]   # 앱이 남·여 둘로만 받는다
     providers=[('kakao','카카오'),('naver','네이버'),('google','구글'),('apple','애플')]
     interests=[('exercise','운동'),('wake_sleep','기상·수면'),('diet_health','식습관·건강'),('study','학습'),('reading','독서'),
                ('mind','마음'),('finance','재테크'),('hobby','취미'),('housekeeping','정리·살림'),

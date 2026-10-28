@@ -63,10 +63,10 @@ public class CloudWatchMetricsConfig {
             "biz.challenge.draft",                     // 초안(origin=ai|template|clone, result=success|blocked|failure)
             "biz.challenge.created",                   // 생성(origin, edited=yes|no) — 초안 수정률
             "biz.challenge.joined",                    // 가입(source=explore|invite)
-            // 회원 구성(MemberProfileMetrics) — 태그는 고정 열거, 합쳐서 39개
+            // 회원 구성(MemberProfileMetrics) — 태그는 고정 열거, 합쳐서 37개
             "biz.members.total",                       // 회원 수
             "biz.members.age",                         // 나잇대(band=10s|20s|30s|40s|50s_plus|unknown)
-            "biz.members.gender",                      // 성별(gender=male|female|non_binary|undisclosed)
+            "biz.members.gender",                      // 성별(gender=male|female)
             "biz.members.provider",                    // 가입 소셜(provider=kakao|naver|google|apple)
             "biz.members.interest",                    // 관심사 12종(category)
             "biz.members.consent",                     // 선택 동의(type=marketing|event)
