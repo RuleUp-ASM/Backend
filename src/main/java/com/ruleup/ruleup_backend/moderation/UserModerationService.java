@@ -42,6 +42,11 @@ public class UserModerationService {
     }
 
     public User moderate(UUID userId) {
+        return moderate(userId, null);
+    }
+
+    /** 방금 올린 사진은 손에 든 바이트로 심사한다 — 공개 주소로 되받는 왕복(~0.6초)을 건너뛴다. */
+    public User moderate(UUID userId, UploadedImage uploaded) {
         byte[] id = bytes(userId);
         var rows = jdbc.queryForList("SELECT nickname,nickname_status,profile_image_key,profile_image_status " +
                 "FROM users WHERE id=? AND status<>'WITHDRAWN'", (Object) id);
@@ -54,7 +59,10 @@ public class UserModerationService {
             String content = (String) submitted.get(column);
             ModerationResult verdict;
             try {
-                verdict = nickname ? client.moderateNickname(content) : client.moderateImage(content);
+                verdict = nickname ? client.moderateNickname(content)
+                        : uploaded != null && uploaded.url().equals(content)
+                        ? client.moderateImageBytes(uploaded.bytes(), uploaded.mimeType())
+                        : client.moderateImage(content);
             } catch (RuntimeException unavailable) {
                 log.warn("user_moderation_pending userId={} target={} error={}", userId, column,
                         unavailable.getClass().getSimpleName());
@@ -95,6 +103,9 @@ public class UserModerationService {
             return user;
         });
     }
+
+    /** 저장한 사진의 서빙 URL 과 원본 바이트. URL 이 지금 제출값과 같을 때만 바이트를 쓴다. */
+    public record UploadedImage(String url, byte[] bytes, String mimeType) {}
 
     private static byte[] bytes(UUID id) {
         return ByteBuffer.allocate(16).putLong(id.getMostSignificantBits()).putLong(id.getLeastSignificantBits()).array();

@@ -33,6 +33,8 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -515,6 +517,21 @@ class OnboardingApiContractIT extends AuthApiSupport {
             // 등록 직후엔 승인 전 — 타인에게는 기본 프로필(null)이 보인다
             assertThat(user.getProfileImageStatus())
                     .isIn(ProfileImageStatus.PENDING, ProfileImageStatus.APPROVED);
+        }
+
+        @Test
+        @DisplayName("올린 사진은 받은 바이트로 심사한다 — 공개 주소로 되받지 않는다")
+        void upload_moderates_received_bytes() throws Exception {
+            String tag = uniq("pb");
+            String at = read(signup(tag, "바이트" + seq()), "$.data.accessToken");
+            org.mockito.Mockito.clearInvocations(moderationClient);
+
+            mvc.perform(multipart("/api/v1/users/me/profile-image")
+                    .file(new MockMultipartFile("image", "p.png", MediaType.IMAGE_PNG_VALUE, PNG_1X1))
+                    .header("Authorization", "Bearer " + at)).andReturn();
+
+            verify(moderationClient).moderateImageBytes(PNG_1X1, MediaType.IMAGE_PNG_VALUE);
+            verify(moderationClient, never()).moderateImage(anyString());
         }
 
         @Test
