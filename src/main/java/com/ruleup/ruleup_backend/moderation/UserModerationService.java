@@ -7,6 +7,7 @@ import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import com.ruleup.ruleup_backend.user.domain.User;
+import jakarta.annotation.PreDestroy;
 import jakarta.persistence.EntityManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,10 +18,18 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.nio.ByteBuffer;
+import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
-/** Synchronous review after submission commits. Only the daily sweep retries pending fields. */
+/**
+ * Review after submission commits. Profile edits wait for it; signup hands it to a small background pool
+ * so the response does not hold a ~0.9s LLM round-trip. Only the daily sweep retries pending fields.
+ */
 @Service
 public class UserModerationService {
     private static final Logger log = LoggerFactory.getLogger(UserModerationService.class);
@@ -31,6 +40,9 @@ public class UserModerationService {
     private final ImageStorageService images;
     private final EntityManager em;
     private final TransactionTemplate tx;
+    /** 외부 호출 ~1초짜리라 스레드는 적게, 가입이 몰리면 줄을 세운다. */
+    private final ThreadPoolExecutor background = new ThreadPoolExecutor(2, 2, 0, TimeUnit.MILLISECONDS,
+            new ArrayBlockingQueue<>(500), Thread.ofPlatform().name("user-moderation-", 0).daemon().factory());
 
     public UserModerationService(JdbcTemplate jdbc, UserRepository users, ContentModerationClient client,
                                  NotificationPublisher notifications, ImageStorageService images,
@@ -43,6 +55,40 @@ public class UserModerationService {
 
     public User moderate(UUID userId) {
         return moderate(userId, null);
+    }
+
+    /**
+     * 가입 응답을 붙잡지 않고 뒤에서 심사한다. 심사 중에는 본인에게 입력 닉네임·타인에게 임시 닉네임이 보이고,
+     * 거절되면 임시 닉네임과 거절 알림이 남는다. 대기열이 가득 차거나 태스크가 내려가 놓친 건 05:00 스캔이 다시 집는다.
+     */
+    public void moderateLater(UUID userId) {
+        try {
+            background.execute(() -> {
+                try { moderate(userId); }
+                catch (RuntimeException failure) {
+                    log.warn("user_moderation_background_failed userId={} error={}", userId, failure.getClass().getSimpleName());
+                }
+            });
+        } catch (RejectedExecutionException full) {
+            log.warn("user_moderation_deferred userId={} reason=queue_full", userId);
+        }
+    }
+
+    /** 뒤에서 도는 심사가 모두 끝날 때까지 기다린다(테스트가 가입 뒤 심사 결과를 전제할 때). */
+    public boolean awaitBackgroundIdle(Duration timeout) throws InterruptedException {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (background.getTaskCount() != background.getCompletedTaskCount()) {
+            if (System.nanoTime() > deadline) return false;
+            Thread.sleep(10);
+        }
+        return true;
+    }
+
+    /** 종료 때 진행 중인 심사는 마저 끝낸다 — 못 끝낸 건 PENDING 으로 남아 05:00 스캔이 집는다. */
+    @PreDestroy
+    void stopBackground() throws InterruptedException {
+        background.shutdown();
+        if (!background.awaitTermination(15, TimeUnit.SECONDS)) background.shutdownNow();
     }
 
     /** 방금 올린 사진은 손에 든 바이트로 심사한다 — 공개 주소로 되받는 왕복(~0.6초)을 건너뛴다. */

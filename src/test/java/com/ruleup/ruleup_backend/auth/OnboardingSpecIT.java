@@ -61,11 +61,29 @@ class OnboardingSpecIT extends ChallengeApiSupport {
         assertThat(second.consume(jti)).isFalse();
     }
 
-    @Test void signupReturnsTheSynchronousModerationResult() throws Exception {
-        when(client.moderateNickname(anyString())).thenReturn(ModerationResult.APPROVED);
-        var result = signup(uniq("sync-moderation"), "동기검수" + uniq("").substring(0, 5));
+    @Test void signupRespondsBeforeModerationAndAppliesItAfterwards() throws Exception {
+        CountDownLatch release = new CountDownLatch(1);
+        when(client.moderateNickname(anyString())).thenAnswer(invocation -> {
+            assertThat(release.await(10, TimeUnit.SECONDS)).isTrue();
+            return ModerationResult.APPROVED;
+        });
+        String nickname = "뒤검수" + uniq("").substring(0, 5);
+        // 공용 signup() 은 심사가 끝나길 기다리므로 직접 보낸다 — 여기선 심사가 막힌 채 응답이 와야 한다.
+        var result = postJson("/api/v1/auth/signup", preparedSignup(uniq("async-moderation"), nickname));
+        // 심사가 막혀 있어도 가입은 끝난다 — 본인에게는 입력한 닉네임이 심사 중으로 보인다.
         assertThat(result.getResponse().getStatus()).isEqualTo(200);
-        assertThat((String) read(result, "$.data.user.nicknameStatus")).isEqualTo("APPROVED");
+        assertThat((String) read(result, "$.data.user.nicknameStatus")).isEqualTo("PENDING");
+        assertThat((String) read(result, "$.data.user.nickname")).isEqualTo(nickname);
+
+        release.countDown();
+        byte[] id = bytes(java.util.UUID.fromString(read(result, "$.data.user.id")));
+        Map<String, Object> row = Map.of();
+        for (int i = 0; i < 100 && !"APPROVED".equals(row.get("nickname_status")); i++) {
+            Thread.sleep(100);
+            row = jdbc.queryForMap("SELECT nickname_status,approved_nickname FROM users WHERE id=?", (Object) id);
+        }
+        assertThat(row.get("nickname_status")).isEqualTo("APPROVED");
+        assertThat(row.get("approved_nickname")).isEqualTo(nickname);
     }
 
     @Test void changedNicknameDiscardsStaleReviewWithoutHoldingTheUserLock() throws Exception {
