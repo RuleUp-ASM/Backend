@@ -233,6 +233,70 @@ class EvaluatorAccuracyTest {
     }
 
     @Nested
+    @DisplayName("장소 방문 — 지오펜스 전환으로 센 체류")
+    class VisitByTransitions {
+
+        private final GpsPresenceEvaluator evaluator = new GpsPresenceEvaluator();
+        private final List<GeoAnchor> anchors = List.of(new GeoAnchor(37.4979, 127.0276, 200, "스터디 카페"));
+
+        @Test
+        @DisplayName("ENTER 몇 초 뒤 DWELL 은 체류가 아니다 — 지나가다 들어간 반경으로 60분 목표가 통과됐다")
+        void dwellRightAfterEnterIsNotStay() {
+            // 2026-10-28 prod 실측: 13:12:53 ENTER, 13:12:56 DWELL(앱이 sync 때 다시 등록 → 초기 트리거).
+            Instant enter = at(13, 12).plusSeconds(53);
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(gpsConfig(60, 60, 150), List.of(
+                    geofence("ENTER", enter, false),
+                    geofence("DWELL", enter.plusSeconds(3), false)), anchors, at(14, 48)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.PENDING);
+            assertThat(outcome.evidence()).containsEntry("dwellMinutes", 0L);
+        }
+
+        @Test
+        @DisplayName("ENTER 없이 온 DWELL 만으로는 인증되지 않는다")
+        void dwellWithoutEnterIsNotStay() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(gpsConfig(30, 30, 150), List.of(
+                    geofence("DWELL", at(9, 30), false)), anchors, at(10, 0)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.PENDING);
+        }
+
+        @Test
+        @DisplayName("목표보다 짧게 머물고 나가면 DWELL 이 와도 미달이다")
+        void shortStayWithDwellIsInsufficient() {
+            // 2026-10-27 prod 실측: 13:43 ENTER → 13:48 DWELL → 13:51 EXIT, 목표 60분.
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(gpsConfig(60, 60, 150), List.of(
+                    geofence("ENTER", at(13, 43), false),
+                    geofence("DWELL", at(13, 48), false),
+                    geofence("EXIT", at(13, 51), false)), anchors, at(14, 0)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.PENDING);
+            assertThat(outcome.evidence()).containsEntry("dwellMinutes", 8L);
+        }
+
+        @Test
+        @DisplayName("ENTER 뒤 목표만큼 지나 DWELL 이 오면 나가기 전이라도 체류로 인정된다")
+        void dwellAfterGoalCountsWhileInside() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(gpsConfig(60, 60, 150), List.of(
+                    geofence("ENTER", at(9, 0), false),
+                    geofence("DWELL", at(10, 0), false)), anchors, at(10, 5)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.evidence()).containsEntry("dwellMinutes", 60L);
+        }
+
+        @Test
+        @DisplayName("ENTER~EXIT 가 목표를 넘으면 DWELL 없이도 인정된다")
+        void enterExitPairCounts() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(gpsConfig(30, 30, 150), List.of(
+                    geofence("ENTER", at(9, 0), false),
+                    geofence("EXIT", at(9, 40), false)), anchors, at(10, 0)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
+        }
+    }
+
+    @Nested
     @DisplayName("기상 — 목표 1시간 전 ~ 30분 후 안의 걸음")
     class WakeBySteps {
 

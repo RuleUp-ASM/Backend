@@ -103,7 +103,7 @@ class VerificationCrossChallengeIT extends VerificationApiSupport {
         }
 
         @Test
-        @DisplayName("OS 가 확정한 DWELL 전환도 자기 챌린지에서만 인정된다")
+        @DisplayName("ENTER 후 목표만큼 지나 온 DWELL 도 자기 챌린지에서만 인정된다")
         void dwellTransitionDoesNotLeak() throws Exception {
             Member me = member(uniq("cross-dwell"));
 
@@ -114,7 +114,8 @@ class VerificationCrossChallengeIT extends VerificationApiSupport {
             UUID libraryMember = insertReadyMember(libraryChallenge, me.id(),
                     anchor(LIBRARY_LAT, LIBRARY_LNG, 100, "도서관"), null);
 
-            sync(me.token(), List.of(geofenceSignal(gymMember, "DWELL", todayAt(9, 30))));
+            sync(me.token(), List.of(geofenceSignal(gymMember, "ENTER", todayAt(9, 0)),
+                    geofenceSignal(gymMember, "DWELL", todayAt(9, 30))));
 
             assertThat(todayStatusOf(gymMember)).isEqualTo("SUCCESS");
             assertThat(todayStatusOf(libraryMember)).isIn(null, "PENDING");
