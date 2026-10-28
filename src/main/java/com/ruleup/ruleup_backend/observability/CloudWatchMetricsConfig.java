@@ -63,14 +63,16 @@ public class CloudWatchMetricsConfig {
             "biz.challenge.draft",                     // 초안(origin=ai|template|clone, result=success|blocked|failure)
             "biz.challenge.created",                   // 생성(origin, edited=yes|no) — 초안 수정률
             "biz.challenge.joined",                    // 가입(source=explore|invite)
-            // 회원 구성(MemberProfileMetrics) — 태그는 고정 열거, 합쳐서 31개
+            // 회원 구성(MemberProfileMetrics) — 태그는 고정 열거, 합쳐서 39개
             "biz.members.total",                       // 회원 수
             "biz.members.age",                         // 나잇대(band=10s|20s|30s|40s|50s_plus|unknown)
             "biz.members.gender",                      // 성별(gender=male|female|non_binary|undisclosed)
             "biz.members.provider",                    // 가입 소셜(provider=kakao|naver|google|apple)
             "biz.members.interest",                    // 관심사 12종(category)
             "biz.members.consent",                     // 선택 동의(type=marketing|event)
-            "biz.members.active");                     // 최근 활동(window=1d|7d)
+            "biz.members.active",                      // 최근 활동(window=1d|7d)
+            "biz.members.rooms",                       // 방 참여 경로(path=created_only|joined_only|both) — 사람 수
+            "biz.members.rooms_per_member");           // 참여 중인 방 개수(rooms=1|2|3|4|5_plus)
 
     static final String BUSINESS_PREFIX = "biz.";
     static final String STG_BUSINESS_PREFIX = "biz.members.";

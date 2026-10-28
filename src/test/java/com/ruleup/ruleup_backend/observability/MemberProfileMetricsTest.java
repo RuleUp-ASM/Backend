@@ -82,6 +82,13 @@ class MemberProfileMetricsTest {
     }
 
     @Test
+    @DisplayName("만드는 게이지는 전부 CloudWatch 허용 목록에 있다 — 빠지면 대시보드 칸이 조용히 비어 있다")
+    void everyGaugeIsExported() {
+        assertThat(registry.getMeters()).allSatisfy(m ->
+                assertThat(CloudWatchMetricsConfig.EXPORTED).as("허용 목록").contains(m.getId().getName()));
+    }
+
+    @Test
     @DisplayName("집계가 실패해도 예외를 밖으로 내지 않고 지난 값을 둔다")
     void keepsLastValuesOnFailure() {
         when(service.snapshot()).thenReturn(profile()).thenThrow(new IllegalStateException("db down"));
