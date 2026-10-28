@@ -380,6 +380,50 @@ class EvaluatorAccuracyTest {
         }
 
         @Test
+        @DisplayName("하루 전체 구간의 합계 기록은 기상 근거가 아니다 — 11시에 걸은 걸음이 창 몫으로 잘려 들어왔다")
+        void dayLongTotalRecordIsNotWakingUp() {
+            // 2026-10-27 prod 실측: 삼성헬스가 00:00~23:59:59 에 4,801걸음 기록 하나를 쓰고, 실제 걸음은 08:59 부터였다.
+            // 비율로 나누면 06:00~07:30 몫이 300걸음이라 매일 성공했다.
+            HealthOrigin hcPhone = new HealthOrigin(
+                    "com.android.healthconnect.phone.0a1b2c3d4e5f60718293a4b5c6d7e8f9", "AUTO", null);
+            HealthOrigin shealthTotal = new HealthOrigin("com.sec.android.app.shealth", "UNKNOWN", null);
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(wakeConfig("07:00",
+                    List.of("com.sec.android.app.shealth", "com.android.healthconnect.phone.*")), List.of(
+                    steps(4801, at(0, 0), at(23, 59), shealthTotal),
+                    steps(7, at(8, 59), at(9, 0), hcPhone),
+                    steps(16, at(11, 0), at(11, 1), hcPhone)), List.of(), at(13, 7)));
+
+            assertThat(outcome.status()).isNotEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.failureReason()).isEqualTo("WOKE_UP_LATE");
+            assertThat(outcome.evidence()).containsEntry("value", 0L).containsEntry("coarseRecordsSkipped", 1);
+        }
+
+        @Test
+        @DisplayName("하루 합계 기록이 있어도 창 안의 잘게 쪼갠 기록으로는 기상이 인정된다")
+        void fineRecordsCountBesideDayLongTotal() {
+            HealthOrigin hcPhone = new HealthOrigin(
+                    "com.android.healthconnect.phone.0a1b2c3d4e5f60718293a4b5c6d7e8f9", "AUTO", null);
+            HealthOrigin shealthTotal = new HealthOrigin("com.sec.android.app.shealth", "UNKNOWN", null);
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(wakeConfig("07:00",
+                    List.of("com.sec.android.app.shealth", "com.android.healthconnect.phone.*")), List.of(
+                    steps(4801, at(0, 0), at(23, 59), shealthTotal),
+                    steps(24, at(6, 50), at(6, 52), hcPhone)), List.of(), at(9, 0)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.evidence()).containsEntry("value", 24L);
+        }
+
+        @Test
+        @DisplayName("창 길이(90분) 안의 기록은 그대로 비율로 센다")
+        void recordUpToWindowLengthStillCounts() {
+            EvaluationOutcome outcome = evaluator.evaluate(ctx(
+                    wakeConfig("07:00"), List.of(steps(90, at(6, 0), at(7, 30), WATCH)), List.of(), at(9, 0)));
+
+            assertThat(outcome.status()).isEqualTo(VerificationStatus.SUCCESS);
+            assertThat(outcome.evidence()).containsEntry("value", 90L).doesNotContainKey("coarseRecordsSkipped");
+        }
+
+        @Test
         @DisplayName("창이 열려 있고 아직 걸음이 없으면 기다린다")
         void waitsWhileWindowOpen() {
             EvaluationOutcome outcome = evaluator.evaluate(ctx(
