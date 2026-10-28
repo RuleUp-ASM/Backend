@@ -46,6 +46,7 @@ public class MemberProfileService {
     public static final List<String> DECADES = List.of("10", "20", "30", "40", "50+", "UNKNOWN");
     public static final List<String> FIVE_YEAR = List.of("14-19", "20-24", "25-29", "30-34", "35-39", "40-49", "50+", "UNKNOWN");
     public static final String UNKNOWN = "UNKNOWN";
+    public static final List<String> ROOM_COUNTS = List.of("1", "2", "3", "4", "5+");
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private final JdbcTemplate jdbc;
@@ -100,7 +101,22 @@ public class MemberProfileService {
                 consents(),
                 activity(now),
                 engagement(),
+                participation(),
                 withdrawals());
+    }
+
+    /**
+     * 참여 중인 방 개수 순위 — 같은 개수는 같은 등수(1, 1, 3). 같은 등수 안에서는 직접 만든 방이 많은 순.
+     * 콘솔 순위표와 대시보드 ④ 순위 칸({@link com.ruleup.ruleup_backend.observability.MemberProfileMetrics})이 쓴다.
+     */
+    @Transactional(readOnly = true)
+    public List<AdminDtos.RoomRank> roomRanking(int limit) {
+        return jdbc.query("SELECT BIN_TO_UUID(t.uid) AS uid, t.nickname, t.rooms, t.created,"
+                        + " RANK() OVER (ORDER BY t.rooms DESC) AS rnk FROM (" + roomsPerUser() + ") t"
+                        + " ORDER BY t.rooms DESC, t.created DESC, t.nickname LIMIT ?",
+                (rs, i) -> new AdminDtos.RoomRank(rs.getInt("rnk"), rs.getString("uid"), rs.getString("nickname"),
+                        rs.getLong("rooms"), rs.getLong("created"), rs.getLong("rooms") - rs.getLong("created")),
+                limit);
     }
 
     // ===== 묶음별 =====
@@ -151,6 +167,33 @@ public class MemberProfileService {
                 + " FROM users u WHERE " + scope);
         return new AdminDtos.Engagement(num(r.get("joined")), num(r.get("in_room")), num(r.get("owned")),
                 num(r.get("judged")), num(r.get("succeeded")));
+    }
+
+    /** 참여 중인 방이 있는 사람을 경로별로 — 방 개수가 아니라 사람 수다. 세 칸은 겹치지 않는다. */
+    private AdminDtos.RoomParticipation participation() {
+        Map<String, Object> r = jdbc.queryForMap("SELECT COUNT(*) AS n, SUM(t.created = t.rooms) AS created_only,"
+                + " SUM(t.created = 0) AS joined_only, SUM(t.created > 0 AND t.created < t.rooms) AS both_paths"
+                + " FROM (" + roomsPerUser() + ") t");
+        return new AdminDtos.RoomParticipation(num(r.get("n")), num(r.get("created_only")), num(r.get("joined_only")),
+                num(r.get("both_paths")),
+                fixed(ROOM_COUNTS, buckets("SELECT IF(t.rooms >= 5, '5+', CAST(t.rooms AS CHAR)) AS k, COUNT(*) AS n"
+                        + " FROM (" + roomsPerUser() + ") t GROUP BY k")));
+    }
+
+    /**
+     * 회원별 「지금 참여 중인 방」 수와 그중 직접 만든 방 수. 시작 전·진행 중인 방의 ACTIVE 멤버십만 센다 — 끝난 방은 뺀다.
+     *
+     * <p>만든 방은 가입 사건({@code challenge_join_events})이 없는 멤버십이다. 가입 사건은 참여 경로(탐색 가입·초대 수락)에만
+     * 쌓이고 방 생성은 멤버만 만든다. 그래서 방장을 넘겨받은 사람은 「들어간 방」, 넘겨준 사람은 여전히 「만든 방」이다.
+     * 탐색과 초대는 같은 참여 경로라 가를 기록이 없어 「들어간 방」 하나로 센다.
+     */
+    private String roomsPerUser() {
+        return "SELECT u.id AS uid, u.approved_nickname AS nickname, COUNT(*) AS rooms,"
+                + " SUM(NOT EXISTS(SELECT 1 FROM challenge_join_events e"
+                + "  WHERE e.challenge_id = cm.challenge_id AND e.user_id = cm.user_id)) AS created"
+                + " FROM challenge_members cm JOIN challenges c ON c.id = cm.challenge_id JOIN users u ON u.id = cm.user_id"
+                + " WHERE cm.status = 'ACTIVE' AND c.status IN ('UPCOMING', 'ACTIVE') AND c.deleted_at IS NULL AND " + scope
+                + " GROUP BY u.id";
     }
 
     /** 탈퇴자는 회원 범위 밖이라 운영자·제외 계정만 빼고 탈퇴 상태를 본다. */

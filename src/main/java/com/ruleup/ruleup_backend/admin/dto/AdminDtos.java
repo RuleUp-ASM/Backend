@@ -410,6 +410,7 @@ public final class AdminDtos {
             @Schema(description = "동의 항목 7종") List<Consent> consents,
             Activity activity,
             Engagement engagement,
+            RoomParticipation participation,
             Withdrawals withdrawals) {}
 
     @Schema(name = "AdminMemberBucket")
@@ -439,6 +440,24 @@ public final class AdminDtos {
             @Schema(description = "방장인 방이 있음") long ownedRoom,
             @Schema(description = "확정 판정(성공·실패)을 받은 적 있음") long judged,
             @Schema(description = "인증에 성공한 적 있음") long succeeded) {}
+
+    @Schema(name = "AdminMemberRoomParticipation", description = """
+            지금 참여 중인 방(시작 전·진행 중)이 있는 **사람 수**를 들어간 경로로 나눈다 — 방 개수가 아니다.
+            세 칸은 겹치지 않는다: 직접 만든 방과 탐색·초대로 들어간 방을 함께 가진 사람은 `both` 에만 센다.
+            탐색 가입과 초대 수락은 같은 참여 경로라 「들어간 방」 하나로 센다.""")
+    public record RoomParticipation(
+            @Schema(description = "참여 중인 방이 하나 이상 = createdOnly + joinedOnly + both") long participating,
+            @Schema(description = "직접 만든 방에만 참여 중") long createdOnly,
+            @Schema(description = "탐색·초대로 들어간 방에만 참여 중") long joinedOnly,
+            @Schema(description = "만든 방과 들어간 방 둘 다") long both,
+            @Schema(description = "참여 중인 방 개수별 회원 수 — key 1 · 2 · 3 · 4 · 5+") List<Bucket> roomsPerMember) {}
+
+    @Schema(name = "AdminMemberRoomRank", description = "참여 중인 방 개수 순위 한 줄 — 같은 개수는 같은 등수")
+    public record RoomRank(int rank, String userId,
+                           @Schema(description = "승인된 닉네임") String nickname,
+                           @Schema(description = "참여 중인 방 수 = created + joined") long rooms,
+                           @Schema(description = "그중 직접 만든 방") long created,
+                           @Schema(description = "그중 탐색·초대로 들어간 방") long joined) {}
 
     @Schema(name = "AdminMemberWithdrawals", description = "탈퇴자 — 가입에서 탈퇴까지 걸린 시간")
     public record Withdrawals(long total, long within1h, long within1d, long within7d, long later) {}

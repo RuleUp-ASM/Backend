@@ -23,6 +23,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -73,6 +74,20 @@ public class AdminController {
     @GetMapping("/dashboard/members")
     public ApiResponse<AdminDtos.MemberProfile> memberProfile(@AuthenticationPrincipal String userId) {
         return ApiResponse.ok(dashboardService.memberProfile(UUID.fromString(userId)));
+    }
+
+    @Operation(summary = "참여 방 수 순위", description = """
+            지금 참여 중인 방(시작 전·진행 중)이 많은 회원 순. 같은 개수는 같은 등수(1, 1, 3)이고,
+            같은 등수 안에서는 직접 만든 방이 많은 순이다. `limit` 1~100, 기본 20.
+
+            회원 구성(`/dashboard/members`)과 같은 범위다 — 탈퇴자·운영자·제외 계정은 뺀다.
+            닉네임이 담겨 감사 로그에 `USER_VIEW` 로 남는다.
+            """)
+    @ApiErrorCodes({ErrorCode.INVALID_REQUEST, ErrorCode.ADMIN_FORBIDDEN, ErrorCode.LOGIN_REQUIRED})
+    @GetMapping("/dashboard/members/room-ranking")
+    public ApiResponse<List<AdminDtos.RoomRank>> roomRanking(@AuthenticationPrincipal String userId,
+                                                             @RequestParam(required = false) Integer limit) {
+        return ApiResponse.ok(dashboardService.roomRanking(UUID.fromString(userId), limit));
     }
 
     // ===== 일별 서비스 지표 =====

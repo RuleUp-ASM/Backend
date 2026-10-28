@@ -161,7 +161,89 @@ class MemberProfileIT extends ChallengeApiSupport {
         assertThat(audited).isEqualTo(1);
     }
 
+    @Test
+    @DisplayName("참여 중인 방이 있는 사람을 경로로 가른다 — 만든 방만·들어간 방만·둘 다, 끝난 방·나간 방은 빼고 사람 단위로")
+    void roomParticipationByPath() throws Exception {
+        AdminDtos.RoomParticipation before = profileService.snapshot().participation();
+
+        Member a = member(uniq("rpa"));   // 만든 방 1 + 들어간 방 1 → 둘 다
+        Member b = member(uniq("rpb"));   // 만든 방 1 → 만든 방만
+        Member c = member(uniq("rpc"));   // 들어간 방 2 → 들어간 방만
+        Member d = member(uniq("rpd"));   // 끝난 방 + 나간 방뿐 → 참여 중 아님
+        UUID roomA = createdRoom(a.id(), "ACTIVE");
+        UUID roomB = createdRoom(b.id(), "UPCOMING");
+        insertActiveMembership(roomB, a.id(), "MEMBER");
+        insertActiveMembership(roomA, c.id(), "MEMBER");
+        insertActiveMembership(roomB, c.id(), "MEMBER");
+        insertActiveMembership(createdRoom(b.id(), "COMPLETED"), d.id(), "MEMBER");
+        insertActiveMembership(roomA, d.id(), "MEMBER");
+        jdbcTemplate.update("UPDATE challenge_members SET status = 'LEFT' WHERE challenge_id = ? AND user_id = ?",
+                bytes(roomA), bytes(d.id()));
+
+        AdminDtos.RoomParticipation after = profileService.snapshot().participation();
+
+        assertThat(after.participating() - before.participating()).as("방 수가 아니라 사람 수 — d 는 빠진다").isEqualTo(3);
+        assertThat(after.createdOnly() - before.createdOnly()).isEqualTo(1);
+        assertThat(after.joinedOnly() - before.joinedOnly()).isEqualTo(1);
+        assertThat(after.both() - before.both()).isEqualTo(1);
+        assertThat(diff(before.roomsPerMember(), after.roomsPerMember()))
+                .as("b 는 끝난 방을 빼고 1개").isEqualTo(Map.of("1", 1L, "2", 2L));
+        assertThat(after.roomsPerMember()).extracting(AdminDtos.Bucket::key)
+                .containsExactlyElementsOf(MemberProfileService.ROOM_COUNTS);
+    }
+
+    @Test
+    @DisplayName("참여 방 수 순위 — 같은 개수는 같은 등수, 만든 방·들어간 방을 나눠 보이고 관리자 조회는 회원 조회로 남는다")
+    void roomRanking() throws Exception {
+        Member top = member(uniq("rkt"));
+        Member x = member(uniq("rkx"));
+        Member y = member(uniq("rky"));
+        Member host = member(uniq("rkh"));
+        for (int i = 0; i < 7; i++) createdRoom(top.id(), "ACTIVE");
+        for (int i = 0; i < 5; i++) insertActiveMembership(createdRoom(host.id(), "ACTIVE"), top.id(), "MEMBER");
+        UUID shared = createdRoom(x.id(), "ACTIVE");
+        insertActiveMembership(shared, y.id(), "MEMBER");
+        insertActiveMembership(createdRoom(host.id(), "ACTIVE"), x.id(), "MEMBER");
+        insertActiveMembership(createdRoom(host.id(), "ACTIVE"), y.id(), "MEMBER");
+
+        List<AdminDtos.RoomRank> ranking = profileService.roomRanking(100);
+        AdminDtos.RoomRank t = rank(ranking, top.id());
+        AdminDtos.RoomRank rx = rank(ranking, x.id());
+        AdminDtos.RoomRank ry = rank(ranking, y.id());
+
+        assertThat(t.rooms()).isEqualTo(12);
+        assertThat(t.created()).isEqualTo(7);
+        assertThat(t.joined()).isEqualTo(5);
+        assertThat(t.nickname()).isNotBlank();
+        assertThat(t.rank()).isLessThan(rx.rank());
+        assertThat(rx.rank()).as("2개끼리 같은 등수").isEqualTo(ry.rank());
+        assertThat(ranking.indexOf(rx)).as("같은 등수 안에서는 만든 방이 많은 쪽이 먼저").isLessThan(ranking.indexOf(ry));
+
+        Member op = member(uniq("rkop"));
+        jdbcTemplate.update("UPDATE users SET role = 'OPERATOR' WHERE id = ?", bytes(op.id()));
+        assertThat(getAuth("/api/v1/admin/dashboard/members/room-ranking?limit=101", op.token()).getResponse().getStatus())
+                .isEqualTo(400);
+        MvcResult res = getAuth("/api/v1/admin/dashboard/members/room-ranking?limit=1", op.token());
+        assertThat(res.getResponse().getStatus()).isEqualTo(200);
+        assertThat((Object) read(res, "$.data[0].rank")).isEqualTo(1);
+        Integer audited = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM admin_audit_logs WHERE operator_id = ?"
+                + " AND action = 'USER_VIEW' AND result = 'ALLOWED'", Integer.class, bytes(op.id()));
+        assertThat(audited).isEqualTo(1);
+    }
+
     // ===== 내부 =====
+
+    /** 방을 만든 것처럼 — 방장 멤버십만 두고 가입 사건은 남기지 않는다(방 생성 경로가 그렇다). */
+    private UUID createdRoom(UUID ownerId, String status) {
+        UUID room = insertChallenge(ownerId, "EXERCISE", status, "GROUP");
+        jdbcTemplate.update("INSERT INTO challenge_members (id, challenge_id, user_id, role, status) VALUES (?, ?, ?, 'OWNER', 'ACTIVE')",
+                bytes(UUID.randomUUID()), bytes(room), bytes(ownerId));
+        return room;
+    }
+
+    private static AdminDtos.RoomRank rank(List<AdminDtos.RoomRank> ranking, UUID userId) {
+        return ranking.stream().filter(r -> r.userId().equals(userId.toString())).findFirst().orElseThrow();
+    }
 
     private void setInfo(UUID userId, LocalDate birthDate, String gender) {
         jdbcTemplate.update("UPDATE user_information SET birth_date = ?, gender = ? WHERE user_id = ?",
