@@ -73,6 +73,15 @@ public class AdminDashboardService {
         return memberProfileService.snapshot();
     }
 
+    /** 참여 방 수 순위 — 닉네임이 담겨 회원을 가리키므로 건수 조회(DASHBOARD_VIEW)가 아니라 회원 조회로 남긴다. */
+    @Transactional(readOnly = true)
+    public List<AdminDtos.RoomRank> roomRanking(UUID operatorId, Integer limit) {
+        int n = limit == null ? 20 : limit;
+        if (n < 1 || n > 100) throw new BusinessException(ErrorCode.INVALID_REQUEST);
+        auditService.allowed(operatorId, AdminAction.USER_VIEW, null, null, "room-ranking");
+        return memberProfileService.roomRanking(n);
+    }
+
     // ===== 가드레일 — 전부 0이어야 한다 =====
 
     private AdminDtos.Guardrails guardrails(Instant from, Instant to) {

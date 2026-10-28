@@ -40,6 +40,8 @@ class MemberProfileMetricsTest {
                         new AdminDtos.Consent("EVENT", 8, 24)),
                 new AdminDtos.Activity(7, 21, 32),
                 new AdminDtos.Engagement(9, 7, 4, 3, 0),
+                new AdminDtos.RoomParticipation(8, 2, 5, 1, List.of(new Bucket("1", 5), new Bucket("2", 1),
+                        new Bucket("3", 0), new Bucket("4", 0), new Bucket("5+", 2))),
                 new AdminDtos.Withdrawals(6, 4, 1, 1, 0));
     }
 
@@ -61,15 +63,20 @@ class MemberProfileMetricsTest {
         assertThat(gauge("biz.members.consent", "type", "marketing")).isEqualTo(9);
         assertThat(gauge("biz.members.active", "window", "1d")).isEqualTo(7);
         assertThat(gauge("biz.members.active", "window", "7d")).isEqualTo(32);
+        assertThat(gauge("biz.members.rooms", "path", "created_only")).isEqualTo(2);
+        assertThat(gauge("biz.members.rooms", "path", "joined_only")).isEqualTo(5);
+        assertThat(gauge("biz.members.rooms", "path", "both")).isEqualTo(1);
+        assertThat(gauge("biz.members.rooms_per_member", "rooms", "1")).isEqualTo(5);
+        assertThat(gauge("biz.members.rooms_per_member", "rooms", "5_plus")).isEqualTo(2);
     }
 
     @Test
-    @DisplayName("지표 수는 고정 31개 — 열거 밖 값이 와도 새 지표가 생기지 않는다(과금 단위가 몰래 늘지 않게)")
+    @DisplayName("지표 수는 고정 39개 — 열거 밖 값이 와도 새 지표가 생기지 않는다(과금 단위가 몰래 늘지 않게)")
     void fixedMeterCount() {
         when(service.snapshot()).thenReturn(profile());
         metrics.refresh();
 
-        assertThat(registry.getMeters()).hasSize(31);
+        assertThat(registry.getMeters()).hasSize(39);
         assertThat(registry.find("biz.members.interest").tag("category", "legacy_category").gauge()).isNull();
         assertThat(registry.find("biz.members.consent").tag("type", "tos").gauge()).isNull();
     }
