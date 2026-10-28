@@ -11,8 +11,12 @@ import java.util.*;
 
 /**
  * GPS PRESENCE 평가기(테크스펙 v2 §5, §7.2).
- *  - 방문(도달형): 지오펜스 체류 ≥ dwellMinutes. DWELL 트랜지션(OS가 loiteringDelay 체류 확정)→즉시 SUCCESS.
- *    DWELL 없으면 ENTER/EXIT 페어 누적 ≥ 목표. fallback LOCATION: 멤버 앵커(OR) 반경 내 측위 시간폭 근사(§7.2, 부록 A).
+ *  - 방문(도달형): 지오펜스 체류 ≥ dwellMinutes. ENTER/EXIT 페어 누적 ≥ 목표.
+ *    DWELL 은 「그 시각에 아직 안에 있었다」는 근거로만 쓴다 — 열린 ENTER 를 그 시각까지 체류로 센다.
+ *    DWELL 하나로 즉시 성공시키던 때는 ENTER 몇 초 뒤에 온 DWELL 로 0~13분 체류가 30·60분 목표를
+ *    통과했다(prod 10/22~10/28). 앱이 sync 마다 지오펜스를 다시 등록하고 INITIAL_TRIGGER_DWELL 이라,
+ *    이미 안에 있다고 판단되면 loiteringDelay 를 기다리지 않고 DWELL 이 바로 온다.
+ *    fallback LOCATION: 멤버 앵커(OR) 반경 내 측위 시간폭 근사(§7.2, 부록 A).
  *  - 장소 피하기(AVOID)는 2026-10-15 유형째 제거했다 — 방문형만 남는다.
  *
  *  앵커는 PER_MEMBER(challenge_members.anchors). 트랜지션은 geofenceId=challengeMemberId라
@@ -49,7 +53,7 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
         int goalMin = (cfg.dwellMinutes() != null) ? cfg.dwellMinutes() : 0;
         long dwellSec = 0;
         Instant openEnter = null;
-        boolean dwellConfirmed = false;
+        Instant stillInsideAt = null;   // 열린 ENTER 이후 마지막 DWELL — 그때까지는 안에 있었다
         String source = "TRANSITION";
 
         // ② 같은 전환이 두 행으로 남아 있어도(geofenceId|transition|at) 한 번만 센다.
@@ -61,13 +65,18 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
             if (at == null) continue;
             if (!seen.add(transitionKey(t))) continue;                 // 이미 처리한 트랜지션 → skip(멱등)
             switch (t.transition()) {
-                case "DWELL" -> dwellConfirmed = true;                 // OS 체류 확정
+                case "DWELL" -> { if (openEnter != null) stillInsideAt = at; }   // ENTER 없는 DWELL 은 근거가 아니다
                 case "ENTER" -> { if (openEnter == null) openEnter = at; }
                 case "EXIT" -> {
                     if (openEnter != null) { dwellSec += Math.max(at.getEpochSecond() - openEnter.getEpochSecond(), 0); openEnter = null; }
+                    stillInsideAt = null;
                 }
                 default -> { }
             }
+        }
+        // 아직 나가지 않았으면 마지막 DWELL 시각까지만 센다 — 「지금」까지 세면 EXIT 를 놓친 날이 통째로 체류가 된다.
+        if (openEnter != null && stillInsideAt != null) {
+            dwellSec += Math.max(stillInsideAt.getEpochSecond() - openEnter.getEpochSecond(), 0);
         }
 
         // ① fallback: 트랜지션 전무 → 멤버 앵커(OR) 반경 내 LOCATION 포인트로 연속 체류를 누적.
@@ -82,7 +91,7 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
 
         long dwellMin = dwellSec / 60;
         boolean inside = openEnter != null;
-        boolean success = dwellConfirmed || dwellMin >= goalMin;
+        boolean success = dwellMin >= goalMin;
 
         Map<String, Object> ev = new HashMap<>();
         ev.put("dwellMinutes", dwellMin);
@@ -93,6 +102,7 @@ public class GpsPresenceEvaluator implements MethodEvaluator {
         ev.put("source", source);
         ev.put("dwellSeconds", dwellSec);
         if (openEnter != null) ev.put("enterAt", openEnter.toString());
+        if (openEnter != null && stillInsideAt != null) ev.put("stillInsideAt", stillInsideAt.toString());
         if (lastInside != null) ev.put("lastInsideAt", lastInside.toString());
         if (!seen.isEmpty()) ev.put("seenTransitions", capSeen(seen));
         putHygiene(ev, ctx, cfg);
