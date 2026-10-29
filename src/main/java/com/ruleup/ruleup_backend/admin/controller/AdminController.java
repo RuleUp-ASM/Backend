@@ -1,7 +1,9 @@
 package com.ruleup.ruleup_backend.admin.controller;
 
+import com.ruleup.ruleup_backend.admin.dto.AdminAppealDtos;
 import com.ruleup.ruleup_backend.admin.dto.AdminDtos;
 import com.ruleup.ruleup_backend.admin.dto.AdminInquiryDtos;
+import com.ruleup.ruleup_backend.admin.service.AdminAppealService;
 import com.ruleup.ruleup_backend.admin.service.AdminDashboardService;
 import com.ruleup.ruleup_backend.admin.service.AdminInquiryService;
 import com.ruleup.ruleup_backend.admin.service.AdminOpsService;
@@ -33,7 +35,7 @@ import java.util.UUID;
  * 2단계 확인은 형태와 무관하게 필수</b>라 서버가 소유한다. 경로 prefix 전체에 인터셉터가 걸려
  * 있어 엔드포인트를 추가해도 권한 검사를 빠뜨릴 자리가 없다.
  */
-@Tag(name = "Admin", description = "운영자 백오피스 — 대시보드 · 일별 지표 · 신고 · 제재 · CS · 직권 폐쇄 · 이상탐지 · 공지")
+@Tag(name = "Admin", description = "운영자 백오피스 — 대시보드 · 일별 지표 · 신고 · 제재 · CS · 이의 · 직권 폐쇄 · 이상탐지 · 공지")
 @SecurityRequirement(name = "bearerAuth")
 @RestController
 @RequestMapping("/api/v1/admin")
@@ -46,6 +48,7 @@ public class AdminController {
     private final AdminInquiryService inquiryService;
     private final AdminDashboardService dashboardService;
     private final AdminStatsService statsService;
+    private final AdminAppealService appealService;
 
     // ===== 대시보드 =====
 
@@ -339,6 +342,47 @@ public class AdminController {
             @PathVariable UUID inquiryId,
             @RequestBody AdminInquiryDtos.CategoryRequest request) {
         return ApiResponse.ok(inquiryService.reclassify(UUID.fromString(userId), inquiryId, request));
+    }
+
+    // ===== 이의 =====
+
+    @Operation(summary = "이의 목록", description = """
+            **최신순**이다. 이의는 접수 = 인용이라 상태(계류·기각)가 없어 상태 필터를 두지 않는다.
+
+            - `from`·`to`: 접수일(KST, `yyyy-MM-dd`), 양끝 포함
+            - `userId`·`challengeId`: 회원·방
+            - `hasImage`: true 사진 있음 / false 없음 / 생략 전부
+            - `failureReason` 은 접수 당시 실패 사유 코드다. 2026-10-29 이전 접수는 null 이다.
+            """)
+    @ApiErrorCodes({ErrorCode.INVALID_REQUEST, ErrorCode.ADMIN_FORBIDDEN, ErrorCode.LOGIN_REQUIRED})
+    @GetMapping("/appeals")
+    public ApiResponse<AdminAppealDtos.QueueResponse> appeals(
+            @AuthenticationPrincipal String userId,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to,
+            @RequestParam(name = "userId", required = false) String memberId,
+            @RequestParam(required = false) String challengeId,
+            @RequestParam(required = false) Boolean hasImage,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(required = false) Integer size) {
+        return ApiResponse.ok(appealService.queue(UUID.fromString(userId), from, to, memberId,
+                challengeId, hasImage, cursor, size));
+    }
+
+    @Operation(summary = "이의 상세", description = """
+            사유 전문 · 증빙 사진(단기 접근 주소와 만료 시각) · **이의 전 실패 설명**(사유 코드·근거·기준값·실제값) ·
+            같은 회원의 최근 30일 이의 수.
+
+            실패 설명은 유저가 신청 화면에서 본 값을 접수 때 고정해 둔 것이다 — 인용하면 판정의 실패 사유가 지워지기 때문이다.
+            2026-10-29 이전 접수는 `failure` 가 null 이다.
+
+            상세 열람은 **개인정보 열람**이라 감사 로그에 `APPEAL_VIEW` 로 따로 남는다.
+            """)
+    @ApiErrorCodes({ErrorCode.APPEAL_NOT_FOUND, ErrorCode.ADMIN_FORBIDDEN, ErrorCode.LOGIN_REQUIRED})
+    @GetMapping("/appeals/{appealId}")
+    public ApiResponse<AdminAppealDtos.Detail> appeal(@AuthenticationPrincipal String userId,
+                                                      @PathVariable UUID appealId) {
+        return ApiResponse.ok(appealService.detail(UUID.fromString(userId), appealId));
     }
 
     // ===== 이상탐지 =====
