@@ -219,6 +219,24 @@ class VerificationAppealIT extends VerificationApiSupport {
         }
 
         @Test
+        @DisplayName("접수 당시 실패 설명이 이의에 남는다 — 인용으로 판정 행의 사유가 지워져도 무엇에 이의했는지 볼 수 있다")
+        void failureExplanationIsKeptOnTheAppeal() throws Exception {
+            FailedVerification f = failedVerification("appeal-snap");
+
+            appeal(f.owner().token(), f.verificationId(), REASON, null);
+
+            Map<String, Object> row = jdbc().queryForMap(
+                    "SELECT a.failureReason, a.failureSummary, a.failureExpected, a.failureActual, d.failureReason AS dailyReason"
+                            + " FROM verification_appeals a JOIN VerificationDaily d ON d.id = a.verificationDailyId"
+                            + " WHERE a.verificationDailyId = ?", bytes(f.verificationId()));
+            assertThat(row.get("dailyReason")).as("인용하면 판정 행의 사유는 지워진다").isNull();
+            assertThat(row.get("failureReason")).isEqualTo("INSUFFICIENT_DWELL");
+            assertThat((String) row.get("failureSummary")).contains("체류").contains("10");
+            assertThat(String.valueOf(row.get("failureExpected"))).contains("goalMinutes");
+            assertThat(String.valueOf(row.get("failureActual"))).contains("dwellMinutes");
+        }
+
+        @Test
         @DisplayName("인용된 인증은 실패 공유 대상에서 빠진다")
         void acceptedAppealRemovesTheFailureFromTheFeed() throws Exception {
             FailedVerification f = failedVerification("appeal-share");

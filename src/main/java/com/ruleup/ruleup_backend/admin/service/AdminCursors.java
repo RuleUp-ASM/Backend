@@ -6,6 +6,7 @@ import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.UUID;
 
 /**
  * 커서 인코딩 — 백오피스 공통 5-2-1 A #1 「커서는 <b>불투명 문자열</b>」.
@@ -50,6 +51,26 @@ final class AdminCursors {
         try {
             return Instant.ofEpochMilli(Long.parseLong(raw));
         } catch (NumberFormatException e) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST);
+        }
+    }
+
+    /** (시각, id) 두 축으로 정렬하는 목록(이의)의 커서 — 같은 시각에 여러 건이 있어도 건너뛰지 않는다. */
+    record TimeIdCursor(Instant at, UUID id) {}
+
+    /** 시각은 잘라내지 않는다 — DB 가 마이크로초까지 담아 밀리초로 자르면 같은 밀리초의 다음 건을 건너뛴다. */
+    static String ofTimeId(Instant at, UUID id) {
+        return encode(at + "|" + id);
+    }
+
+    static TimeIdCursor toTimeId(String cursor) {
+        String raw = decode(cursor);
+        if (raw == null) return null;
+        String[] parts = raw.split("\\|", 2);
+        if (parts.length != 2) throw new BusinessException(ErrorCode.INVALID_REQUEST);
+        try {
+            return new TimeIdCursor(Instant.parse(parts[0]), UUID.fromString(parts[1]));
+        } catch (IllegalArgumentException | java.time.format.DateTimeParseException e) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST);
         }
     }

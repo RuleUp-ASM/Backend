@@ -15,6 +15,7 @@ import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.verification.domain.Appeal;
 import com.ruleup.ruleup_backend.verification.domain.Polarity;
+import com.ruleup.ruleup_backend.verification.domain.VerificationConfig;
 import com.ruleup.ruleup_backend.verification.domain.VerificationPolarity;
 import com.ruleup.ruleup_backend.verification.domain.VerificationDaily;
 import com.ruleup.ruleup_backend.verification.dto.AppealResponse;
@@ -68,6 +69,7 @@ public class AppealService {
     private final VerificationMetrics metrics;
     private final ChallengeQueryService challengeQuery;
     private final VerificationConfigFactory configFactory;
+    private final FailureExplainer failureExplainer;
     private final VerificationProgressService progressService;
     private final StreakService streakService;
     private final NotificationPublisher notificationPublisher;
@@ -91,14 +93,16 @@ public class AppealService {
         if (!Appeal.isValidReason(reason)) throw new BusinessException(ErrorCode.INVALID_REASON);
 
         Instant now = Instant.now();
-        Polarity polarity = polarityOf(daily.getChallengeId());
+        VerificationConfig config = configOf(daily.getChallengeId());
+        Polarity polarity = (config == null) ? Polarity.ACHIEVEMENT : VerificationPolarity.of(config);
         // 실패로 확정됐거나 이대로면 실패인 건에만. 이미 인용돼 완료로 바뀐 건도 여기서 걸린다
         // (실패 결과 기준 멱등 — 두 번째 요청은 완료 상태라 대상이 아니다).
         if (!failing(daily, polarity, now)) throw new BusinessException(ErrorCode.NOT_FAILED);
         if (!daily.isAppealable(polarity, now)) throw new BusinessException(ErrorCode.APPEAL_WINDOW_CLOSED);
 
+        // 인용하면 판정 행의 사유가 지워진다 — 정정 전에 유저가 본 설명을 이의에 옮겨 둔다.
         Appeal appeal = saveAppeal(daily, userId, reason.trim(),
-                (request != null) ? request.imageUrl() : null, now);
+                (request != null) ? request.imageUrl() : null, failureOf(daily, config), now);
 
         // 인용 — 정상 성공과 동일하게 정정한다.
         daily.correctByAppeal(now);
@@ -147,12 +151,19 @@ public class AppealService {
         return daily.getStatus() == VerificationStatus.FAILED || daily.isFailExpected(polarity, now);
     }
 
-    /** 판정 방향은 챌린지 설정에서 온다 — 목표 달성형인지 규칙 지키기형인지로 실패 예정 여부가 갈린다. */
-    private Polarity polarityOf(UUID challengeId) {
-        return challengeQuery.findChallenge(challengeId)
-                .map(configFactory::build)
-                .map(VerificationPolarity::of)
-                .orElse(Polarity.ACHIEVEMENT);
+    /**
+     * 챌린지 인증 설정. 판정 방향(목표 달성형·규칙 지키기형)이 여기서 와 실패 예정 여부가 갈린다.
+     * 방이 사라졌으면 null 이다.
+     */
+    private VerificationConfig configOf(UUID challengeId) {
+        return challengeQuery.findChallenge(challengeId).map(configFactory::build).orElse(null);
+    }
+
+    /** 신청 화면의 실패 설명과 같은 값. 설정이 없으면(방이 사라짐) 남길 설명도 없다. */
+    private Appeal.FailureSnapshot failureOf(VerificationDaily daily, VerificationConfig config) {
+        if (config == null) return null;
+        FailureExplainer.Explanation e = failureExplainer.explain(daily, config);
+        return new Appeal.FailureSnapshot(e.reasonCode(), e.summary(), e.expected(), e.actual());
     }
 
     /**
@@ -173,11 +184,12 @@ public class AppealService {
         });
     }
 
-    private Appeal saveAppeal(VerificationDaily daily, UUID userId, String reason, String imageUrl, Instant now) {
+    private Appeal saveAppeal(VerificationDaily daily, UUID userId, String reason, String imageUrl,
+                              Appeal.FailureSnapshot failure, Instant now) {
         try {
             return appealRepo.saveAndFlush(Appeal.accept(
                     daily.getId(), daily.getChallengeId(), daily.getChallengeMemberId(),
-                    userId, daily.getTargetDate(), reason, imageUrl, now));
+                    userId, daily.getTargetDate(), reason, imageUrl, failure, now));
         } catch (DataIntegrityViolationException e) {
             // 같은 판정에 두 번째 이의. 유일 제약이 막았다 — 중복 정정·중복 지급의 방어선이
             // 실제로 일하고 있는지는 이 값으로만 알 수 있다.
