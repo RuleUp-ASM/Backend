@@ -218,6 +218,12 @@ class SessionDeviceFlowIT {
         return id;
     }
 
+    private int reuseDetectedCount(String refreshToken) {
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM refresh_tokens WHERE token_hash = ? AND reuse_detected_at IS NOT NULL",
+                Integer.class, (Object) TokenService.sha256(refreshToken));
+    }
+
     private int refreshTokenCount(UUID tokenId) {
         return jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM refresh_tokens WHERE id = ?", Integer.class, bytes(tokenId));
@@ -458,8 +464,8 @@ class SessionDeviceFlowIT {
         }
 
         @Test
-        @DisplayName("같은 RT 동시 제출은 하나만 회전 성공하고 후발 요청은 재사용으로 감지한다")
-        void concurrent_refresh_has_single_winner() throws Exception {
+        @DisplayName("같은 RT 동시 제출은 회전 경합이다 — 둘 다 새 페어를 받고 세션은 유지된다")
+        void concurrent_refresh_is_a_rotation_race_not_reuse() throws Exception {
             String tag = uniq();
             String rt1 = read(signup(tag), "$.data.refreshToken");
 
@@ -483,34 +489,76 @@ class SessionDeviceFlowIT {
                 MvcResult r1 = first.get(10, TimeUnit.SECONDS);
                 MvcResult r2 = second.get(10, TimeUnit.SECONDS);
                 assertThat(List.of(r1.getResponse().getStatus(), r2.getResponse().getStatus()))
-                        .containsExactlyInAnyOrder(200, 401);
+                        .containsExactly(200, 200);
 
-                MvcResult winner = r1.getResponse().getStatus() == 200 ? r1 : r2;
-                MvcResult rejected = r1.getResponse().getStatus() == 401 ? r1 : r2;
-                expectError(rejected, 401, "SESSION_EXPIRED");
-
-                // 후발 제출은 기존 정책대로 탈취 의심 재사용이다. 따라서 선발 요청이 만든
-                // 자식 RT까지 같은 family 전체가 폐기되어 다시 로그인해야 한다.
-                String rotated = read(winner, "$.data.refreshToken");
-                expectError(refresh(rotated), 401, "SESSION_EXPIRED");
+                // 앱이 어느 응답을 저장하든 세션이 이어진다.
+                String a = read(r1, "$.data.refreshToken");
+                String b = read(r2, "$.data.refreshToken");
+                assertThat(a).isNotEqualTo(b);
+                assertThat(refresh(a).getResponse().getStatus()).isEqualTo(200);
+                assertThat(refresh(b).getResponse().getStatus()).isEqualTo(200);
             } finally {
                 executor.shutdownNow();
             }
         }
 
         @Test
-        @DisplayName("revoke 된 RT 재제출(재사용 감지) 시 family 전체를 무효화한다 — 탈취 대응")
-        void reuse_detection_revokes_whole_family() throws Exception {
+        @DisplayName("회전 직후 직전 RT 가 다시 오면 같은 family 로 재발급하고 SEC-05 로 세지 않는다 — 앱 갱신 경합(SEC-05 10/28·29)")
+        void stale_refresh_right_after_rotation_keeps_session() throws Exception {
             String tag = uniq();
             String rt1 = read(signup(tag), "$.data.refreshToken");
+            String rt2 = read(refresh(rt1), "$.data.refreshToken");
 
+            MvcResult again = refresh(rt1);
+            assertThat(again.getResponse().getStatus()).isEqualTo(200);
+            String rt2b = read(again, "$.data.refreshToken");
+
+            assertThat(reuseDetectedCount(rt1)).as("재사용으로 기록하지 않는다").isZero();
+            assertThat(refresh(rt2).getResponse().getStatus()).as("먼저 받은 페어도 살아 있다").isEqualTo(200);
+            assertThat(refresh(rt2b).getResponse().getStatus()).isEqualTo(200);
+        }
+
+        @Test
+        @DisplayName("유예 창(30초)이 지난 뒤 직전 RT 재제출은 재사용 감지 — family 전체 무효(탈취 대응)")
+        void reuse_after_grace_window_revokes_whole_family() throws Exception {
+            String tag = uniq();
+            String rt1 = read(signup(tag), "$.data.refreshToken");
             String rt2 = read(refresh(rt1), "$.data.refreshToken");   // rt1 은 이 시점에 revoke
+            jdbcTemplate.update("UPDATE refresh_tokens SET revoked_at = revoked_at - INTERVAL 31 SECOND WHERE token_hash = ?",
+                    (Object) TokenService.sha256(rt1));
 
             // 탈취범이 rt1 을 재사용 → 401 + family 전체 revoke
             expectError(refresh(rt1), 401, "SESSION_EXPIRED");
+            assertThat(reuseDetectedCount(rt1)).isEqualTo(1);
 
             // 정상 사용자가 갖고 있던 rt2 도 함께 무효 (재로그인 요구)
             expectError(refresh(rt2), 401, "SESSION_EXPIRED");
+        }
+
+        @Test
+        @DisplayName("후속 RT 가 이미 다시 회전됐으면 창 안이어도 직전 RT 재제출은 재사용 감지")
+        void reuse_after_successor_rotated_revokes_whole_family() throws Exception {
+            String tag = uniq();
+            String rt1 = read(signup(tag), "$.data.refreshToken");
+            String rt2 = read(refresh(rt1), "$.data.refreshToken");
+            String rt3 = read(refresh(rt2), "$.data.refreshToken");
+
+            expectError(refresh(rt1), 401, "SESSION_EXPIRED");
+            expectError(refresh(rt3), 401, "SESSION_EXPIRED");
+        }
+
+        @Test
+        @DisplayName("후속 RT 로 로그아웃했으면 창 안이어도 직전 RT 로 세션을 되살릴 수 없다")
+        void logout_is_not_undone_by_stale_refresh() throws Exception {
+            String tag = uniq();
+            MvcResult signup = signup(tag);
+            String rt1 = read(signup, "$.data.refreshToken");
+            MvcResult rotated = refresh(rt1);
+            String at2 = read(rotated, "$.data.accessToken");
+            String rt2 = read(rotated, "$.data.refreshToken");
+
+            assertThat(logout(at2, rt2).getResponse().getStatus()).isEqualTo(200);
+            expectError(refresh(rt1), 401, "SESSION_EXPIRED");
         }
 
         @Test
