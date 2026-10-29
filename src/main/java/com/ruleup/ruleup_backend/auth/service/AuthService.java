@@ -46,6 +46,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.time.LocalDate;
@@ -62,6 +63,12 @@ public class AuthService {
     private static final Logger log = LoggerFactory.getLogger(AuthService.class);
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+
+    /**
+     * 회전 직후 직전 토큰을 다시 받아 주는 창. prod 에서 본 갱신 경합은 회전 뒤 3~8초에 왔다(2026-10-28·29 SEC-05 3건).
+     * 길게 두면 탈취된 직전 토큰이 통하는 창도 늘어난다.
+     */
+    private static final Duration ROTATION_GRACE = Duration.ofSeconds(30);
     /** 임시 승인 닉네임 INSERT 충돌 시 가입 트랜잭션 재시도 상한 (DB 정리 §6). 같은 패키지 테스트가 참조. */
     static final int MAX_SIGNUP_ATTEMPTS = 3;
     /** 재시도 대상 제약 — 임시 승인 닉네임 UNIQUE. 신청 닉네임 충돌(409)은 재시도 대상이 아니다. */
@@ -616,6 +623,17 @@ public class AuthService {
         RefreshToken stored = refreshTokenRepository.findByTokenHashForUpdate(TokenService.sha256(refreshTokenValue))
                 .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_EXPIRED));
 
+        // 회전 유예 — 방금 회전된 토큰이 몇 초 뒤 같은 기기에서 다시 오는 것은 탈취가 아니라 앱의 갱신 경합이다
+        // (만료된 AT 로 동시에 나간 요청들이 각자 refresh 를 부른다). 세션을 끊지 않고 같은 family 에 새 페어를 준다.
+        if (stored.isRevoked() && inRotationGrace(stored)) {
+            User user = userRepository.findByIdAndDeletedAtIsNull(userId)
+                    .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_EXPIRED));
+            log.info("refresh_rotation_grace userId={} sinceRotationMs={}", userId,
+                    Duration.between(stored.getRevokedAt(), Instant.now()).toMillis());
+            return TokenResponse.from(tokenService.issueRotatedPair(user, stored.getFamilyId(), stored.getId()),
+                    syncPolicy.forUser(user));
+        }
+
         // 재사용 감지 — 이미 폐기된 토큰이 다시 제출되면 탈취 의심 → family 전체 revoke (DB 정리 §11.3)
         // 이 메서드는 BusinessException에 대해 롤백하지 않으므로 흔적과 revoke가 401 응답 전에 커밋된다.
         if (stored.isRevoked()) {
@@ -631,6 +649,24 @@ public class AuthService {
 
         stored.revoke();                                   // 기존 무효화(회전)
         return TokenResponse.from(tokenService.issueRotatedPair(user, stored.getFamilyId(), stored.getId()), syncPolicy.forUser(user));
+    }
+
+    /**
+     * 회전 유예에 드는지 — <b>회전으로</b> 폐기된 지 {@link #ROTATION_GRACE} 안이고, 그 회전이 만든 후속 토큰이
+     * 모두 살아 있을 때만이다.
+     *
+     * <p>후속 토큰이 살아 있는지가 핵심이다. 로그아웃 · 새 기기 로그인 · 정지 · 탈퇴 · 재사용 감지는 후속 토큰까지
+     * 폐기하므로 여기서 걸러진다. 후속 토큰이 이미 다시 회전됐어도(앱이 새 토큰을 쓰기 시작했다) 유예하지 않는다.
+     * 후속이 없으면 회전이 아니라 로그아웃으로 폐기된 토큰이다.
+     *
+     * <p>창 안에서 탈취된 직전 토큰도 새 페어를 받을 수 있다 — 창을 짧게 두는 이유다. 창이 지나 다시 오면
+     * 기존대로 재사용 감지가 family 전체를 끊는다.
+     */
+    private boolean inRotationGrace(RefreshToken stored) {
+        if (stored.getReuseDetectedAt() != null || stored.isExpired()) return false;
+        if (stored.getRevokedAt().isBefore(Instant.now().minus(ROTATION_GRACE))) return false;
+        List<RefreshToken> successors = refreshTokenRepository.findByParentTokenId(stored.getId());
+        return !successors.isEmpty() && successors.stream().noneMatch(RefreshToken::isRevoked);
     }
 
     // ===== 로그아웃 (멱등) =====
