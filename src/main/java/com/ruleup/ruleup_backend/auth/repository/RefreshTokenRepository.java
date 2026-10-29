@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import jakarta.persistence.LockModeType;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -29,6 +30,9 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, UUID
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select t from RefreshToken t where t.tokenHash = :tokenHash")
     Optional<RefreshToken> findByTokenHashForUpdate(@Param("tokenHash") byte[] tokenHash);
+
+    /** 이 토큰을 회전해 발급된 후속 토큰들 — 회전 유예 판단용(parent_token_id 인덱스). */
+    List<RefreshToken> findByParentTokenId(UUID parentTokenId);
 
     /** 사용자의 활성 RT 전체 revoke — 로그아웃 전체·신규 기기 로그인·탈퇴·정지 시. */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
