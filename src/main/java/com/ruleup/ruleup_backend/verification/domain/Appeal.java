@@ -13,6 +13,7 @@ import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -75,6 +76,26 @@ public class Appeal extends AssignedIdEntity {
     @Column(name = "acceptedAt", nullable = false, updatable = false)
     private Instant acceptedAt;
 
+    /**
+     * 접수 당시 유저가 본 실패 설명 — 사유 코드 · 한 줄 요약 · 기준값 · 실제값.
+     *
+     * <p>인용되면 판정 행의 사유가 지워지고, 확정 전 인용이라 {@code verification_failure_details} 도 생기지
+     * 않는다. 운영자가 「무엇에 이의를 냈는지」를 볼 수 있는 곳은 여기뿐이다. V21 이전 접수는 비어 있다.
+     */
+    @Column(name = "failureReason", length = 40, updatable = false)
+    private String failureReason;
+
+    @Column(name = "failureSummary", length = 512, updatable = false)
+    private String failureSummary;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "failureExpected", updatable = false)
+    private Map<String, Object> failureExpected;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "failureActual", updatable = false)
+    private Map<String, Object> failureActual;
+
     @Generated(event = EventType.INSERT)
     @Column(name = "createdAt", nullable = false, updatable = false)
     private Instant createdAt;
@@ -82,7 +103,7 @@ public class Appeal extends AssignedIdEntity {
     /** 형식 요건을 통과한 이의를 인용 상태로 접수한다. */
     public static Appeal accept(UUID verificationDailyId, UUID challengeId, UUID challengeMemberId,
                                 UUID userId, LocalDate targetDate, String reason, String imageUrl,
-                                Instant acceptedAt) {
+                                FailureSnapshot failure, Instant acceptedAt) {
         Appeal a = new Appeal();
         a.id = UuidGenerator.generate();
         a.verificationDailyId = verificationDailyId;
@@ -92,9 +113,19 @@ public class Appeal extends AssignedIdEntity {
         a.targetDate = targetDate;
         a.reason = reason;
         a.imageUrl = imageUrl;
+        if (failure != null) {
+            a.failureReason = failure.reasonCode();
+            a.failureSummary = failure.summary();
+            a.failureExpected = failure.expected();
+            a.failureActual = failure.actual();
+        }
         a.acceptedAt = acceptedAt;
         return a;
     }
+
+    /** 접수 당시 실패 설명. */
+    public record FailureSnapshot(String reasonCode, String summary,
+                                  Map<String, Object> expected, Map<String, Object> actual) {}
 
     /** 사유가 형식 요건을 충족하는지. 공백만 있는 값은 사유가 아니다. */
     public static boolean isValidReason(String reason) {

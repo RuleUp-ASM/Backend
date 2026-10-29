@@ -7,12 +7,7 @@ import com.ruleup.ruleup_backend.challenge.service.ChallengeQueryService;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.common.verification.VerificationStatus;
-import com.ruleup.ruleup_backend.verification.domain.FailureEvidence;
-import com.ruleup.ruleup_backend.verification.domain.FailureReasons;
-import com.ruleup.ruleup_backend.verification.domain.GapReason;
 import com.ruleup.ruleup_backend.verification.domain.Polarity;
-import com.ruleup.ruleup_backend.verification.domain.VerificationMethod;
-import com.ruleup.ruleup_backend.verification.domain.VerificationMethodResult;
 import com.ruleup.ruleup_backend.verification.domain.VerificationConfig;
 import com.ruleup.ruleup_backend.verification.domain.VerificationPolarity;
 import com.ruleup.ruleup_backend.verification.domain.VerificationDaily;
@@ -20,8 +15,6 @@ import com.ruleup.ruleup_backend.verification.dto.ChallengeProgress;
 import com.ruleup.ruleup_backend.verification.dto.TodayVerificationResponse;
 import com.ruleup.ruleup_backend.verification.repository.AppealRepository;
 import com.ruleup.ruleup_backend.verification.repository.VerificationDailyRepository;
-import com.ruleup.ruleup_backend.verification.repository.VerificationFailureDetailRepository;
-import com.ruleup.ruleup_backend.verification.repository.VerificationMethodResultRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,7 +26,6 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -55,8 +47,7 @@ public class VerificationReadService {
     private final com.ruleup.ruleup_backend.challenge.view.ChallengeMasking masking;
     private final com.ruleup.ruleup_backend.challenge.view.ReportedChallengeLabels reportedLabels;
     private final VerificationDailyRepository dailyRepo;
-    private final VerificationMethodResultRepository methodResultRepo;
-    private final VerificationFailureDetailRepository failureDetailRepo;
+    private final FailureExplainer failureExplainer;
     private final AppealRepository appealRepo;
     private final VerificationConfigFactory configFactory;
     private final StreakService streakService;
@@ -135,35 +126,10 @@ public class VerificationReadService {
                 failing ? appeal(member, daily, polarity, now) : null);
     }
 
-    /**
-     * 실패 설명 — <b>확정된 실패는 판정 당시 스냅샷을, 실패 예정은 지금 신호로 계산</b>한다.
-     *
-     * <p>실패 예정에 상세 행을 만들지 않는 이유가 여기 드러난다. 그 상태는 늦게 도착한 신호나
-     * 이의로 뒤집힐 수 있어서, 저장해 두면 완료가 된 뒤에도 실패 기록이 남는다. 대신 화면에
-     * 보여줄 근거는 그때그때 계산한다 — 유저는 이 숫자를 보고 이의를 낸다(공통 5-8).
-     */
+    /** 실패 설명 — 확정된 실패는 판정 당시 스냅샷, 실패 예정은 지금 신호로 계산한다({@link FailureExplainer}). */
     private Failure failureOf(VerificationDaily daily, VerificationConfig config) {
-        if (daily.getStatus() == VerificationStatus.FAILED) {
-            String summary = failureDetailRepo.findById(daily.getId())
-                    .map(d -> d.getEvidenceSummary()).orElse(null);
-            if (summary != null) {
-                return new Failure(daily.getFailureReason(), daily.getGapReason(), summary);
-            }
-        }
-        VerificationMethod method = config.primaryMethod();
-        Map<String, Object> evidence = (method == null) ? null
-                : methodResultRepo.findByVerificationDailyIdAndMethod(daily.getId(), method.name())
-                .map(VerificationMethodResult::getEvidence).orElse(null);
-
-        // 목표 미달은 확정 전까지 사유가 비어 있다 — 확정 배치와 같은 규칙으로 채워야
-        // 같은 사건이 화면에서 두 번 다르게 설명되지 않는다.
-        String pending = FailureReasons.pendingReasonOf(evidence);
-        String reasonCode = (daily.getFailureReason() != null) ? daily.getFailureReason()
-                : (pending != null) ? pending : FailureReasons.of(method, config);
-        String gapReason = (daily.getGapReason() != null)
-                ? daily.getGapReason() : GapReason.of(reasonCode);
-
-        return new Failure(reasonCode, gapReason, FailureEvidence.of(reasonCode, evidence).summary());
+        FailureExplainer.Explanation e = failureExplainer.explain(daily, config);
+        return new Failure(e.reasonCode(), e.gapReason(), e.summary());
     }
 
     /** 실패(예정) 한 건의 설명 세 값. 진행중이면 전부 null 이다. */
