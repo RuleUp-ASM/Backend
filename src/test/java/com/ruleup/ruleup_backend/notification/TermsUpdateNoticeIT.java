@@ -7,6 +7,7 @@ import com.ruleup.ruleup_backend.agreement.domain.AgreementType;
 import com.ruleup.ruleup_backend.agreement.domain.UserAgreementState;
 import com.ruleup.ruleup_backend.config.AppProperties;
 import com.ruleup.ruleup_backend.notification.domain.Notification;
+import com.ruleup.ruleup_backend.notification.service.NotificationPublisher;
 import com.ruleup.ruleup_backend.notification.terms.TermsUpdateNoticeBatch;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import com.ruleup.ruleup_backend.user.domain.OAuthProvider;
@@ -45,6 +46,7 @@ class TermsUpdateNoticeIT {
     @Autowired UserRepository userRepository;
     @Autowired TransactionTemplate txTemplate;
     @Autowired AppProperties props;
+    @Autowired NotificationPublisher publisher;
 
     private UUID newUser() {
         String tag = "tu" + System.nanoTime() + SEQ.incrementAndGet();
@@ -142,6 +144,41 @@ class TermsUpdateNoticeIT {
             batch.notifyOutdated();
 
             assertThat(noticesOf(userId)).hasSize(2);
+        }
+    }
+    @Nested
+    @DisplayName("대상이 한 쪽을 넘을 때")
+    class Paging {
+
+        /** 쪽 크기 2 — 대상 수가 쪽 크기를 넘고, 쪽을 넘기는 횟수도 쪽 크기를 넘게 만든다. */
+        private TermsUpdateNoticeBatch smallChunkBatch() {
+            return new TermsUpdateNoticeBatch(stateRepository, publisher, props, 2);
+        }
+
+        @Test
+        @DisplayName("앞쪽 사람이 재동의하지 않고 남아 있어도 뒤쪽 사람까지 모두 받는다 — 각자 한 번만")
+        void reachesEveryoneBeyondFirstPage() {
+            TermsUpdateNoticeBatch paged = smallChunkBatch();
+
+            // 첫 실행에서 고지를 받고도 재동의하지 않은 사람들 — 다음 실행에서도 여전히 대상이다.
+            List<UUID> notified = java.util.stream.Stream.generate(TermsUpdateNoticeIT.this::newUser)
+                    .limit(3).toList();
+            notified.forEach(u -> agreeAt(u, AgreementType.TOS, olderThanCurrent(AgreementType.TOS)));
+            paged.notifyOutdated();
+
+            // 그 뒤에 밀린 사람들. 쪽 크기(2)를 넘고, 앞의 대상까지 합치면 쪽을 넘기는 횟수도 2를 넘는다.
+            List<UUID> later = java.util.stream.Stream.generate(TermsUpdateNoticeIT.this::newUser)
+                    .limit(5).toList();
+            later.forEach(u -> agreeAt(u, AgreementType.TOS, olderThanCurrent(AgreementType.TOS)));
+            paged.notifyOutdated();
+            paged.notifyOutdated();
+
+            for (UUID userId : notified) {
+                assertThat(noticesOf(userId)).as("먼저 받은 사람은 다시 받지 않는다 %s", userId).hasSize(1);
+            }
+            for (UUID userId : later) {
+                assertThat(noticesOf(userId)).as("뒤쪽 사람도 받는다 %s", userId).hasSize(1);
+            }
         }
     }
 }
