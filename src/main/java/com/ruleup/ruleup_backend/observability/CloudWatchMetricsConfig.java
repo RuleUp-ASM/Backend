@@ -34,8 +34,7 @@ import java.util.Set;
  *
  * <p>서비스 지표({@value #BUSINESS_PREFIX}*)는 prod 에서만 보낸다. stg 의 가입·로그인·인증 수는 QA 가 만든
  * 값이라 볼 일이 없고, 이름마다 과금만 된다. stg 대시보드는 서버 지표(ruleup-stg-ops)만 둔다.
- * 예외는 회원 구성({@value #STG_BUSINESS_PREFIX}*) 하나다 — 집계·대시보드를 prod 에 올리기 전에 stg 에서 값이
- * 들어오는지 확인하려고 둔다(31개). 확인이 끝나 stg 값을 볼 일이 없어지면 이 예외를 지운다.
+ * 회원 구성(biz.members.*)도 마찬가지다 — prod 반영 전 확인용으로 stg 에서도 내보내던 예외는 확인이 끝나 지웠다.
  */
 @Configuration
 @Profile({"prod", "stg"})
@@ -75,7 +74,6 @@ public class CloudWatchMetricsConfig {
             "biz.members.rooms_per_member");           // 참여 중인 방 개수(rooms=1|2|3|4|5_plus)
 
     static final String BUSINESS_PREFIX = "biz.";
-    static final String STG_BUSINESS_PREFIX = "biz.members.";
 
     @Bean
     public SimpleMeterRegistry simpleMeterRegistry() {
@@ -98,8 +96,7 @@ public class CloudWatchMetricsConfig {
         CloudWatchMeterRegistry registry = new CloudWatchMeterRegistry(config, Clock.SYSTEM, client);
         registry.config()
                 .meterFilter(MeterFilter.denyUnless(id -> EXPORTED.contains(id.getName())
-                        && ("prod".equals(profile) || !id.getName().startsWith(BUSINESS_PREFIX)
-                            || id.getName().startsWith(STG_BUSINESS_PREFIX))));
+                        && ("prod".equals(profile) || !id.getName().startsWith(BUSINESS_PREFIX))));
         return registry;
     }
 }
