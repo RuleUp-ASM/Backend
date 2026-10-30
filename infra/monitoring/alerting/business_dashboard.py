@@ -1,16 +1,16 @@
-"""사용자 행동 지표 대시보드 ruleup-<env>-business. 노션 「RuleUp 모니터링」 2절 — 서버 지표(ruleup-prod-ops)와 분리해서 본다.
+"""사용자 행동 지표 대시보드 ruleup-prod-business. 노션 「RuleUp 모니터링」 2절 — 서버 지표(ruleup-prod-ops)와 분리해서 본다.
 지표 원천은 앱 BusinessMetrics·VerificationRateMetrics(biz.*). 경보는 걸지 않는다 — 추세와 자료용 화면이다. 재실행 안전.
 prod 전용 — stg 의 가입·로그인 수는 QA 가 만든 값이라 추세로 볼 의미가 없어 stg 는 biz.* 를 내보내지도 않는다(CloudWatchMetricsConfig).
-예외는 ④ 회원 구성(biz.members.*) — prod 반영 전 확인용으로 stg 도 내보내므로, stg 대시보드에는 ④ 만 그린다.
+④ 회원 구성(biz.members.*)도 같다 — prod 반영 전 확인용으로 stg 에서도 내보내던 예외는 지웠다(#356).
 
 네 묶음: ① 로그인·가입 ② 챌린지 참여(초안·생성·가입) ③ 인증(자동 vs 수동)
 ④ 회원 구성(나잇대·성별·소셜·관심사·동의·활동·방 참여 경로·참여 방 수 순위).
 묶음마다 첫 줄은 「대시보드에서 고른 기간 전체」의 합계·비율(숫자 칸) — 발표·보고 자료에 그대로 옮긴다. 그 아래가 1시간 단위 추세.
 ④ 는 게이지라 합계가 아니라 「지금 값」이고, 분포 칸(막대·원)도 가장 최근 값을 그린다.
-사용: python business_dashboard.py [prod|stg]   (기본 prod)"""
+사용: python business_dashboard.py [prod]   (prod 만 받는다)"""
 import boto3, json, sys
 R='ap-northeast-2'; ENV=sys.argv[1] if len(sys.argv)>1 else 'prod'
-assert ENV in ('prod','stg'), ENV
+assert ENV=='prod', f'{ENV}: prod 전용 — stg 는 biz.* 를 내보내지 않는다'
 NS=f'RuleUp/App/{ENV}'
 cw=boto3.client('cloudwatch',region_name=R)
 widgets=[]; y=0
@@ -89,11 +89,6 @@ def rooms_section(g, latest):
                 "by bin(10m) as at, r_user | sort at desc, rank_no asc | limit 10"}})
     y+=8
     row(('참여 경로 추이',[p(k,label=l) for k,l in paths],None))
-
-if ENV=='stg':
-    members_section()
-    cw.put_dashboard(DashboardName=f'ruleup-{ENV}-business',DashboardBody=json.dumps({'widgets':widgets},ensure_ascii=False))
-    print('ok', len(widgets)); sys.exit(0)
 
 # ---------------------------------------------------------------- ① 로그인 · 가입
 text(f'## ① 로그인 · 가입 ({ENV})')

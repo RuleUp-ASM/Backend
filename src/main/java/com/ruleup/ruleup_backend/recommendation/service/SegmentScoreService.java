@@ -1,6 +1,5 @@
 package com.ruleup.ruleup_backend.recommendation.service;
 
-import com.ruleup.ruleup_backend.challenge.domain.Challenge;
 import com.ruleup.ruleup_backend.challenge.repository.ChallengeRepository;
 import com.ruleup.ruleup_backend.recommendation.domain.SegmentType;
 import com.ruleup.ruleup_backend.recommendation.domain.SegmentTypeWeight;
@@ -28,7 +27,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -50,7 +48,8 @@ import java.util.UUID;
  * {@link SegmentScoreReader} 캐시를 무효화한다(커밋 전 무효화 시 미커밋 데이터로 재캐싱되는 레이스 방지).
  * 변경 시점 = 무효화 시점이라 캐시 thrash가 없다.
  *
- * <p>현재는 윈도우 전량 재집계(단순·정확). 데이터가 커지면 증분(마지막 실행 이후 챌린지만)으로 최적화 가능.
+ * <p>현재는 윈도우 전량 재집계(단순·정확). 기간·조건 필터와 (생성자, 템플릿) 묶음은 DB 가 하고, 생성자는
+ * 일괄 조회한다. 데이터가 더 커지면 증분(마지막 실행 이후 챌린지만)으로 최적화 가능.
  */
 @Service
 @RequiredArgsConstructor
@@ -82,17 +81,28 @@ public class SegmentScoreService {
         Instant since = Instant.now().minus(Duration.ofDays(windowDays));
         log.info("세그먼트 점수 재집계 시작(윈도우 {}일, since={})", windowDays, since);
 
-        Map<Key, Long> counts = new HashMap<>();
-        Map<UUID, Optional<User>> userCache = new HashMap<>();   // 생성자 1명이 여러 챌린지 → 조회 캐시
+        // 윈도우 안·삭제 X·템플릿 기반·생성자 있는 챌린지만, (생성자, 템플릿)별 개수로 DB 가 묶어 준다.
+        List<Object[]> choices = challengeRepository.countTemplateChoicesByCreatorSince(since);
 
-        for (Challenge c : challengeRepository.findAll()) {
-            if (c.getDeletedAt() != null || c.getTemplateId() == null) continue;   // 직접 입력/삭제분 제외
-            if (c.getCreatedAt() != null && c.getCreatedAt().isBefore(since)) continue;   // 윈도우 밖 제외
-            if (c.getCreatorId() == null) continue;   // 봇방장 방: 세그먼트를 잴 생성자가 없다(findById(null) 은 예외)
-            User creator = userCache.computeIfAbsent(c.getCreatorId(), userRepository::findById).orElse(null);
+        // 생성자는 한 번에 읽는다(예전엔 생성자마다 findById).
+        Set<UUID> creatorIds = new HashSet<>();
+        for (Object[] r : choices) creatorIds.add((UUID) r[0]);
+        Map<UUID, User> creators = new HashMap<>();
+        if (!creatorIds.isEmpty()) {
+            for (User u : userRepository.findAllById(creatorIds)) creators.put(u.getId(), u);
+        }
+
+        // 챌린지 n개를 하나씩 +1 하던 것과 같은 결과가 되도록 세그먼트마다 n 을 더한다.
+        Map<Key, Long> counts = new HashMap<>();
+        Map<UUID, List<Segment>> segmentsByCreator = new HashMap<>();
+        for (Object[] r : choices) {
+            UUID creatorId = (UUID) r[0];
+            User creator = creators.get(creatorId);
             if (creator == null) continue;
-            for (Segment seg : segmentResolver.resolve(creator)) {
-                counts.merge(new Key(seg.type(), seg.value(), c.getTemplateId()), 1L, Long::sum);
+            Long templateId = (Long) r[1];
+            long n = (Long) r[2];
+            for (Segment seg : segmentsByCreator.computeIfAbsent(creatorId, id -> segmentResolver.resolve(creator))) {
+                counts.merge(new Key(seg.type(), seg.value(), templateId), n, Long::sum);
             }
         }
 

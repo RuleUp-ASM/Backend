@@ -32,18 +32,21 @@ public interface UserAgreementStateRepository
      * <p>동의한 적 없는 사람({@code agreed=false} · 행 없음)은 제외한다. 그들에게 「약관이
      * 개정됐어요」는 틀린 문장이고, 필수 약관 미동의는 개정과 무관하게 게이트가 이미 막고 있다.
      *
-     * <p>오래 동의한 순으로 주는 이유는 상한에 걸렸을 때 <b>가장 오래된 버전부터</b> 처리하기
-     * 위해서다 — 같은 대상을 매일 다시 긁지 않는다.
+     * <p><b>{@code userId} 커서로 한 쪽씩</b> 준다. 고지를 받아도 재동의하기 전까지는 계속 대상이라,
+     * 앞에서부터 상한만큼 자르면 매일 같은 사람만 다시 읽고 뒤쪽은 영영 닿지 않는다. 커서는 직전 쪽의
+     * 마지막 {@code userId} 이고 첫 쪽은 null 이다. PK 선두가 {@code user_id} 라 정렬도 PK 를 탄다.
      */
     @Query("""
             select s from UserAgreementState s
              where s.agreementType = :type
                and s.agreed = true
                and s.version <> :currentVersion
-             order by s.agreedAt asc
+               and (:after is null or s.userId > :after)
+             order by s.userId asc
             """)
     List<UserAgreementState> findOutdated(@Param("type") AgreementType type,
                                           @Param("currentVersion") String currentVersion,
+                                          @Param("after") UUID after,
                                           Limit limit);
 
     long countByUserId(UUID userId);

@@ -4,8 +4,6 @@ import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.verification.config.VerificationProperties;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Instant;
 import java.util.Map;
@@ -23,6 +21,9 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class SyncRateLimiter {
 
+    /** 아무것도 차지하지 않은 슬롯(제한을 끈 경우). */
+    private static final Slot NONE = () -> { };
+
     private final Map<String, Long> lastSyncAt = new ConcurrentHashMap<>();
     private final VerificationProperties properties;
 
@@ -30,10 +31,14 @@ public class SyncRateLimiter {
         this.properties = properties;
     }
 
-    public void check(String userId, boolean backlog) {
+    /**
+     * 간격을 검사하고 슬롯을 차지한다. 처리에 끝내 실패하면 호출자가 {@link Slot#release()} 로 돌려준다.
+     * 트랜잭션 콜백에 맡기지 않는 이유: 검사는 트랜잭션 <b>바깥</b>에서 하므로 등록할 곳이 없다(#378).
+     */
+    public Slot check(String userId, boolean backlog) {
         long minInterval = 1000L * (backlog
                 ? properties.syncBacklogMinIntervalSec() : properties.syncMinIntervalSec());
-        if (minInterval <= 0) return;   // 제한 없음(설정으로 끈 경우)
+        if (minInterval <= 0) return NONE;   // 제한 없음(설정으로 끈 경우)
         long now = Instant.now().toEpochMilli();
         Long prev = lastSyncAt.put(userId, now);
         if (prev != null && now - prev < minInterval) {
@@ -42,7 +47,7 @@ public class SyncRateLimiter {
             throw BusinessException.rateLimited(ErrorCode.SYNC_TOO_FREQUENT,
                     (minInterval - (now - prev) + 999) / 1000);
         }
-        releaseOnRollback(userId, now, prev);
+        return () -> release(userId, now, prev);
     }
 
     /**
@@ -50,15 +55,14 @@ public class SyncRateLimiter {
      * 슬롯을 차지해, 사용자가 곧바로 다시 누른 「동기화」가 429 로 튕긴다 — 실패가 두 번 보인다.
      * 그 사이 다른 요청이 시각을 갱신했으면 건드리지 않는다.
      */
-    private void releaseOnRollback(String userId, long stamp, Long prev) {
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) return;
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCompletion(int status) {
-                if (status == STATUS_COMMITTED) return;
-                if (prev == null) lastSyncAt.remove(userId, stamp);
-                else lastSyncAt.replace(userId, stamp, prev);
-            }
-        });
+    private void release(String userId, long stamp, Long prev) {
+        if (prev == null) lastSyncAt.remove(userId, stamp);
+        else lastSyncAt.replace(userId, stamp, prev);
+    }
+
+    /** {@link #check} 가 차지한 간격 슬롯. */
+    @FunctionalInterface
+    public interface Slot {
+        void release();
     }
 }
