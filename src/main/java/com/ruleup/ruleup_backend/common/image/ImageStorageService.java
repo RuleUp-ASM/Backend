@@ -73,6 +73,9 @@ public class ImageStorageService {
      *
      * <p>우리 {@code /files/} 경로가 아닌 주소는 조용히 무시한다. 외부 URL 이 섞여 들어와도
      * 삭제 대상이 아니고, 여기서 예외를 던지면 정리 배치가 그 한 건에 막힌다.
+     *
+     * <p>반면 저장소 삭제가 실패하면 예외를 그대로 올린다 — 정리 배치는 그걸 보고 기록을 남겨
+     * 다시 시도하고, 다른 호출부(업로드 롤백·심사 거부)는 각자 잡아 넘긴다.
      */
     public void deleteByUrl(String url) {
         filenameOf(url).ifPresent(store::delete);

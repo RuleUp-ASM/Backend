@@ -52,6 +52,7 @@ public class LocalImageObjectStore implements ImageObjectStore {
             Files.deleteIfExists(resolve(filename));
         } catch (IOException e) {
             log.warn("로컬 이미지 삭제 실패 filename={}: {}", filename, e.toString());
+            throw new java.io.UncheckedIOException(e);
         }
     }
 

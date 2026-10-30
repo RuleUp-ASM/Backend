@@ -8,17 +8,17 @@ import com.ruleup.ruleup_backend.notification.NotificationEvent;
 import com.ruleup.ruleup_backend.notification.service.NotificationPublisher;
 import com.ruleup.ruleup_backend.notification.domain.NotificationParams;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Limit;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 약관 개정 고지 — 저장 버전이 현행과 어긋난 사람에게 재동의를 안내한다.
@@ -35,23 +35,40 @@ import java.util.Map;
  * <h4>재발송은 멱등 키가 막는다</h4>
  * 키에 <b>현행 버전</b>을 넣는다. 매일 돌아도 같은 개정에 대해서는 한 번만 적재되고, 다음 개정이
  * 나오면 버전이 달라져 새 고지가 나간다. 발송 이력 테이블이 필요 없는 이유다.
+ *
+ * <h4>한 실행에서 대상 끝까지 돈다</h4>
+ * 고지를 받아도 재동의하기 전까지는 계속 대상이다. 그래서 앞에서부터 상한만큼만 읽으면 매일 같은
+ * 사람만 다시 읽고(멱등 키에 막혀 아무것도 안 나간다) 상한 뒤쪽은 영영 받지 못한다. {@code userId}
+ * 커서로 쪽을 넘기며 끝까지 가고, 이미 받은 사람은 멱등 키가 걸러 준다.
+ *
+ * <p>실행 전체를 한 트랜잭션으로 묶지 않는다. 적재는 쪽마다 바로 커밋되고 큐 투입도 그때 나간다 —
+ * 전원이 대상인 개정을 한 트랜잭션에 담으면 중단 시 전부 롤백되는데, 이미 적재한 쪽은 남는 편이
+ * 낫다. 다음 실행은 처음부터 다시 돌고 멱등 키가 이어받게 해 준다.
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class TermsUpdateNoticeBatch {
-
-    /** 한 항목에서 한 번에 처리할 인원. 개정은 드물지만 터지면 전원이 대상이라 상한을 둔다. */
-    private static final int LIMIT = 2_000;
 
     private final UserAgreementStateRepository stateRepository;
     private final NotificationPublisher publisher;
     private final AppProperties props;
 
+    /** 한 쪽에 읽을 인원. 개정은 드물지만 터지면 전원이 대상이라 한 번에 다 읽지 않는다. */
+    private final int chunk;
+
+    public TermsUpdateNoticeBatch(UserAgreementStateRepository stateRepository,
+                                  NotificationPublisher publisher,
+                                  AppProperties props,
+                                  @Value("${app.notification.terms-update.chunk:2000}") int chunk) {
+        this.stateRepository = stateRepository;
+        this.publisher = publisher;
+        this.props = props;
+        this.chunk = chunk;
+    }
+
     /** 매일 03:50 KST. 03:40 미접속 고지 다음 자리다. */
     @SchedulerLock(name = "TermsUpdateNoticeBatch.notifyOutdated", lockAtMostFor = "PT1H", lockAtLeastFor = "PT1M")
     @Scheduled(cron = "0 50 3 * * *", zone = "Asia/Seoul")
-    @Transactional
     public int notifyOutdated() {
         int total = 0;
         for (AgreementType type : AgreementType.values()) {
@@ -61,11 +78,17 @@ public class TermsUpdateNoticeBatch {
             String current = props.client().termsVersions().of(type);
             if (current == null || current.isBlank()) continue;   // 버전을 모르면 비교할 수 없다
 
-            List<UserAgreementState> outdated =
-                    stateRepository.findOutdated(type, current, Limit.of(LIMIT));
-            if (outdated.isEmpty()) continue;
+            UUID after = null;
+            while (true) {
+                List<UserAgreementState> outdated =
+                        stateRepository.findOutdated(type, current, after, Limit.of(chunk));
+                if (outdated.isEmpty()) break;
 
-            total += publishAll(type, current, outdated);
+                total += publishAll(type, current, outdated);
+                // 덜 찼다 = 남은 대상이 없다. 비교 대상은 반복 횟수가 아니라 쪽 크기다.
+                if (outdated.size() < chunk) break;
+                after = outdated.getLast().getUserId();
+            }
         }
         if (total > 0) log.info("약관 개정 고지 — {}건", total);
         return total;

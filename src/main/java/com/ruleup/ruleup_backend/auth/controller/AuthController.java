@@ -268,7 +268,8 @@ public class AuthController {
     @Operation(
             summary = "로그아웃",
             description = """
-                    현재 기기의 refreshToken 을 폐기한다. accessToken 은 남은 수명 동안 유효하므로 클라이언트가 함께 지운다.
+                    현재 기기의 세션을 끊는다. 보낸 refreshToken 과 같은 로그인 세션에서 발급된 refreshToken 을 모두 폐기한다
+                    (갱신 경합으로 함께 발급된 토큰 포함). accessToken 은 남은 수명 동안 유효하므로 클라이언트가 함께 지운다.
 
                     **멱등**하다. 이미 로그아웃했거나 존재하지 않는 refreshToken 을 보내도 200 으로 성공 처리한다
                     (로그아웃이 실패해 로그인 상태에 갇히는 편이 더 나쁘다).

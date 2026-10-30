@@ -171,13 +171,18 @@ public interface VerificationDailyRepository extends JpaRepository<VerificationD
 
     /**
      * 추천 아웃컴 수집(RoutineOutcomeCollector): 확정 시각이 워터마크 이후인 종결(SUCCESS/FAILED) 행.
-     * verifiedAt 오름차순 → 페이지 상한(Pageable)으로 한 배치 처리량을 제한한다.
+     *
+     * <p><b>(verifiedAt, id) 복합 커서</b>로 한 쪽씩 준다. 확정 배치는 같은 시각으로 여러 건을 닫으므로
+     * 시각 하나만으로 자르면 같은 시각이 한 쪽을 넘을 때 매번 그 앞부분만 다시 읽고 멈춘다. 첫 쪽은
+     * {@code afterId=null} 이라 {@code verifiedAt >= since}, 이후는 직전 쪽 마지막 행의 (시각, id) 뒤부터다.
      */
     @Query("SELECT d FROM VerificationDaily d " +
-            "WHERE d.status IN :statuses AND d.verifiedAt IS NOT NULL AND d.verifiedAt >= :since " +
-            "ORDER BY d.verifiedAt ASC")
-    List<VerificationDaily> findTerminalSince(@Param("statuses") Collection<VerificationStatus> statuses,
-                                              @Param("since") Instant since, Pageable pageable);
+            "WHERE d.status IN :statuses AND d.verifiedAt IS NOT NULL " +
+            "AND (d.verifiedAt > :since OR (d.verifiedAt = :since AND (:afterId IS NULL OR d.id > :afterId))) " +
+            "ORDER BY d.verifiedAt ASC, d.id ASC")
+    List<VerificationDaily> findTerminalAfter(@Param("statuses") Collection<VerificationStatus> statuses,
+                                              @Param("since") Instant since,
+                                              @Param("afterId") UUID afterId, Pageable pageable);
     @Query("""
             select d from VerificationDaily d where d.status = com.ruleup.ruleup_backend.common.verification.VerificationStatus.FAILED
              and d.verifiedAt >= :since and d.verifiedAt <= :now and d.shareableAt <= :now

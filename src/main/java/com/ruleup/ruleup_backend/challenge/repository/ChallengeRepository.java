@@ -137,4 +137,16 @@ public interface ChallengeRepository extends JpaRepository<Challenge, UUID> {
             "WHERE c.status = com.ruleup.ruleup_backend.challenge.domain.ChallengeStatus.COMPLETED " +
             "AND c.deletedAt IS NULL AND c.templateId IS NOT NULL")
     List<Object[]> findCompletedTemplateChallenges();
+
+    /**
+     * 추천 세그먼트 재집계(최근 N일): {@code since} 이후 생성된 챌린지를 (생성자, 템플릿)별로 센 (creatorId, templateId, count).
+     * 삭제분·직접 입력(templateId 없음)·봇방장 방(생성자 없음)은 뺀다 — 세그먼트를 잴 대상이 아니다.
+     *
+     * <p>예전에는 전체 챌린지를 엔티티로 읽어 앱에서 걸렀다. 윈도우 밖 과거 데이터까지 메모리로 올라와
+     * 누적 데이터에 비례해 무거워졌다. 이제 기간·조건을 DB 가 걸러 필요한 세 값만 돌려준다.
+     */
+    @Query("SELECT c.creatorId, c.templateId, COUNT(c) FROM Challenge c " +
+            "WHERE c.deletedAt IS NULL AND c.templateId IS NOT NULL AND c.creatorId IS NOT NULL " +
+            "AND c.createdAt >= :since GROUP BY c.creatorId, c.templateId")
+    List<Object[]> countTemplateChoicesByCreatorSince(@Param("since") Instant since);
 }

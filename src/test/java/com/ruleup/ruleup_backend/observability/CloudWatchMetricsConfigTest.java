@@ -66,8 +66,8 @@ class CloudWatchMetricsConfigTest {
     }
 
     @Test
-    @DisplayName("회원 구성(biz.members.*)만은 stg 에서도 나간다 — prod 반영 전 확인용 예외")
-    void exportsMemberProfileInStgToo() {
+    @DisplayName("회원 구성(biz.members.*)도 stg 에서는 나가지 않는다 — prod 반영 전 확인용 예외는 지웠다")
+    void exportsMemberProfileOnlyInProd() {
         for (String profile : new String[]{"stg", "prod"}) {
             CloudWatchMeterRegistry registry = new CloudWatchMetricsConfig()
                     .cloudWatchMeterRegistry(mock(CloudWatchAsyncClient.class), profile);
@@ -78,7 +78,7 @@ class CloudWatchMetricsConfigTest {
                 assertThat(registry.getMeters()).extracting(m -> m.getId().getName()).as(profile)
                         .containsExactlyInAnyOrderElementsOf("prod".equals(profile)
                                 ? List.of("biz.members.total", "biz.login")
-                                : List.of("biz.members.total"));
+                                : List.of());
             } finally {
                 registry.stop();
             }

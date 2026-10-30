@@ -158,21 +158,24 @@ public class VerificationSignalReader {
         byte[] cursor = new byte[16];   // binary(16) 최솟값 — 첫 페이지
         int read = 0;
         while (true) {
-            List<Map<String, Object>> page = jdbc.queryForList(
-                    "SELECT id, payload, receivedAt FROM " + domain.table()
+            // 정렬은 id 만으로 한다. payload(JSON)까지 함께 정렬하면 LIMIT 만큼의 행이 정렬 버퍼에 들어가야 해
+            // 큰 원본이 섞인 날 「Out of sort memory」로 sync 가 500 이 됐다(prod 2026-10-30).
+            List<byte[]> ids = jdbc.queryForList(
+                    "SELECT id FROM " + domain.table()
                             + " WHERE observedDate = ? AND userId = ? AND excludeReason IS NULL AND id > ?"
                             + " ORDER BY id LIMIT " + PAGE_SIZE,
-                    Date.valueOf(date), bytes(userId), cursor);
-            if (page.isEmpty()) return true;
+                    byte[].class, Date.valueOf(date), bytes(userId), cursor);
+            if (ids.isEmpty()) return true;
+            List<Map<String, Object>> page = fetchById(domain, date, ids);
 
             for (Map<String, Object> row : page) {
                 SyncSignal signal = parse((String) row.get("payload"));
                 // 수신 시각은 payload 가 아니라 행에 있다 — 평가기가 「받은 때」로 따질 수 있게 채워 준다.
                 if (signal != null) out.add(signal.withReceivedAt(receivedAt(row.get("receivedAt"))));
-                cursor = (byte[]) row.get("id");
             }
-            read += page.size();
-            if (page.size() < PAGE_SIZE) return true;   // 마지막 페이지
+            cursor = ids.getLast();
+            read += ids.size();
+            if (ids.size() < PAGE_SIZE) return true;   // 마지막 페이지
 
             if (read >= MAX_ROWS_PER_DAY) {
                 metrics.signalsReadTruncated();
@@ -182,6 +185,29 @@ public class VerificationSignalReader {
                 return false;
             }
         }
+    }
+
+    /**
+     * 정렬해 둔 id 의 원본을 PK({@code observedDate, id})로 읽어 <b>id 순서대로</b> 돌려준다.
+     * 여기서는 정렬하지 않는다 — 순서는 id 목록이 이미 갖고 있다.
+     */
+    private List<Map<String, Object>> fetchById(SignalDomain domain, LocalDate date, List<byte[]> ids) {
+        String in = String.join(",", java.util.Collections.nCopies(ids.size(), "?"));
+        List<Object> args = new ArrayList<>(ids.size() + 1);
+        args.add(Date.valueOf(date));
+        args.addAll(ids);
+        Map<ByteBuffer, Map<String, Object>> byId = new HashMap<>(ids.size() * 2);
+        for (Map<String, Object> row : jdbc.queryForList(
+                "SELECT id, payload, receivedAt FROM " + domain.table()
+                        + " WHERE observedDate = ? AND id IN (" + in + ")", args.toArray())) {
+            byId.put(ByteBuffer.wrap((byte[]) row.get("id")), row);
+        }
+        List<Map<String, Object>> ordered = new ArrayList<>(ids.size());
+        for (byte[] id : ids) {
+            Map<String, Object> row = byId.get(ByteBuffer.wrap(id));
+            if (row != null) ordered.add(row);   // 두 질의 사이에 파기된 행은 빠진다
+        }
+        return ordered;
     }
 
     /**
