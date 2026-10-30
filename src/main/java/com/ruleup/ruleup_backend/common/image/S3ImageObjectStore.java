@@ -78,9 +78,9 @@ public class S3ImageObjectStore implements ImageObjectStore {
             s3.deleteObject(DeleteObjectRequest.builder()
                     .bucket(bucket).key(keyOf(filename)).build());
         } catch (SdkException e) {
-            // 삭제 실패로 상위 작업을 되돌리지 않는다. 남은 객체는 아무도 참조하지 않는
-            // 쓰레기라 다음 회차나 수동 정리로 치우면 된다.
+            // 삼키지 않는다 — 정리 배치는 이 실패를 보고 소유 기록을 남겨 다음 회차에 다시 시도한다.
             log.warn("S3 이미지 삭제 실패 key={}: {}", keyOf(filename), e.toString());
+            throw e;
         }
     }
 

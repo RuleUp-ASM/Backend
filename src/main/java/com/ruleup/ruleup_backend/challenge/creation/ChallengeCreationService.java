@@ -390,10 +390,10 @@ public class ChallengeCreationService {
         return new ParamsResult(values, specs);
     }
 
-    /** 이미지: 업로드 API 가 발급한 본인 소유 URL 만 허용. */
+    /** 이미지: 업로드 API 가 발급한 본인 소유 URL 만 허용. 행을 잠가 미등록 정리와 줄을 세운다(#381). */
     private ChallengeImageUpload validateImage(UUID userId, String imageUrl) {
         if (imageUrl == null || imageUrl.isBlank()) return null;
-        ChallengeImageUpload upload = imageUploadRepository.findByImageUrl(imageUrl)
+        ChallengeImageUpload upload = imageUploadRepository.findByImageUrlForUpdate(imageUrl)
                 .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_IMAGE_URL));
         if (!upload.ownedBy(userId)) throw new BusinessException(ErrorCode.IMAGE_NOT_OWNED);
         return upload;

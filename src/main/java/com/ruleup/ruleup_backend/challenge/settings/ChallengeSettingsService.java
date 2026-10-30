@@ -227,7 +227,8 @@ public class ChallengeSettingsService {
         if (!node.isString()) throw new BusinessException(ErrorCode.INVALID_FIELD_VALUE);
         String imageUrl = node.stringValue();
         if (imageUrl.equals(c.getImageUrl())) return;
-        ChallengeImageUpload upload = imageUploadRepository.findByImageUrl(imageUrl)
+        // 행을 잠가 읽는다 — 미등록 정리가 같은 이미지를 지우는 중이면 끝날 때까지 기다린다(#381)
+        ChallengeImageUpload upload = imageUploadRepository.findByImageUrlForUpdate(imageUrl)
                 .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_IMAGE_URL));
         if (!upload.ownedBy(userId)) throw new BusinessException(ErrorCode.IMAGE_NOT_OWNED);
         upload.markRegistered(now);
