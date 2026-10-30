@@ -618,9 +618,13 @@ public class AuthService {
         Claims claims = parseRefreshToken(refreshTokenValue);
         UUID userId = UUID.fromString(claims.getSubject());
 
-        // 같은 RT의 동시 회전을 직렬화한다. 선발 요청이 revoke+새 RT 발급을 커밋한 뒤
-        // 후발 요청은 revoked=true를 읽어 재사용으로 처리한다.
-        RefreshToken stored = refreshTokenRepository.findByTokenHashForUpdate(TokenService.sha256(refreshTokenValue))
+        // 같은 세션(family)의 갱신·로그아웃을 직렬화한다. 선발 요청이 revoke+새 RT 발급을 커밋한 뒤
+        // 후발 요청은 revoked=true를 읽어 회전 유예·재사용 감지로 간다. 로그아웃이 먼저 끝났으면 유예도 받지 못한다.
+        byte[] tokenHash = TokenService.sha256(refreshTokenValue);
+        UUID familyId = refreshTokenRepository.findFamilyIdByTokenHash(tokenHash)
+                .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_EXPIRED));
+        refreshTokenRepository.lockActiveFamily(familyId);
+        RefreshToken stored = refreshTokenRepository.findByTokenHashForUpdate(tokenHash)
                 .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_EXPIRED));
 
         // 회전 유예 — 방금 회전된 토큰이 몇 초 뒤 같은 기기에서 다시 오는 것은 탈취가 아니라 앱의 갱신 경합이다
@@ -665,15 +669,23 @@ public class AuthService {
     private boolean inRotationGrace(RefreshToken stored) {
         if (stored.getReuseDetectedAt() != null || stored.isExpired()) return false;
         if (stored.getRevokedAt().isBefore(Instant.now().minus(ROTATION_GRACE))) return false;
-        List<RefreshToken> successors = refreshTokenRepository.findByParentTokenId(stored.getId());
+        List<RefreshToken> successors = refreshTokenRepository.findByParentTokenIdForUpdate(stored.getId());
         return !successors.isEmpty() && successors.stream().noneMatch(RefreshToken::isRevoked);
     }
 
     // ===== 로그아웃 (멱등) =====
+    /**
+     * 제출된 RT가 속한 세션(family)의 살아 있는 RT를 모두 폐기한다. 회전 유예로 같은 세션에 RT가 여럿 생길 수 있어
+     * 받은 토큰 하나만 폐기하면 다른 쪽으로 계속 갱신된다(#376). 다른 기기·다른 로그인 세션은 family 가 달라 그대로다.
+     * 갱신과 같은 family 잠금을 잡으므로 진행 중인 갱신이 만든 RT까지 함께 폐기된다.
+     */
     @Transactional
     public void logout(String refreshTokenValue) {
-        refreshTokenRepository.findByTokenHash(TokenService.sha256(refreshTokenValue))
-                .ifPresent(RefreshToken::revoke);          // 없거나 이미 무효여도 성공
+        refreshTokenRepository.findFamilyIdByTokenHash(TokenService.sha256(refreshTokenValue))
+                .ifPresent(familyId -> {                   // 없거나 이미 무효여도 성공
+                    refreshTokenRepository.lockActiveFamily(familyId);
+                    refreshTokenRepository.revokeFamily(familyId, Instant.now());
+                });
     }
 
     // ===== 닉네임 형식/중복 검사 (스펙 4.6) =====

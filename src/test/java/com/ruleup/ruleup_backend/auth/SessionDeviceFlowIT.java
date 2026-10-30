@@ -58,7 +58,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  *  3) 설치 인계: 기존 회원이 타 계정 점유 설치에서 로그인하면 이전 계정 연결 해제(+세션 종료)
  *  4) RT 회전: refresh 마다 새 페어 + 기존 즉시 revoke (같은 family 유지)
  *  5) RT 재사용 감지: revoke 된 RT 재제출 → family 전체 revoke (탈취 대응) — 새 RT도 무효
- *  6) 로그아웃: RT revoke + 멱등, 이후 refresh 401
+ *  6) 로그아웃: 같은 세션(family) RT 전체 revoke + 멱등, 이후 refresh 401 — 갱신 경합으로 생긴 RT 포함
  *  7) social_tokens: 로그인 시 IdP 토큰 암호화 저장(unlink 근거)
  */
 @SpringBootTest
@@ -234,6 +234,31 @@ class SessionDeviceFlowIT {
                 .putLong(id.getMostSignificantBits())
                 .putLong(id.getLeastSignificantBits())
                 .array();
+    }
+
+    /** 두 요청을 최대한 같은 순간에 시작시키고 결과를 제출 순서대로 돌려준다. */
+    private List<MvcResult> runConcurrently(java.util.concurrent.Callable<MvcResult> a,
+                                            java.util.concurrent.Callable<MvcResult> b) throws Exception {
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            List<Future<MvcResult>> futures = new java.util.ArrayList<>();
+            for (java.util.concurrent.Callable<MvcResult> call : List.of(a, b)) {
+                futures.add(executor.submit(() -> {
+                    ready.countDown();
+                    if (!start.await(5, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("동시 요청 시작 대기 시간 초과");
+                    }
+                    return call.call();
+                }));
+            }
+            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            return List.of(futures.get(0).get(10, TimeUnit.SECONDS), futures.get(1).get(10, TimeUnit.SECONDS));
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     private void expectError(MvcResult res, int status, String code) throws Exception {
@@ -559,6 +584,71 @@ class SessionDeviceFlowIT {
 
             assertThat(logout(at2, rt2).getResponse().getStatus()).isEqualTo(200);
             expectError(refresh(rt1), 401, "SESSION_EXPIRED");
+        }
+
+        @Test
+        @DisplayName("동시 갱신으로 RT 가 둘 생긴 세션은 하나로 로그아웃해도 둘 다 갱신할 수 없다(#376)")
+        void logout_revokes_every_token_from_refresh_race() throws Exception {
+            String tag = uniq();
+            String rt1 = read(signup(tag), "$.data.refreshToken");
+
+            List<MvcResult> raced = runConcurrently(() -> refresh(rt1), () -> refresh(rt1));
+            assertThat(raced).extracting(r -> r.getResponse().getStatus()).containsExactly(200, 200);
+            String atA = read(raced.get(0), "$.data.accessToken");
+            String rtA = read(raced.get(0), "$.data.refreshToken");
+            String rtB = read(raced.get(1), "$.data.refreshToken");
+            assertThat(rtA).isNotEqualTo(rtB);
+
+            assertThat(logout(atA, rtA).getResponse().getStatus()).isEqualTo(200);
+
+            expectError(refresh(rtB), 401, "SESSION_EXPIRED");
+            expectError(refresh(rtA), 401, "SESSION_EXPIRED");
+            expectError(refresh(rt1), 401, "SESSION_EXPIRED");   // 유예 창 안의 직전 RT 로도 되살릴 수 없다
+            assertThat(logout(atA, rtB).getResponse().getStatus()).as("멱등").isEqualTo(200);
+        }
+
+        @Test
+        @DisplayName("갱신과 로그아웃이 동시에 와도 로그아웃이 끝난 세션엔 갱신 가능한 RT 가 남지 않는다(#376)")
+        void concurrent_refresh_and_logout_leave_no_live_token() throws Exception {
+            String tag = uniq();
+            String rt1 = read(signup(tag), "$.data.refreshToken");
+            List<MvcResult> twins = runConcurrently(() -> refresh(rt1), () -> refresh(rt1));
+            String atA = read(twins.get(0), "$.data.accessToken");
+            String rtA = read(twins.get(0), "$.data.refreshToken");
+            String rtB = read(twins.get(1), "$.data.refreshToken");
+
+            // 한쪽 RT 로 로그아웃하는 동안 다른 쪽 RT 로 갱신 — 어느 쪽이 먼저 잠금을 잡든 결과는 같아야 한다.
+            List<MvcResult> raced = runConcurrently(() -> logout(atA, rtA), () -> refresh(rtB));
+            assertThat(raced.get(0).getResponse().getStatus()).isEqualTo(200);
+            MvcResult refreshed = raced.get(1);
+            if (refreshed.getResponse().getStatus() == 200) {
+                // 갱신이 먼저 커밋됐다 — 그때 받은 RT 도 로그아웃이 함께 폐기했어야 한다.
+                expectError(refresh(read(refreshed, "$.data.refreshToken")), 401, "SESSION_EXPIRED");
+            } else {
+                expectError(refreshed, 401, "SESSION_EXPIRED");
+            }
+            expectError(refresh(rtB), 401, "SESSION_EXPIRED");
+            assertThat(jdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM refresh_tokens
+                    WHERE family_id = (SELECT family_id FROM refresh_tokens WHERE token_hash = ?)
+                      AND revoked_at IS NULL
+                    """, Integer.class, (Object) TokenService.sha256(rt1))).isZero();
+        }
+
+        @Test
+        @DisplayName("로그아웃은 그 세션만 끊는다 — 같은 기기 재로그인으로 생긴 다른 세션은 그대로다")
+        void logout_keeps_other_sessions() throws Exception {
+            String tag = uniq();
+            MvcResult signup = signup(tag);
+            String at = read(signup, "$.data.accessToken");
+            String oldRefresh = read(signup, "$.data.refreshToken");
+            MvcResult relogin = postJson("/api/v1/auth/oauth/kakao", loginBody(tag, "inst-" + tag, "dev-" + tag));
+            String otherRefresh = read(relogin, "$.data.refreshToken");
+
+            assertThat(logout(at, oldRefresh).getResponse().getStatus()).isEqualTo(200);
+
+            expectError(refresh(oldRefresh), 401, "SESSION_EXPIRED");
+            assertThat(refresh(otherRefresh).getResponse().getStatus()).isEqualTo(200);
         }
 
         @Test
