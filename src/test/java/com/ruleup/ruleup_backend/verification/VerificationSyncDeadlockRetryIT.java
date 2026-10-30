@@ -10,6 +10,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -30,9 +31,11 @@ import static org.springframework.security.test.web.servlet.setup.SecurityMockMv
 /**
  * 같은 사용자의 sync 가 겹쳐 데드락으로 진 트랜잭션은 처음부터 다시 돈다 — 부하테스트(2026-10) 피크 5xx 11건의 원인.
  * 빈도 제한은 다시 태우지 않으므로 재시도가 자기 첫 시도에 막혀 429 가 되지 않는다.
+ * 그래서 이 클래스는 간격을 운영값처럼 켜 둔다 — 꺼 두면 「재시도가 429 가 아니다」를 검증하지 못한다.
  */
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
+@TestPropertySource(properties = "app.verification.sync-min-interval-sec=300")
 class VerificationSyncDeadlockRetryIT extends VerificationApiSupport {
 
     @Autowired WebApplicationContext wac;
@@ -71,6 +74,26 @@ class VerificationSyncDeadlockRetryIT extends VerificationApiSupport {
 
         assertThat(res.getResponse().getStatus()).isGreaterThanOrEqualTo(500);
         verify(ingest, times(3)).ingest(eq(me.id()), anyList(), any(Instant.class), any(VerificationSignalIngestService.Source.class));
+    }
+
+    @Test
+    @DisplayName("끝내 실패한 sync 는 간격 슬롯을 돌려줘 곧바로 다시 보내도 429 가 아니다")
+    void finalFailureReleasesSlot() throws Exception {
+        Member me = member(uniq("deadlock-release"));
+        CannotAcquireLockException deadlock = new CannotAcquireLockException("Deadlock found when trying to get lock");
+        doThrow(deadlock).doThrow(deadlock).doThrow(deadlock)
+                .doCallRealMethod()
+                .when(ingest).ingest(eq(me.id()), anyList(), any(Instant.class), any(VerificationSignalIngestService.Source.class));
+
+        MvcResult failed = postJsonAuth("/api/v1/verifications/sync", me.token(), syncBody(List.of(steps("dl-3"))));
+        assertThat(failed.getResponse().getStatus()).isGreaterThanOrEqualTo(500);
+
+        MvcResult retried = postJsonAuth("/api/v1/verifications/sync", me.token(), syncBody(List.of(steps("dl-3"))));
+        assertThat(retried.getResponse().getStatus()).as(retried.getResponse().getContentAsString()).isEqualTo(200);
+
+        // 성공한 sync 는 슬롯을 그대로 쥔다.
+        MvcResult tooSoon = postJsonAuth("/api/v1/verifications/sync", me.token(), syncBody(List.of(steps("dl-4"))));
+        assertThat(tooSoon.getResponse().getStatus()).isEqualTo(429);
     }
 
     private static Map<String, Object> steps(String recordId) {

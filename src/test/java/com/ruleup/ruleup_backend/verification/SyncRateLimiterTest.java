@@ -3,11 +3,8 @@ package com.ruleup.ruleup_backend.verification;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.verification.config.VerificationProperties;
 import com.ruleup.ruleup_backend.verification.service.SyncRateLimiter;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -26,18 +23,10 @@ class SyncRateLimiterTest {
         limiter = new SyncRateLimiter(properties);
     }
 
-    @AfterEach
-    void clear() {
-        if (TransactionSynchronizationManager.isSynchronizationActive())
-            TransactionSynchronizationManager.clearSynchronization();
-    }
-
     @Test
-    @DisplayName("커밋된 sync 뒤 300초 안의 재요청은 429")
-    void committedHoldsSlot() {
-        TransactionSynchronizationManager.initSynchronization();
+    @DisplayName("성공한 sync 뒤 300초 안의 재요청은 429")
+    void successHoldsSlot() {
         limiter.check("u1", false);
-        complete(TransactionSynchronization.STATUS_COMMITTED);
 
         assertThatThrownBy(() -> limiter.check("u1", false))
                 .isInstanceOfSatisfying(BusinessException.class, e ->
@@ -45,19 +34,22 @@ class SyncRateLimiterTest {
     }
 
     @Test
-    @DisplayName("롤백된 sync 는 슬롯을 돌려준다")
-    void rolledBackReleasesSlot() {
-        TransactionSynchronizationManager.initSynchronization();
-        limiter.check("u2", false);
-        complete(TransactionSynchronization.STATUS_ROLLED_BACK);
+    @DisplayName("돌려준 슬롯은 곧바로 다시 쓸 수 있다")
+    void releasedSlotIsReusable() {
+        limiter.check("u2", false).release();
 
-        TransactionSynchronizationManager.initSynchronization();
         assertThatCode(() -> limiter.check("u2", false)).doesNotThrowAnyException();
     }
 
-    private static void complete(int status) {
-        var syncs = TransactionSynchronizationManager.getSynchronizations();
-        TransactionSynchronizationManager.clearSynchronization();
-        syncs.forEach(s -> s.afterCompletion(status));
+    @Test
+    @DisplayName("그 사이 다른 요청이 차지한 슬롯은 늦게 돌려줘도 건드리지 않는다")
+    void staleReleaseKeepsNewerSlot() throws InterruptedException {
+        SyncRateLimiter.Slot first = limiter.check("u3", false);
+        first.release();
+        Thread.sleep(2);              // 같은 밀리초면 시각이 같아 「다른 요청」을 구분할 수 없다
+        limiter.check("u3", false);   // 다음 요청이 새로 차지
+        first.release();              // 앞 요청의 늦은 반환
+
+        assertThatThrownBy(() -> limiter.check("u3", false)).isInstanceOf(BusinessException.class);
     }
 }

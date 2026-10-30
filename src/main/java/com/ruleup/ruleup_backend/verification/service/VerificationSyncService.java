@@ -182,6 +182,7 @@ public class VerificationSyncService {
      * 한쪽이 데드락으로 진다 — 부하테스트(2026-10) 피크에서 5xx 11건이 전부 이것이었다. 진 쪽은 아무것도 남기지 않고
      * 롤백되므로 처음부터 다시 하면 된다. 재시도를 트랜잭션 밖에 두는 이유: 안에서 잡으면 이미 롤백 표시가 된 뒤다.
      * 빈도 제한을 재시도에 다시 태우면 자기 자신의 첫 시도에 막혀 429 가 된다.
+     * 재시도까지 끝내 실패하면 슬롯을 돌려준다 — 곧바로 다시 누른 동기화가 429 로 튕기지 않게(#378).
      */
     public SyncResponse sync(UUID userId, SyncRequest req) {
         long startedAt = System.nanoTime();
@@ -198,7 +199,16 @@ public class VerificationSyncService {
         if (signals.size() > MAX_SIGNALS_PER_SYNC) {
             throw new BusinessException(ErrorCode.SYNC_PAYLOAD_TOO_LARGE);   // 413 — 클라는 분할 재전송
         }
-        rateLimiter.check(userId.toString(), backlog);
+        SyncRateLimiter.Slot slot = rateLimiter.check(userId.toString(), backlog);
+        try {
+            return syncWithDeadlockRetry(userId, req, signals, startedAt);
+        } catch (RuntimeException | Error e) {
+            slot.release();
+            throw e;
+        }
+    }
+
+    private SyncResponse syncWithDeadlockRetry(UUID userId, SyncRequest req, List<SyncSignal> signals, long startedAt) {
         List<String> ignored = signals.stream()
                 .map(SyncSignal::type)
                 .filter(t -> t == null || !KNOWN_SIGNAL_TYPES.contains(t))
