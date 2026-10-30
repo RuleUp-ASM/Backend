@@ -6,7 +6,16 @@ COPY . .
 RUN chmod +x gradlew && ./gradlew clean bootJar -x test --no-daemon
 
 # 런타임 스테이지: target(arm64) — ECS Fargate ARM64.
-FROM eclipse-temurin:25-jre
+# 버전을 고정한다 — 떠다니는 25-jre 태그는 배포 때마다 JRE 가 말없이 바뀐다.
+FROM eclipse-temurin:25.0.5_8-jre
+# eMudhra 중간 CA 키 유출(CVE-2026-91403·CVE-2026-114820): 25.0.5+8 에도 emSign Root CA - G1 이 남아 있어
+# 이 회사 루트를 cacerts 에서 모두 지운다. 서버가 부르는 곳(Google·카카오·네이버·Apple·AWS·Slack)은 이 루트를 쓰지 않는다(2026-10-30 확인).
+# OpenJDK 원본 수정(JDK-8395690)이 들어간 Temurin 으로 올리면 이 단계는 지워도 된다.
+RUN set -eu; \
+    keytool -list -cacerts -storepass changeit | grep -iE 'emsign|emudhra' | sed 's/, .*//' | while IFS= read -r alias; do \
+      keytool -delete -cacerts -storepass changeit -alias "$alias"; \
+    done; \
+    ! keytool -list -cacerts -storepass changeit | grep -iqE 'emsign|emudhra'
 WORKDIR /app
 # 트레이스(X-Ray) 용 ADOT Java 에이전트. 이미지에는 늘 들어 있고, 태스크 정의 env OTEL_ENABLED=true 일 때만 붙는다.
 # 구성: infra/monitoring/tracing/README.md
