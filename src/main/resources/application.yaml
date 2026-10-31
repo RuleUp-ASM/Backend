@@ -331,6 +331,15 @@ app:
   #
   # 심사가 끝나면 <b>값을 지워야 한다.</b> 만료가 없다.
   review-accounts: ${REVIEW_ACCOUNT_IDS:}
+  # 심사 코드 로그인(심사 계정 테크 스펙 5-3). 값은 Secrets Manager → 환경변수. 기본은 꺼짐이라 평소 동작이 달라지지 않는다.
+  # codes 에는 정규화한 코드의 SHA-256 hex 와 userId 만 둔다 — 코드 원문은 서버·태스크로 보내지 않는다.
+  review-login:
+    enabled: ${REVIEW_LOGIN_ENABLED:false}
+    round: ${REVIEW_LOGIN_ROUND:}
+    expires-at: ${REVIEW_LOGIN_EXPIRES_AT:}
+    codes: ${REVIEW_LOGIN_CODES:}
+    # 종료 스케줄러 확인 간격 — 보장이 아니다. 끊김 보장은 재발급 차단(꺼진 시각 + AT 수명)이 맡는다.
+    terminator-interval: PT1M
 
   # 감시자(§11.4). 연락처 암호화 키는 prod 필수(Secrets Manager), 로컬은 미설정 시 임시 키로 동작.
   watcher:

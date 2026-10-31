@@ -25,6 +25,7 @@ public class DeviceTokenService {
     private static final int TOKEN_MAX = 512;
 
     private final DeviceTokenRepository deviceTokenRepository;
+    private final com.ruleup.ruleup_backend.auth.review.ReviewAccountPolicy reviewAccountPolicy;
 
     /**
      * 토큰 upsert. 이미 존재하면(다른 유저 소유 포함) 소유자·플랫폼을 재바인딩하고 최근 확인 시각을 갱신한다
@@ -38,6 +39,13 @@ public class DeviceTokenService {
         String normalized = requireValidToken(token);
         DevicePlatform p = (platform != null) ? platform : DevicePlatform.ANDROID;
         Instant now = Instant.now();
+
+        // 심사 코드 계정은 푸시를 받지 않는다(심사 계정 5-4). 등록은 200 으로 받되 저장하지 않는다 — 심사위원이 같은 기기에서
+        // 쓰던 본인 계정의 토큰이 심사 계정으로 넘어가면 안 된다. 그 계정에 남은 활성 토큰은 이참에 내린다.
+        if (reviewAccountPolicy.isCodeAccount(userId)) {
+            deviceTokenRepository.deactivateAllOf(userId, now);
+            return;
+        }
 
         deviceTokenRepository.findByToken(normalized).ifPresentOrElse(
                 existing -> existing.reassign(userId, p, now),

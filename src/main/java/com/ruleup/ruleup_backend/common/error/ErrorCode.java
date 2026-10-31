@@ -71,6 +71,9 @@ public enum ErrorCode {
     GENDER_REQUIRED(HttpStatus.BAD_REQUEST, "성별을 선택해 주세요."),
     CONFIRM_PHRASE_MISMATCH(HttpStatus.BAD_REQUEST, "탈퇴 확인 문구가 일치하지 않습니다."),
 
+    /** 심사 코드 불일치·폐기·지난 회차 계정 — 401 은 앱에서 토큰 재발급으로 이어지므로 쓰지 않는다(심사 계정 5-5). */
+    INVALID_REVIEW_CODE(HttpStatus.BAD_REQUEST, "코드가 맞지 않아요. 받은 코드를 다시 확인해주세요."),
+
     // ===== 앱 토큰 (4.4 refresh / 보호 API) =====
     SESSION_EXPIRED(HttpStatus.UNAUTHORIZED, "세션이 만료되었습니다. 다시 로그인해주세요."),
     LOGIN_REQUIRED(HttpStatus.UNAUTHORIZED, "로그인이 필요합니다."),

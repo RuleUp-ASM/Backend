@@ -92,6 +92,23 @@ public class ExploreCircuitBreaker {
     }
 
     /**
+     * {@link #callQuietly} 와 같되 <b>해냈는지</b> 돌려준다 — 결과를 보고해야 하는 일회성 작업(심사 계정 시드)용.
+     * 회로가 열려 건너뛰었거나 실패했으면 false. 탐색 Redis 를 꺼 둔 환경({@code enabled=false})은 할 일이 없으니 true.
+     */
+    public boolean tryCall(Runnable redisCall) {
+        if (!enabled) return true;
+        if (isOpen()) return false;
+        try {
+            redisCall.run();
+            onSuccess();
+            return true;
+        } catch (RuntimeException e) {
+            onFailure(e);
+            return false;
+        }
+    }
+
+    /**
      * 밖에서 잡은 Redis 실패를 회로에 알린다 — 호출부가 폴백을 직접 처리해야 하는 경로용
      * (커서를 들고 있으면 그냥 폴백할 수 없고 {@code CURSOR_INVALID} 를 내야 한다).
      */

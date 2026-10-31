@@ -36,7 +36,10 @@ class SchedulerLockCoverageTest {
             "VerificationRateMetrics.refresh",
             "MemberProfileMetrics.refresh",
             "WatcherHealth.sample",
-            "SegmentScoreService.evictLocalCaches");
+            "SegmentScoreService.evictLocalCaches",
+            // 심사 세션 종료(심사 계정 테크 스펙 5-1): 멱등 회수라 겹쳐 돌아도 되고, 락이 있으면 강제 재배포 직후
+            // 새 태스크의 「기동 직후 실행」이 앞 태스크의 락에 막혀 RT 정리가 늦어진다(재활성화 전 정리가 운영 조건).
+            "ReviewSessionTerminator.revokeEndedSessions");
 
     @Test
     @DisplayName("@Scheduled 는 전부 @SchedulerLock 이 있거나 태스크별 목록에 있다 — 락 이름은 겹치지 않는다")

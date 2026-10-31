@@ -93,7 +93,9 @@ public class CrossRankingSnapshotService {
 
     @TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT)
     public void removeDeparted(ChallengeStatsRefreshRequested event) {
-        if (!java.util.Set.of("LEAVE", "WITHDRAW", "KICK", "SANCTION", "DORMANT", "TIER_GATE", "ADMIN").contains(event.reason())) return;
+        // VOLUNTARY — 회원 탈퇴(leaveAllForWithdrawal)와 심사 계정 리셋의 외부 나가기가 쓰는 사유. 빠져 있어 탈퇴한 회원이
+        // 다음 일일 갱신까지 방 집계(참여·성공 수)에 남았다.
+        if (!java.util.Set.of("LEAVE", "VOLUNTARY", "WITHDRAW", "KICK", "SANCTION", "DORMANT", "TIER_GATE", "ADMIN").contains(event.reason())) return;
         em.flush();
         // 스냅샷에 없는 방(시작 전 방·랭킹 비공개 SOLO 등)이면 전역 락을 잡을 일이 없다 — 모든 이탈이 한 줄로 서지 않게.
         // 잠금 읽기라 스냅샷 시점과 상관없이 커밋된 최신 행을 본다(일일 refresh 가 막 넣은 행도 놓치지 않는다).
