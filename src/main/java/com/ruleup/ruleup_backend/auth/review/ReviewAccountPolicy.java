@@ -51,7 +51,7 @@ public class ReviewAccountPolicy {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     /** 한 회차의 최대 길이 — round 날짜(00:00 KST)부터 expiresAt 까지. */
-    static final Duration MAX_REVIEW_LENGTH = Duration.ofDays(60);
+    public static final Duration MAX_REVIEW_LENGTH = Duration.ofDays(60);
     private static final Pattern ROUND = Pattern.compile("(\\d{8})\\d{2}");
     private static final Pattern REVIEW_SUBJECT = Pattern.compile("ruleup-review-(\\d{10})-\\d{2}");
     private static final DateTimeFormatter ROUND_DATE =
@@ -141,6 +141,16 @@ public class ReviewAccountPolicy {
     /** 코드가 폐기된 계정 — 스위치가 켜져 있어도 세션을 끊는다. */
     public Set<UUID> revokedCodeAccountIds() {
         return revokedCodeAccountIds;
+    }
+
+    /** 이번 회차 — 시드 리셋이 대상 회차를 인자가 아니라 서버와 같은 설정에서 읽는다. 없으면 null. */
+    public String round() {
+        return round;
+    }
+
+    /** 심사 종료 시각(평가 마지막 날 다음 날 00:00 KST). 없으면 null. */
+    public Instant expiresAt() {
+        return expiresAt;
     }
 
     public boolean isCodeAccount(UUID userId) {

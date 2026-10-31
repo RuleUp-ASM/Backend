@@ -16,7 +16,19 @@ import com.ruleup.ruleup_backend.challenge.ChallengeApiSupport;
 import com.ruleup.ruleup_backend.config.AppProperties;
 import com.ruleup.ruleup_backend.notification.domain.NotificationType;
 import com.ruleup.ruleup_backend.sanction.ReviewAccounts;
+import com.ruleup.ruleup_backend.challenge.explore.store.ExploreCircuitBreaker;
+import com.ruleup.ruleup_backend.common.DbTime;
+import com.ruleup.ruleup_backend.admin.service.SanctionLeaveListener;
+import com.ruleup.ruleup_backend.common.outbox.OutboxDispatcher;
+import com.ruleup.ruleup_backend.common.outbox.OutboxHandler;
+import com.ruleup.ruleup_backend.room.service.CrossRankingSnapshotService;
+import com.ruleup.ruleup_backend.common.outbox.OutboxRepository;
+import com.ruleup.ruleup_backend.common.outbox.OutboxService;
+import com.ruleup.ruleup_backend.score.service.LeaveScoreOutboxHandler;
+import com.ruleup.ruleup_backend.verification.service.AppealAbuseOutboxHandler;
+import com.ruleup.ruleup_backend.watcher.service.WatcherFailureOutboxHandler;
 import com.ruleup.ruleup_backend.score.service.ScoreProcessor;
+import com.ruleup.ruleup_backend.score.service.ScoreSyncService;
 import com.ruleup.ruleup_backend.user.UserAccountService;
 import com.ruleup.ruleup_backend.user.UserRepository;
 import com.ruleup.ruleup_backend.user.domain.OAuthProvider;
@@ -32,6 +44,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.data.domain.Limit;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -42,6 +55,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.WebApplicationContext;
 
 import java.nio.ByteBuffer;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSetMetaData;
 import java.time.Clock;
 import java.time.Duration;
@@ -60,6 +75,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -113,9 +134,10 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
      * 실패 주입용 루트 연결 — 트리거 생성은 바이너리 로그가 켜진 MySQL 에서 앱 계정(test)에 허용되지 않는다.
      * 공유 컨테이너의 루트로 따로 붙는다(ReviewAccountShutdownIT 와 같은 방식).
      */
-    private static final JdbcTemplate ROOT = new JdbcTemplate(new DriverManagerDataSource(
+    private static final DriverManagerDataSource ROOT_DS = new DriverManagerDataSource(
             TestcontainersConfiguration.sharedMysql().getJdbcUrl(), "root",
-            TestcontainersConfiguration.sharedMysql().getPassword()));
+            TestcontainersConfiguration.sharedMysql().getPassword());
+    private static final JdbcTemplate ROOT = new JdbcTemplate(ROOT_DS);
 
     @Autowired WebApplicationContext wac;
     @Autowired JdbcTemplate jdbcTemplate;
@@ -128,6 +150,12 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
     @Autowired TokenService tokenService;
     @Autowired TransactionTemplate tx;
     @Autowired MutableClock clock;
+    @Autowired ScoreSyncService scoreSync;
+    @Autowired OutboxDispatcher outboxDispatcher;
+    @Autowired OutboxRepository outboxRepository;
+    @Autowired OutboxService outboxService;
+    @Autowired ExploreCircuitBreaker exploreCircuit;
+    @Autowired CrossRankingSnapshotService crossRanking;
 
     MockMvc mvc;
 
@@ -146,8 +174,58 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
     private static CreateResult shared;
 
     private CreateResult created() {
-        if (shared == null) shared = seed.create(3, evaluationEnd());
+        if (shared == null) shared = create(3);
         return shared;
+    }
+
+    /**
+     * 생성 + 그 정산이 쌓은 아웃박스(티어 알림 등)를 끝까지 흘린다. 시드 태스크는 아웃박스를 흘리지 않고 상시 서비스의
+     * 디스패처가 처리한다 — 그 알림이 스냅숏 뒤에 끼면 「실패한 리셋이 바꿨다」로 보이므로 테스트가 먼저 끝내 둔다.
+     */
+    private CreateResult create(int accounts) {
+        CreateResult res = seed.create(accounts, evaluationEnd());
+        assertThat(res.followUpsComplete()).as("커밋 뒤 마무리").isTrue();
+        settleOutbox();
+        return res;
+    }
+
+    private void settleOutbox() {
+        for (int i = 0; i < 100; i++) {
+            if (outboxRepository.findDue(Instant.now(), Limit.of(1)).isEmpty()) return;
+            outboxDispatcher.flush();   // 다른 스레드가 처리 중인 건은 행 잠금에서 기다렸다가 넘어간다
+        }
+        throw new AssertionError("아웃박스가 비지 않는다");
+    }
+
+    /** 시드가 다룬 계정들의 점수 원장 행 수. */
+    private long ledgerRows(List<UUID> ids) {
+        return count("SELECT COUNT(*) FROM score_transactions WHERE user_id IN (" + placeholders(ids.size()) + ")",
+                ids.stream().map(ReviewSeedServiceIT::bytes).toArray());
+    }
+
+    /**
+     * 나가기 감점 사건을 백오프(1회 실패, 10분 뒤 재시도) 또는 포기 상태로 적재한다. 적재와 상태 변경을 한 트랜잭션에서
+     * 해 디스패처가 그 사이에 집지 못하게 한다.
+     */
+    private UUID queueLeaveScore(UUID userId, UUID roomId, boolean deadLettered) {
+        String source = "seed-it-leave:" + UUID.randomUUID();
+        return queueOutbox(LeaveScoreOutboxHandler.TYPE, new LeaveScoreOutboxHandler.Payload(userId, roomId, source,
+                0, "AUTO", -15, Instant.now().minusSeconds(3600)), source, deadLettered);
+    }
+
+    private UUID queueOutbox(String type, Object payload, String source, boolean deadLettered) {
+        tx.executeWithoutResult(s -> {
+            outboxService.enqueue(type, payload, source);
+            outboxRepository.flush();
+            if (deadLettered) {
+                jdbcTemplate.update("UPDATE outbox_messages SET attempts = 5, last_error = 'seed-it', dead_lettered_at = ? "
+                        + "WHERE dedup_key = ?", DbTime.utc(Instant.now()), source);
+            } else {
+                jdbcTemplate.update("UPDATE outbox_messages SET attempts = 1, last_error = 'seed-it', available_at = ? "
+                        + "WHERE dedup_key = ?", DbTime.utc(Instant.now().plusSeconds(600)), source);
+            }
+        });
+        return uuid(jdbcTemplate.queryForObject("SELECT id FROM outbox_messages WHERE dedup_key = ?", byte[].class, source));
     }
 
     // =====================================================================
@@ -175,8 +253,8 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
         @Test
         @DisplayName("같은 날 두 번째 실행은 순번이 오른다 — 같은 round 로 계정을 두 벌 만들 수 없다")
         void secondRunSameDayIncrementsSequence() {
-            CreateResult first = seed.create(1, evaluationEnd());
-            CreateResult second = seed.create(1, evaluationEnd());
+            CreateResult first = create(1);
+            CreateResult second = create(1);
 
             assertThat(second.round().substring(0, 8)).isEqualTo(first.round().substring(0, 8));
             assertThat(Integer.parseInt(second.round().substring(8)))
@@ -267,7 +345,7 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
         @Test
         @DisplayName("결과·로그에는 round 와 UUID 만 — 코드·해시가 없다")
         void outputsRoundAndIdsOnly(CapturedOutput output) {
-            CreateResult res = seed.create(2, evaluationEnd());
+            CreateResult res = create(2);
 
             List<String> seedLines = output.getAll().lines().filter(l -> l.contains("review_seed")).toList();
             assertThat(seedLines).as("시드 로그").isNotEmpty();
@@ -285,6 +363,33 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
                 assertThat(Arrays.stream(type.getRecordComponents()).map(c -> c.getName().toLowerCase()))
                         .noneMatch(n -> n.contains("code") || n.contains("hash"));
             }
+        }
+
+        /**
+         * 탐색 색인은 Redis 실패를 안에서 삼킨다(가입이 Redis 때문에 실패하면 안 된다). 시드가 그 경로의 예외만 세면 색인이
+         * 빠져도 「마무리 완료」(종료 0)로 보고한다 — 회로가 열린 상태로 만들어 미완(종료 2)으로 드러나는지 본다.
+         */
+        @Test
+        @DisplayName("탐색 색인을 못 하면(Redis 실패·회로 열림) 마무리 미완으로 보고한다 — 데이터는 커밋돼 있다")
+        void reportsSkippedExploreIndex(CapturedOutput output) {
+            Object enabled = ReflectionTestUtils.getField(exploreCircuit, "enabled");
+            ReflectionTestUtils.setField(exploreCircuit, "enabled", true);
+            ReflectionTestUtils.setField(exploreCircuit, "openUntil", new AtomicReference<>(Instant.now().plusSeconds(600)));
+            CreateResult res;
+            try {
+                res = seed.create(1, evaluationEnd());
+            } finally {
+                ReflectionTestUtils.setField(exploreCircuit, "openUntil", new AtomicReference<Instant>());
+                ReflectionTestUtils.setField(exploreCircuit, "consecutiveFailures", new AtomicInteger());
+                ReflectionTestUtils.setField(exploreCircuit, "enabled", enabled);
+            }
+            settleOutbox();
+
+            assertThat(res.followUpsComplete()).as("색인이 빠졌다 — 종료 코드 2").isFalse();
+            assertThat(count("SELECT COUNT(*) FROM challenges WHERE id IN (?, ?)",
+                    bytes(res.manualRoomId()), bytes(res.autoRoomId()))).as("데이터는 커밋됐다").isEqualTo(2);
+            assertThat(output.getAll()).contains("review_seed_followup_failed step=EXPLORE_INDEX")
+                    .contains("review_seed_followup_incomplete mode=create");
         }
     }
 
@@ -529,6 +634,20 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
         }
 
         @Test
+        @DisplayName("1분 점수 보정 배치가 돌아도 시드 계정·더미의 점수가 바뀌지 않는다 — 원장 없는 확정 이력을 남기지 않는다")
+        void scoreSyncFindsNothingLeft() {
+            CreateResult res = created();
+            List<UUID> ids = Stream.concat(res.accountIds().stream(), res.dummyIds().stream()).toList();
+            long before = ledgerRows(ids);
+            Map<UUID, List<Object>> scores = scores(ids);
+
+            scoreSync.syncConfirmedJudgements();
+
+            assertThat(ledgerRows(ids)).as("보정 배치가 새로 정산한 원장 행").isEqualTo(before);
+            assertThat(scores(ids)).isEqualTo(scores);
+        }
+
+        @Test
         @DisplayName("알림함 — 유형별 샘플 3종 이상 · 푸시로 나가지 않았다")
         void sampleNotifications() {
             CreateResult res = created();
@@ -560,7 +679,7 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
             CreateResult first = created();
             long dummies = count("SELECT COUNT(*) FROM users WHERE oauth_subject LIKE 'ruleup-demo-%'");
 
-            CreateResult next = seed.create(1, evaluationEnd());
+            CreateResult next = create(1);
 
             assertThat(count("SELECT COUNT(*) FROM users WHERE oauth_subject LIKE 'ruleup-demo-%'")).isEqualTo(dummies);
             assertThat(next.manualRoomId()).as("데모 방은 회차마다 새로").isNotIn(first.manualRoomId(), first.autoRoomId());
@@ -579,13 +698,13 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
         @Test
         @DisplayName("지난 round 를 확인 인자로 넣으면 실패 — 지난 계정의 상태·동의·참여가 그대로 남는다")
         void confirmRoundMismatch() {
-            CreateResult earlier = seed.create(1, evaluationEnd());
-            CreateResult current = seed.create(1, evaluationEnd());
+            CreateResult earlier = create(1);
+            CreateResult current = create(1);
             UUID prev = earlier.accountIds().get(0);
             // 지난 심사위원이 남긴 상태 — 개별 동의 · 방 나가기 · 탈퇴
             agree(prev, AgreementType.LOCATION_INFO);
             leave(earlier.manualRoomId(), prev);
-            userAccountService.withdraw(prev, CONFIRM_PHRASE);
+            withdraw(prev);
             Map<String, Object> before = snapshot(earlier, current);
 
             ReviewAccountPolicy cfg = config(current.round(), current.accountIds(), scopeOf(earlier, current), true, expiry(), clock);
@@ -600,7 +719,7 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
         @Test
         @DisplayName("만료가 지난 설정(끝난 회차)에서는 실패한다")
         void expiredConfig() {
-            CreateResult current = seed.create(1, evaluationEnd());
+            CreateResult current = create(1);
             agree(current.accountIds().get(0), AgreementType.HEALTH_INFO);
             Map<String, Object> before = snapshot(current);
 
@@ -616,7 +735,7 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
         @Test
         @DisplayName("스위치가 꺼진 설정에서는 실패한다 — codes 가 있는 채로 꺼져 있으면 종료 스케줄러가 곧 탈퇴시킨다")
         void disabledConfig() {
-            CreateResult current = seed.create(1, evaluationEnd());
+            CreateResult current = create(1);
             agree(current.accountIds().get(0), AgreementType.HEALTH_INFO);
             Map<String, Object> before = snapshot(current);
 
@@ -631,8 +750,8 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
         @Test
         @DisplayName("codes 에 지난 회차 계정이 섞여 있으면 전체 실패 — 이번 회차 계정도 건드리지 않는다")
         void mixedRoundCodes() {
-            CreateResult earlier = seed.create(1, evaluationEnd());
-            CreateResult current = seed.create(1, evaluationEnd());
+            CreateResult earlier = create(1);
+            CreateResult current = create(1);
             agree(earlier.accountIds().get(0), AgreementType.LOCATION_INFO);
             agree(current.accountIds().get(0), AgreementType.LOCATION_INFO);
             Map<String, Object> before = snapshot(earlier, current);
@@ -649,7 +768,7 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
         @Test
         @DisplayName("대상 계정이 없으면 실패한다 — codes 의 계정 행이 하나도 없음")
         void noTarget() {
-            CreateResult current = seed.create(1, evaluationEnd());
+            CreateResult current = create(1);
             UUID missing = UUID.randomUUID();
             Map<String, Object> before = snapshot(current);
 
@@ -671,8 +790,8 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
         @Test
         @DisplayName("잠금·참여·점수·개별 동의·탈퇴·기기를 되돌리고, RT·더미·일반 유저·다른 회차는 그대로 둔다")
         void restoresSeedState() throws Exception {
-            CreateResult other = seed.create(1, evaluationEnd());
-            CreateResult current = seed.create(2, evaluationEnd());
+            CreateResult other = create(1);
+            CreateResult current = create(2);
             UUID j0 = current.accountIds().get(0);
             UUID j1 = current.accountIds().get(1);
             Map<UUID, List<Object>> scoreAfterCreate = scores(current.accountIds());
@@ -702,7 +821,7 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
             // 픽스처 insert 는 참여 인원 수를 올리지 않는다 — 운영처럼 실제 멤버 수로 맞춘다
             for (UUID r : List.of(judgeRoom, current.autoRoomId(), realRoom)) syncParticipantCount(r);
 
-            userAccountService.withdraw(j1, CONFIRM_PHRASE);   // 심사위원이 탈퇴해 봤다
+            withdraw(j1);   // 심사위원이 탈퇴해 봤다
 
             long consentEvents = count("SELECT COUNT(*) FROM user_agreement_events WHERE user_id = ?", bytes(j0));
             List<Map<String, Object>> realRows = rows("SELECT * FROM users WHERE id = ?", real.id());
@@ -788,6 +907,169 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
                 assertThat(finalRows(res.autoRoomId(), id)).isNotEmpty();
                 assertThat(finalRows(res.manualRoomId(), id)).isNotEmpty();
             }
+            // 리셋 뒤에도 점수 보정 배치가 정산할 것이 남지 않았다
+            assertThat(res.followUpsComplete()).isTrue();
+            List<UUID> seeded = scopeIds(current);
+            long ledger = ledgerRows(seeded);
+            scoreSync.syncConfirmedJudgements();
+            assertThat(ledgerRows(seeded)).isEqualTo(ledger);
+        }
+
+        /**
+         * 리셋 전에 쌓인 심사 계정 사건이 리셋 뒤에 새 원장 위로 적용되는 경우. 심사위원이 방을 나간 직후 리셋하면 나가기
+         * 감점이 아직 대기(백오프)거나 포기(04:40 자동 재적재 대상)일 수 있다 — 디스패처가 그걸 다시 잡을 수 있게 만든 뒤에도
+         * 리셋한 점수가 그대로여야 한다. 실제 유저의 대기 사건은 건드리지 않는다.
+         */
+        @Test
+        @DisplayName("리셋 전에 대기·포기된 심사 계정 사건은 리셋 뒤에 적용되지 않는다 — 실제 유저 사건은 그대로")
+        void retiresEventsQueuedBeforeReset() throws Exception {
+            CreateResult current = create(1);
+            UUID j0 = current.accountIds().get(0);
+            Member real = member("seed-outbox");
+            Instant before = Instant.now().minusSeconds(1);
+            UUID backoff = queueLeaveScore(j0, current.manualRoomId(), false);
+            UUID dead = queueLeaveScore(j0, current.autoRoomId(), true);
+            UUID others = queueLeaveScore(real.id(), current.autoRoomId(), false);
+            // 리셋이 지우는 원본에서 나온 비점수 사건 — 실패의 감시자 통지, 인용된 이의의 남용 표본. 원본이 사라지므로
+            // 보내지 않는다고 정했다(처리기도 원본이 없으면 조용히 끝난다) — 조용히 사라지지 않고 표식을 남겨 닫혀야 한다
+            UUID failedDay = uuid(jdbcTemplate.queryForObject("SELECT id FROM VerificationDaily WHERE userId = ? AND challengeId = ? "
+                    + "AND status = 'FAILED' ORDER BY targetDate LIMIT 1", byte[].class, bytes(j0), bytes(current.autoRoomId())));
+            UUID watcher = queueOutbox(WatcherFailureOutboxHandler.OUTBOX_TYPE, new WatcherFailureOutboxHandler.Payload(
+                    current.autoRoomId().toString(), j0.toString(), failedDay.toString(), LocalDate.now(KST).minusDays(3).toString(),
+                    Instant.now().toString()), "seed-it-watcher:" + UUID.randomUUID(), false);
+            UUID appealId = uuid(jdbcTemplate.queryForObject("SELECT id FROM verification_appeals WHERE userId = ? LIMIT 1",
+                    byte[].class, bytes(j0)));
+            UUID abuse = queueOutbox(AppealAbuseOutboxHandler.OUTBOX_TYPE, new AppealAbuseOutboxHandler.Payload(appealId.toString(),
+                    j0.toString(), current.autoRoomId().toString(), failedDay.toString(), LocalDate.now(KST).minusDays(3).toString(),
+                    Instant.now().toString()), "seed-it-abuse:" + UUID.randomUUID(), false);
+            // 점수와 무관한 운영 집행 — 관리자 제재의 방 나가기. 제재가 유지되므로 리셋 뒤에도 집행돼야 한다
+            UUID sanction = queueOutbox(SanctionLeaveListener.OUTBOX_TYPE, new SanctionLeaveListener.Payload(j0, "SANCTION"),
+                    "seed-it-sanction:" + UUID.randomUUID(), false);
+            try {
+                ReviewAccountPolicy cfg = config(current.round(), current.accountIds(), scopeOf(current), true, expiry(), clock);
+                ResetResult res = seed.reset(scopeOf(current), cfg, null);
+                assertThat(res.followUpsComplete()).isTrue();
+                settleOutbox();   // 리셋 정산이 쌓은 새 사건은 평소처럼 흐른다
+                long ledger = ledgerRows(List.of(j0));
+                Map<UUID, List<Object>> score = scores(List.of(j0));
+
+                // 디스패처가 그 사건을 다시 잡을 수 있게 — 백오프가 끝나고, 포기분은 매일 재적재가 되살린다
+                jdbcTemplate.update("UPDATE outbox_messages SET available_at = ? WHERE id IN (?, ?) "
+                                + "AND processed_at IS NULL AND dead_lettered_at IS NULL",
+                        DbTime.utc(Instant.now().minusSeconds(1)), bytes(backoff), bytes(dead));
+                assertThat(jdbcTemplate.queryForObject("SELECT processed_at IS NULL FROM outbox_messages WHERE id = ?",
+                        Boolean.class, bytes(sanction))).as("제재 나가기는 닫지 않는다").isTrue();
+                assertThat(activeRoomsOf(j0)).as("리셋이 새 데모 방에 다시 넣었다").isNotEmpty();
+                jdbcTemplate.update("UPDATE outbox_messages SET available_at = ? WHERE id = ?",
+                        DbTime.utc(Instant.now().minusSeconds(1)), bytes(sanction));
+                outboxDispatcher.redriveDeadLettered(100, before);
+                settleOutbox();
+
+                assertThat(activeRoomsOf(j0)).as("제재 나가기가 리셋 뒤에 집행됐다").isEmpty();
+
+                assertThat(ledgerRows(List.of(j0))).as("리셋 뒤 원장에 옛 감점이 끼지 않는다").isEqualTo(ledger);
+                assertThat(scores(List.of(j0))).isEqualTo(score);
+                for (UUID id : List.of(backoff, dead, watcher, abuse)) {
+                    Map<String, Object> row = jdbcTemplate.queryForMap(
+                            "SELECT processed_at, dead_lettered_at, last_error FROM outbox_messages WHERE id = ?", (Object) bytes(id));
+                    assertThat(row.get("processed_at")).as("닫혔다").isNotNull();
+                    assertThat(row.get("dead_lettered_at")).as("재적재 대상에서 빠졌다").isNull();
+                    assertThat(row.get("last_error")).isEqualTo(ReviewSeedService.RETIRED_BY_RESET);
+                }
+                Map<String, Object> other = jdbcTemplate.queryForMap(
+                        "SELECT processed_at, last_error FROM outbox_messages WHERE id = ?", (Object) bytes(others));
+                assertThat(other.get("processed_at")).as("실제 유저 사건은 그대로 대기").isNull();
+                assertThat(other.get("last_error")).isEqualTo("seed-it");
+                assertThat(jdbcTemplate.queryForObject("SELECT last_error FROM outbox_messages WHERE id = ?",
+                        String.class, bytes(sanction))).isNotEqualTo(ReviewSeedService.RETIRED_BY_RESET);
+            } finally {
+                jdbcTemplate.update("DELETE FROM outbox_messages WHERE id = ?", (Object) bytes(others));
+            }
+        }
+
+        @Test
+        @DisplayName("모든 아웃박스 사건 종류는 「리셋이 닫는다」와 「그대로 둔다」 중 정확히 하나에 속한다 — 새 종류가 생기면 정해야 한다")
+        void everyOutboxTypeIsClassified() {
+            Set<String> types = wac.getBeansOfType(OutboxHandler.class).values().stream()
+                    .map(OutboxHandler::type).collect(Collectors.toSet());
+            assertThat(ReviewSeedService.SUPERSEDED_EVENT_TYPES).doesNotContainAnyElementsOf(ReviewSeedService.KEPT_EVENT_TYPES);
+            Set<String> classified = new HashSet<>(ReviewSeedService.SUPERSEDED_EVENT_TYPES);
+            classified.addAll(ReviewSeedService.KEPT_EVENT_TYPES);
+            assertThat(classified).containsExactlyInAnyOrderElementsOf(types);
+        }
+
+        /**
+         * 실제 유저가 남는 방은 지우지 않고 심사 계정·더미만 내보낸다. 그 방이 이미 전체 랭킹 스냅숏에 있으면 나간 멤버의
+         * 참여·성공 수가 다음 일일 갱신까지 남아 실제 유저가 보는 방 순위가 틀어진다 — 나가는 트랜잭션에서 빠져야 한다.
+         */
+        @Test
+        @DisplayName("남기는 방의 전체 랭킹 집계에서 나간 심사 계정·더미가 곧바로 빠진다")
+        void keptRoomLeavesCrossRanking() throws Exception {
+            CreateResult current = create(1);
+            UUID roomId = current.manualRoomId();
+            Member real = member("seed-ranking");
+            insertActiveMembership(roomId, real.id(), "MEMBER");
+            syncParticipantCount(roomId);
+            jdbcTemplate.update("UPDATE challenge_members SET success_days = 20, fail_days = 5 WHERE challenge_id = ? AND user_id = ?",
+                    bytes(roomId), bytes(real.id()));
+            crossRanking.refresh();
+            assertThat(count("SELECT COUNT(*) FROM challenge_cross_ranking_members WHERE challenge_id = ?", bytes(roomId)))
+                    .as("스냅숏에 심사 계정·더미·실제 유저").isGreaterThan(1);
+
+            ReviewAccountPolicy cfg = config(current.round(), current.accountIds(), scopeOf(current), true, expiry(), clock);
+            seed.reset(scopeOf(current), cfg, null);
+
+            List<UUID> ranked = jdbcTemplate.query("SELECT user_id FROM challenge_cross_ranking_members WHERE challenge_id = ?",
+                    (rs, n) -> uuid(rs.getBytes(1)), (Object) bytes(roomId));
+            assertThat(ranked).containsExactly(real.id());
+            Map<String, Object> snap = jdbcTemplate.queryForMap("SELECT member_count, success_count, total_count "
+                    + "FROM challenge_cross_ranking_snapshot WHERE challenge_id = ?", (Object) bytes(roomId));
+            assertThat(((Number) snap.get("member_count")).intValue()).isEqualTo(1);
+            assertThat(((Number) snap.get("success_count")).intValue()).isEqualTo(20);
+            assertThat(((Number) snap.get("total_count")).intValue()).isEqualTo(25);
+        }
+
+        /**
+         * 리셋이 방을 지울지 정하는 동안 실제 유저가 그 방에 가입하는 경합. 가입 경로처럼 다른 연결이 방 행을 잠그고 멤버를
+         * 넣은 채(미커밋) 리셋을 시작한다 — 리셋은 그 잠금에서 기다려야 하고, 가입이 커밋된 뒤의 멤버로 판단해 방을 남겨야
+         * 한다. 잠금 전에 읽은 멤버로 「심사 계정·더미만 있는 방」이라 정해 두면 새 참여 행과 방을 함께 지운다.
+         */
+        @Test
+        @DisplayName("리셋 중 실제 유저가 가입하면 그 방을 지우지 않는다 — 가입과 같은 방 잠금 뒤의 멤버로 정한다")
+        void keepsRoomJoinedDuringReset() throws Exception {
+            CreateResult current = create(1);
+            Member real = member("seed-join-race");
+            UUID roomId = current.manualRoomId();   // 심사 계정·더미만 있는 방 — 그대로면 리셋이 지운다
+            ReviewAccountPolicy cfg = config(current.round(), current.accountIds(), scopeOf(current), true, expiry(), clock);
+
+            ExecutorService pool = Executors.newSingleThreadExecutor();
+            try (Connection join = ROOT_DS.getConnection()) {
+                join.setAutoCommit(false);
+                try (PreparedStatement lock = join.prepareStatement("SELECT id FROM challenges WHERE id = ? FOR UPDATE")) {
+                    lock.setBytes(1, bytes(roomId));
+                    lock.executeQuery().close();
+                }
+                try (PreparedStatement insert = join.prepareStatement("INSERT INTO challenge_members "
+                        + "(id, challenge_id, user_id, role, status, setup_status) VALUES (?, ?, ?, 'MEMBER', 'ACTIVE', 'READY')")) {
+                    insert.setBytes(1, bytes(UUID.randomUUID()));
+                    insert.setBytes(2, bytes(roomId));
+                    insert.setBytes(3, bytes(real.id()));
+                    insert.executeUpdate();
+                }
+
+                Future<ResetResult> reset = pool.submit(() -> seed.reset(scopeOf(current), cfg, null));
+                awaitLockWait(reset);
+                join.commit();
+                reset.get(120, TimeUnit.SECONDS);
+            } finally {
+                pool.shutdownNow();
+            }
+
+            Map<String, Object> r = room(roomId);
+            assertThat(r.get("deleted_at")).as("가입한 방은 남는다").isNull();
+            assertThat(r.get("owner_type")).isEqualTo("BOT");
+            assertThat(activeMembers(roomId)).isEqualTo(Map.of(real.id(), "MEMBER"));
+            assertThat(((Number) r.get("participant_count")).intValue()).isEqualTo(1);
         }
 
         /**
@@ -800,7 +1082,7 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
                 "NEW_DEMO_ROOM", "NEW_HISTORY", "SCORE_LEDGER"})
         @DisplayName("쓰는 도중 실패하면 전부 롤백 — 나가기·삭제·복원·점수 중 어느 것도 남지 않는다")
         void rollsBackOnFailureMidway(String point) {
-            CreateResult current = seed.create(2, evaluationEnd());
+            CreateResult current = create(2);
             UUID j0 = current.accountIds().get(0);
             UUID j1 = current.accountIds().get(1);
             agree(j0, AgreementType.LOCATION_INFO);
@@ -808,7 +1090,7 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
             jdbcTemplate.update("INSERT INTO DeviceToken (id, userId, token, platform, isActive, lastSeenAt, createdAt) "
                     + "VALUES (?, ?, ?, 'ANDROID', 1, NOW(6), NOW(6))", bytes(UUID.randomUUID()), bytes(j0), "seed-it-" + UUID.randomUUID());
             jdbcTemplate.update("UPDATE user_score_summaries SET total_score = total_score + 100 WHERE user_id = ?", (Object) bytes(j0));
-            userAccountService.withdraw(j1, CONFIRM_PHRASE);
+            withdraw(j1);
             Map<String, Object> before = snapshot(current);
 
             String condition = switch (point) {
@@ -843,7 +1125,7 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
         @Test
         @DisplayName("확인 인자 없이도 설정의 round 로 돈다")
         void withoutConfirmRound() {
-            CreateResult current = seed.create(1, evaluationEnd());
+            CreateResult current = create(1);
             agree(current.accountIds().get(0), AgreementType.HEALTH_INFO);
 
             ReviewAccountPolicy cfg = config(current.round(), current.accountIds(), scopeOf(current), true, expiry(), clock);
@@ -857,7 +1139,7 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
         @Test
         @DisplayName("폐기된 코드의 계정도 대상이다 — codes 의 모든 항목이 이번 회차 계정")
         void revokedCodeAccountIsTarget() {
-            CreateResult current = seed.create(2, evaluationEnd());
+            CreateResult current = create(2);
             UUID revoked = current.accountIds().get(1);
             agree(revoked, AgreementType.LOCATION_INFO);
 
@@ -924,6 +1206,30 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
         });
     }
 
+    /** 리셋이 다른 연결의 잠금을 기다리기 시작할 때까지 — 기다리기 전에 끝나면(잠금을 안 잡았다) 실패다. */
+    private static void awaitLockWait(Future<?> reset) throws Exception {
+        for (int i = 0; i < 300; i++) {
+            Long waits = ROOT.queryForObject("SELECT COUNT(*) FROM performance_schema.data_lock_waits", Long.class);
+            if (waits != null && waits > 0) return;
+            if (reset.isDone()) {
+                reset.get();
+                throw new AssertionError("리셋이 가입의 방 잠금을 기다리지 않고 끝났다");
+            }
+            Thread.sleep(50);
+        }
+        throw new AssertionError("리셋이 15초 안에 잠금 대기에 들어가지 않았다");
+    }
+
+    /**
+     * 탈퇴 — 탈퇴의 방 나가기는 참여 인원을 커밋 뒤 비동기로 다시 센다. 그 갱신이 스냅숏 뒤에 끼면 「리셋이 바꿨다」로
+     * 보이므로 여기서 같은 값으로 먼저 맞춘다(비동기 갱신이 늦게 와도 같은 값을 쓴다).
+     */
+    private void withdraw(UUID userId) {
+        userAccountService.withdraw(userId, CONFIRM_PHRASE);
+        jdbcTemplate.query("SELECT DISTINCT challenge_id FROM challenge_members WHERE user_id = ?",
+                (rs, n) -> uuid(rs.getBytes(1)), (Object) bytes(userId)).forEach(this::syncParticipantCount);
+    }
+
     private void syncParticipantCount(UUID roomId) {
         jdbcTemplate.update("UPDATE challenges SET participant_count = (SELECT COUNT(*) FROM challenge_members "
                 + "WHERE challenge_id = ? AND status = 'ACTIVE') WHERE id = ?", bytes(roomId), bytes(roomId));
@@ -952,7 +1258,8 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
                 + "participant_count, "
                 + "JSON_UNQUOTE(JSON_EXTRACT(verification_config, '$.selectedMethod')) AS sel, "
                 + "JSON_UNQUOTE(JSON_EXTRACT(verification_config, '$.verificationType')) AS vt, "
-                + "CAST(JSON_EXTRACT(params, '$.steps') AS UNSIGNED) AS steps FROM challenges WHERE id = ?", id);
+                // 생성 API 와 같이 값은 문자열로 저장된다("10000") — 따옴표를 벗겨 숫자로 본다
+                + "CAST(JSON_UNQUOTE(JSON_EXTRACT(params, '$.steps')) AS UNSIGNED) AS steps FROM challenges WHERE id = ?", id);
     }
 
     /** 방의 ACTIVE 멤버 → 역할. */

@@ -26,7 +26,7 @@ import java.util.UUID;
  * {@code app.review-accounts} · {@code app.review-login.codes} 와 짝이다.
  *
  * <ul>
- *   <li>{@code oauth_provider}=GOOGLE · {@code oauth_subject}=ruleup-review-{회차}-0N (더미는 ruleup-demo-01). subject 는 바뀌지 않는
+ *   <li>{@code oauth_provider}=GOOGLE · {@code oauth_subject}=ruleup-review-{회차}-0N (더미는 ruleup-demo-fixture — 시드 더미 번호와 겹치지 않게). subject 는 바뀌지 않는
  *       값이라 계정의 <b>회차</b>를 여기서 읽는다 — 이번 회차는 {@link #ROUND}, JUDGE_8 만 지난 회차 {@link #EARLIER_ROUND}</li>
  *   <li>{@code installation_id} 시드 고정값 · <b>{@code device_id} NULL</b> · {@code device_info} NULL — sync 의 활성 기기
  *       대조를 건너뛰어 심사위원 기기의 신호가 판정에 쓰이고(코드 로그인은 기기를 받지 않는다), sync 주기는 폴백 행</li>
@@ -192,7 +192,9 @@ public final class ReviewAccountFixture {
     private record Seed(String subject, String nickname, String installationId) {}
 
     private static Seed seedOf(UUID id) {
-        if (id.equals(DUMMY)) return new Seed("ruleup-demo-01", "룰업더미01", "demo-inst-01");
+        // 시드 태스크의 더미(ruleup-demo-NN)와 subject·설치 값이 겹치지 않게 — 같은 DB 에서 시드 테스트가 먼저 돌면
+        // ruleup-demo-01 이 다른 UUID 로 이미 있다(uq_users_oauth_identity). 숫자 순번이 아니라 시드 번호 매김에도 안 낀다.
+        if (id.equals(DUMMY)) return new Seed("ruleup-demo-fixture", "룰업더미01", "demo-inst-fixture");
         if (id.equals(PLAY_REVIEWER)) return new Seed("ruleup-play-01", "룰업플레이01", "play-inst-01");
         if (id.equals(NEXT_ROUND_1)) return new Seed("ruleup-review-" + NEXT_ROUND + "-01", "룰업심사B01", "review-inst-" + NEXT_ROUND + "-01");
         int n = JUDGES.indexOf(id) + 1;
