@@ -76,6 +76,12 @@ public class VerificationController {
                     - 멱등은 신호 단위(`recordId` 우선). 요청 gzip(`Content-Encoding: gzip`) 지원(선택).
 
                     `SYNC_PAYLOAD_TOO_LARGE` 를 받으면 구간을 반으로 쪼개 재전송한다.
+
+                    **호출 간격(429 `SYNC_TOO_FREQUENT`):** 같은 유저의 sync 는 평상시 5분, `backlog=true` 는 10초에 한 번까지 받는다.
+                    - 간격 안에 다시 보내면 429 이고, 응답의 `retryAfterSeconds` 가 다시 보낼 수 있을 때까지 남은 초다 —
+                      재시도는 그만큼 기다린 뒤에 한다(그 사이 재시도는 다시 429).
+                    - 거부된 호출은 간격을 새로 시작하지 않는다.
+                    - **오류 응답(4xx·5xx)으로 끝난 sync 는 간격을 쓰지 않은 것으로 친다** — 고쳐서 곧바로 다시 보내도 429 가 나지 않는다.
                     """)
     @ApiErrorCodes({ErrorCode.INVALID_SIGNAL_PAYLOAD, ErrorCode.LOGIN_REQUIRED,
             ErrorCode.SYNC_PAYLOAD_TOO_LARGE, ErrorCode.SYNC_TOO_FREQUENT})
