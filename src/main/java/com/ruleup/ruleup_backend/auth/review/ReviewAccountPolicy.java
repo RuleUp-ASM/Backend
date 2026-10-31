@@ -100,6 +100,11 @@ public class ReviewAccountPolicy {
                 throw new IllegalStateException("심사 코드 " + code.label()
                         + " 가 폐기된 항목의 계정에 묶였다 — 새 코드는 예비 계정에 묶는다");
         }
+        // 켜 둔 채 만료가 빠지면 「꺼짐」으로 판정돼 종료 스케줄러가 기동 직후 코드 계정을 탈퇴시킨다 — 준비한 방에서
+        // 나가고 방장이 봇으로 바뀐다. 설정 한 줄 누락이 되돌리기 어려운 결과가 되므로 기동을 멈춘다.
+        // enabled=false 는 막지 않는다 — 긴급 차단 재배포가 기동 실패로 막히면 안 된다(그때의 탈퇴는 의도된 종료다).
+        if (enabled && !codes.isEmpty() && this.expiresAt == null)
+            throw new IllegalStateException("심사 코드 로그인을 켰는데(enabled=true) expiresAt 이 없다");
         if (!codes.isEmpty()) validateRound(this.round, this.expiresAt);
         else if (this.round != null) parseRoundDate(this.round);
 
@@ -215,7 +220,7 @@ public class ReviewAccountPolicy {
     private static void validateRound(String round, Instant expiresAt) {
         if (round == null) throw new IllegalStateException("심사 코드가 있는데 round 가 없다");
         LocalDate date = parseRoundDate(round);
-        if (expiresAt == null) return;   // 만료가 없으면 스위치가 꺼져 있다 — 켤 때 다시 검사된다
+        if (expiresAt == null) return;   // enabled=false(긴급 차단)일 때만 여기 온다 — 켤 때 다시 검사된다
         Instant start = date.atStartOfDay(KST).toInstant();
         if (!start.isBefore(expiresAt))
             throw new IllegalStateException("심사 round " + round + " 의 날짜가 expiresAt 보다 늦거나 같다");

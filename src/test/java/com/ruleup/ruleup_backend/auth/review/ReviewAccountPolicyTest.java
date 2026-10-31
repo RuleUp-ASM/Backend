@@ -124,10 +124,17 @@ class ReviewAccountPolicyTest {
         }
 
         @Test
-        @DisplayName("expiresAt 이 없으면 꺼진다 — 만료 없는 심사 로그인은 열지 않는다")
-        void missingExpiryIsOff() {
-            assertThat(policy(true, null, codesJson(), at(EXPIRY.minus(Duration.ofDays(3)))).isSwitchOn()).isFalse();
-            assertThat(policy(true, "", codesJson(), at(EXPIRY.minus(Duration.ofDays(3)))).isSwitchOn()).isFalse();
+        @DisplayName("코드가 없으면 expiresAt 이 없어도 꺼진 채 기동한다 — 기본 설정")
+        void missingExpiryWithoutCodesIsOff() {
+            assertThat(policy(true, null, null, at(EXPIRY.minus(Duration.ofDays(3)))).isSwitchOn()).isFalse();
+            assertThat(policy(true, "", "", at(EXPIRY.minus(Duration.ofDays(3)))).isSwitchOn()).isFalse();
+        }
+
+        @Test
+        @DisplayName("enabled=false 면 expiresAt 이 없어도 기동한다 — 긴급 차단 재배포가 기동 실패로 막히면 안 된다")
+        void disabledWithoutExpiryStillBoots() {
+            assertThat(policy(false, null, codesJson(), at(EXPIRY.minus(Duration.ofDays(3)))).isSwitchOn()).isFalse();
+            assertThat(policy(false, "", codesJson(), at(EXPIRY.minus(Duration.ofDays(3)))).isSwitchOn()).isFalse();
         }
 
         @Test
@@ -303,6 +310,17 @@ class ReviewAccountPolicyTest {
         void malformedCodesAbortBoot() {
             assertThatThrownBy(() -> policy(true, EXPIRES_AT, "[{not json", Clock.systemUTC()))
                     .isInstanceOf(IllegalStateException.class);
+        }
+
+        @Test
+        @DisplayName("켜 둔 채 코드가 있는데 expiresAt 이 없으면 기동을 중단한다 — 꺼진 것으로 보면 종료 스케줄러가 기동 직후 코드 계정을 탈퇴시킨다")
+        void enabledCodesWithoutExpiryAbortBoot() {
+            // 준비해 둔 방에서 나가고 방장이 봇으로 바뀌는 일이 설정 한 줄 누락으로 일어난다 — 로그인만 막히는 게 아니다.
+            for (String missing : java.util.Arrays.asList(null, "", "  ")) {
+                assertThatThrownBy(() -> policy(true, missing, codesJson(), Clock.systemUTC()))
+                        .as(String.valueOf(missing)).isInstanceOf(IllegalStateException.class)
+                        .hasMessageContaining("expiresAt");
+            }
         }
 
         @Test
