@@ -140,6 +140,20 @@ public record OAuthLoginResponse(
                 null, null, null, null, false);
     }
 
+    /**
+     * 심사 코드 로그인 — 기존 회원 응답과 같은 구조이고 {@code device} 만 null 이다. 코드 로그인은 기기 정보를 받지 않는다
+     * (심사 계정 오픈 이슈 #7).
+     */
+    public static OAuthLoginResponse reviewCode(TokenService.TokenPair pair, User user, UserScoreSummary summary,
+                                                int flushIntervalSec, Sanction lock, boolean restored) {
+        return new OAuthLoginResponse(false,
+                pair.accessToken(), pair.refreshToken(), "Bearer", pair.expiresIn(),
+                flushIntervalSec,
+                UserResponse.from(user, summary, lock),
+                null,
+                null, null, null, false, restored);
+    }
+
     /** 신규 분기. returningUser=true 면 예전에 탈퇴한 계정이 있어 입력 없이 복원될 사람이다. */
     public static OAuthLoginResponse newUser(String signupToken, long expiresIn, OAuthUserInfo info,
                                              boolean returningUser) {

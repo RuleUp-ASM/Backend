@@ -21,7 +21,10 @@ public class GlobalExceptionHandler {
         ClientErrorLog.record(code);
         // 부가 필드(reason·rejoinAvailableAt·nextChangeAvailableAt)는 각각 독립이다 —
         // detail 유무로 분기하면 detail 없이 실린 값이 조용히 사라진다.
-        return ResponseEntity.status(code.getStatus()).body(ApiResponse.fail(ErrorResponse.of(e)));
+        ResponseEntity.BodyBuilder res = ResponseEntity.status(code.getStatus());
+        // 남은 대기 초가 있으면 표준 헤더로도 싣는다 — 본문의 retryAfterSeconds 와 같은 값이다.
+        if (e.getRetryAfterSeconds() != null) res.header("Retry-After", String.valueOf(e.getRetryAfterSeconds()));
+        return res.body(ApiResponse.fail(ErrorResponse.of(e)));
     }
 
     // 본문 JSON이 깨졌거나 형식이 안 맞을 때 → 400
