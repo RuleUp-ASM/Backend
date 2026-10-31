@@ -138,6 +138,15 @@ class ReviewLoginIT extends AuthApiSupport {
         return reviewLogin(body, freshIp());
     }
 
+    /**
+     * 겹치지 않는 닉네임(접두 + 숫자 8자리, 정책 2~12자). uniq 의 <b>뒤쪽</b>(나노초 하위 자리 + 순번)을 쓴다 —
+     * 앞쪽은 나노초 상위 자리라 같은 1초 안의 가입끼리 같아져 닉네임 중복 409 로 가입이 실패한다.
+     */
+    private static String nickname(String prefix) {
+        String digits = uniq("").replace("n", "");
+        return prefix + digits.substring(digits.length() - 8);
+    }
+
     private static Map<String, Object> codeBody(String code) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("code", code);
@@ -338,7 +347,7 @@ class ReviewLoginIT extends AuthApiSupport {
 
         private OwnAccount ownAccount() throws Exception {
             String tag = uniq("rv-own");
-            MvcResult res = signup(tag, "본인" + uniq("").substring(0, 6));
+            MvcResult res = signup(tag, nickname("본인"));
             return new OwnAccount(tag, UUID.fromString(read(res, "$.data.user.id")),
                     read(res, "$.data.accessToken"), read(res, "$.data.refreshToken"));
         }
@@ -652,7 +661,7 @@ class ReviewLoginIT extends AuthApiSupport {
         @DisplayName("재발급 차단은 codes 계정에만 걸린다 — Play 심사 계정·일반 유저는 꺼진 뒤에도 재발급된다")
         void refreshBlockIsOnlyForCodeAccounts() throws Exception {
             String playRt = tokenService.issueTokenPair(reload(PLAY_REVIEWER)).refreshToken();
-            String normalRt = read(signup(uniq("rv-refresh"), "일반" + uniq("").substring(0, 6)), "$.data.refreshToken");
+            String normalRt = read(signup(uniq("rv-refresh"), nickname("일반")), "$.data.refreshToken");
 
             passExpiry();
 
@@ -696,7 +705,7 @@ class ReviewLoginIT extends AuthApiSupport {
         @DisplayName("종료 스케줄러는 Play 심사 계정과 일반 유저의 세션·푸시·계정을 건드리지 않는다 — 대상은 REVIEW_ACCOUNT_IDS 전체가 아니라 codes 뿐")
         void terminatorSparesOtherSessions() throws Exception {
             String playRt = tokenService.issueTokenPair(reload(PLAY_REVIEWER)).refreshToken();
-            MvcResult normal = signup(uniq("rv-normal"), "일반" + uniq("").substring(0, 6));
+            MvcResult normal = signup(uniq("rv-normal"), nickname("일반"));
             String normalRt = read(normal, "$.data.refreshToken");
             String normalPush = fcmToken();
             registerPushToken(read(normal, "$.data.accessToken"), normalPush);
