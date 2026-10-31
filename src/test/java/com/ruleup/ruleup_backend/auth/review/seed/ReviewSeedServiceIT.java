@@ -142,6 +142,7 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
     @Autowired WebApplicationContext wac;
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired ReviewSeedService seed;
+    @Autowired ReviewSeedDemo demo;
     @Autowired ScoreProcessor scoreProcessor;
     @Autowired AgreementService agreementService;
     @Autowired AppProperties props;
@@ -168,7 +169,12 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
                 .apply(org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity())
                 .build();
         clock.reset();
+        // 테스트마다 새 더미 — 더미는 회차 무관 재사용이라 같은 날 수십 번 시드하면 같은 더미에 같은 날짜대 이력이 쌓여
+        // 정산 재생이 실행 횟수의 제곱으로 는다(CI 에서 이 클래스만 25분). 한 테스트 안의 회차끼리는 그대로 공유한다.
+        demo.dummyNamespace = "t" + (++dummyNamespaces) + "-";
     }
+
+    private static int dummyNamespaces;
 
     /** 생성 결과를 여러 테스트가 읽기만 한다 — 데모 데이터 생성이 무거워 한 번만 만든다. 리셋 테스트는 자기 회차를 따로 만든다. */
     private static CreateResult shared;
@@ -676,7 +682,7 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
         @Test
         @DisplayName("더미 멤버는 회차와 무관하게 유지 — 다음 생성은 있는 더미를 다시 쓰고 새로 만들지 않는다")
         void reusesDummies() {
-            CreateResult first = created();
+            CreateResult first = create(1);   // 공유 결과가 아니라 이 테스트의 더미 이름 공간에서 만든다
             long dummies = count("SELECT COUNT(*) FROM users WHERE oauth_subject LIKE 'ruleup-demo-%'");
 
             CreateResult next = create(1);

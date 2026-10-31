@@ -99,7 +99,16 @@ class ReviewSeedDemo {
     static final List<AgreementType> TERMS = List.of(AgreementType.TOS, AgreementType.PRIVACY,
             AgreementType.LOCATION, AgreementType.MARKETING, AgreementType.EVENT);
     private static final String DUMMY_PREFIX = "ruleup-demo-";
-    private static final Pattern DUMMY_SUBJECT = Pattern.compile("ruleup-demo-(\\d+)");
+    private static final String DUMMY_INSTALLATION_PREFIX = "demo-inst-";
+
+    /**
+     * 더미 subject·설치 값의 이름 공간 — 운영은 빈 값이라 스펙 5-3 대로 {@code ruleup-demo-NN} · {@code demo-inst-NN} 이다.
+     *
+     * <p>테스트 전용 이음새다. 더미는 회차와 무관하게 다시 쓰이므로, 같은 날 수십 번 생성·리셋하는 테스트에서는 같은 더미 5명에
+     * 같은 날짜대의 이력이 계속 쌓여 정산이 매번 그 구간을 재생한다(원장·재생 비용이 실행 횟수의 제곱으로 는다 — 8회에 원장
+     * 2만 행). 운영은 한 회차의 생성·리셋 몇 번뿐이라 문제가 없고, 테스트는 테스트마다 이름 공간을 바꿔 새 더미를 쓴다.
+     */
+    String dummyNamespace = "";
     private static final List<String> DUMMY_NICKNAMES = List.of(
             "아침산책러", "만보도전", "책읽는곰", "꾸준히가자", "오늘도한걸음",
             "하루한쪽", "새벽러너", "걷기왕", "루틴지킴이", "작심백일");
@@ -171,19 +180,24 @@ class ReviewSeedDemo {
      */
     List<UUID> ensureDummies(int count) {
         Instant joinBound = joinedAt();
-        List<UUID> pool = new ArrayList<>(jdbc.query(
-                "SELECT id FROM users WHERE oauth_subject LIKE 'ruleup-demo-%' AND status = 'ACTIVE' AND created_at < ? "
-                        + "ORDER BY oauth_subject LIMIT ?",
-                (rs, n) -> uuid(rs.getBytes(1)), DbTime.utc(joinBound), count));
+        String prefix = DUMMY_PREFIX + dummyNamespace;
+        Pattern dummySubject = Pattern.compile(Pattern.quote(prefix) + "(\\d+)");
+        String like = prefix.replace("_", "\\_").replace("%", "\\%") + "%";
+        List<UUID> pool = new ArrayList<>();
+        jdbc.query("SELECT id, oauth_subject FROM users WHERE oauth_subject LIKE ? AND status = 'ACTIVE' AND created_at < ? "
+                        + "ORDER BY oauth_subject",
+                rs -> {
+                    if (pool.size() < count && dummySubject.matcher(rs.getString(2)).matches()) pool.add(uuid(rs.getBytes(1)));
+                }, like, DbTime.utc(joinBound));
         if (pool.size() >= count) return pool;
 
-        int next = jdbc.queryForList("SELECT oauth_subject FROM users WHERE oauth_subject LIKE 'ruleup-demo-%'", String.class)
-                .stream().map(DUMMY_SUBJECT::matcher).filter(Matcher::matches)
+        int next = jdbc.queryForList("SELECT oauth_subject FROM users WHERE oauth_subject LIKE ?", String.class, like)
+                .stream().map(dummySubject::matcher).filter(Matcher::matches)
                 .mapToInt(m -> Integer.parseInt(m.group(1))).max().orElse(0) + 1;
         while (pool.size() < count) {
             String nn = "%02d".formatted(next);
-            String subject = DUMMY_PREFIX + nn;
-            String installation = "demo-inst-" + nn;
+            String subject = prefix + nn;
+            String installation = DUMMY_INSTALLATION_PREFIX + dummyNamespace + nn;
             next++;
             if (count("SELECT COUNT(*) FROM users WHERE oauth_subject = ? OR installation_id = ?", subject, installation) > 0)
                 continue;
