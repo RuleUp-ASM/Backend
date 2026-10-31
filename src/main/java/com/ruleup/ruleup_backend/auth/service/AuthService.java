@@ -104,6 +104,7 @@ public class AuthService {
     private final com.ruleup.ruleup_backend.notification.service.NotificationPublisher notificationPublisher;
     private final com.ruleup.ruleup_backend.observability.BusinessMetrics businessMetrics;
     private final com.ruleup.ruleup_backend.observability.ops.SignupSlackAlert signupSlackAlert;
+    private final com.ruleup.ruleup_backend.auth.review.ReviewAccountPolicy reviewAccountPolicy;
 
     // ===== OAuth 로그인 =====
     // ⚠️ 일부러 @Transactional 을 붙이지 않는다.
@@ -627,6 +628,10 @@ public class AuthService {
         RefreshToken stored = refreshTokenRepository.findByTokenHashForUpdate(tokenHash)
                 .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_EXPIRED));
 
+        // 심사 코드 세션 종료 — 스위치가 꺼졌거나 코드가 폐기됐으면 회전 유예보다 먼저 끊는다(심사 계정 5-7).
+        // family 를 회수해 커밋한 뒤 401 이라, 다시 켜도 이 세션으로는 이어지지 않는다(종료 스케줄러가 돌기 전이라도).
+        if (reviewAccountPolicy.isCodeSessionEnded(userId)) throw endReviewSession(familyId);
+
         // 회전 유예 — 방금 회전된 토큰이 몇 초 뒤 같은 기기에서 다시 오는 것은 탈취가 아니라 앱의 갱신 경합이다
         // (만료된 AT 로 동시에 나간 요청들이 각자 refresh 를 부른다). 세션을 끊지 않고 같은 family 에 새 페어를 준다.
         if (stored.isRevoked() && inRotationGrace(stored)) {
@@ -634,8 +639,9 @@ public class AuthService {
                     .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_EXPIRED));
             log.info("refresh_rotation_grace userId={} sinceRotationMs={}", userId,
                     Duration.between(stored.getRevokedAt(), Instant.now()).toMillis());
-            return TokenResponse.from(tokenService.issueRotatedPair(user, stored.getFamilyId(), stored.getId()),
-                    syncPolicy.forUser(user));
+            TokenService.TokenPair pair = tokenService.issueRotatedPair(user, stored.getFamilyId(), stored.getId());
+            if (reviewAccountPolicy.isCodeSessionEnded(userId)) throw endReviewSession(familyId);
+            return TokenResponse.from(pair, syncPolicy.forUser(user));
         }
 
         // 재사용 감지 — 이미 폐기된 토큰이 다시 제출되면 탈취 의심 → family 전체 revoke (DB 정리 §11.3)
@@ -652,7 +658,21 @@ public class AuthService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_EXPIRED));
 
         stored.revoke();                                   // 기존 무효화(회전)
-        return TokenResponse.from(tokenService.issueRotatedPair(user, stored.getFamilyId(), stored.getId()), syncPolicy.forUser(user));
+        TokenService.TokenPair pair = tokenService.issueRotatedPair(user, stored.getFamilyId(), stored.getId());
+        // 발급 뒤 재확인 — 위 확인을 통과한 요청이 지연돼 그사이 꺼졌으면 방금 만든 RT 까지 회수하고 거부한다.
+        // 그러면 전달되는 AT 는 모두 꺼지기 전에 만들어진 것이라 끊김이 「꺼진 시각 + AT 수명」을 넘지 않는다.
+        if (reviewAccountPolicy.isCodeSessionEnded(userId)) throw endReviewSession(familyId);
+        return TokenResponse.from(pair, syncPolicy.forUser(user));
+    }
+
+    /**
+     * 심사 코드 세션을 끊는다 — family 의 살아 있는 RT(방금 발급한 것 포함)를 회수하고 401 을 돌려준다.
+     * 이 메서드는 BusinessException 에 롤백하지 않으므로 회수가 응답 전에 커밋된다.
+     */
+    private BusinessException endReviewSession(UUID familyId) {
+        refreshTokenRepository.revokeFamily(familyId, Instant.now());
+        log.info("refresh_review_session_ended familyId={}", familyId);
+        return new BusinessException(ErrorCode.SESSION_EXPIRED);
     }
 
     /**
