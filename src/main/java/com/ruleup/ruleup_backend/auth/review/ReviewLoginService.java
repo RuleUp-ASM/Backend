@@ -62,41 +62,54 @@ public class ReviewLoginService {
 
     public OAuthLoginResponse login(String code, String clientIp) {
         if (!policy.isSwitchOn()) throw new ResponseStatusException(HttpStatus.NOT_FOUND);
-        limiter.check(clientIp);
+        try {
+            limiter.check(clientIp);
+        } catch (BusinessException e) {
+            log.warn("review_login_failed reason=TOO_MANY_ATTEMPTS ip={}", clientIp);
+            throw e;
+        }
 
+        // 입력값 원문은 어떤 로그에도 남기지 않는다(5-7).
         ReviewLoginCode matched = policy.match(code).orElse(null);
-        if (matched == null) throw mismatch(clientIp);
+        if (matched == null) {
+            limiter.recordFailure(clientIp);
+            log.warn("review_login_failed reason=CODE_MISMATCH ip={}", clientIp);
+            throw new BusinessException(ErrorCode.INVALID_REVIEW_CODE);
+        }
 
         OAuthLoginResponse res;
         try {
-            res = transactionTemplate.execute(status -> openSession(matched));
+            res = transactionTemplate.execute(status -> openSession(matched, clientIp));
         } catch (BusinessException e) {
             if (e.getErrorCode() == ErrorCode.INVALID_REVIEW_CODE) limiter.recordFailure(clientIp);
             throw e;
         }
         activity.touchNow(matched.userId());   // 커밋 뒤 — 롤백된 로그인을 활동으로 남기지 않는다
-        log.info("review_login label={} restored={}", matched.label(), res.restored());
+        log.info("review_login_succeeded label={} userId={} ip={} restored={}",
+                matched.label(), matched.userId(), clientIp, res.restored());
         return res;
     }
 
-    private BusinessException mismatch(String clientIp) {
-        limiter.recordFailure(clientIp);
-        return new BusinessException(ErrorCode.INVALID_REVIEW_CODE);
+    private void refused(ReviewLoginCode matched, String reason, String clientIp) {
+        log.warn("review_login_failed reason={} label={} userId={} ip={}", reason, matched.label(), matched.userId(), clientIp);
     }
 
-    private OAuthLoginResponse openSession(ReviewLoginCode matched) {
+    private OAuthLoginResponse openSession(ReviewLoginCode matched, String clientIp) {
         UUID userId = matched.userId();
         User user = userRepository.findByIdForUpdate(userId).orElse(null);
         if (user == null) {
-            log.warn("review_login_account_missing label={}", matched.label());
+            refused(matched, "ACCOUNT_MISSING", clientIp);
             throw new BusinessException(ErrorCode.INVALID_REVIEW_CODE);
         }
         // 지난 회차 계정 — 이전 심사위원의 동의·데이터가 남아 있다. 코드가 맞아도 열지 않는다(운영 실수 방어).
         if (!policy.isCurrentRoundAccount(user.getOauthSubject())) {
-            log.warn("review_login_other_round label={}", matched.label());
+            refused(matched, "EARLIER_REVIEW_ACCOUNT", clientIp);
             throw new BusinessException(ErrorCode.INVALID_REVIEW_CODE);
         }
-        if (sanctionService.isBanActive(userId)) throw new BusinessException(ErrorCode.ACCOUNT_BANNED);
+        if (sanctionService.isBanActive(userId)) {
+            refused(matched, "ACCOUNT_BANNED", clientIp);
+            throw new BusinessException(ErrorCode.ACCOUNT_BANNED);
+        }
 
         boolean restored = user.isWithdrawn();
         if (restored) restore(user);
@@ -107,7 +120,7 @@ public class ReviewLoginService {
 
         // 발급 뒤 재확인 — 그사이 꺼졌으면 롤백(발급한 RT 가 남지 않는다)하고 꺼진 뒤의 요청과 같은 404.
         if (policy.isCodeSessionEnded(userId)) {
-            log.info("review_login_cut_after_issue label={}", matched.label());
+            refused(matched, "SWITCHED_OFF_DURING_LOGIN", clientIp);
             throw new ResponseStatusException(HttpStatus.NOT_FOUND);
         }
 
