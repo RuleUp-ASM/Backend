@@ -58,6 +58,11 @@ public interface DeviceTokenRepository extends JpaRepository<DeviceToken, UUID> 
     int deactivateOthers(@Param("userId") UUID userId, @Param("keepToken") String keepToken,
                          @Param("at") Instant at);
 
+    /** 이 유저의 활성 토큰을 전부 내린다 — 푸시를 받지 않는 심사 코드 계정. */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update DeviceToken t set t.active = false, t.lastSeenAt = :at where t.userId = :userId and t.active = true")
+    int deactivateAllOf(@Param("userId") UUID userId, @Param("at") Instant at);
+
     /** 본인 토큰 해제 — 지우지 않고 내린다. 남의 토큰은 건드리지 않는다. */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
