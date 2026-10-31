@@ -558,6 +558,36 @@ class ReviewLoginIT extends AuthApiSupport {
             expectError(reviewLogin(codeBody(CODE_1), "10.8.8.8, " + albSeen), 429, "TOO_MANY_ATTEMPTS");
         }
 
+        /**
+         * 운영 경로(앱 → Cloudflare → ALB)와 운영 필터를 그대로 — 운영은 {@code forward-headers-strategy=framework} 라
+         * ForwardedHeaderFilter 가 X-Forwarded-For 를 숨기고 접속 주소를 첫 값(위조 가능)으로 바꾼다. 기본 mvc 는 이 필터를
+         * 거치지 않으므로 앞에 세워 보안 필터·컨트롤러까지 지나게 한다.
+         */
+        private MvcResult viaCloudflare(String code, String spoofedPrefix, String client) throws Exception {
+            MockMvc prodLike = MockMvcBuilders.webAppContextSetup(wac)
+                    .addFilters(new org.springframework.web.filter.ForwardedHeaderFilter())
+                    .apply(springSecurity()).build();
+            return prodLike.perform(post(URL).contentType(MediaType.APPLICATION_JSON)
+                    .with(r -> { r.setRemoteAddr("10.1.0.15"); return r; })   // ALB
+                    .header("X-Forwarded-For", spoofedPrefix + ", " + client + ", 172.70.9.9")   // … 클라이언트, CF 엣지
+                    .header("CF-Connecting-IP", client)
+                    .content(OM.writeValueAsString(codeBody(code)))).andReturn();
+        }
+
+        @Test
+        @DisplayName("운영 경로 — 같은 Cloudflare 엣지를 거친 심사위원끼리 한도를 나누지 않고, 앞쪽 위조로도 피하지 못한다")
+        void countsRealClientBehindCloudflare() throws Exception {
+            String judgeA = freshIp();
+            String judgeB = freshIp();
+            for (int i = 0; i < 10; i++) {
+                expectError(viaCloudflare(UNKNOWN_CODE, "6.6.6." + i, judgeA), 400, "INVALID_REVIEW_CODE");
+            }
+
+            expectError(viaCloudflare(CODE_1, "7.7.7.7", judgeA), 429, "TOO_MANY_ATTEMPTS");
+            assertThat(viaCloudflare(CODE_1, "6.6.6.0", judgeB).getResponse().getStatus())
+                    .as("같은 엣지를 거친 다른 심사위원").isEqualTo(200);
+        }
+
         @Test
         @DisplayName("성공은 세지 않는다")
         void successesDoNotCount() throws Exception {

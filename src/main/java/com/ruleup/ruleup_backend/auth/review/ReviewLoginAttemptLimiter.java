@@ -6,12 +6,16 @@ import com.github.benmanes.caffeine.cache.Expiry;
 import com.github.benmanes.caffeine.cache.Ticker;
 import com.ruleup.ruleup_backend.common.error.BusinessException;
 import com.ruleup.ruleup_backend.common.error.ErrorCode;
+import jakarta.servlet.ServletRequest;
+import jakarta.servlet.ServletRequestWrapper;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -81,20 +85,47 @@ public class ReviewLoginAttemptLimiter {
     }
 
     /**
-     * 클라이언트 IP — ALB 가 덧붙인 {@code X-Forwarded-For} 의 <b>마지막</b> 값. 앞쪽은 클라이언트가 지어낼 수 있다.
-     * 헤더가 없으면 접속 주소(로컬·테스트).
+     * 클라이언트 IP. 운영 경로는 앱 → Cloudflare → ALB → 태스크이고, ALB 는 직접 접근도 받는다(보안 그룹 0.0.0.0/0).
+     *
+     * <ol>
+     *   <li>ALB 가 {@code X-Forwarded-For} <b>끝</b>에 붙인 값 = ALB 에 붙은 주소. 앞쪽은 클라이언트가 지어낼 수 있다</li>
+     *   <li>그 주소가 Cloudflare 엣지면 Cloudflare 가 덮어쓴 {@code CF-Connecting-IP} 가 클라이언트다
+     *       (없으면 Cloudflare 가 엣지 바로 앞에 덧붙인 값). 엣지를 거치지 않은 요청의 CF-Connecting-IP 는 믿지 않는다</li>
+     *   <li>아니면 그 주소가 곧 클라이언트(직접 접근). 헤더가 없으면 접속 주소(로컬·테스트)</li>
+     * </ol>
+     *
+     * <p>원본 요청에서 읽는다 — 운영은 {@code server.forward-headers-strategy=framework} 라 ForwardedHeaderFilter 가
+     * X-Forwarded-For 를 숨기고 접속 주소를 그 <b>첫 값</b>(위조 가능)으로 바꾼 요청을 넘긴다.
      */
     public static String clientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            String[] parts = forwarded.split(",");
-            for (int i = parts.length - 1; i >= 0; i--) {
-                String v = parts[i].trim();
-                if (!v.isEmpty()) return v;
-            }
+        HttpServletRequest raw = unwrap(request);
+        List<String> chain = forwardedChain(raw.getHeader("X-Forwarded-For"));
+        if (chain.isEmpty()) {
+            String remote = raw.getRemoteAddr();
+            return (remote != null) ? remote : "unknown";
         }
-        String remote = request.getRemoteAddr();
-        return (remote != null) ? remote : "unknown";
+        String peer = chain.get(chain.size() - 1);
+        if (!CloudflareRanges.contains(peer)) return peer;
+
+        String connecting = raw.getHeader("CF-Connecting-IP");
+        if (connecting != null && !connecting.isBlank()) return connecting.trim();
+        return (chain.size() >= 2) ? chain.get(chain.size() - 2) : peer;
+    }
+
+    private static HttpServletRequest unwrap(HttpServletRequest request) {
+        ServletRequest current = request;
+        while (current instanceof ServletRequestWrapper wrapper) current = wrapper.getRequest();
+        return (current instanceof HttpServletRequest http) ? http : request;
+    }
+
+    private static List<String> forwardedChain(String header) {
+        if (header == null || header.isBlank()) return List.of();
+        List<String> values = new ArrayList<>();
+        for (String part : header.split(",")) {
+            String v = part.trim();
+            if (!v.isEmpty()) values.add(v);
+        }
+        return values;
     }
 
     private static String key(String ip) {
