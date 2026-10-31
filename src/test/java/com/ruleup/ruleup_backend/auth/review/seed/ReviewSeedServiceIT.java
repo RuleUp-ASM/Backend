@@ -827,9 +827,11 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
                     + " THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'seed-it injected failure'; END IF");
             try {
                 ReviewAccountPolicy cfg = config(current.round(), current.accountIds(), scopeOf(current), true, expiry(), clock);
+                // 주입한 실패로 멈췄어야 한다 — 사전 검사나 다른 버그로 쓰기 전에 실패하면 롤백을 검증한 것이 아니다.
+                // 예외를 감싸더라도 원인 사슬에 트리거 메시지가 남아야 한다
                 assertThatThrownBy(() -> seed.reset(scopeOf(current), cfg, current.round()))
                         .as("주입한 실패(%s)가 리셋을 멈춰야 한다", point)
-                        .isNotNull();
+                        .hasStackTraceContaining("seed-it injected failure");
             } finally {
                 ROOT.execute("DROP TRIGGER IF EXISTS seed_it_fail");
             }
@@ -1010,7 +1012,20 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
      * 실패는 어디도 바꾸지 않아야 하므로 공유 더미의 계정 단위 데이터까지 본다.
      */
     private Map<String, Object> snapshot(CreateResult... rounds) {
-        return snapshot(scopeIds(rounds), roomsOf(rounds));
+        List<UUID> users = scopeIds(rounds);
+        Map<String, Object> snap = snapshot(users, roomsOf(rounds));
+        // 새로 남은 행 — 기존 방 ID 로는 보이지 않는다. 리셋이 새 데모 방(방장은 더미)이나 그 방의 탐색 투영·가입 사건만
+        // 남기고 실패해도 잡히게, 더미(어느 더미든)·대상 계정이 방장인 방과 그 방의 투영 행, 계정 단위 가입 사건을 본다.
+        // 방은 배치가 만들지 않으므로 공유 DB 에서도 실패 전후가 같아야 한다.
+        String u = placeholders(users.size());
+        Object[] ub = users.stream().map(ReviewSeedServiceIT::bytes).toArray();
+        String owned = "SELECT id FROM challenges WHERE owner_id IN (" + u + ") "
+                + "OR owner_id IN (SELECT id FROM users WHERE oauth_subject LIKE 'ruleup-demo-%')";
+        snap.put("owned_rooms", rows(owned + " ORDER BY id", ub));
+        snap.put("owned_room_stats", rows("SELECT challenge_id FROM challenge_stats WHERE challenge_id IN ("
+                + owned + ") ORDER BY challenge_id", ub));
+        snap.put("join_events", rows("SELECT id FROM challenge_join_events WHERE user_id IN (" + u + ") ORDER BY id", ub));
+        return snap;
     }
 
     /**
