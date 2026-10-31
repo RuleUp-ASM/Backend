@@ -26,12 +26,15 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -98,10 +101,21 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
     private static final DateTimeFormatter YMD = DateTimeFormatter.ofPattern("yyyyMMdd");
     /** 코드 해시 모양 — 시드 출력에 있으면 안 된다. */
     private static final Pattern HEX64 = Pattern.compile("(?i)(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])");
+    /** UUID — 코드 모양 검사 전에 지운다. UUID 의 마지막 12자리·중간 4-4-4 묶음도 코드 모양과 같다. */
+    private static final Pattern UUID_TEXT = Pattern.compile(
+            "(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
     /** 코드 원문 모양(XXXX-XXXX-XXXX) — 시드 출력에 있으면 안 된다. */
     private static final Pattern CODE_LIKE = Pattern.compile("(?<![A-Z0-9])[A-Z0-9]{4}-?[A-Z0-9]{4}-?[A-Z0-9]{4}(?![A-Z0-9])");
     private static final List<AgreementType> TERMS = List.of(AgreementType.TOS, AgreementType.PRIVACY,
             AgreementType.LOCATION, AgreementType.MARKETING, AgreementType.EVENT);
+
+    /**
+     * 실패 주입용 루트 연결 — 트리거 생성은 바이너리 로그가 켜진 MySQL 에서 앱 계정(test)에 허용되지 않는다.
+     * 공유 컨테이너의 루트로 따로 붙는다(ReviewAccountShutdownIT 와 같은 방식).
+     */
+    private static final JdbcTemplate ROOT = new JdbcTemplate(new DriverManagerDataSource(
+            TestcontainersConfiguration.sharedMysql().getJdbcUrl(), "root",
+            TestcontainersConfiguration.sharedMysql().getPassword()));
 
     @Autowired WebApplicationContext wac;
     @Autowired JdbcTemplate jdbcTemplate;
@@ -261,8 +275,10 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
             assertThat(joined).contains(res.round());
             for (UUID id : res.accountIds()) assertThat(joined).contains(id.toString());
             for (UUID id : res.dummyIds()) assertThat(joined).contains(id.toString());
-            assertThat(HEX64.matcher(joined).find()).as("해시 모양 없음").isFalse();
-            assertThat(CODE_LIKE.matcher(joined.toUpperCase()).find()).as("코드 모양 없음").isFalse();
+            // 출력해야 하는 UUID 를 지운 나머지에서 본다 — UUID 안에도 12자리 영숫자 묶음이 있다
+            String withoutIds = UUID_TEXT.matcher(joined).replaceAll("<uuid>");
+            assertThat(HEX64.matcher(withoutIds).find()).as("해시 모양 없음").isFalse();
+            assertThat(CODE_LIKE.matcher(withoutIds.toUpperCase()).find()).as("코드 모양 없음").isFalse();
 
             // 결과 타입에도 코드·해시 자리가 없다 — 시드는 코드를 만들지도 받지도 않는다(5-7)
             for (Class<?> type : List.of(CreateResult.class, CreatePlan.class)) {
@@ -448,9 +464,16 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
                 assertThat(rows.stream().filter(r -> "SUCCESS".equals(r.get("status"))).map(r -> r.get("verifiedVia")))
                         .allMatch("MANUAL"::equals);
 
+                // 마지막 확정일부터 거꾸로 — 성공이면서 날짜가 하루씩 이어져야 센다(빠진 날이 있으면 끊긴다)
                 int streak = 0;
-                for (int i = rows.size() - 1; i >= 0 && "SUCCESS".equals(rows.get(i).get("status")); i--) streak++;
-                assertThat(streak).as("스트릭").isGreaterThanOrEqualTo(7);
+                LocalDate expect = (LocalDate) rows.get(rows.size() - 1).get("targetDate");
+                for (int i = rows.size() - 1; i >= 0; i--) {
+                    Map<String, Object> r = rows.get(i);
+                    if (!"SUCCESS".equals(r.get("status")) || !expect.equals(r.get("targetDate"))) break;
+                    streak++;
+                    expect = expect.minusDays(1);
+                }
+                assertThat(streak).as("연속 성공 스트릭").isGreaterThanOrEqualTo(7);
             }
         }
 
@@ -667,12 +690,17 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
             tokenService.issueTokenPair(j0User);
             long liveRts = count("SELECT COUNT(*) FROM refresh_tokens WHERE user_id = ? AND revoked_at IS NULL", bytes(j0));
 
-            // 실제 유저 — 심사위원이 만든 방에 들어오고, 데모 자동 인증 방에도 들어온다
+            // 실제 유저 — 심사위원이 만든 방에 들어오고, 데모 자동 인증 방에도 들어오고, 자기 방에 심사위원을 받는다
             Member real = member("seed-real");
             UUID judgeRoom = insertChallenge(j0, "EXERCISE", "ACTIVE", "GROUP");
             insertActiveMembership(judgeRoom, j0, "OWNER");
             insertActiveMembership(judgeRoom, real.id(), "MEMBER");
             insertActiveMembership(current.autoRoomId(), real.id(), "MEMBER");
+            UUID realRoom = insertChallenge(real.id(), "EXERCISE", "ACTIVE", "GROUP");
+            insertActiveMembership(realRoom, real.id(), "OWNER");
+            insertActiveMembership(realRoom, j0, "MEMBER");
+            // 픽스처 insert 는 참여 인원 수를 올리지 않는다 — 운영처럼 실제 멤버 수로 맞춘다
+            for (UUID r : List.of(judgeRoom, current.autoRoomId(), realRoom)) syncParticipantCount(r);
 
             userAccountService.withdraw(j1, CONFIRM_PHRASE);   // 심사위원이 탈퇴해 봤다
 
@@ -681,7 +709,9 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
             List<Map<String, Object>> realMemberships = rows("SELECT * FROM challenge_members WHERE user_id = ? ORDER BY id", real.id());
             Map<UUID, List<Map<String, Object>>> dummyRows = new LinkedHashMap<>();
             for (UUID d : current.dummyIds()) dummyRows.put(d, rows("SELECT * FROM users WHERE id = ?", d));
-            Map<String, Object> otherRound = snapshot(other);
+            // 다른 회차 — 그 회차의 심사 계정과 그 회차 방 안의 데이터만 본다. 더미는 회차 간 공유라 더미의 계정 단위
+            // 데이터(다른 방 참여·전역 점수)는 이번 회차 리셋으로 바뀔 수 있다
+            Map<String, Object> otherRound = roundSnapshot(other);
             Map<UUID, String> subjects = new LinkedHashMap<>();
             for (UUID id : current.accountIds()) subjects.put(id, subjectOf(id));
 
@@ -728,6 +758,13 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
                 assertThat(activeMembers(kept).keySet()).containsExactly(real.id());
                 assertThat(((Number) r.get("participant_count")).intValue()).isEqualTo(1);
             }
+            // 실제 유저가 방장인 방 — 실제 유저가 계속 방장이고, 심사 계정만 빠진다
+            Map<String, Object> rr = room(realRoom);
+            assertThat(rr.get("deleted_at")).isNull();
+            assertThat(rr.get("owner_type")).isEqualTo("USER");
+            assertThat(uuid(rr.get("owner_id"))).isEqualTo(real.id());
+            assertThat(activeMembers(realRoom)).isEqualTo(Map.of(real.id(), "OWNER"));
+            assertThat(((Number) rr.get("participant_count")).intValue()).isEqualTo(1);
             // 일반 유저 행·참여 행은 그대로
             assertThat(rows("SELECT * FROM users WHERE id = ?", real.id())).isEqualTo(realRows);
             assertThat(rows("SELECT * FROM challenge_members WHERE user_id = ? ORDER BY id", real.id())).isEqualTo(realMemberships);
@@ -736,16 +773,69 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
                 assertThat(rows("SELECT * FROM users WHERE id = ?", e.getKey())).as("더미 %s", e.getKey()).isEqualTo(e.getValue());
             }
             // 다른 회차는 그대로
-            assertThat(snapshot(other)).isEqualTo(otherRound);
+            assertThat(roundSnapshot(other)).isEqualTo(otherRound);
 
             // 점수 — 같은 날 리셋이면 생성 직후와 같고, 원장 재생과 맞는다
             assertThat(scores(current.accountIds())).isEqualTo(scoreAfterCreate);
             for (UUID id : current.accountIds()) assertThat(scoreProcessor.verifyUser(id)).isEmpty();
+            // 공유 더미의 전역 점수 — 값은 고정하지 않는다(지운 방의 이력만큼 바뀐다). 남은 이력의 재생과 맞으면 된다
+            for (UUID d : scopeIds(other, current)) {
+                if (current.accountIds().contains(d) || other.accountIds().contains(d)) continue;
+                assertThat(scoreProcessor.verifyUser(d)).as("더미 %s", d).isEmpty();
+            }
             // 새 데모 방에도 이력이 있다
             for (UUID id : current.accountIds()) {
                 assertThat(finalRows(res.autoRoomId(), id)).isNotEmpty();
                 assertThat(finalRows(res.manualRoomId(), id)).isNotEmpty();
             }
+        }
+
+        /**
+         * 사전 검사를 통과한 뒤 <b>쓰는 도중</b> 실패하면 전부 되돌린다. 실패는 DB 트리거로 넣는다 — 구현의 쓰기 순서를
+         * 모르므로 계약상 반드시 일어나는 쓰기 여러 곳을 하나씩 막는다. 어느 지점이 마지막이든, 그 앞의 쓰기(나가기·삭제·
+         * 복원·점수)가 남으면 실패한다. 트리거 실행 자체가 실패의 증거라 리셋은 반드시 예외로 끝나야 한다.
+         */
+        @ParameterizedTest(name = "{0}")
+        @ValueSource(strings = {"DEVICE_TOKEN_DELETE", "CONSENT_DELETE", "RESTORE_WITHDRAWN",
+                "NEW_DEMO_ROOM", "NEW_HISTORY", "SCORE_LEDGER"})
+        @DisplayName("쓰는 도중 실패하면 전부 롤백 — 나가기·삭제·복원·점수 중 어느 것도 남지 않는다")
+        void rollsBackOnFailureMidway(String point) {
+            CreateResult current = seed.create(2, evaluationEnd());
+            UUID j0 = current.accountIds().get(0);
+            UUID j1 = current.accountIds().get(1);
+            agree(j0, AgreementType.LOCATION_INFO);
+            leave(current.manualRoomId(), j0);
+            jdbcTemplate.update("INSERT INTO DeviceToken (id, userId, token, platform, isActive, lastSeenAt, createdAt) "
+                    + "VALUES (?, ?, ?, 'ANDROID', 1, NOW(6), NOW(6))", bytes(UUID.randomUUID()), bytes(j0), "seed-it-" + UUID.randomUUID());
+            jdbcTemplate.update("UPDATE user_score_summaries SET total_score = total_score + 100 WHERE user_id = ?", (Object) bytes(j0));
+            userAccountService.withdraw(j1, CONFIRM_PHRASE);
+            Map<String, Object> before = snapshot(current);
+
+            String condition = switch (point) {
+                case "DEVICE_TOKEN_DELETE" -> "BEFORE DELETE ON DeviceToken FOR EACH ROW IF OLD.userId = UNHEX('" + hex(j0) + "')";
+                case "CONSENT_DELETE" -> "BEFORE DELETE ON user_agreement_states FOR EACH ROW IF OLD.user_id = UNHEX('" + hex(j0) + "')";
+                case "RESTORE_WITHDRAWN" -> "BEFORE UPDATE ON users FOR EACH ROW IF OLD.id = UNHEX('" + hex(j1) + "') AND NEW.status = 'ACTIVE'";
+                // 새 데모 방의 방장은 더미 — 어느 더미를 고르든 막도록 subject 로 본다
+                case "NEW_DEMO_ROOM" -> "BEFORE INSERT ON challenges FOR EACH ROW IF "
+                        + "(SELECT oauth_subject FROM users WHERE id = NEW.owner_id) LIKE 'ruleup-demo-%'";
+                case "NEW_HISTORY" -> "BEFORE INSERT ON VerificationDaily FOR EACH ROW IF NEW.userId = UNHEX('" + hex(j0) + "')";
+                case "SCORE_LEDGER" -> "BEFORE INSERT ON score_transactions FOR EACH ROW IF NEW.user_id = UNHEX('" + hex(j0) + "')";
+                default -> throw new IllegalArgumentException(point);
+            };
+            ROOT.execute("DROP TRIGGER IF EXISTS seed_it_fail");
+            ROOT.execute("CREATE TRIGGER seed_it_fail " + condition
+                    + " THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'seed-it injected failure'; END IF");
+            try {
+                ReviewAccountPolicy cfg = config(current.round(), current.accountIds(), scopeOf(current), true, expiry(), clock);
+                assertThatThrownBy(() -> seed.reset(scopeOf(current), cfg, current.round()))
+                        .as("주입한 실패(%s)가 리셋을 멈춰야 한다", point)
+                        .isNotNull();
+            } finally {
+                ROOT.execute("DROP TRIGGER IF EXISTS seed_it_fail");
+            }
+
+            assertThat(snapshot(current)).isEqualTo(before);
+            assertThat(statusOf(j1)).isEqualTo("WITHDRAWN");
         }
 
         @Test
@@ -832,6 +922,15 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
         });
     }
 
+    private void syncParticipantCount(UUID roomId) {
+        jdbcTemplate.update("UPDATE challenges SET participant_count = (SELECT COUNT(*) FROM challenge_members "
+                + "WHERE challenge_id = ? AND status = 'ACTIVE') WHERE id = ?", bytes(roomId), bytes(roomId));
+    }
+
+    private static String hex(UUID id) {
+        return HexFormat.of().formatHex(bytes(id));
+    }
+
     private void leave(UUID roomId, UUID userId) {
         jdbcTemplate.update("UPDATE challenge_members SET status = 'LEFT', left_type = 'LEAVE', left_at = NOW(6) "
                 + "WHERE challenge_id = ? AND user_id = ? AND status = 'ACTIVE'", bytes(roomId), bytes(userId));
@@ -907,15 +1006,31 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
     }
 
     /**
-     * 실패한 리셋이 「아무것도 바꾸지 않았다」를 보는 스냅숏 — 회차들의 계정·더미의 행과 그 데모 방.
+     * 실패한 리셋이 「아무것도 바꾸지 않았다」를 보는 스냅숏 — 회차들의 계정·더미의 모든 행과 그 데모 방 안의 모든 행.
+     * 실패는 어디도 바꾸지 않아야 하므로 공유 더미의 계정 단위 데이터까지 본다.
      */
     private Map<String, Object> snapshot(CreateResult... rounds) {
-        List<UUID> users = scopeIds(rounds);
+        return snapshot(scopeIds(rounds), roomsOf(rounds));
+    }
+
+    /**
+     * 성공한 리셋이 「다른 회차를 건드리지 않았다」를 보는 스냅숏 — 그 회차 심사 계정의 모든 행과 그 회차 방 안의 모든 행
+     * (방 안의 더미 참여·이력 포함). 더미의 계정 단위 데이터(다른 회차 방 참여·전역 점수)는 빼고, 점수는 재생 일치로 따로 본다.
+     */
+    private Map<String, Object> roundSnapshot(CreateResult round) {
+        return snapshot(round.accountIds(), roomsOf(round));
+    }
+
+    private static List<UUID> roomsOf(CreateResult... rounds) {
         List<UUID> rooms = new ArrayList<>();
         for (CreateResult r : rounds) {
             rooms.add(r.manualRoomId());
             rooms.add(r.autoRoomId());
         }
+        return rooms;
+    }
+
+    private Map<String, Object> snapshot(List<UUID> users, List<UUID> rooms) {
         String u = placeholders(users.size());
         String c = placeholders(rooms.size());
         Object[] ub = users.stream().map(ReviewSeedServiceIT::bytes).toArray();
@@ -935,6 +1050,9 @@ class ReviewSeedServiceIT extends ChallengeApiSupport {
         snap.put("device_tokens", rows("SELECT * FROM DeviceToken WHERE userId IN (" + u + ") ORDER BY id", ub));
         snap.put("refresh_tokens", rows("SELECT id, revoked_at FROM refresh_tokens WHERE user_id IN (" + u + ") ORDER BY id", ub));
         snap.put("notifications", rows("SELECT id FROM notifications WHERE user_id IN (" + u + ") ORDER BY id", ub));
+        snap.put("room_members", rows("SELECT * FROM challenge_members WHERE challenge_id IN (" + c + ") ORDER BY id", cb));
+        snap.put("room_dailies", rows("SELECT id, status, verifiedVia FROM VerificationDaily WHERE challengeId IN (" + c + ") ORDER BY id", cb));
+        snap.put("room_appeals", rows("SELECT id FROM verification_appeals WHERE challengeId IN (" + c + ") ORDER BY id", cb));
         return snap;
     }
 
