@@ -1,6 +1,7 @@
 package com.ruleup.ruleup_backend.observability.usage;
 
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -69,8 +70,9 @@ public class ScreenViewRecorder {
         return seen;
     }
 
-    /** 보관 기간이 지난 행 — 하루 한 번. 태스크마다 돌아도 같은 행을 지울 뿐이라 잠그지 않는다. */
+    /** 보관 기간이 지난 행 — 하루 한 번, 한 태스크만. */
     @Scheduled(cron = "0 20 4 * * *", zone = "Asia/Seoul")
+    @SchedulerLock(name = "ScreenViewRecorder.purge", lockAtMostFor = "PT10M", lockAtLeastFor = "PT1M")
     public void purge() {
         try {
             LocalDate cutoff = LocalDate.now(clock.withZone(KST)).minusDays(RETENTION_DAYS);
