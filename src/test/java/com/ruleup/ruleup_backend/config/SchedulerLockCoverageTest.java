@@ -35,6 +35,7 @@ class SchedulerLockCoverageTest {
             "VerificationBacklogMetrics.refresh",
             "VerificationRateMetrics.refresh",
             "MemberProfileMetrics.refresh",
+            "UsageMetrics.refresh",
             "WatcherHealth.sample",
             "SegmentScoreService.evictLocalCaches",
             // 심사 세션 종료(심사 계정 테크 스펙 5-1): 멱등 회수라 겹쳐 돌아도 되고, 락이 있으면 강제 재배포 직후
