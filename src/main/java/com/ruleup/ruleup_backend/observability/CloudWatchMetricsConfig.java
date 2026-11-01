@@ -71,7 +71,12 @@ public class CloudWatchMetricsConfig {
             "biz.members.consent",                     // 선택 동의(type=marketing|event)
             "biz.members.active",                      // 최근 활동(window=1d|7d)
             "biz.members.rooms",                       // 방 참여 경로(path=created_only|joined_only|both) — 사람 수
-            "biz.members.rooms_per_member");           // 참여 중인 방 개수(rooms=1|2|3|4|5_plus)
+            "biz.members.rooms_per_member",            // 참여 중인 방 개수(rooms=1|2|3|4|5_plus)
+            // 서비스 이용(UsageMetrics) — 태그는 고정 열거
+            "biz.rooms.count",                         // 지금 있는 방 수(mode × verification × status, 8)
+            "biz.rooms.memberships",                   // 그 방들의 참여 인원 합(mode × verification, 4)
+            "biz.rooms.people_by_mode",                // 그룹·솔로 방에 참여 중인 사람 수(2)
+            "biz.rooms.people_by_verification");       // 자동·수동 방에 참여 중인 사람 수(2)
 
     static final String BUSINESS_PREFIX = "biz.";
 

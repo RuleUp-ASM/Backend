@@ -20,8 +20,6 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
@@ -60,12 +58,9 @@ public class MemberProfileService {
                                 @Value("${app.admin.stats-excluded-user-ids:}") String excludedUserIds) {
         this.jdbc = jdbc;
         this.clock = clock;
-        List<UUID> excluded = Arrays.stream(excludedUserIds.split(","))
-                .map(String::trim).filter(s -> !s.isEmpty()).map(UUID::fromString).toList();
-        // 제외 ID 는 UUID 로 파싱한 값만 들어가므로 문자열로 이어 붙여도 안전하다.
-        this.everyone = "u.role = 'MEMBER'" + (excluded.isEmpty() ? "" : excluded.stream().map(id -> "'" + id + "'")
-                .collect(Collectors.joining(", ", " AND BIN_TO_UUID(u.id) NOT IN (", ")")));
-        this.scope = everyone + " AND u.status <> 'WITHDRAWN' AND u.deleted_at IS NULL";
+        MemberScope range = MemberScope.of(excludedUserIds);
+        this.everyone = range.everyone();
+        this.scope = range.members();
     }
 
     @Transactional(readOnly = true)
