@@ -1,11 +1,13 @@
 package com.ruleup.ruleup_backend.observability.usage;
 
+import com.ruleup.ruleup_backend.score.domain.Tier;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -29,6 +31,11 @@ import java.util.concurrent.atomic.AtomicLong;
  *       failed_no_signal·failed_permission</li>
  *   <li>{@code biz.auto.judged_people{result}} — 그 기간 신호로 측정된 판정이 있는 사람 중 한 번이라도 성공(succeeded)·
  *       실패뿐(failed_only)</li>
+ *   <li>{@code biz.members.tier{tier}} — 표시 티어별 회원 수(unranked·bronze·silver·gold·diamond·ruby)</li>
+ *   <li>{@code biz.members.interest_fit{fit}} — 참여 중인 사람을 방 카테고리가 관심사 안인가로: interest_only·mixed·
+ *       outside_only·no_interest. 「관심사 밖 루틴도 하는 사람」= mixed + outside_only</li>
+ *   <li>{@code biz.members.withdrawn_stage{stage}} — 탈퇴자가 어디까지 써 보고 나갔나: before_room·no_judgment·after_judgment.
+ *       가입 후 얼마 만에 나갔나는 {@code biz.members.withdrawn{lived}}(MemberProfileMetrics)</li>
  * </ul>
  *
  * <p>칸은 미리 다 만든다 — 열거 밖 값(옛 값)으로 새 지표가 생기면 과금 단위가 몰래 늘어난다. 태그 조합 하나가 CloudWatch
@@ -74,6 +81,12 @@ public class UsageMetrics {
             register("biz.auto.judgments", "확정된 최근 7일 자동 인증 판정 — 결과별", "result", r);
         for (String r : JUDGED_PEOPLE)
             register("biz.auto.judged_people", "최근 7일 신호로 측정된 판정이 있는 사람 — 성공 경험 여부", "result", r);
+        for (String t : Arrays.stream(Tier.values()).map(t -> tag(t.name())).toList())
+            register("biz.members.tier", "표시 티어별 회원 수", "tier", t);
+        for (String f : UsageStatsService.INTEREST_FIT)
+            register("biz.members.interest_fit", "참여 중인 사람 — 방 카테고리가 고른 관심사 안인가", "fit", f);
+        for (String st : UsageStatsService.WITHDRAWAL_STAGES)
+            register("biz.members.withdrawn_stage", "탈퇴자 — 어디까지 써 보고 나갔나", "stage", st);
     }
 
     /** tags 는 (키, 값) 쌍을 이어 쓴다. 칸은 이름과 값들로 찾는다({@link #key}). */
@@ -98,6 +111,13 @@ public class UsageMetrics {
         // 묶음마다 따로 — 한 쿼리가 실패해도 나머지 칸은 갱신된다.
         run("방 구성", () -> applyRooms(stats.rooms()));
         run("자동 인증", () -> applyAuto(stats.autoVerification()));
+        run("회원 이용", () -> applyMembers(stats.members()));
+    }
+
+    void applyMembers(UsageStatsService.MemberUsage m) {
+        m.tiers().forEach((t, n) -> set(key("biz.members.tier", tag(t)), n));
+        m.interestFit().forEach((f, n) -> set(key("biz.members.interest_fit", f), n));
+        m.withdrawalStage().forEach((st, n) -> set(key("biz.members.withdrawn_stage", st), n));
     }
 
     private static void run(String what, Runnable task) {

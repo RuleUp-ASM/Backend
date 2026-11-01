@@ -68,15 +68,18 @@ class MemberProfileMetricsTest {
         assertThat(gauge("biz.members.rooms", "path", "both")).isEqualTo(1);
         assertThat(gauge("biz.members.rooms_per_member", "rooms", "1")).isEqualTo(5);
         assertThat(gauge("biz.members.rooms_per_member", "rooms", "5_plus")).isEqualTo(2);
+        assertThat(gauge("biz.members.withdrawn", "lived", "1h")).isEqualTo(4);
+        assertThat(gauge("biz.members.withdrawn", "lived", "7d")).isEqualTo(1);
+        assertThat(gauge("biz.members.withdrawn", "lived", "later")).isZero();
     }
 
     @Test
-    @DisplayName("지표 수는 고정 37개 — 열거 밖 값이 와도 새 지표가 생기지 않는다(과금 단위가 몰래 늘지 않게)")
+    @DisplayName("지표 수는 고정 41개 — 열거 밖 값이 와도 새 지표가 생기지 않는다(과금 단위가 몰래 늘지 않게)")
     void fixedMeterCount() {
         when(service.snapshot()).thenReturn(profile());
         metrics.refresh();
 
-        assertThat(registry.getMeters()).hasSize(37);
+        assertThat(registry.getMeters()).hasSize(41);
         assertThat(registry.find("biz.members.interest").tag("category", "legacy_category").gauge()).isNull();
         assertThat(registry.find("biz.members.consent").tag("type", "tos").gauge()).isNull();
     }

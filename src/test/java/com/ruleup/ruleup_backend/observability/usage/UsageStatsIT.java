@@ -4,6 +4,7 @@ import com.ruleup.ruleup_backend.TestcontainersConfiguration;
 import com.ruleup.ruleup_backend.challenge.ChallengeApiSupport;
 import com.ruleup.ruleup_backend.common.DbTime;
 import com.ruleup.ruleup_backend.observability.usage.UsageStatsService.AutoVerification;
+import com.ruleup.ruleup_backend.observability.usage.UsageStatsService.MemberUsage;
 import com.ruleup.ruleup_backend.observability.usage.UsageStatsService.RoomCell;
 import com.ruleup.ruleup_backend.observability.usage.UsageStatsService.RoomComposition;
 import org.junit.jupiter.api.BeforeEach;
@@ -147,6 +148,50 @@ class UsageStatsIT extends ChallengeApiSupport {
         assertThat(after.succeededPeople() - before.succeededPeople()).isEqualTo(1);
         assertThat(after.failedOnlyPeople() - before.failedOnlyPeople())
                 .as("stale 은 측정 실패만, never 는 측정된 판정이 없어 안 센다").isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("회원 이용 — 표시 티어, 참여 중인 방이 관심사 안·밖·섞임·관심사 없음, 탈퇴자의 이용 단계")
+    void memberUsage() throws Exception {
+        MemberUsage before = stats.members();
+        LocalDate today = LocalDate.now(clock.withZone(ZoneId.of("Asia/Seoul")));
+
+        Member in = member(uniq("mui"));      // 관심사 EXERCISE·READING(가입 기본값), 운동 방만 → 안
+        Member mix = member(uniq("mum"));     // 운동 + 학습 → 섞임
+        Member out = member(uniq("muo"));     // 학습 방만 → 밖
+        Member none = member(uniq("mun"));    // 관심사 없음, 운동 방
+        Member idle = member(uniq("mux"));    // 방 없음 — 관심사 칸에 안 든다
+        jdbcTemplate.update("UPDATE user_score_summaries SET display_tier = 'SILVER' WHERE user_id = ?", bytes(in.id()));
+        jdbcTemplate.update("DELETE FROM user_interests WHERE user_id = ?", bytes(none.id()));
+        UUID exercise = insertChallenge(idle.id(), "EXERCISE", "ACTIVE", "GROUP");
+        UUID study = insertChallenge(idle.id(), "STUDY", "UPCOMING", "GROUP");
+        insertActiveMembership(exercise, in.id(), "MEMBER");
+        insertActiveMembership(exercise, mix.id(), "MEMBER");
+        insertActiveMembership(study, mix.id(), "MEMBER");
+        insertActiveMembership(study, out.id(), "MEMBER");
+        insertActiveMembership(exercise, none.id(), "MEMBER");
+
+        Member w1 = member(uniq("mw1"));      // 방에 안 들어가고 탈퇴
+        Member w2 = member(uniq("mw2"));      // 방에 들어갔다 판정 없이 탈퇴
+        Member w3 = member(uniq("mw3"));      // 판정까지 받고 탈퇴
+        insertActiveMembership(exercise, w2.id(), "MEMBER");
+        insertActiveMembership(exercise, w3.id(), "MEMBER");
+        judgment(exercise, w3.id(), today.minusDays(3), "SUCCESS", null);
+        for (Member w : new Member[]{w1, w2, w3}) {
+            jdbcTemplate.update("UPDATE challenge_members SET status = 'LEFT' WHERE user_id = ?", bytes(w.id()));
+            jdbcTemplate.update("UPDATE users SET status = 'WITHDRAWN', deleted_at = created_at + INTERVAL 2 HOUR WHERE id = ?",
+                    bytes(w.id()));
+        }
+
+        MemberUsage after = stats.members();
+
+        assertThat(diff(before.tiers(), after.tiers()))
+                .as("새 회원 5명 중 SILVER 1, 나머지는 가입 기본 BRONZE — 탈퇴자 3명은 빠진다").isEqualTo(Map.of("BRONZE", 4L, "SILVER", 1L));
+        assertThat(after.tiers().keySet()).as("티어 칸은 0 이어도 다").contains("UNRANKED", "RUBY");
+        assertThat(diff(before.interestFit(), after.interestFit())).isEqualTo(Map.of(
+                "interest_only", 1L, "mixed", 1L, "outside_only", 1L, "no_interest", 1L));
+        assertThat(diff(before.withdrawalStage(), after.withdrawalStage())).isEqualTo(Map.of(
+                "before_room", 1L, "no_judgment", 1L, "after_judgment", 1L));
     }
 
     // ===== 내부 =====

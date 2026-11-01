@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <p>콘솔은 지금 한 장면이고, 이건 <b>구성이 어떻게 변해 가는가</b>를 본다(대시보드 ruleup-&lt;env&gt;-business ④).
  * 칸은 분포를 읽는 데 필요한 것만 둔다 — 태그 조합 하나가 CloudWatch 지표 하나로 과금되므로 앱 버전·OS·국가처럼
- * 값이 열려 있는 칸은 콘솔에만 있다. 지금 37개다.
+ * 값이 열려 있는 칸은 콘솔에만 있다. 지금 41개다.
  * <ul>
  *   <li>{@code biz.members.total} — 회원 수</li>
  *   <li>{@code biz.members.age{band}} — 10s·20s·30s·40s·50s_plus·unknown (만 나이, 10s 는 14~19)</li>
@@ -33,6 +33,8 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>{@code biz.members.active{window}} — 최근 1d·7d 안에 활동한 회원 수</li>
  *   <li>{@code biz.members.rooms{path}} — 참여 중인 방이 있는 사람을 경로로: created_only·joined_only·both (겹치지 않는다)</li>
  *   <li>{@code biz.members.rooms_per_member{rooms}} — 참여 중인 방 1·2·3·4·5_plus 개인 회원 수</li>
+ *   <li>{@code biz.members.withdrawn{lived}} — 탈퇴자를 가입 후 얼마 만에 나갔나로: 1h·1d·7d·later (1시간 안·하루 안·
+ *       일주일 안·그 뒤, 겹치지 않는다). 탈퇴자는 회원 수에 들지 않는다 — 운영자·제외 계정만 뺀다</li>
  * </ul>
  *
  * <p>참여 방 수 순위는 사람을 가리키므로 게이지로 만들 수 없다(사람마다 지표 하나 = 과금). 대신 갱신마다 상위
@@ -53,6 +55,7 @@ public class MemberProfileMetrics {
     private static final List<String> PATH_TAGS = List.of("created_only", "joined_only", "both");
     private static final Map<String, String> ROOM_COUNT_TAGS = Map.of(
             "1", "1", "2", "2", "3", "3", "4", "4", "5+", "5_plus");
+    private static final List<String> LIVED_TAGS = List.of("1h", "1d", "7d", "later");
     static final int RANK_LOG_SIZE = 10;
 
     private final MemberProfileService profileService;
@@ -66,6 +69,7 @@ public class MemberProfileMetrics {
     private final AtomicLong active7d = new AtomicLong();
     private final Map<String, AtomicLong> roomPath = new LinkedHashMap<>();
     private final Map<String, AtomicLong> roomsPerMember = new LinkedHashMap<>();
+    private final Map<String, AtomicLong> withdrawn = new LinkedHashMap<>();
 
     public MemberProfileMetrics(MemberProfileService profileService, MeterRegistry registry) {
         this.profileService = profileService;
@@ -89,6 +93,8 @@ public class MemberProfileMetrics {
             register(registry, "biz.members.rooms", "path", path, roomPath, "참여 중인 방이 있는 회원 수 — 들어간 경로별");
         for (String n : ROOM_COUNT_TAGS.values().stream().sorted().toList())
             register(registry, "biz.members.rooms_per_member", "rooms", n, roomsPerMember, "참여 중인 방 개수별 회원 수");
+        for (String lived : LIVED_TAGS)
+            register(registry, "biz.members.withdrawn", "lived", lived, withdrawn, "탈퇴자 — 가입 후 얼마 만에 나갔나");
     }
 
     private static void register(MeterRegistry registry, String name, String key, String value,
@@ -125,6 +131,10 @@ public class MemberProfileMetrics {
         set(roomPath, "joined_only", p.participation().joinedOnly());
         set(roomPath, "both", p.participation().both());
         p.participation().roomsPerMember().forEach(b -> set(roomsPerMember, ROOM_COUNT_TAGS.get(b.key()), b.count()));
+        set(withdrawn, "1h", p.withdrawals().within1h());
+        set(withdrawn, "1d", p.withdrawals().within1d());
+        set(withdrawn, "7d", p.withdrawals().within7d());
+        set(withdrawn, "later", p.withdrawals().later());
     }
 
     /** 미리 만든 칸만 채운다 — 열거에 없는 값(옛 값)으로 새 지표가 생기면 과금 단위가 몰래 늘어난다. */

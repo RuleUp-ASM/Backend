@@ -2,6 +2,7 @@ package com.ruleup.ruleup_backend.observability.usage;
 
 import com.ruleup.ruleup_backend.observability.CloudWatchMetricsConfigAccess;
 import com.ruleup.ruleup_backend.observability.usage.UsageStatsService.AutoVerification;
+import com.ruleup.ruleup_backend.observability.usage.UsageStatsService.MemberUsage;
 import com.ruleup.ruleup_backend.observability.usage.UsageStatsService.RoomCell;
 import com.ruleup.ruleup_backend.observability.usage.UsageStatsService.RoomComposition;
 import com.ruleup.ruleup_backend.observability.usage.UsageStatsService.RoomPeople;
@@ -28,6 +29,10 @@ class UsageMetricsTest {
     void stub() {
         when(stats.rooms()).thenReturn(rooms());
         when(stats.autoVerification()).thenReturn(auto());
+        when(stats.members()).thenReturn(new MemberUsage(
+                Map.of("UNRANKED", 1L, "BRONZE", 20L, "SILVER", 4L, "GOLD", 0L, "DIAMOND", 0L, "RUBY", 0L, "LEGACY", 9L),
+                Map.of("interest_only", 5L, "mixed", 2L, "outside_only", 1L, "no_interest", 3L),
+                Map.of("before_room", 4L, "no_judgment", 1L, "after_judgment", 1L)));
     }
 
     private static AutoVerification auto() {
@@ -87,6 +92,18 @@ class UsageMetricsTest {
     }
 
     @Test
+    @DisplayName("회원 이용 — 티어(열거 밖 값은 버린다)·관심사 안팎·탈퇴 단계")
+    void memberGauges() {
+        metrics.refresh();
+
+        assertThat(gauge("biz.members.tier", "tier", "bronze")).isEqualTo(20);
+        assertThat(gauge("biz.members.tier", "tier", "unranked")).isEqualTo(1);
+        assertThat(registry.find("biz.members.tier").tag("tier", "legacy").gauge()).isNull();
+        assertThat(gauge("biz.members.interest_fit", "fit", "mixed")).isEqualTo(2);
+        assertThat(gauge("biz.members.withdrawn_stage", "stage", "before_room")).isEqualTo(4);
+    }
+
+    @Test
     @DisplayName("한 묶음 집계가 실패해도 다른 묶음은 갱신된다")
     void sectionsFailIndependently() {
         when(stats.rooms()).thenThrow(new IllegalStateException("db down"));
@@ -130,6 +147,6 @@ class UsageMetricsTest {
         assertThat(gauge("biz.rooms.people_by_mode", "mode", "group")).isEqualTo(10);
     }
 
-    /** 방 8 + 참여 인원 4 + 사람 수 2+2 · 자동 인증 3+6+4+2. */
-    static final int EXPECTED_METERS = 31;
+    /** 방 8 + 참여 인원 4 + 사람 수 2+2 · 자동 인증 3+6+4+2 · 티어 6 + 관심사 4 + 탈퇴 단계 3. */
+    static final int EXPECTED_METERS = 44;
 }

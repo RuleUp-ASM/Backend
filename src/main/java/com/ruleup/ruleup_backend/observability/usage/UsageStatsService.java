@@ -2,6 +2,7 @@ package com.ruleup.ruleup_backend.observability.usage;
 
 import com.ruleup.ruleup_backend.admin.stats.MemberScope;
 import com.ruleup.ruleup_backend.common.DbTime;
+import com.ruleup.ruleup_backend.score.domain.Tier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -13,12 +14,13 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * 서비스 이용 지표 — 방 구성(그룹·솔로 × 자동·수동)·자동 인증 진행을 「지금」 기준으로 센다. 게이지 {@link UsageMetrics} 가 쓴다.
+ * 서비스 이용 지표 — 방 구성(그룹·솔로 × 자동·수동)·자동 인증 진행·관심사와 루틴·티어·탈퇴 단계를 「지금」 기준으로 센다. 게이지 {@link UsageMetrics} 가 쓴다.
  *
  * <p>회원 범위는 회원 구성({@link com.ruleup.ruleup_backend.admin.stats.MemberProfileService})과 같다
  * ({@link MemberScope}) — 탈퇴자·운영자·개발자 시험 계정은 빼고 센다.
@@ -53,16 +55,22 @@ public class UsageStatsService {
     public static final List<String> STALL_REASONS = List.of(
             "ok", "pending_setup", "permission_missing", "just_joined", "never_synced", "sync_stale");
 
+    public static final List<String> INTEREST_FIT = List.of("interest_only", "mixed", "outside_only", "no_interest");
+    public static final List<String> WITHDRAWAL_STAGES = List.of("before_room", "no_judgment", "after_judgment");
+
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private final JdbcTemplate jdbc;
     private final Clock clock;
     private final String scope;
+    private final String everyone;
 
     public UsageStatsService(JdbcTemplate jdbc, Clock clock,
                              @Value("${app.admin.stats-excluded-user-ids:}") String excludedUserIds) {
         this.jdbc = jdbc;
         this.clock = clock;
-        this.scope = MemberScope.of(excludedUserIds).members();
+        MemberScope range = MemberScope.of(excludedUserIds);
+        this.scope = range.members();
+        this.everyone = range.everyone();
     }
 
     /** 방 한 칸 — 모드 × 인증 방식 × 상태별 방 수와 그 방들의 참여 인원(멤버십 수). */
@@ -172,6 +180,55 @@ public class UsageStatsService {
 
         return new AutoVerification(num(people.get("in_room")), num(people.get("d1")), num(people.get("d7")),
                 stall, judgments, num(p.get("ok")), num(p.get("ng")));
+    }
+
+    /**
+     * 회원 쪽 분포.
+     *
+     * @param tiers           표시 티어별 회원 수 — {@link Tier} 순서, 점수 행이 없으면 UNRANKED
+     * @param interestFit     참여 중인 방(시작 전·진행 중)이 있는 사람을 「방 카테고리가 고른 관심사 안인가」로 —
+     *                        interest_only(전부 관심사 안)·mixed(안과 밖이 섞임)·outside_only(전부 밖)·no_interest(관심사를 안 고름)
+     * @param withdrawalStage 탈퇴자가 어디까지 써 보고 나갔나 — before_room(방에 한 번도 안 들어감)·no_judgment(방엔 들어갔지만
+     *                        확정 판정 없음)·after_judgment(판정까지 받아 봄)
+     */
+    public record MemberUsage(Map<String, Long> tiers, Map<String, Long> interestFit, Map<String, Long> withdrawalStage) {}
+
+    @Transactional(readOnly = true)
+    public MemberUsage members() {
+        Map<String, Long> tiers = new LinkedHashMap<>();
+        Arrays.stream(Tier.values()).forEach(t -> tiers.put(t.name(), 0L));
+        jdbc.query("SELECT IFNULL(s.display_tier, 'UNRANKED') AS k, COUNT(*) AS n FROM users u"
+                        + " LEFT JOIN user_score_summaries s ON s.user_id = u.id WHERE " + scope + " GROUP BY k",
+                rs -> {
+                    tiers.merge(rs.getString("k"), rs.getLong("n"), Long::sum);
+                });
+
+        // 사람마다 참여 중인 방 수(rooms)와 그중 카테고리가 관심사 안인 방 수(inside), 고른 관심사 수(picked).
+        Map<String, Object> f = jdbc.queryForMap("SELECT SUM(t.picked = 0) AS none,"
+                + " SUM(t.picked > 0 AND t.inside = t.rooms) AS only_in,"
+                + " SUM(t.picked > 0 AND t.inside = 0) AS only_out,"
+                + " SUM(t.picked > 0 AND t.inside > 0 AND t.inside < t.rooms) AS mixed FROM ("
+                + "SELECT cm.user_id, COUNT(*) AS rooms,"
+                + " SUM(EXISTS(SELECT 1 FROM user_interests i WHERE i.user_id = cm.user_id AND i.category = c.category)) AS inside,"
+                + " MAX((SELECT COUNT(*) FROM user_interests i2 WHERE i2.user_id = cm.user_id)) AS picked"
+                + LIVE_MEMBERSHIPS + scope + " GROUP BY cm.user_id) t");
+        Map<String, Long> fit = new LinkedHashMap<>();
+        fit.put("interest_only", num(f.get("only_in")));
+        fit.put("mixed", num(f.get("mixed")));
+        fit.put("outside_only", num(f.get("only_out")));
+        fit.put("no_interest", num(f.get("none")));
+
+        // 탈퇴해도 멤버십(LEFT)·판정 행은 남는다. 지워진 방의 멤버십은 보관 이력에서 찾는다.
+        String joined = "(EXISTS(SELECT 1 FROM challenge_members cm WHERE cm.user_id = u.id)"
+                + " OR EXISTS(SELECT 1 FROM challenge_member_history h WHERE h.user_id = u.id))";
+        String judged = "EXISTS(SELECT 1 FROM VerificationDaily v WHERE v.userId = u.id AND v.status IN ('SUCCESS', 'FAILED'))";
+        Map<String, Object> w = jdbc.queryForMap("SELECT SUM(NOT " + joined + " AND NOT " + judged + ") AS before_room,"
+                + " SUM(" + joined + " AND NOT " + judged + ") AS no_judgment, SUM(" + judged + ") AS after_judgment"
+                + " FROM users u WHERE " + everyone + " AND u.status = 'WITHDRAWN'");
+        Map<String, Long> stage = new LinkedHashMap<>();
+        WITHDRAWAL_STAGES.forEach(k -> stage.put(k, num(w.get(k))));
+
+        return new MemberUsage(tiers, fit, stage);
     }
 
     static long num(Object v) {

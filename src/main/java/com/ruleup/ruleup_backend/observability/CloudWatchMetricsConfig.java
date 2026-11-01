@@ -62,7 +62,7 @@ public class CloudWatchMetricsConfig {
             "biz.challenge.draft",                     // 초안(origin=ai|template|clone, result=success|blocked|failure)
             "biz.challenge.created",                   // 생성(origin, edited=yes|no) — 초안 수정률
             "biz.challenge.joined",                    // 가입(source=explore|invite)
-            // 회원 구성(MemberProfileMetrics) — 태그는 고정 열거, 합쳐서 37개
+            // 회원 구성(MemberProfileMetrics) — 태그는 고정 열거, 합쳐서 41개
             "biz.members.total",                       // 회원 수
             "biz.members.age",                         // 나잇대(band=10s|20s|30s|40s|50s_plus|unknown)
             "biz.members.gender",                      // 성별(gender=male|female)
@@ -72,6 +72,7 @@ public class CloudWatchMetricsConfig {
             "biz.members.active",                      // 최근 활동(window=1d|7d)
             "biz.members.rooms",                       // 방 참여 경로(path=created_only|joined_only|both) — 사람 수
             "biz.members.rooms_per_member",            // 참여 중인 방 개수(rooms=1|2|3|4|5_plus)
+            "biz.members.withdrawn",                   // 탈퇴자 가입 후 경과(lived=1h|1d|7d|later)
             // 서비스 이용(UsageMetrics) — 태그는 고정 열거
             "biz.rooms.count",                         // 지금 있는 방 수(mode × verification × status, 8)
             "biz.rooms.memberships",                   // 그 방들의 참여 인원 합(mode × verification, 4)
@@ -80,7 +81,10 @@ public class CloudWatchMetricsConfig {
             "biz.auto.people",                         // 자동 인증 방 사람 수·최근 sync 보낸 사람(state, 3)
             "biz.auto.stall",                          // 자동 인증 멤버십 진행 상태(reason, 6)
             "biz.auto.judgments",                      // 확정된 최근 7일 자동 판정 결과(result, 4)
-            "biz.auto.judged_people");                 // 측정된 판정이 있는 사람의 성공 경험(result, 2)
+            "biz.auto.judged_people",                  // 측정된 판정이 있는 사람의 성공 경험(result, 2)
+            "biz.members.tier",                        // 표시 티어별 회원 수(tier, 6)
+            "biz.members.interest_fit",                // 참여 중인 사람의 관심사 안·밖 루틴(fit, 4)
+            "biz.members.withdrawn_stage");            // 탈퇴자 이용 단계(stage, 3)
 
     static final String BUSINESS_PREFIX = "biz.";
 
