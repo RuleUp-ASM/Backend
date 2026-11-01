@@ -21,6 +21,14 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>{@code biz.rooms.memberships{mode,verification}} — 그 방들의 참여 인원 합(방 × 사람). 방당 평균 인원 = 이것 / 방 수</li>
  *   <li>{@code biz.rooms.people_by_mode{mode}} · {@code biz.rooms.people_by_verification{verification}} — 참여 중인 사람 수.
  *       한 사람이 두 칸에 다 있을 수 있다(그룹과 솔로를 함께 하는 사람)</li>
+ *   <li>{@code biz.auto.people{state}} — 진행 중인 자동 인증 방에 참여 중인 사람(in_room)과 그중 최근 1일·7일 안에
+ *       sync 를 보낸 사람(synced_1d·synced_7d) — 「자동 인증을 실제로 하고 있는 사람」</li>
+ *   <li>{@code biz.auto.stall{reason}} — 그 방들의 멤버십(방 × 사람)을 진행 상태로: ok·pending_setup·permission_missing·
+ *       just_joined·never_synced·sync_stale (겹치지 않는다, {@link UsageStatsService#autoVerification})</li>
+ *   <li>{@code biz.auto.judgments{result}} — 확정된 최근 7일 자동 인증 판정: success·failed_measured(신호는 왔는데 목표 미달)·
+ *       failed_no_signal·failed_permission</li>
+ *   <li>{@code biz.auto.judged_people{result}} — 그 기간 신호로 측정된 판정이 있는 사람 중 한 번이라도 성공(succeeded)·
+ *       실패뿐(failed_only)</li>
  * </ul>
  *
  * <p>칸은 미리 다 만든다 — 열거 밖 값(옛 값)으로 새 지표가 생기면 과금 단위가 몰래 늘어난다. 태그 조합 하나가 CloudWatch
@@ -34,6 +42,9 @@ public class UsageMetrics {
     static final List<String> MODES = List.of("group", "solo");
     static final List<String> VERIFICATIONS = List.of("auto", "manual");
     static final List<String> ROOM_STATUSES = List.of("upcoming", "active");
+    static final List<String> AUTO_PEOPLE = List.of("in_room", "synced_1d", "synced_7d");
+    static final List<String> JUDGMENTS = List.of("success", "failed_measured", "failed_no_signal", "failed_permission");
+    static final List<String> JUDGED_PEOPLE = List.of("succeeded", "failed_only");
 
     private final UsageStatsService stats;
     /** 이름 + 태그 값으로 찾는 게이지 칸 — {@link #key}. */
@@ -55,6 +66,14 @@ public class UsageMetrics {
         }
         for (String v : VERIFICATIONS)
             register("biz.rooms.people_by_verification", "자동·수동 인증 방에 참여 중인 사람 수(겹칠 수 있다)", "verification", v);
+        for (String st : AUTO_PEOPLE)
+            register("biz.auto.people", "진행 중인 자동 인증 방의 사람 수와 그중 최근 sync 를 보낸 사람", "state", st);
+        for (String r : UsageStatsService.STALL_REASONS)
+            register("biz.auto.stall", "진행 중인 자동 인증 방의 멤버십 — 진행 상태별", "reason", r);
+        for (String r : JUDGMENTS)
+            register("biz.auto.judgments", "확정된 최근 7일 자동 인증 판정 — 결과별", "result", r);
+        for (String r : JUDGED_PEOPLE)
+            register("biz.auto.judged_people", "최근 7일 신호로 측정된 판정이 있는 사람 — 성공 경험 여부", "result", r);
     }
 
     /** tags 는 (키, 값) 쌍을 이어 쓴다. 칸은 이름과 값들로 찾는다({@link #key}). */
@@ -76,12 +95,28 @@ public class UsageMetrics {
 
     @Scheduled(fixedDelay = 600_000, initialDelay = 120_000)
     public void refresh() {
+        // 묶음마다 따로 — 한 쿼리가 실패해도 나머지 칸은 갱신된다.
+        run("방 구성", () -> applyRooms(stats.rooms()));
+        run("자동 인증", () -> applyAuto(stats.autoVerification()));
+    }
+
+    private static void run(String what, Runnable task) {
         try {
-            applyRooms(stats.rooms());
+            task.run();
         } catch (RuntimeException e) {
             // 지표 갱신 실패가 아무것도 막으면 안 된다. 다음 주기가 다시 센다.
-            log.warn("방 구성 지표 갱신 실패: {}", e.toString());
+            log.warn("{} 지표 갱신 실패: {}", what, e.toString());
         }
+    }
+
+    void applyAuto(UsageStatsService.AutoVerification a) {
+        set(key("biz.auto.people", "in_room"), a.inRoom());
+        set(key("biz.auto.people", "synced_1d"), a.synced1d());
+        set(key("biz.auto.people", "synced_7d"), a.synced7d());
+        a.stall().forEach((r, n) -> set(key("biz.auto.stall", r), n));
+        a.judgments().forEach((r, n) -> set(key("biz.auto.judgments", r), n));
+        set(key("biz.auto.judged_people", "succeeded"), a.succeededPeople());
+        set(key("biz.auto.judged_people", "failed_only"), a.failedOnlyPeople());
     }
 
     void applyRooms(UsageStatsService.RoomComposition r) {

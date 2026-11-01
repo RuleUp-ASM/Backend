@@ -76,7 +76,11 @@ public class CloudWatchMetricsConfig {
             "biz.rooms.count",                         // 지금 있는 방 수(mode × verification × status, 8)
             "biz.rooms.memberships",                   // 그 방들의 참여 인원 합(mode × verification, 4)
             "biz.rooms.people_by_mode",                // 그룹·솔로 방에 참여 중인 사람 수(2)
-            "biz.rooms.people_by_verification");       // 자동·수동 방에 참여 중인 사람 수(2)
+            "biz.rooms.people_by_verification",        // 자동·수동 방에 참여 중인 사람 수(2)
+            "biz.auto.people",                         // 자동 인증 방 사람 수·최근 sync 보낸 사람(state, 3)
+            "biz.auto.stall",                          // 자동 인증 멤버십 진행 상태(reason, 6)
+            "biz.auto.judgments",                      // 확정된 최근 7일 자동 판정 결과(result, 4)
+            "biz.auto.judged_people");                 // 측정된 판정이 있는 사람의 성공 경험(result, 2)
 
     static final String BUSINESS_PREFIX = "biz.";
 

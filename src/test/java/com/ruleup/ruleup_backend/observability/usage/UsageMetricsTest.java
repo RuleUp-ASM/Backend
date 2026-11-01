@@ -1,6 +1,7 @@
 package com.ruleup.ruleup_backend.observability.usage;
 
 import com.ruleup.ruleup_backend.observability.CloudWatchMetricsConfigAccess;
+import com.ruleup.ruleup_backend.observability.usage.UsageStatsService.AutoVerification;
 import com.ruleup.ruleup_backend.observability.usage.UsageStatsService.RoomCell;
 import com.ruleup.ruleup_backend.observability.usage.UsageStatsService.RoomComposition;
 import com.ruleup.ruleup_backend.observability.usage.UsageStatsService.RoomPeople;
@@ -9,7 +10,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -24,6 +27,17 @@ class UsageMetricsTest {
     @BeforeEach
     void stub() {
         when(stats.rooms()).thenReturn(rooms());
+        when(stats.autoVerification()).thenReturn(auto());
+    }
+
+    private static AutoVerification auto() {
+        Map<String, Long> stall = new LinkedHashMap<>();
+        UsageStatsService.STALL_REASONS.forEach(r -> stall.put(r, 0L));
+        stall.put("ok", 7L);
+        stall.put("pending_setup", 3L);
+        stall.put("never_synced", 2L);
+        return new AutoVerification(11, 8, 9, stall,
+                Map.of("success", 40L, "failed_measured", 10L, "failed_no_signal", 5L, "failed_permission", 1L), 6, 2);
     }
 
     private static RoomComposition rooms() {
@@ -57,6 +71,28 @@ class UsageMetricsTest {
         assertThat(gauge("biz.rooms.people_by_mode", "mode", "solo")).isEqualTo(6);
         assertThat(gauge("biz.rooms.people_by_verification", "verification", "auto")).isEqualTo(11);
         assertThat(gauge("biz.rooms.people_by_verification", "verification", "manual")).isEqualTo(5);
+    }
+
+    @Test
+    @DisplayName("자동 인증 — sync 보낸 사람·진행 상태·판정 결과·성공 경험")
+    void autoGauges() {
+        metrics.refresh();
+
+        assertThat(gauge("biz.auto.people", "state", "in_room")).isEqualTo(11);
+        assertThat(gauge("biz.auto.people", "state", "synced_1d")).isEqualTo(8);
+        assertThat(gauge("biz.auto.stall", "reason", "pending_setup")).isEqualTo(3);
+        assertThat(gauge("biz.auto.stall", "reason", "sync_stale")).isZero();
+        assertThat(gauge("biz.auto.judgments", "result", "failed_measured")).isEqualTo(10);
+        assertThat(gauge("biz.auto.judged_people", "result", "failed_only")).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("한 묶음 집계가 실패해도 다른 묶음은 갱신된다")
+    void sectionsFailIndependently() {
+        when(stats.rooms()).thenThrow(new IllegalStateException("db down"));
+        metrics.refresh();
+
+        assertThat(gauge("biz.auto.people", "state", "in_room")).isEqualTo(11);
     }
 
     @Test
@@ -94,6 +130,6 @@ class UsageMetricsTest {
         assertThat(gauge("biz.rooms.people_by_mode", "mode", "group")).isEqualTo(10);
     }
 
-    /** 방 8 + 참여 인원 4 + 사람 수 2+2. */
-    static final int EXPECTED_METERS = 16;
+    /** 방 8 + 참여 인원 4 + 사람 수 2+2 · 자동 인증 3+6+4+2. */
+    static final int EXPECTED_METERS = 31;
 }
