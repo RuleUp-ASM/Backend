@@ -84,7 +84,8 @@ public class CloudWatchMetricsConfig {
             "biz.auto.judged_people",                  // 측정된 판정이 있는 사람의 성공 경험(result, 2)
             "biz.members.tier",                        // 표시 티어별 회원 수(tier, 6)
             "biz.members.interest_fit",                // 참여 중인 사람의 관심사 안·밖 루틴(fit, 4)
-            "biz.members.withdrawn_stage");            // 탈퇴자 이용 단계(stage, 3)
+            "biz.members.withdrawn_stage",             // 탈퇴자 이용 단계(stage, 3)
+            "biz.screen.viewers");                     // 화면을 연 사람(screen 9 × window=today|7d, 18)
 
     static final String BUSINESS_PREFIX = "biz.";
 

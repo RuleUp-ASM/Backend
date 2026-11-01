@@ -6,6 +6,7 @@ import com.ruleup.ruleup_backend.common.DbTime;
 import com.ruleup.ruleup_backend.observability.usage.UsageStatsService.AutoVerification;
 import com.ruleup.ruleup_backend.observability.usage.UsageStatsService.MemberUsage;
 import com.ruleup.ruleup_backend.observability.usage.UsageStatsService.RoomCell;
+import com.ruleup.ruleup_backend.observability.usage.UsageStatsService.ScreenViewers;
 import com.ruleup.ruleup_backend.observability.usage.UsageStatsService.RoomComposition;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -44,6 +45,7 @@ class UsageStatsIT extends ChallengeApiSupport {
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired UsageStatsService stats;
     @Autowired Clock clock;
+    @Autowired ScreenViewRecorder recorder;
 
     private MockMvc mvc;
 
@@ -192,6 +194,55 @@ class UsageStatsIT extends ChallengeApiSupport {
                 "interest_only", 1L, "mixed", 1L, "outside_only", 1L, "no_interest", 1L));
         assertThat(diff(before.withdrawalStage(), after.withdrawalStage())).isEqualTo(Map.of(
                 "before_room", 1L, "no_judgment", 1L, "after_judgment", 1L));
+    }
+
+    @Test
+    @DisplayName("화면 조회 — 성공한 화면 API 만 사람·화면·날짜 하나로 남고, 남의 방(403)·운영자는 안 센다")
+    void screenViews() throws Exception {
+        ScreenViewers before = stats.screens();
+        Member a = member(uniq("sva"));
+        Member b = member(uniq("svb"));
+        Member op = member(uniq("svo"));
+        jdbcTemplate.update("UPDATE users SET role = 'OPERATOR' WHERE id = ?", bytes(op.id()));
+        UUID room = insertChallenge(a.id(), "EXERCISE", "ACTIVE", "GROUP");
+        insertActiveMembership(room, a.id(), "OWNER");
+
+        assertThat(getAuth("/api/v1/challenges/" + room + "/threads", a.token()).getResponse().getStatus()).isEqualTo(200);
+        assertThat(getAuth("/api/v1/challenges/" + room + "/threads?size=5", a.token()).getResponse().getStatus()).isEqualTo(200);
+        assertThat(getAuth("/api/v1/me/stats", a.token()).getResponse().getStatus()).isEqualTo(200);
+        String month = LocalDate.now(clock.withZone(ZoneId.of("Asia/Seoul"))).toString().substring(0, 7);
+        assertThat(getAuth("/api/v1/me/calendar?month=" + month, a.token()).getResponse().getStatus()).isEqualTo(200);
+        assertThat(getAuth("/api/v1/me/calendar", a.token()).getResponse().getStatus())
+                .as("잘못된 요청(400)은 안 센다 — 위 200 과 같은 화면이라 결과에는 영향이 없다").isEqualTo(400);
+        assertThat(getAuth("/api/v1/me/stats", b.token()).getResponse().getStatus()).isEqualTo(200);
+        assertThat(getAuth("/api/v1/challenges/" + room + "/threads", b.token()).getResponse().getStatus())
+                .as("멤버가 아니면 403 — 화면을 본 게 아니다").isEqualTo(403);
+        assertThat(getAuth("/api/v1/me/stats", op.token()).getResponse().getStatus()).isEqualTo(200);
+        recorder.forget();   // 메모리가 비어도 같은 날 같은 화면은 한 행(INSERT IGNORE)
+        getAuth("/api/v1/me/stats", a.token());
+
+        ScreenViewers after = stats.screens();
+
+        assertThat(diff(before.today(), after.today())).isEqualTo(Map.of("feed", 1L, "stats", 2L, "calendar", 1L));
+        assertThat(after.last7d().get("stats") - before.last7d().get("stats")).isEqualTo(2);
+        Integer rows = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM user_screen_views WHERE user_id = ?",
+                Integer.class, bytes(a.id()));
+        assertThat(rows).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("화면 조회 정리 — 보관 기간이 지난 날짜만 지운다")
+    void purgesOldViews() {
+        UUID u = UUID.randomUUID();
+        LocalDate today = LocalDate.now(clock.withZone(ZoneId.of("Asia/Seoul")));
+        jdbcTemplate.update("INSERT INTO user_screen_views (view_date, screen, user_id) VALUES (?, 'home', ?), (?, 'home', ?)",
+                today.minusDays(ScreenViewRecorder.RETENTION_DAYS + 1), bytes(u),
+                today.minusDays(ScreenViewRecorder.RETENTION_DAYS), bytes(u));
+
+        recorder.purge();
+
+        assertThat(jdbcTemplate.queryForList("SELECT view_date FROM user_screen_views WHERE user_id = ?", LocalDate.class, bytes(u)))
+                .containsExactly(today.minusDays(ScreenViewRecorder.RETENTION_DAYS));
     }
 
     // ===== 내부 =====

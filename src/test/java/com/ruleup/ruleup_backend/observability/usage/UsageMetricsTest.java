@@ -3,6 +3,7 @@ package com.ruleup.ruleup_backend.observability.usage;
 import com.ruleup.ruleup_backend.observability.CloudWatchMetricsConfigAccess;
 import com.ruleup.ruleup_backend.observability.usage.UsageStatsService.AutoVerification;
 import com.ruleup.ruleup_backend.observability.usage.UsageStatsService.MemberUsage;
+import com.ruleup.ruleup_backend.observability.usage.UsageStatsService.ScreenViewers;
 import com.ruleup.ruleup_backend.observability.usage.UsageStatsService.RoomCell;
 import com.ruleup.ruleup_backend.observability.usage.UsageStatsService.RoomComposition;
 import com.ruleup.ruleup_backend.observability.usage.UsageStatsService.RoomPeople;
@@ -33,6 +34,7 @@ class UsageMetricsTest {
                 Map.of("UNRANKED", 1L, "BRONZE", 20L, "SILVER", 4L, "GOLD", 0L, "DIAMOND", 0L, "RUBY", 0L, "LEGACY", 9L),
                 Map.of("interest_only", 5L, "mixed", 2L, "outside_only", 1L, "no_interest", 3L),
                 Map.of("before_room", 4L, "no_judgment", 1L, "after_judgment", 1L)));
+        when(stats.screens()).thenReturn(new ScreenViewers(Map.of("home", 12L, "feed", 3L), Map.of("home", 30L, "stats", 9L)));
     }
 
     private static AutoVerification auto() {
@@ -104,6 +106,17 @@ class UsageMetricsTest {
     }
 
     @Test
+    @DisplayName("화면 조회 — 화면 × 오늘·7일")
+    void screenGauges() {
+        metrics.refresh();
+
+        assertThat(gauge("biz.screen.viewers", "screen", "home", "window", "today")).isEqualTo(12);
+        assertThat(gauge("biz.screen.viewers", "screen", "feed", "window", "today")).isEqualTo(3);
+        assertThat(gauge("biz.screen.viewers", "screen", "stats", "window", "7d")).isEqualTo(9);
+        assertThat(gauge("biz.screen.viewers", "screen", "tier", "window", "7d")).isZero();
+    }
+
+    @Test
     @DisplayName("한 묶음 집계가 실패해도 다른 묶음은 갱신된다")
     void sectionsFailIndependently() {
         when(stats.rooms()).thenThrow(new IllegalStateException("db down"));
@@ -147,6 +160,6 @@ class UsageMetricsTest {
         assertThat(gauge("biz.rooms.people_by_mode", "mode", "group")).isEqualTo(10);
     }
 
-    /** 방 8 + 참여 인원 4 + 사람 수 2+2 · 자동 인증 3+6+4+2 · 티어 6 + 관심사 4 + 탈퇴 단계 3. */
-    static final int EXPECTED_METERS = 44;
+    /** 방 8 + 참여 인원 4 + 사람 수 2+2 · 자동 인증 3+6+4+2 · 티어 6 + 관심사 4 + 탈퇴 단계 3 · 화면 9×2. */
+    static final int EXPECTED_METERS = 62;
 }

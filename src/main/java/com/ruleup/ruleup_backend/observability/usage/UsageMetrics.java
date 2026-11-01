@@ -36,6 +36,8 @@ import java.util.concurrent.atomic.AtomicLong;
  *       outside_only·no_interest. 「관심사 밖 루틴도 하는 사람」= mixed + outside_only</li>
  *   <li>{@code biz.members.withdrawn_stage{stage}} — 탈퇴자가 어디까지 써 보고 나갔나: before_room·no_judgment·after_judgment.
  *       가입 후 얼마 만에 나갔나는 {@code biz.members.withdrawn{lived}}(MemberProfileMetrics)</li>
+ *   <li>{@code biz.screen.viewers{screen,window}} — 화면을 연 사람 수, window=today(KST 오늘)·7d(오늘 포함 7일).
+ *       screen=home 이 「앱을 연 사람」이라 다른 화면 비율의 분모다({@link ScreenViewRecorder})</li>
  * </ul>
  *
  * <p>칸은 미리 다 만든다 — 열거 밖 값(옛 값)으로 새 지표가 생기면 과금 단위가 몰래 늘어난다. 태그 조합 하나가 CloudWatch
@@ -87,6 +89,9 @@ public class UsageMetrics {
             register("biz.members.interest_fit", "참여 중인 사람 — 방 카테고리가 고른 관심사 안인가", "fit", f);
         for (String st : UsageStatsService.WITHDRAWAL_STAGES)
             register("biz.members.withdrawn_stage", "탈퇴자 — 어디까지 써 보고 나갔나", "stage", st);
+        for (String screen : ScreenViewRecorder.SCREEN_NAMES)
+            for (String w : List.of("today", "7d"))
+                register("biz.screen.viewers", "화면을 연 사람 수 — 오늘·최근 7일", "screen", screen, "window", w);
     }
 
     /** tags 는 (키, 값) 쌍을 이어 쓴다. 칸은 이름과 값들로 찾는다({@link #key}). */
@@ -112,6 +117,12 @@ public class UsageMetrics {
         run("방 구성", () -> applyRooms(stats.rooms()));
         run("자동 인증", () -> applyAuto(stats.autoVerification()));
         run("회원 이용", () -> applyMembers(stats.members()));
+        run("화면 조회", () -> applyScreens(stats.screens()));
+    }
+
+    void applyScreens(UsageStatsService.ScreenViewers v) {
+        v.today().forEach((screen, n) -> set(key("biz.screen.viewers", screen, "today"), n));
+        v.last7d().forEach((screen, n) -> set(key("biz.screen.viewers", screen, "7d"), n));
     }
 
     void applyMembers(UsageStatsService.MemberUsage m) {

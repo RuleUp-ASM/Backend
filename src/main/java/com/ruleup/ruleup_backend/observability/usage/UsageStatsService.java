@@ -20,7 +20,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 서비스 이용 지표 — 방 구성(그룹·솔로 × 자동·수동)·자동 인증 진행·관심사와 루틴·티어·탈퇴 단계를 「지금」 기준으로 센다. 게이지 {@link UsageMetrics} 가 쓴다.
+ * 서비스 이용 지표 — 방 구성(그룹·솔로 × 자동·수동)·자동 인증 진행·관심사와 루틴·티어·탈퇴 단계·화면 조회를 「지금」 기준으로 센다. 게이지 {@link UsageMetrics} 가 쓴다.
  *
  * <p>회원 범위는 회원 구성({@link com.ruleup.ruleup_backend.admin.stats.MemberProfileService})과 같다
  * ({@link MemberScope}) — 탈퇴자·운영자·개발자 시험 계정은 빼고 센다.
@@ -229,6 +229,28 @@ public class UsageStatsService {
         WITHDRAWAL_STAGES.forEach(k -> stage.put(k, num(w.get(k))));
 
         return new MemberUsage(tiers, fit, stage);
+    }
+
+    /** 화면별 본 사람 수 — 오늘(KST)과 오늘 포함 최근 7일. {@link ScreenViewRecorder#SCREEN_NAMES} 칸을 0 으로 채운다. */
+    public record ScreenViewers(Map<String, Long> today, Map<String, Long> last7d) {}
+
+    @Transactional(readOnly = true)
+    public ScreenViewers screens() {
+        LocalDate today = LocalDate.now(clock.withZone(KST));
+        Map<String, Long> day = new LinkedHashMap<>();
+        Map<String, Long> week = new LinkedHashMap<>();
+        ScreenViewRecorder.SCREEN_NAMES.forEach(k -> {
+            day.put(k, 0L);
+            week.put(k, 0L);
+        });
+        jdbc.query("SELECT v.screen AS k, COUNT(DISTINCT IF(v.view_date = ?, v.user_id, NULL)) AS d1,"
+                        + " COUNT(DISTINCT v.user_id) AS d7 FROM user_screen_views v JOIN users u ON u.id = v.user_id"
+                        + " WHERE v.view_date >= ? AND " + scope + " GROUP BY k",
+                rs -> {
+                    day.put(rs.getString("k"), rs.getLong("d1"));
+                    week.put(rs.getString("k"), rs.getLong("d7"));
+                }, today, today.minusDays(6));
+        return new ScreenViewers(day, week);
     }
 
     static long num(Object v) {
