@@ -3,8 +3,9 @@
 prod 전용 — stg 의 가입·로그인 수는 QA 가 만든 값이라 추세로 볼 의미가 없어 stg 는 biz.* 를 내보내지도 않는다(CloudWatchMetricsConfig).
 ④ 회원 구성(biz.members.*)도 같다 — prod 반영 전 확인용으로 stg 에서도 내보내던 예외는 지웠다(#356).
 
-네 묶음: ① 로그인·가입 ② 챌린지 참여(초안·생성·가입) ③ 인증(자동 vs 수동)
-④ 회원 구성(나잇대·성별·소셜·관심사·동의·활동·방 참여 경로·참여 방 수 순위).
+다섯 묶음: ① 로그인·가입 ② 챌린지 참여(초안·생성·가입) ③ 인증(자동 vs 수동)
+④ 회원 구성(나잇대·성별·소셜·관심사·동의·활동·방 참여 경로·참여 방 수 순위)
+⑤ 서비스 이용(UsageMetrics — 방 구성·자동 인증 진행·관심사 안팎·티어·탈퇴 시점·화면 조회).
 묶음마다 첫 줄은 「대시보드에서 고른 기간 전체」의 합계·비율(숫자 칸) — 발표·보고 자료에 그대로 옮긴다. 그 아래가 1시간 단위 추세.
 ④ 는 게이지라 합계가 아니라 「지금 값」이고, 분포 칸(막대·원)도 가장 최근 값을 그린다.
 사용: python business_dashboard.py [prod]   (prod 만 받는다)"""
@@ -90,6 +91,84 @@ def rooms_section(g, latest):
     y+=8
     row(('참여 경로 추이',[p(k,label=l) for k,l in paths],None))
 
+def usage_section():
+    """⑤ 서비스 이용 — UsageMetrics(biz.rooms.*·biz.auto.*·biz.screen.*)와 MemberProfileMetrics 의 탈퇴 경과.
+    게이지라 「지금 값」. 비율은 여기서 계산한다 — 서버가 비율을 내면 분모 0 과 진짜 0% 를 가를 수 없다."""
+    g=lambda name,*tags,**o:m(f'{name}.value',*tags,stat='Maximum',**o)
+    latest={'setPeriodToTimeRange':False,'period':900}
+    modes=[('group','그룹'),('solo','솔로')]; vers=[('auto','자동'),('manual','수동')]
+    rc=lambda mo,v,st,**o:g('biz.rooms.count','mode',mo,'verification',v,'status',st,**o)
+    ms=lambda mo,v,**o:g('biz.rooms.memberships','mode',mo,'verification',v,**o)
+    text(f'## ⑤ 서비스 이용 ({ENV}) — 10분마다 갱신, 지금 값. 방은 시작 전·진행 중이고 회원(탈퇴·운영자·제외 계정 빼고)이 참여 중인 방')
+    # 방 수 — 상태 두 칸을 더해 모드 × 방식 네 칸으로
+    room_ids=[]; room_metrics=[]
+    for mo,_ in modes:
+        for v,_ in vers:
+            for st in ('upcoming','active'):
+                i=f'r_{mo}_{v}_{st}'; room_ids.append(i); room_metrics.append(rc(mo,v,st,id=i,visible=False))
+    add=lambda ids:'+'.join(f'FILL({i},0)' for i in ids)
+    pick=lambda key:[i for i in room_ids if key in i]
+    totals(('지금 있는 방 수',room_metrics+[expr(add(pick('_group_')),'그룹 방','rg'),expr(add(pick('_solo_')),'솔로 방','rs'),
+                                         expr(add(pick('_auto_')),'자동 인증 방','ra'),expr(add(pick('_manual_')),'수동 인증 방','rm')],latest),
+           ('참여 중인 사람 수 — 한 사람이 두 칸에 다 있을 수 있다',
+            [g('biz.rooms.people_by_mode','mode',k,label=f'{l} 방') for k,l in modes]
+            +[g('biz.rooms.people_by_verification','verification',k,label=f'{l} 인증 방') for k,l in vers],latest))
+    mem_ids=[(mo,v,f'm_{mo}_{v}') for mo,_ in modes for v,_ in vers]
+    totals(('방당 평균 인원(명) — 참여 인원 합 ÷ 방 수',
+            room_metrics+[ms(mo,v,id=i,visible=False) for mo,v,i in mem_ids]
+            +[expr(f'IF({add(pick("_"+mo+"_"+v+"_"))}>0, FILL({i},0)/({add(pick("_"+mo+"_"+v+"_"))}))',
+                   f'{dict(modes)[mo]} · {dict(vers)[v]}',f'avg_{mo}_{v}') for mo,v,i in mem_ids],latest))
+    row(('방 수 — 모드 × 인증 방식',room_metrics+[expr(add(pick(f'_{mo}_{v}_')),f'{ml} · {vl}',f'p_{mo}_{v}')
+                                              for mo,ml in modes for v,vl in vers],latest),
+        ('참여 인원(방 × 사람) — 모드 × 인증 방식',[ms(mo,v,label=f'{ml} · {vl}') for mo,ml in modes for v,vl in vers],latest),
+        view='pie')
+
+    # 자동 인증 — sync 를 보내는 사람·멈춘 이유·확정 판정
+    ap=lambda st,**o:g('biz.auto.people','state',st,**o)
+    jd=lambda r,**o:g('biz.auto.judgments','result',r,**o)
+    jp=lambda r,**o:g('biz.auto.judged_people','result',r,**o)
+    stall=[('ok','정상(1일 안 sync)'),('pending_setup','셋업 안 함'),('permission_missing','권한 없음'),
+           ('just_joined','막 들어옴(1일 안)'),('never_synced','sync 한 번도 없음'),('sync_stale','sync 1일 넘게 끊김')]
+    totals(('자동 인증 — 진행 중인 자동 방의 사람 · 신호(sync)를 보내는 사람',
+            [ap('in_room',label='자동 방 참여 중'),ap('synced_1d',label='1일 안 sync'),ap('synced_7d',label='7일 안 sync'),
+             ap('in_room',id='ai',visible=False),ap('synced_1d',id='a1',visible=False),
+             expr('IF(FILL(ai,0)>0, 100*FILL(a1,0)/FILL(ai,0))','실제로 하는 비율(%, 1일)','ar')],latest),
+           ('신호를 보낸 사람 중 성공률(%) — 확정된 최근 7일',
+            [jd('success',id='js',visible=False),jd('failed_measured',id='jf',visible=False),
+             jd('failed_no_signal',id='jn',visible=False),jd('failed_permission',id='jx',visible=False),
+             jp('succeeded',id='ps',visible=False),jp('failed_only',id='pf',visible=False),
+             expr('IF(FILL(js,0)+FILL(jf,0)>0, 100*FILL(js,0)/(FILL(js,0)+FILL(jf,0)))','판정 기준(측정된 판정 중 성공)','jr'),
+             expr('IF(FILL(ps,0)+FILL(pf,0)>0, 100*FILL(ps,0)/(FILL(ps,0)+FILL(pf,0)))','사람 기준(한 번이라도 성공)','pr'),
+             expr('IF(FILL(js,0)+FILL(jf,0)+FILL(jn,0)+FILL(jx,0)>0, 100*(FILL(jn,0)+FILL(jx,0))/(FILL(js,0)+FILL(jf,0)+FILL(jn,0)+FILL(jx,0)))',
+                  '판정 불가 비율(신호·권한 없음)','nr')],latest))
+    row(('자동 방에 들어갔지만 진행이 안 되는 이유 — 멤버십(방 × 사람)',[g('biz.auto.stall','reason',k,label=l) for k,l in stall],latest),
+        ('확정된 최근 7일 자동 판정',[jd('success',label='성공'),jd('failed_measured',label='실패 — 신호는 왔는데 목표 미달'),
+                                  jd('failed_no_signal',label='실패 — 신호 없음'),jd('failed_permission',label='실패 — 권한 없음')],latest),
+        view='pie')
+
+    # 관심사 안팎 · 티어 · 탈퇴 시점
+    fit=[('interest_only','관심사 안에서만'),('mixed','관심사 밖도 함께'),('outside_only','관심사 밖에서만'),('no_interest','관심사 안 고름')]
+    tiers=[('unranked','언랭크'),('bronze','브론즈'),('silver','실버'),('gold','골드'),('diamond','다이아'),('ruby','루비')]
+    lived=[('1h','1시간 안'),('1d','하루 안'),('7d','일주일 안'),('later','일주일 뒤')]
+    stages=[('before_room','방에 안 들어가 봄'),('no_judgment','방엔 들어갔지만 판정 전'),('after_judgment','판정까지 받아 봄')]
+    row(('참여 중인 사람 — 방 카테고리가 고른 관심사 안인가',[g('biz.members.interest_fit','fit',k,label=l) for k,l in fit],latest),
+        ('티어별 회원 수(표시 티어)',[g('biz.members.tier','tier',k,label=l) for k,l in tiers],latest),
+        ('탈퇴 — 가입 후 얼마 만에',[g('biz.members.withdrawn','lived',k,label=l) for k,l in lived],latest),
+        ('탈퇴 — 어디까지 써 보고',[g('biz.members.withdrawn_stage','stage',k,label=l) for k,l in stages],latest),
+        view='pie')
+
+    # 화면 조회 — 서버는 API 호출을 본다. home(앱을 연 사람)이 분모
+    screens=[('room_home','방 홈'),('feed','피드'),('room_ranking','방 안 랭킹'),('cross_ranking','그룹 랭킹(방 밖)'),
+             ('stats','통계'),('calendar','기록(캘린더)'),('tier','티어'),('members','멤버 목록')]
+    sv=lambda sc,w,**o:g('biz.screen.viewers','screen',sc,'window',w,**o)
+    row(('화면을 연 사람 수 — 오늘',[sv('home','today',label='홈(앱을 연 사람)')]+[sv(k,'today',label=l) for k,l in screens],latest),
+        ('화면을 연 사람 비율(%) — 최근 7일, 홈을 연 사람 중',
+         [sv('home','7d',id='h7',visible=False)]+[sv(k,'7d',id=f's_{k}',visible=False) for k,_ in screens]
+         +[expr(f'IF(FILL(h7,0)>0, 100*FILL(s_{k},0)/FILL(h7,0))',l,f'q_{k}') for k,l in screens],latest),
+        view='bar')
+    row(('자동 인증 — sync 보내는 사람 추이',[ap('in_room',label='자동 방 참여 중'),ap('synced_1d',label='1일 안 sync')],None),
+        ('화면을 연 사람 추이 — 오늘 칸',[sv('home','today',label='홈')]+[sv(k,'today',label=l) for k,l in screens],None))
+
 # ---------------------------------------------------------------- ① 로그인 · 가입
 text(f'## ① 로그인 · 가입 ({ENV})')
 totals(('기간 합계',[m('biz.signup.count','result','success',label='가입 완료'),
@@ -167,5 +246,7 @@ row(('오늘 진행률(%) — 판정 행이 열린 멤버 중 성공',[m('biz.ve
 
 # ---------------------------------------------------------------- ④ 회원 구성
 members_section()
+# ---------------------------------------------------------------- ⑤ 서비스 이용
+usage_section()
 cw.put_dashboard(DashboardName=f'ruleup-{ENV}-business',DashboardBody=json.dumps({'widgets':widgets},ensure_ascii=False))
 print('ok', len(widgets))
