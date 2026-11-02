@@ -220,6 +220,17 @@ public class User extends AssignedIdEntity {
         return u;
     }
 
+    /**
+     * 미리 정한 id 로 만든다 — 심사 계정 시드 전용. 시드는 계정 UUID 를 먼저 발급해(계획 단계) 운영자가 코드 설정에
+     * 묶게 하고, 적용 단계에서 같은 UUID 로 행을 만든다(심사 계정 테크 스펙 5-3).
+     */
+    public static User createWithId(UUID id, OAuthProvider provider, String oauthSubject, String nickname,
+                                    List<String> interestCategories) {
+        User u = create(provider, oauthSubject, null, nickname, null, interestCategories);
+        u.id = java.util.Objects.requireNonNull(id);
+        return u;
+    }
+
     // ===== 개인정보(user_information) 위임 접근자 =====
     public String getEmail()       { return (information != null) ? information.getEmail() : null; }
     public LocalDate getBirthDate(){ return (information != null) ? information.getBirthDate() : null; }

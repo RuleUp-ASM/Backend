@@ -38,6 +38,7 @@ public class SecurityConfig {
             "/api/v1/auth/oauth/**",         // 4.1 / 4.2 소셜 로그인 (+ /callback)
             "/api/v1/auth/signup",           // 4.3 가입
             "/api/v1/auth/refresh",          // 4.4 토큰 재발급 (refreshToken 사용)
+            "/api/v1/auth/review-login",     // 심사 코드 로그인 (꺼져 있으면 404)
             "/api/v1/nicknames/**",          // 4.6 닉네임 검사
             "/api/v1/categories",            // 4.7 카테고리 마스터
             "/api/v1/app-links/check",       // 딥링크 진입 시점 — 아직 로그인 전일 수 있다

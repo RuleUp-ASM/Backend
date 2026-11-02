@@ -35,7 +35,7 @@ import java.util.UUID;
 public class UserAccountService {
 
     /** 탈퇴 확인 문구 — 서버 검증 문자열로 계약의 일부. */
-    static final String CONFIRM_PHRASE = "탈퇴할게요";
+    public static final String CONFIRM_PHRASE = "탈퇴할게요";
     /** 개인정보 아카이브 보존 기간(탈퇴 후 복원 가능 기간). */
     private static final long ARCHIVE_RETENTION_DAYS = 365;
     private static final String RESTORE_NOTE = "1년 안에 같은 소셜 계정으로 로그인하면 기록이 복원돼요";

@@ -329,14 +329,7 @@ public class ChallengeMemberService {
             }
 
 
-            if (!closeIfLastMember(c) && c.isOwner(userId)) {
-                c.convertToBotOwner(now);
-                notifyBotOwnerActivated(c, userId);
-            }
-            me.leaveExternally(now, reason);       // rejoinAt=null — 재입장 대기 없음
-            c.bumpVersion();
-            muteCleaner.clearMute(userId, challengeId);
-            eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, reason));
+            leaveLocked(c, me, reason, now);
             left++;
         }
 
@@ -345,6 +338,37 @@ public class ChallengeMemberService {
 
         if (left > 0) log.info("회원 탈퇴 정리 userId={} 나간 방 {}건", userId, left);
         return left;
+    }
+
+    /**
+     * 한 방에서만 외부 사유로 내보낸다 — {@link #leaveAllExternally} 의 방 하나 몫과 같다(감점·재입장 대기 없음,
+     * 방장이면 봇방장, 마지막 멤버면 방 닫기). 심사 계정 시드 리셋이 실제 유저가 남는 방에서 심사 계정·더미만 뺄 때 쓴다.
+     *
+     * @return 내보냈으면 true — 활성 멤버가 아니었거나 방이 없으면 false
+     */
+    @Transactional
+    public boolean leaveExternally(UUID userId, UUID challengeId, String reason) {
+        Challenge c = challengeRepository.findByIdForUpdate(challengeId).orElse(null);
+        if (c == null) return false;
+        ChallengeMember me = memberRepository.findByChallengeIdAndUserId(challengeId, userId)
+                .filter(ChallengeMember::isActive).orElse(null);
+        if (me == null) return false;
+        leaveLocked(c, me, reason, Instant.now());
+        return true;
+    }
+
+    /** 방 행을 잠근 채로 한 멤버를 외부 사유로 내보낸다. */
+    private void leaveLocked(Challenge c, ChallengeMember me, String reason, Instant now) {
+        UUID userId = me.getUserId();
+        UUID challengeId = c.getId();
+        if (!closeIfLastMember(c) && c.isOwner(userId)) {
+            c.convertToBotOwner(now);
+            notifyBotOwnerActivated(c, userId);
+        }
+        me.leaveExternally(now, reason);       // rejoinAt=null — 재입장 대기 없음
+        c.bumpVersion();
+        muteCleaner.clearMute(userId, challengeId);
+        eventPublisher.publishEvent(ChallengeStatsRefreshRequested.of(challengeId, reason));
     }
 
     /**

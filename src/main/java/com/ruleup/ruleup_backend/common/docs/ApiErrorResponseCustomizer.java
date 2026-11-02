@@ -4,6 +4,7 @@ import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.examples.Example;
 import io.swagger.v3.oas.models.media.BooleanSchema;
+import io.swagger.v3.oas.models.media.IntegerSchema;
 import io.swagger.v3.oas.models.media.Content;
 import io.swagger.v3.oas.models.media.MediaType;
 import io.swagger.v3.oas.models.media.ObjectSchema;
@@ -46,8 +47,15 @@ public class ApiErrorResponseCustomizer implements OperationCustomizer {
         }
 
         ApiResponses responses = (operation.getResponses() != null) ? operation.getResponses() : new ApiResponses();
-        groupByStatus(declared.value()).forEach((status, codes) ->
-                responses.addApiResponse(String.valueOf(status.value()), errorResponse(status, codes)));
+        groupByStatus(declared.value()).forEach((status, codes) -> {
+            String key = String.valueOf(status.value());
+            ApiResponse built = errorResponse(status, codes);
+            // @Operation(responses=...) 로 선언한 응답 헤더(예: 429 Retry-After)는 에러 예시로 덮어도 남긴다.
+            ApiResponse declaredResponse = responses.get(key);
+            if (declaredResponse != null && declaredResponse.getHeaders() != null)
+                built.setHeaders(declaredResponse.getHeaders());
+            responses.addApiResponse(key, built);
+        });
         operation.setResponses(responses);
         return operation;
     }
@@ -102,7 +110,10 @@ public class ApiErrorResponseCustomizer implements OperationCustomizer {
                 .addProperty("message", new StringSchema()
                         .description("사용자에게 그대로 노출해도 되는 안내 문구"))
                 .addProperty("reason", new StringSchema()
-                        .description("세부 사유 — 해당 코드에만 실린다. 없으면 필드 자체가 생략된다."));
+                        .description("세부 사유 — 해당 코드에만 실린다. 없으면 필드 자체가 생략된다."))
+                .addProperty("retryAfterSeconds", new IntegerSchema()
+                        .description("429 일 때 다시 시도할 수 있을 때까지 남은 초 — 싣는 API 에만 있고 같은 값을 "
+                                + "`Retry-After` 헤더로도 보낸다. 없으면 필드 자체가 생략된다."));
 
         return new ObjectSchema()
                 .description("공통 응답 봉투 (실패)")

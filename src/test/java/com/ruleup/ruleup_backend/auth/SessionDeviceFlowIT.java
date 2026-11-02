@@ -544,12 +544,27 @@ class SessionDeviceFlowIT {
         }
 
         @Test
-        @DisplayName("유예 창(30초)이 지난 뒤 직전 RT 재제출은 재사용 감지 — family 전체 무효(탈취 대응)")
+        @DisplayName("회전 몇 시간 뒤 직전 RT 가 와도 후속 RT 가 안 쓰였으면 재발급한다 — 앱이 갱신 응답을 잃은 경우(SEC-05 11/02)")
+        void stale_refresh_hours_after_rotation_keeps_session_when_successor_unused() throws Exception {
+            String tag = uniq();
+            String rt1 = read(signup(tag), "$.data.refreshToken");
+            read(refresh(rt1), "$.data.refreshToken");                 // 앱이 이 응답을 잃었다
+            jdbcTemplate.update("UPDATE refresh_tokens SET revoked_at = revoked_at - INTERVAL 5 HOUR WHERE token_hash = ?",
+                    (Object) TokenService.sha256(rt1));
+
+            MvcResult again = refresh(rt1);
+            assertThat(again.getResponse().getStatus()).isEqualTo(200);
+            assertThat(reuseDetectedCount(rt1)).as("재사용으로 기록하지 않는다").isZero();
+            assertThat(refresh(read(again, "$.data.refreshToken")).getResponse().getStatus()).isEqualTo(200);
+        }
+
+        @Test
+        @DisplayName("유예 창(12시간)이 지난 뒤 직전 RT 재제출은 재사용 감지 — family 전체 무효(탈취 대응)")
         void reuse_after_grace_window_revokes_whole_family() throws Exception {
             String tag = uniq();
             String rt1 = read(signup(tag), "$.data.refreshToken");
             String rt2 = read(refresh(rt1), "$.data.refreshToken");   // rt1 은 이 시점에 revoke
-            jdbcTemplate.update("UPDATE refresh_tokens SET revoked_at = revoked_at - INTERVAL 31 SECOND WHERE token_hash = ?",
+            jdbcTemplate.update("UPDATE refresh_tokens SET revoked_at = revoked_at - INTERVAL 12 HOUR - INTERVAL 1 SECOND WHERE token_hash = ?",
                     (Object) TokenService.sha256(rt1));
 
             // 탈취범이 rt1 을 재사용 → 401 + family 전체 revoke

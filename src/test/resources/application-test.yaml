@@ -22,6 +22,35 @@ app:
     # 통합 테스트는 전부 127.0.0.1 로 잡혀 한 윈도우를 공유한다 → 운영 한도(60/분)면
     # 테스트 개수에 따라 429가 터진다. 한도 자체는 NicknameCheckRateLimiterTest 가 검증한다.
     max-per-minute: 100000
+  # 심사 계정(심사 계정 테크 스펙). 고정 UUID 라 다른 테스트가 가입으로 만드는 계정과 겹치지 않아
+  # 평소 동작에는 영향이 없다. 계정 행은 ReviewAccountFixture 가 시드처럼 직접 심는다.
+  #  · 5e01~5e06 심사 계정(코드 있음) · 5e07 코드가 폐기된 심사 계정 · 5e51 더미 멤버 · 5e61 Play 심사 계정(코드 없음)
+  #  · 코드는 judge-N 순서로 K7QM-4XRD-9WTF · A2B3-C4D5-E6F7 · Q8W9-E2R3-T4Y5 · M5N6-P7Q8-R9S2 · H3J4-K5M6-N7P8
+  #    · W2X3-Y4Z5-A6B7. judge-6 은 자동 인증 IT 전용이다(기기·동의·멤버십을 다른 테스트와 나누지 않는다)
+  #  · judge-7(P3Q4-R5S6-T7U8)은 "revoked": true — 코드 유출 대응. 로그인은 안 되고 기존 세션은 스위치와 무관하게 끊긴다
+  #  · round 는 시드 생성 모드가 발급하는 {시드 실행일 yyyyMMdd}{순번 2자리}. 이번 회차는 2029120101(만료 2030-01-01 의 31일 전)
+  #  · judge-8(B4C5-D6E7-F8G9) → 5e08 은 <b>지난 회차(2029100101) 계정</b>을 실수로 새 코드에 묶은 경우 — subject 의 회차가
+  #    round 와 달라 코드가 맞아도 로그인되지 않는다. 나머지 심사 계정의 subject 는 이번 회차다
+  #  · 만료는 MutableClock 으로 넘겨서 검증한다 — 그래서 먼 미래로 둔다
+  review-accounts: >-
+    01930c1e-5a7b-7c2d-9e4f-1a2b3c4d5e01,01930c1e-5a7b-7c2d-9e4f-1a2b3c4d5e02,
+    01930c1e-5a7b-7c2d-9e4f-1a2b3c4d5e03,01930c1e-5a7b-7c2d-9e4f-1a2b3c4d5e04,
+    01930c1e-5a7b-7c2d-9e4f-1a2b3c4d5e05,01930c1e-5a7b-7c2d-9e4f-1a2b3c4d5e06,
+    01930c1e-5a7b-7c2d-9e4f-1a2b3c4d5e07,01930c1e-5a7b-7c2d-9e4f-1a2b3c4d5e08,
+    01930c1e-5a7b-7c2d-9e4f-1a2b3c4d5e51,01930c1e-5a7b-7c2d-9e4f-1a2b3c4d5e61
+  review-login:
+    enabled: true
+    round: "2029120101"
+    expires-at: "2030-01-01T00:00:00+09:00"
+    codes: >-
+      [{"label":"judge-1","codeHash":"5902c09a4fe0fd68805ec09248a272c86e513c32b67cba756923a3a9ea955ee4","userId":"01930c1e-5a7b-7c2d-9e4f-1a2b3c4d5e01"},
+      {"label":"judge-2","codeHash":"5ff07f62e9e0fb0d3d993603bfcf355030ca2f3e945ff6d3755344fe7693d08d","userId":"01930c1e-5a7b-7c2d-9e4f-1a2b3c4d5e02"},
+      {"label":"judge-3","codeHash":"b8179045e76db0648c7a9e311897ea1834d7efa5324e7999e144b26d5d87b5d0","userId":"01930c1e-5a7b-7c2d-9e4f-1a2b3c4d5e03"},
+      {"label":"judge-4","codeHash":"2a7e742b89815b345f42a08f40d9105e27d698b885133e6170b73ed2d353efa2","userId":"01930c1e-5a7b-7c2d-9e4f-1a2b3c4d5e04"},
+      {"label":"judge-5","codeHash":"6d7b1e0e8c5682f71a9b6bb2e09510c3f16260114e1bd6fbb0a7caa44ac4eb62","userId":"01930c1e-5a7b-7c2d-9e4f-1a2b3c4d5e05"},
+      {"label":"judge-6","codeHash":"620e6f68040b60916be10f5bf83d867b21c9bdd8616bfa9dd5fb84066fbd479a","userId":"01930c1e-5a7b-7c2d-9e4f-1a2b3c4d5e06"},
+      {"label":"judge-7","codeHash":"8bbff607a751eda14ab8ec60dcd014cb137ca27e6cd9e0cc596d839bf12a164c","userId":"01930c1e-5a7b-7c2d-9e4f-1a2b3c4d5e07","revoked":true},
+      {"label":"judge-8","codeHash":"c0969c2a8c968d560f2f9bed94c09363c01b473d11161b9f8843df78becf71c5","userId":"01930c1e-5a7b-7c2d-9e4f-1a2b3c4d5e08"}]
   recommendation:
     # 짧은 테스트 동안 추천 재계산 배치가 끼어들지 않도록 첫 실행을 멀리 민다.
     rebuild-initial-delay-ms: 3600000

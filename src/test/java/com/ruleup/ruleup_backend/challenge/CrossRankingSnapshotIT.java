@@ -2,6 +2,7 @@ package com.ruleup.ruleup_backend.challenge;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.ruleup.ruleup_backend.TestcontainersConfiguration;
+import com.ruleup.ruleup_backend.challenge.service.ChallengeMemberService;
 import com.ruleup.ruleup_backend.challenge.stats.ChallengeStatsRefreshRequested;
 import com.ruleup.ruleup_backend.perf.SqlRecorder;
 import com.ruleup.ruleup_backend.room.service.CrossRankingSnapshotService;
@@ -35,6 +36,7 @@ class CrossRankingSnapshotIT extends ChallengeApiSupport {
     @Autowired CrossRankingSnapshotService snapshotService;
     @Autowired ApplicationEventPublisher events;
     @Autowired PlatformTransactionManager txManager;
+    @Autowired ChallengeMemberService memberService;
     MockMvc mvc;
 
     @Override protected MockMvc mvc() { return mvc; }
@@ -58,16 +60,20 @@ class CrossRankingSnapshotIT extends ChallengeApiSupport {
         setDays(unranked, owner.id(), 5, 4);
 
         snapshotService.refresh();
+        // 목록 첫 페이지가 아니라 myChallenge 로 본다 — 같은 DB 의 다른 테스트가 남긴 방(시드 데모 방 등)이
+        // 더 높은 성공률이면 이 방은 첫 50개 밖으로 밀린다. 방 수와 무관하게 그 방의 스냅숏 값만 확인한다.
         JsonNode first = ranking(owner, ranked);
-        JsonNode rankedItem = item(first.path("items"), ranked);
-        assertThat(rankedItem.path("memberCount").asInt()).isEqualTo(1);
-        assertThat(rankedItem.path("totalCount").asInt()).isEqualTo(50);
-        assertThat(rankedItem.path("successRate").decimalValue()).isEqualByComparingTo("0.9000");
+        JsonNode rankedMine = first.path("myChallenge");
+        assertThat(rankedMine.path("ranked").asBoolean()).isTrue();
+        assertThat(jdbcTemplate.queryForObject("SELECT member_count FROM challenge_cross_ranking_snapshot WHERE challenge_id=?",
+                Integer.class, bytes(ranked))).isEqualTo(1);
+        assertThat(rankedMine.path("totalCount").asInt()).isEqualTo(50);
+        assertThat(rankedMine.path("successRate").decimalValue()).isEqualByComparingTo("0.9000");
         String updatedAt = first.path("updatedAt").asText();
 
         setDays(ranked, owner.id(), 0, 50);
         JsonNode unchanged = ranking(owner, ranked);
-        assertThat(item(unchanged.path("items"), ranked).path("successRate").decimalValue())
+        assertThat(unchanged.path("myChallenge").path("successRate").decimalValue())
                 .isEqualByComparingTo("0.9000");
         assertThat(unchanged.path("updatedAt").asText()).isEqualTo(updatedAt);
 
@@ -79,7 +85,7 @@ class CrossRankingSnapshotIT extends ChallengeApiSupport {
 
         snapshotService.refresh();
         JsonNode refreshed = ranking(owner, ranked);
-        assertThat(item(refreshed.path("items"), ranked).path("successRate").decimalValue())
+        assertThat(refreshed.path("myChallenge").path("successRate").decimalValue())
                 .isEqualByComparingTo("0.0000");
     }
 
@@ -121,6 +127,33 @@ class CrossRankingSnapshotIT extends ChallengeApiSupport {
         assertThat(rankWrites).as(sql.toString()).isLessThanOrEqualTo(4);
     }
 
+    /**
+     * 회원 탈퇴의 방 정리(외부 나가기, 사유 VOLUNTARY)도 이탈이다. 사유 목록에 없으면 탈퇴한 회원의 참여·성공 수가 다음 일일
+     * 갱신까지 방 집계에 남아 남은 사람이 보는 순위가 틀어진다(심사 계정 리셋도 같은 사유로 내보낸다).
+     */
+    @Test
+    @DisplayName("회원 탈퇴로 방을 나가도 그 방 집계에서 곧바로 빠진다")
+    void withdrawalLeavesSnapshot() throws Exception {
+        Member owner = member(uniq("cross-wd-owner"));
+        Member leaver = member(uniq("cross-wd-leaver"));
+        UUID a = insertChallenge(owner.id(), "EXERCISE", "ACTIVE", "GROUP");
+        insertActiveMembership(a, owner.id(), "OWNER");
+        insertActiveMembership(a, leaver.id(), "MEMBER");
+        setDays(a, owner.id(), 40, 10);
+        setDays(a, leaver.id(), 50, 0);
+        snapshotService.refresh();
+        assertThat(jdbcTemplate.queryForObject("SELECT member_count FROM challenge_cross_ranking_snapshot WHERE challenge_id=?",
+                Integer.class, bytes(a))).isEqualTo(2);
+
+        memberService.leaveAllForWithdrawal(leaver.id());
+
+        Map<String, Object> snap = jdbcTemplate.queryForMap("SELECT member_count, success_count, total_count "
+                + "FROM challenge_cross_ranking_snapshot WHERE challenge_id=?", bytes(a));
+        assertThat(((Number) snap.get("member_count")).intValue()).isEqualTo(1);
+        assertThat(((Number) snap.get("success_count")).intValue()).isEqualTo(40);
+        assertThat(((Number) snap.get("total_count")).intValue()).isEqualTo(50);
+    }
+
     private int rank(UUID challengeId) {
         return jdbcTemplate.queryForObject("SELECT rank_no FROM challenge_cross_ranking_snapshot WHERE challenge_id=?",
                 Integer.class, bytes(challengeId));
@@ -131,12 +164,6 @@ class CrossRankingSnapshotIT extends ChallengeApiSupport {
                 viewer.token());
         assertThat(result.getResponse().getStatus()).isEqualTo(200);
         return OM.readTree(result.getResponse().getContentAsString()).path("data");
-    }
-
-    private JsonNode item(JsonNode items, UUID challengeId) {
-        for (JsonNode item : items)
-            if (challengeId.toString().equals(item.path("challengeId").asText())) return item;
-        throw new AssertionError("랭킹에 " + challengeId + " 가 없다");
     }
 
     private void setDays(UUID challengeId, UUID userId, int success, int fail) {

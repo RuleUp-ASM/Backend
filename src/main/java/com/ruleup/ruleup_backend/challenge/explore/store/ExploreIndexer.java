@@ -103,6 +103,18 @@ public class ExploreIndexer {
     }
 
     /**
+     * {@link #index} 와 같되 투영을 해냈는지 돌려준다 — Redis 실패·회로 열림이면 false. 실패를 삼키면 안 되는 호출부
+     * (결과를 종료 코드로 보고하는 심사 계정 시드)용이다. 원천에 방이 없으면 할 일이 없으니 true.
+     */
+    public boolean tryIndex(UUID challengeId) {
+        return circuit.tryCall(() -> {
+            Row row = loadOne(challengeId);
+            if (row == null) return;
+            apply(row);
+        });
+    }
+
+    /**
      * 방이 사라졌을 때(하드 삭제) 파생에서도 지운다.
      *
      * <p>비노출 전환과 <b>같은 경로</b>를 쓴다. 키를 하나씩 지우면 중간 실패에 일부만 남고,

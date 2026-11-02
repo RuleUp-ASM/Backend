@@ -67,6 +67,7 @@ class OpenApiDocsIT {
                 "/api/v1/auth/oauth/{provider}/callback",
                 "/api/v1/auth/signup",
                 "/api/v1/auth/refresh",
+                "/api/v1/auth/review-login",
                 "/api/v1/auth/logout",
                 "/api/v1/nicknames/check",
                 "/api/v1/categories",
@@ -239,6 +240,34 @@ class OpenApiDocsIT {
                     "$.paths['/api/v1/challenges/{challengeId}/threads'].get.responses['400']"
                             + ".content['application/json'].examples"))
                     .containsKey("CURSOR_INVALID");
+        }
+
+        @Test
+        @DisplayName("심사 코드 로그인 — 400·403·429 는 코드로, 꺼짐 404 는 본문 없이, 429 는 Retry-After 헤더까지 실린다")
+        void reviewLoginErrors() throws Exception {
+            String op = "$.paths['/api/v1/auth/review-login'].post";
+            assertThat(doc().<Map<String, Object>>read(op + ".responses['400'].content['application/json'].examples"))
+                    .containsKey("INVALID_REVIEW_CODE");
+            assertThat(doc().<Map<String, Object>>read(op + ".responses['403'].content['application/json'].examples"))
+                    .containsKey("ACCOUNT_BANNED");
+            assertThat(doc().<Map<String, Object>>read(op + ".responses['429'].content['application/json'].examples"))
+                    .containsKey("TOO_MANY_ATTEMPTS");
+            // 앱은 남은 초만큼 확인 버튼을 막는다 — 헤더가 에러 예시로 덮여 사라지면 안 된다.
+            assertThat(doc().<Map<String, Object>>read(op + ".responses['429'].headers")).containsKey("Retry-After");
+            // 꺼져 있으면 경로가 없는 것처럼 본문 없는 404 다 — 에러 봉투 예시가 실리면 클라가 code 를 기다린다.
+            Map<String, Object> notFound = doc().read(op + ".responses['404']");
+            assertThat(notFound).doesNotContainKey("content");
+            // 로그인 전 단계라 토큰 없이 부른다.
+            assertThat(doc().<Map<String, Object>>read(op)).doesNotContainKey("security");
+        }
+
+        @Test
+        @DisplayName("에러 봉투 스키마에 429 의 남은 초(retryAfterSeconds)가 있다")
+        void envelopeHasRetryAfterSeconds() throws Exception {
+            assertThat(doc().<Map<String, Object>>read(
+                    "$.paths['/api/v1/auth/review-login'].post.responses['429'].content['application/json']"
+                            + ".schema.properties.error.properties"))
+                    .containsKey("retryAfterSeconds");
         }
 
         @Test

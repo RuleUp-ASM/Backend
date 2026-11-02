@@ -15,6 +15,9 @@ package com.ruleup.ruleup_backend.config.runtime;
  * <p>{@link #MIGRATE} 는 스키마 마이그레이션만 돌고 끝나는 일회성 태스크다. 마이그레이션 전용 DB 계정
  * (DDL 권한)은 이 역할에만 주고, 상시 서비스(api·admin)의 계정에서는 DDL 을 뺀다.
  *
+ * <p>{@link #REVIEW_SEED} 는 심사 계정 시드(생성·리셋)만 돌고 끝나는 일회성 태스크다 — 엔드포인트도 배경 작업도 없다.
+ * DDL 이 필요 없으므로 일반 API 와 같은 DB 계정으로 띄운다.
+ *
  * <p>{@link #ALL} 은 로컬·시험 전용이다. 배포 프로필(stg·prod)에서 ALL 로 뜨면
  * {@link RuntimeRoleGuard} 가 기동을 막는다 — 관리자 경로가 공개 ALB 뒤에 다시 열리는 길이기 때문이다.
  */
@@ -22,6 +25,7 @@ public enum RuntimeRole {
     API,
     ADMIN,
     MIGRATE,
+    REVIEW_SEED,
     ALL;
 
     public boolean servesPublicApi() {

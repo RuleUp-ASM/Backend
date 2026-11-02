@@ -45,7 +45,7 @@ public record OAuthLoginResponse(
         @Schema(description = "로그인한 사용자 정보. (신규면 null)")
         UserResponse user,
 
-        @Schema(description = "이번 로그인 기준으로 서버에 저장된 기기 스펙(보낸 값을 그대로 되돌려준다). (신규면 null)")
+        @Schema(description = "이번 로그인 기준으로 서버에 저장된 기기 스펙(보낸 값을 그대로 되돌려준다). (신규·심사 코드 로그인이면 null)")
         DeviceSpecResponse device,
 
         // 신규 사용자
@@ -68,6 +68,11 @@ public record OAuthLoginResponse(
                 false 면 평소대로 닉네임·관심사·약관을 입력받아 가입을 진행한다.""",
                 example = "false")
         Boolean returningUser,
+
+        @Schema(description = """
+                탈퇴했던 계정을 이번 로그인으로 되살렸는지. 같은 계정 id 로 점수·이력이 그대로 돌아온다(참여하던 방은 돌아오지 않는다).
+                신규 분기(isNewUser=true)에서는 항상 false.""",
+                example = "false", requiredMode = Schema.RequiredMode.REQUIRED)
         boolean restored) {
 
     public OAuthLoginResponse withRestored(boolean value) {
@@ -138,6 +143,20 @@ public record OAuthLoginResponse(
                 UserResponse.from(user, summary, lock),
                 DeviceSpecResponse.from(user),
                 null, null, null, null, false);
+    }
+
+    /**
+     * 심사 코드 로그인 — 기존 회원 응답과 같은 구조이고 {@code device} 만 null 이다. 코드 로그인은 기기 정보를 받지 않는다
+     * (심사 계정 오픈 이슈 #7).
+     */
+    public static OAuthLoginResponse reviewCode(TokenService.TokenPair pair, User user, UserScoreSummary summary,
+                                                int flushIntervalSec, Sanction lock, boolean restored) {
+        return new OAuthLoginResponse(false,
+                pair.accessToken(), pair.refreshToken(), "Bearer", pair.expiresIn(),
+                flushIntervalSec,
+                UserResponse.from(user, summary, lock),
+                null,
+                null, null, null, false, restored);
     }
 
     /** 신규 분기. returningUser=true 면 예전에 탈퇴한 계정이 있어 입력 없이 복원될 사람이다. */

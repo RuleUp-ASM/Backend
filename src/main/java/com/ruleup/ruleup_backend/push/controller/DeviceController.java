@@ -26,7 +26,13 @@ public class DeviceController {
     private final DeviceTokenService deviceTokenService;
 
     @Operation(summary = "FCM 토큰 등록",
-            description = "로그인 유저의 디바이스 FCM 토큰을 등록(upsert). 앱 최초 획득·onNewToken 시 호출.")
+            description = """
+                    로그인 유저의 디바이스 FCM 토큰을 등록(upsert). 앱 최초 획득·onNewToken 시 호출.
+                    등록과 함께 이 유저의 다른 활성 토큰은 내린다(단일 활성 기기).
+
+                    **심사 코드 계정**(`POST /api/v1/auth/review-login` 으로 들어온 계정)은 푸시를 받지 않는다 —
+                    200 으로 받되 저장하지 않고, 그 계정에 남아 있던 활성 토큰도 내린다. 같은 기기의 다른 계정 토큰은 건드리지 않는다.
+                    앱은 분기할 필요 없이 평소대로 호출하면 된다.""")
     @PostMapping
     public ApiResponse<Void> register(@AuthenticationPrincipal String userId,
                                       @Valid @RequestBody RegisterRequest request) {
