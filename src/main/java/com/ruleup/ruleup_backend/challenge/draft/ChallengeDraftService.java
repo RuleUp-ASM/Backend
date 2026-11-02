@@ -24,6 +24,7 @@ import com.ruleup.ruleup_backend.routine.domain.RoutineTemplate;
 import com.ruleup.ruleup_backend.recommendation.service.RecommendationShuffle;
 import com.ruleup.ruleup_backend.routine.match.RoutineCandidate;
 import com.ruleup.ruleup_backend.routine.match.RoutineMatch;
+import com.ruleup.ruleup_backend.routine.match.RunningIntent;
 import com.ruleup.ruleup_backend.routine.service.RoutineCatalog;
 import com.ruleup.ruleup_backend.score.domain.Tier;
 import com.ruleup.ruleup_backend.score.repository.UserScoreSummaryRepository;
@@ -129,6 +130,12 @@ public class ChallengeDraftService {
         String category = (template != null)
                 ? template.getCategory().name()
                 : sanitizeCategory(s.category());
+        // 러닝 방을 걷기·이동 거리 루틴에 붙이면 하루 합계로 판정돼 걷기만 해도 성공한다 — 수동으로 돌린다(#368).
+        // 카테고리는 매칭했던 루틴 것을 그대로 둔다(러닝은 운동이다).
+        if (RunningIntent.blocksAuto(template, description, title, correctedDescription)) {
+            log.info("draft_running_manual templateId={} userId={}", template.getId(), userId);
+            template = null;
+        }
         String mode = sanitizeMode(s.participationType());
         int weeklyCount = sanitizeWeeklyCount(s.weeklyCount());
 

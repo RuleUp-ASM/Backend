@@ -23,6 +23,7 @@ import com.ruleup.ruleup_backend.routine.domain.ParamSpec;
 import com.ruleup.ruleup_backend.routine.domain.RoutineTemplate;
 import com.ruleup.ruleup_backend.routine.domain.SelectedMethod;
 import com.ruleup.ruleup_backend.routine.domain.VerificationConfig;
+import com.ruleup.ruleup_backend.routine.match.RunningIntent;
 import com.ruleup.ruleup_backend.routine.service.RoutineCatalog;
 import com.ruleup.ruleup_backend.score.repository.UserScoreSummaryRepository;
 import com.ruleup.ruleup_backend.score.domain.Tier;
@@ -131,7 +132,7 @@ public class ChallengeCreationService {
 
         RoutineTemplate template = (draft.getTemplateId() != null)
                 ? catalog.findById(draft.getTemplateId()).orElse(null) : null;
-        VerificationConfig verification = resolveVerification(req.verification(), original, template);
+        VerificationConfig verification = resolveVerification(req.verification(), original, template, title, description);
         boolean auto = verification.selectedMethod() == SelectedMethod.AUTO;
 
         ParamsResult params = validateParams(template, req.params(), original.params());
@@ -327,7 +328,8 @@ public class ChallengeCreationService {
      * 초안이 MANUAL(자동 불가)인데 AUTO 요청은 거부(역방향 불가).
      */
     private VerificationConfig resolveVerification(CreateChallengeRequest.Verification requested,
-                                                   DraftView original, RoutineTemplate template) {
+                                                   DraftView original, RoutineTemplate template,
+                                                   String title, String description) {
         if (requested == null || requested.type() == null)
             throw new BusinessException(ErrorCode.ROUTINE_METHOD_REQUIRED);
         boolean draftAuto = "AUTO".equals(original.verification().type());
@@ -339,6 +341,12 @@ public class ChallengeCreationService {
         }
         if (method == SelectedMethod.AUTO && (!draftAuto || template == null || !template.supportsAuto()))
             throw new BusinessException(ErrorCode.ROUTINE_AUTO_NOT_SUPPORTED);
+        // 걷기·이동 거리 루틴으로 고른 초안의 제목을 「러닝」으로 고쳐도 하루 합계로 판정돼 걷기만 해도 성공한다.
+        // 에러로 막지 않고 수동으로 만든다 — AUTO→MANUAL 은 원래 허용되는 방향이고, 응답의 verification 이 알려 준다(#368).
+        if (method == SelectedMethod.AUTO && RunningIntent.blocksAuto(template, title, description)) {
+            log.info("challenge_create_running_manual templateId={}", template.getId());
+            method = SelectedMethod.MANUAL;
+        }
         return (method == SelectedMethod.AUTO)
                 ? VerificationConfig.auto(template)
                 : VerificationConfig.manual(template);
