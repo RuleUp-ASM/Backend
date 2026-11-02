@@ -254,9 +254,9 @@ app:
     app-redirect-uri: ${APP_OAUTH_REDIRECT_URI:ruleup://login/callback}
   llm:
     # 활성 LLM provider. fallback(기본) | gemini | bedrock. env(LLM_PROVIDER)로 스위치.
-    #  · fallback → FallbackLlmClient 활성. Gemini 우선 호출, 실패(null) 시 Bedrock Nova 로 폴백.
+    #  · fallback → FallbackLlmClient 활성. Gemini 우선 호출, 실패(null) 시 Bedrock(Claude Haiku 4.5) 으로 폴백.
     #  · gemini   → GeminiClient 단독(Google Gemini)
-    #  · bedrock  → BedrockNovaClient 단독(AWS Bedrock Nova, 자격증명=ECS 태스크 역할)
+    #  · bedrock  → BedrockNovaClient 단독(AWS Bedrock Converse, 자격증명=ECS 태스크 역할)
     provider: ${LLM_PROVIDER:fallback}
     gemini:
       api-key: ${GEMINI_API_KEY:}                  # 비밀키만 env (없어도 기동은 됨, 호출 시에만 필요)
@@ -267,7 +267,11 @@ app:
       retry-backoff-ms: ${GEMINI_RETRY_BACKOFF_MS:300}  # 지수 백오프 base (300→600→1200ms)
     bedrock:
       region: ${BEDROCK_REGION:ap-northeast-2}     # 서울(Bedrock·모델 승인이 된 리전)
-      model-id: ${BEDROCK_MODEL_ID:apac.amazon.nova-lite-v1:0}  # Nova Lite APAC 크로스리전 추론 프로파일
+      # 폴백 모델: Claude Haiku 4.5 global 추론 프로파일(APAC 프로파일이 없어 global — 요청이 아시아 밖에서 처리될 수 있다).
+      # 2026-11-02 274케이스 비교에서 Nova 2 Lite 보다 정확(90.5% vs 89.8%)하고 위험 출력 0·재실행 흔들림 0,
+      # deepseek 보다 2배 넘게 빠르다. 태스크 역할에 bedrock-haiku-fallback 인라인 정책이 있어야 한다.
+      # 되돌리려면 env BEDROCK_MODEL_ID=apac.amazon.nova-lite-v1:0 (Nova 권한은 그대로 남아 있다).
+      model-id: ${BEDROCK_MODEL_ID:global.anthropic.claude-haiku-4-5-20251001-v1:0}
       timeout-ms: ${BEDROCK_TIMEOUT_MS:8000}       # Converse 총 호출 타임아웃
       max-retries: ${BEDROCK_MAX_RETRIES:2}        # 쓰로틀 재시도 횟수
       retry-backoff-ms: ${BEDROCK_RETRY_BACKOFF_MS:300}

@@ -37,7 +37,7 @@ public class FallbackLlmClient implements LlmClient {
     private static final Logger log = LoggerFactory.getLogger(FallbackLlmClient.class);
 
     private final GeminiClient primary;   // Gemini 우선
-    private final BedrockNovaClient fallback; // Nova 폴백
+    private final BedrockNovaClient fallback; // Bedrock(Haiku 4.5) 폴백
     private final Timer callTimer;
     private final Counter callFailed;
     private final OpsSignals ops;
@@ -49,8 +49,8 @@ public class FallbackLlmClient implements LlmClient {
         this.callTimer = Timer.builder("llm.call")
                 .description("LLM 호출 한 번(재시도·폴백 포함)의 소요 시간").register(registry);
         this.callFailed = Counter.builder("llm.call.failed")
-                .description("Gemini·Nova 모두 실패해 결과 없이 끝난 호출 수").register(registry);
-        log.info("LLM provider=fallback (primary=gemini configured={}, fallback=nova configured={})",
+                .description("Gemini·Bedrock 모두 실패해 결과 없이 끝난 호출 수").register(registry);
+        log.info("LLM provider=fallback (primary=gemini configured={}, fallback=bedrock configured={})",
                 primary.isConfigured(), fallback.isConfigured());
     }
 
