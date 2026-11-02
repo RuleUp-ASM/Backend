@@ -267,7 +267,7 @@ def build(reg, health_check_id=None):
     for service in ('ruleup-admin', 'ruleup-api'):
         add(api, 'SEC-01', service.removeprefix('ruleup-'), '관리자 로그인 실패 ≥5회/10분 — 침해 확정이 아니다(RB-05 로 조사)',
             **metric('RuleUp/Security', 'AdminLoginFailedCount', {'Env': env, 'Service': service}, 'Sum', 600, 1, 1, 5, GE, 'notBreaching'))
-    add(api, 'SEC-05', None, 'refresh 토큰 재사용 탐지 ≥1건/5분 — 회전 충돌·탈취를 가린다',
+    add(api, 'SEC-05', None, 'refresh 토큰 재사용 ≥1건/5분 — 12시간 유예 밖(탈취 의심·끝난 세션), 분류·사용자는 Slack 보안 알림',
         **metric('RuleUp/Security', 'RefreshReuseDetectedCount', base, 'Sum', 300, 1, 1, 1, GE, 'notBreaching'))
     add(api, 'INV-01', 'score-ledger', '점수 원장 재구성 불일치 ≥1건 — 증거를 고치지 말고 RB-05',
         **metric('RuleUp/Ops', 'InvariantViolationCount', {**base, 'Invariant': 'SCORE_LEDGER'}, 'Sum', 300, 1, 1, 1, GE, 'notBreaching'))

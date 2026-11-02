@@ -10,6 +10,7 @@ import com.ruleup.ruleup_backend.auth.dto.SignupRequest;
 import com.ruleup.ruleup_backend.auth.dto.SignupResponse;
 import com.ruleup.ruleup_backend.auth.dto.TokenResponse;
 import com.ruleup.ruleup_backend.auth.dto.UserResponse;
+import com.ruleup.ruleup_backend.observability.ops.SecuritySlackAlert;
 import com.ruleup.ruleup_backend.user.domain.*;
 import com.ruleup.ruleup_backend.auth.domain.*;
 
@@ -111,6 +112,7 @@ public class AuthService {
     private final com.ruleup.ruleup_backend.notification.service.NotificationPublisher notificationPublisher;
     private final com.ruleup.ruleup_backend.observability.BusinessMetrics businessMetrics;
     private final com.ruleup.ruleup_backend.observability.ops.SignupSlackAlert signupSlackAlert;
+    private final com.ruleup.ruleup_backend.observability.ops.SecuritySlackAlert securitySlackAlert;
     private final com.ruleup.ruleup_backend.auth.review.ReviewAccountPolicy reviewAccountPolicy;
 
     // ===== OAuth 로그인 =====
@@ -656,9 +658,16 @@ public class AuthService {
         // 재사용 감지 — 이미 폐기된 토큰이 다시 제출되면 탈취 의심 → family 전체 revoke (DB 정리 §11.3)
         // 이 메서드는 BusinessException에 대해 롤백하지 않으므로 흔적과 revoke가 401 응답 전에 커밋된다.
         if (stored.isRevoked()) {
+            // 분류는 family 를 회수하기 전에 — 회수하면 후속 토큰이 모두 폐기돼 끝난 세션과 구별되지 않는다.
+            boolean firstDetection = stored.getReuseDetectedAt() == null;
+            SecuritySlackAlert.RefreshReuse kind = classifyReuse(stored);
+            Duration sinceRevoked = Duration.between(stored.getRevokedAt(), Instant.now());
             stored.markReuseDetected();
-            opsSignals.refreshReuseDetected();   // SEC-05 — 회전 충돌인지 탈취인지는 RB-05 가 가린다
+            opsSignals.refreshReuseDetected();   // SEC-05 — 유예 밖 재사용만 온다. 무엇인지는 아래 로그·Slack 이 가린다
             refreshTokenRepository.revokeFamily(stored.getFamilyId(), Instant.now());
+            log.warn("refresh_reuse_detected userId={} kind={} sinceRevokedMs={} first={}",
+                    userId, kind, sinceRevoked.toMillis(), firstDetection);
+            if (firstDetection) securitySlackAlert.refreshReuse(userId.toString(), kind, sinceRevoked);
             throw new BusinessException(ErrorCode.SESSION_EXPIRED);
         }
         if (stored.isExpired()) throw new BusinessException(ErrorCode.SESSION_EXPIRED);
@@ -700,6 +709,25 @@ public class AuthService {
         if (stored.getRevokedAt().isBefore(Instant.now().minus(ROTATION_GRACE))) return false;
         List<RefreshToken> successors = refreshTokenRepository.findByParentTokenIdForUpdate(stored.getId());
         return !successors.isEmpty() && successors.stream().noneMatch(RefreshToken::isRevoked);
+    }
+
+    /**
+     * 유예하지 못한 재사용이 무엇인지 — {@link #inRotationGrace} 와 같은 후속 토큰을 본다.
+     * 후속이 다시 회전됐으면 두 곳이 같은 세션을 쓰는 것이고, 후속이 없거나 모두 폐기됐으면 이미 끝난 세션이며,
+     * 후속이 살아 있는데 여기까지 왔으면 유예 창(또는 토큰 수명)을 넘긴 것이다.
+     */
+    private SecuritySlackAlert.RefreshReuse classifyReuse(RefreshToken stored) {
+        List<RefreshToken> successors = refreshTokenRepository.findByParentTokenIdForUpdate(stored.getId());
+        boolean successorRotated = !successors.isEmpty() && refreshTokenRepository.existsByParentTokenIdIn(
+                successors.stream().map(RefreshToken::getId).toList());
+        return classifyReuse(successors.stream().map(RefreshToken::isRevoked).toList(), successorRotated);
+    }
+
+    /** 순수 분류 — 후속 토큰들의 폐기 여부와, 그중 하나라도 다시 회전됐는지. */
+    static SecuritySlackAlert.RefreshReuse classifyReuse(List<Boolean> successorsRevoked, boolean successorRotated) {
+        if (successorRotated) return SecuritySlackAlert.RefreshReuse.SUCCESSOR_ROTATED;
+        if (successorsRevoked.isEmpty() || !successorsRevoked.contains(false)) return SecuritySlackAlert.RefreshReuse.SESSION_ENDED;
+        return SecuritySlackAlert.RefreshReuse.GRACE_EXPIRED;
     }
 
     // ===== 로그아웃 (멱등) =====
