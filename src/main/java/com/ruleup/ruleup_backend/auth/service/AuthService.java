@@ -65,10 +65,17 @@ public class AuthService {
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     /**
-     * 회전 직후 직전 토큰을 다시 받아 주는 창. prod 에서 본 갱신 경합은 회전 뒤 3~8초에 왔다(2026-10-28·29 SEC-05 3건).
-     * 길게 두면 탈취된 직전 토큰이 통하는 창도 늘어난다.
+     * 회전 뒤 직전 토큰을 다시 받아 주는 창 — 후속 토큰이 아직 한 번도 갱신에 쓰이지 않았을 때만이다({@link #inRotationGrace}).
+     *
+     * <p>처음엔 30초였다(10/28·29 갱신 경합은 회전 뒤 3~8초). 그 뒤 10/29~11/02 prod 재사용 23건은 전부 회전 5분~11시간 뒤
+     * 직전 토큰으로 왔고 21건은 후속 토큰이 한 번도 쓰이지 않았다 — 탈취가 아니라 앱이 갱신 응답을 잃은 것이고, 사용자는
+     * 강제 로그아웃됐다(다시 로그인한 사람 3명). 12시간이면 그 23건이 모두 들어온다.
+     *
+     * <p>대가: 이 창 안에서는 탈취된 직전 토큰도 새 페어를 받는다. 다만 정상 앱이 후속 토큰으로 한 번이라도 갱신하면
+     * 그 뒤 직전 토큰은 재사용 감지로 세션 전체를 끊는다. 앱이 고쳐져 유예 재발급(RefreshGraceReissueCount)이 0 에
+     * 가까워지면 다시 줄인다.
      */
-    private static final Duration ROTATION_GRACE = Duration.ofSeconds(30);
+    private static final Duration ROTATION_GRACE = Duration.ofHours(12);
     /** 임시 승인 닉네임 INSERT 충돌 시 가입 트랜잭션 재시도 상한 (DB 정리 §6). 같은 패키지 테스트가 참조. */
     static final int MAX_SIGNUP_ATTEMPTS = 3;
     /** 재시도 대상 제약 — 임시 승인 닉네임 UNIQUE. 신청 닉네임 충돌(409)은 재시도 대상이 아니다. */
@@ -632,13 +639,15 @@ public class AuthService {
         // family 를 회수해 커밋한 뒤 401 이라, 다시 켜도 이 세션으로는 이어지지 않는다(종료 스케줄러가 돌기 전이라도).
         if (reviewAccountPolicy.isCodeSessionEnded(userId)) throw endReviewSession(familyId);
 
-        // 회전 유예 — 방금 회전된 토큰이 몇 초 뒤 같은 기기에서 다시 오는 것은 탈취가 아니라 앱의 갱신 경합이다
-        // (만료된 AT 로 동시에 나간 요청들이 각자 refresh 를 부른다). 세션을 끊지 않고 같은 family 에 새 페어를 준다.
+        // 회전 유예 — 회전된 토큰이 후속 토큰보다 먼저 다시 오는 것은 탈취가 아니라 앱 쪽 사정이다
+        // (만료된 AT 로 동시에 나간 요청들이 각자 refresh 를 부르거나, 갱신 응답을 받지 못했거나 저장하지 못했다).
+        // 세션을 끊지 않고 같은 family 에 새 페어를 준다.
         if (stored.isRevoked() && inRotationGrace(stored)) {
             User user = userRepository.findByIdAndDeletedAtIsNull(userId)
                     .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_EXPIRED));
             log.info("refresh_rotation_grace userId={} sinceRotationMs={}", userId,
                     Duration.between(stored.getRevokedAt(), Instant.now()).toMillis());
+            opsSignals.refreshGraceReissued();
             TokenService.TokenPair pair = tokenService.issueRotatedPair(user, stored.getFamilyId(), stored.getId());
             if (reviewAccountPolicy.isCodeSessionEnded(userId)) throw endReviewSession(familyId);
             return TokenResponse.from(pair, syncPolicy.forUser(user));
