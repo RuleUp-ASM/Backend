@@ -23,7 +23,8 @@ import java.time.Duration;
 import java.util.List;
 
 /**
- * AWS Bedrock Converse API 로 Amazon Nova(Lite 등)를 호출하는 {@link LlmClient} 구현.
+ * AWS Bedrock Converse API 로 모델을 호출하는 {@link LlmClient} 구현. 기본 모델은 Claude Haiku 4.5
+ * (2026-11-02 Nova Lite 에서 교체 — 이름은 이력상 Nova 로 남았다).
  * {@code app.llm.provider=bedrock} 일 때만 활성화된다(Gemini 대신 주입).
  *
  * <p>자격증명은 기본 provider 체인(ECS 태스크 역할). 리전·모델은 설정으로 주입.
@@ -38,7 +39,7 @@ public class BedrockNovaClient implements LlmClient {
     private static final Logger log = LoggerFactory.getLogger(BedrockNovaClient.class);
 
     private static final String DEFAULT_REGION = "ap-northeast-2";                // 서울
-    private static final String DEFAULT_MODEL_ID = "apac.amazon.nova-lite-v1:0";  // APAC 온디맨드 크로스리전 추론 프로파일
+    private static final String DEFAULT_MODEL_ID = "global.anthropic.claude-haiku-4-5-20251001-v1:0";  // global 추론 프로파일
     private static final long DEFAULT_TIMEOUT_MS = 8000L;
     private static final int DEFAULT_MAX_RETRIES = 2;
     private static final long DEFAULT_RETRY_BACKOFF_MS = 300L;
