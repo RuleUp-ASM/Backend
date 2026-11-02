@@ -10,6 +10,7 @@ import com.ruleup.ruleup_backend.auth.dto.SignupRequest;
 import com.ruleup.ruleup_backend.auth.dto.SignupResponse;
 import com.ruleup.ruleup_backend.auth.dto.TokenResponse;
 import com.ruleup.ruleup_backend.auth.dto.UserResponse;
+import com.ruleup.ruleup_backend.observability.ops.SecuritySlackAlert;
 import com.ruleup.ruleup_backend.user.domain.*;
 import com.ruleup.ruleup_backend.auth.domain.*;
 
@@ -65,10 +66,17 @@ public class AuthService {
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     /**
-     * 회전 직후 직전 토큰을 다시 받아 주는 창. prod 에서 본 갱신 경합은 회전 뒤 3~8초에 왔다(2026-10-28·29 SEC-05 3건).
-     * 길게 두면 탈취된 직전 토큰이 통하는 창도 늘어난다.
+     * 회전 뒤 직전 토큰을 다시 받아 주는 창 — 후속 토큰이 아직 한 번도 갱신에 쓰이지 않았을 때만이다({@link #inRotationGrace}).
+     *
+     * <p>처음엔 30초였다(10/28·29 갱신 경합은 회전 뒤 3~8초). 그 뒤 10/29~11/02 prod 재사용 23건은 전부 회전 5분~11시간 뒤
+     * 직전 토큰으로 왔고 21건은 후속 토큰이 한 번도 쓰이지 않았다 — 탈취가 아니라 앱이 갱신 응답을 잃은 것이고, 사용자는
+     * 강제 로그아웃됐다(다시 로그인한 사람 3명). 12시간이면 그 23건이 모두 들어온다.
+     *
+     * <p>대가: 이 창 안에서는 탈취된 직전 토큰도 새 페어를 받는다. 다만 정상 앱이 후속 토큰으로 한 번이라도 갱신하면
+     * 그 뒤 직전 토큰은 재사용 감지로 세션 전체를 끊는다. 앱이 고쳐져 유예 재발급(RefreshGraceReissueCount)이 0 에
+     * 가까워지면 다시 줄인다.
      */
-    private static final Duration ROTATION_GRACE = Duration.ofSeconds(30);
+    private static final Duration ROTATION_GRACE = Duration.ofHours(12);
     /** 임시 승인 닉네임 INSERT 충돌 시 가입 트랜잭션 재시도 상한 (DB 정리 §6). 같은 패키지 테스트가 참조. */
     static final int MAX_SIGNUP_ATTEMPTS = 3;
     /** 재시도 대상 제약 — 임시 승인 닉네임 UNIQUE. 신청 닉네임 충돌(409)은 재시도 대상이 아니다. */
@@ -104,6 +112,7 @@ public class AuthService {
     private final com.ruleup.ruleup_backend.notification.service.NotificationPublisher notificationPublisher;
     private final com.ruleup.ruleup_backend.observability.BusinessMetrics businessMetrics;
     private final com.ruleup.ruleup_backend.observability.ops.SignupSlackAlert signupSlackAlert;
+    private final com.ruleup.ruleup_backend.observability.ops.SecuritySlackAlert securitySlackAlert;
     private final com.ruleup.ruleup_backend.auth.review.ReviewAccountPolicy reviewAccountPolicy;
 
     // ===== OAuth 로그인 =====
@@ -632,13 +641,15 @@ public class AuthService {
         // family 를 회수해 커밋한 뒤 401 이라, 다시 켜도 이 세션으로는 이어지지 않는다(종료 스케줄러가 돌기 전이라도).
         if (reviewAccountPolicy.isCodeSessionEnded(userId)) throw endReviewSession(familyId);
 
-        // 회전 유예 — 방금 회전된 토큰이 몇 초 뒤 같은 기기에서 다시 오는 것은 탈취가 아니라 앱의 갱신 경합이다
-        // (만료된 AT 로 동시에 나간 요청들이 각자 refresh 를 부른다). 세션을 끊지 않고 같은 family 에 새 페어를 준다.
+        // 회전 유예 — 회전된 토큰이 후속 토큰보다 먼저 다시 오는 것은 탈취가 아니라 앱 쪽 사정이다
+        // (만료된 AT 로 동시에 나간 요청들이 각자 refresh 를 부르거나, 갱신 응답을 받지 못했거나 저장하지 못했다).
+        // 세션을 끊지 않고 같은 family 에 새 페어를 준다.
         if (stored.isRevoked() && inRotationGrace(stored)) {
             User user = userRepository.findByIdAndDeletedAtIsNull(userId)
                     .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_EXPIRED));
             log.info("refresh_rotation_grace userId={} sinceRotationMs={}", userId,
                     Duration.between(stored.getRevokedAt(), Instant.now()).toMillis());
+            opsSignals.refreshGraceReissued();
             TokenService.TokenPair pair = tokenService.issueRotatedPair(user, stored.getFamilyId(), stored.getId());
             if (reviewAccountPolicy.isCodeSessionEnded(userId)) throw endReviewSession(familyId);
             return TokenResponse.from(pair, syncPolicy.forUser(user));
@@ -647,9 +658,16 @@ public class AuthService {
         // 재사용 감지 — 이미 폐기된 토큰이 다시 제출되면 탈취 의심 → family 전체 revoke (DB 정리 §11.3)
         // 이 메서드는 BusinessException에 대해 롤백하지 않으므로 흔적과 revoke가 401 응답 전에 커밋된다.
         if (stored.isRevoked()) {
+            // 분류는 family 를 회수하기 전에 — 회수하면 후속 토큰이 모두 폐기돼 끝난 세션과 구별되지 않는다.
+            boolean firstDetection = stored.getReuseDetectedAt() == null;
+            SecuritySlackAlert.RefreshReuse kind = classifyReuse(stored);
+            Duration sinceRevoked = Duration.between(stored.getRevokedAt(), Instant.now());
             stored.markReuseDetected();
-            opsSignals.refreshReuseDetected();   // SEC-05 — 회전 충돌인지 탈취인지는 RB-05 가 가린다
+            opsSignals.refreshReuseDetected();   // SEC-05 — 유예 밖 재사용만 온다. 무엇인지는 아래 로그·Slack 이 가린다
             refreshTokenRepository.revokeFamily(stored.getFamilyId(), Instant.now());
+            log.warn("refresh_reuse_detected userId={} kind={} sinceRevokedMs={} first={}",
+                    userId, kind, sinceRevoked.toMillis(), firstDetection);
+            if (firstDetection) securitySlackAlert.refreshReuse(userId.toString(), kind, sinceRevoked);
             throw new BusinessException(ErrorCode.SESSION_EXPIRED);
         }
         if (stored.isExpired()) throw new BusinessException(ErrorCode.SESSION_EXPIRED);
@@ -691,6 +709,25 @@ public class AuthService {
         if (stored.getRevokedAt().isBefore(Instant.now().minus(ROTATION_GRACE))) return false;
         List<RefreshToken> successors = refreshTokenRepository.findByParentTokenIdForUpdate(stored.getId());
         return !successors.isEmpty() && successors.stream().noneMatch(RefreshToken::isRevoked);
+    }
+
+    /**
+     * 유예하지 못한 재사용이 무엇인지 — {@link #inRotationGrace} 와 같은 후속 토큰을 본다.
+     * 후속이 다시 회전됐으면 두 곳이 같은 세션을 쓰는 것이고, 후속이 없거나 모두 폐기됐으면 이미 끝난 세션이며,
+     * 후속이 살아 있는데 여기까지 왔으면 유예 창(또는 토큰 수명)을 넘긴 것이다.
+     */
+    private SecuritySlackAlert.RefreshReuse classifyReuse(RefreshToken stored) {
+        List<RefreshToken> successors = refreshTokenRepository.findByParentTokenIdForUpdate(stored.getId());
+        boolean successorRotated = !successors.isEmpty() && refreshTokenRepository.existsByParentTokenIdIn(
+                successors.stream().map(RefreshToken::getId).toList());
+        return classifyReuse(successors.stream().map(RefreshToken::isRevoked).toList(), successorRotated);
+    }
+
+    /** 순수 분류 — 후속 토큰들의 폐기 여부와, 그중 하나라도 다시 회전됐는지. */
+    static SecuritySlackAlert.RefreshReuse classifyReuse(List<Boolean> successorsRevoked, boolean successorRotated) {
+        if (successorRotated) return SecuritySlackAlert.RefreshReuse.SUCCESSOR_ROTATED;
+        if (successorsRevoked.isEmpty() || !successorsRevoked.contains(false)) return SecuritySlackAlert.RefreshReuse.SESSION_ENDED;
+        return SecuritySlackAlert.RefreshReuse.GRACE_EXPIRED;
     }
 
     // ===== 로그아웃 (멱등) =====

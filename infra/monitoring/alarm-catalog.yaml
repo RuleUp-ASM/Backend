@@ -279,6 +279,7 @@ alarms:
   - id: SEC-05
     status: active
     severity: P1
+    notes: 회전 유예(12시간·후속 토큰 미사용) 밖 재사용만 센다. 앱이 같은 감지마다 #ruleup-alert 에 분류(탈취 의심·끝난 세션·유예 초과)와 사용자 ID 를 보낸다(SecuritySlackAlert). 유예 재발급은 RefreshGraceReissueCount(경보 없음)
   - id: INV-01
     status: active
     severity: P1

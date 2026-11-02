@@ -17,6 +17,7 @@ import org.springframework.stereotype.Component;
  *   <li>{@code RuleUp/Ops CacheLookupCount · CacheHitCount}(CacheKind) — CACHE-01</li>
  *   <li>{@code RuleUp/Ops InvariantViolationCount}(Invariant) — INV-01. 정상적인 중복·멱등 재시도는 넣지 않는다</li>
  *   <li>{@code RuleUp/Security AdminLoginFailedCount · RefreshReuseDetectedCount} — SEC-01·SEC-05. 토큰 값은 남기지 않는다</li>
+ *   <li>{@code RuleUp/Security RefreshGraceReissueCount} — 회전 유예 재발급(경보 없음, 앱 갱신 응답 유실 추세)</li>
  * </ul>
  * 차원 값은 모두 고정 열거다(사용자·챌린지 ID 없음).
  */
@@ -35,6 +36,7 @@ public class OpsSignals {
     private final MetricKey pushAttempts;
     private final MetricKey adminLoginFailed;
     private final MetricKey refreshReuse;
+    private final MetricKey refreshGraceReissue;
 
     public OpsSignals(MinuteMetricBuffer buffer, MetricContext ctx) {
         this.buffer = buffer;
@@ -42,6 +44,7 @@ public class OpsSignals {
         this.pushAttempts = MetricKey.count(TRAFFIC, "PushAttemptCount", ctx.dims());
         this.adminLoginFailed = MetricKey.count(SECURITY, "AdminLoginFailedCount", ctx.dims());
         this.refreshReuse = MetricKey.count(SECURITY, "RefreshReuseDetectedCount", ctx.dims());
+        this.refreshGraceReissue = MetricKey.count(SECURITY, "RefreshGraceReissueCount", ctx.dims());
         if (ctx.role().runsBackgroundWork()) buffer.declare(pushAttempts);
     }
 
@@ -83,5 +86,10 @@ public class OpsSignals {
 
     public void refreshReuseDetected() {
         buffer.increment(refreshReuse);
+    }
+
+    /** 회전 유예로 직전 토큰에 새 페어를 줬다 — 앱이 갱신 응답을 잃은 횟수. 경보 없이 추세만 본다. */
+    public void refreshGraceReissued() {
+        buffer.increment(refreshGraceReissue);
     }
 }
