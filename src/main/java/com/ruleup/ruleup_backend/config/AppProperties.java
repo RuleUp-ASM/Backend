@@ -47,10 +47,10 @@ public record AppProperties(Jwt jwt, Oauth oauth, Llm llm, Client client, Securi
                 long retryBackoffMs // 재시도 사이 대기(지수 백오프 base, ms). 0/미설정 → 기본값
         ) {}
 
-        /** AWS Bedrock Nova(Converse API). provider=bedrock 일 때 활성. 자격증명은 ECS 태스크 역할. */
+        /** AWS Bedrock(Converse API) — 지금은 Claude Haiku 4.5, 폴백으로 쓴다. provider=bedrock 이면 단독. 자격증명은 ECS 태스크 역할. */
         public record Bedrock(
                 String region,      // 예: ap-northeast-2 서울 (미설정 시 기본 ap-northeast-2)
-                String modelId,     // 예: apac.amazon.nova-lite-v1:0 (APAC 온디맨드 크로스리전 추론 프로파일)
+                String modelId,     // 예: global.anthropic.claude-haiku-4-5-20251001-v1:0 (기본) · apac.amazon.nova-lite-v1:0 (옛 폴백)
                 long timeoutMs,     // Converse 호출 총 타임아웃(ms). 0/미설정 → 기본값
                 int maxRetries,     // 쓰로틀 재시도 횟수. 0/미설정 → 기본값
                 long retryBackoffMs // 재시도 백오프 base(ms). 0/미설정 → 기본값

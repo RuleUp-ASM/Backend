@@ -146,8 +146,8 @@ row(('Redis CPU·메모리·히트율(%)', [red(m, n, label=f'{n} {m}') for n in
     ('SQS 가장 오래된 메시지(초)·DLQ', [sqs(q, 'ApproximateAgeOfOldestMessage') for q in REG['queues']]
      + [sqs(q, 'ApproximateNumberOfMessagesVisible')[:-1] + [{'stat': 'Maximum', 'label': q, 'yAxis': 'right'}] for q in REG['dlqs']], None),
     ('공급자 호출 실패(429·쿼터 포함)', [['RuleUp/Ops', 'ProviderFailureCount', *BASE, 'Feature', f, 'Provider', pv, {'stat': 'Sum', 'label': f'{f}/{pv}'}]
-                                    for f, pv in (('generation', 'gemini'), ('generation', 'nova'), ('moderation', 'gemini'),
-                                                  ('moderation', 'nova'), ('push', 'fcm'))], None),
+                                    for f, pv in (('generation', 'gemini'), ('generation', 'haiku'), ('moderation', 'gemini'),
+                                                  ('moderation', 'haiku'), ('push', 'fcm'))], None),
     ('LLM p95(ms)·무효 FCM 토큰', [['RuleUp/Ops', 'LlmLatencyMs', *BASE, 'Feature', f, {'stat': 'p95', 'label': f'{f} p95'}] for f in ('generation', 'moderation')]
      + [['RuleUp/Ops', 'InvalidTokenCount', *BASE, 'Provider', 'fcm', {'stat': 'Sum', 'label': '무효 토큰', 'yAxis': 'right'}]], None))
 row(('인증 확정 배치', [app('verification.finalize.overdue.value', 'Maximum', label='1시간 넘게 미확정'),

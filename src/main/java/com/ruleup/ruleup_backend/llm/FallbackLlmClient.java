@@ -11,12 +11,12 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
- * Gemini 우선 → 실패 시 Bedrock Nova 폴백 {@link LlmClient}.
+ * Gemini 우선 → 실패 시 Bedrock(Claude Haiku 4.5) 폴백 {@link LlmClient}.
  * {@code app.llm.provider=fallback}(기본) 일 때 활성화된다.
  *
  * <p>동기: 100케이스×5모델 평가에서 gemini-3.1-flash-lite 가 정확도 1위(응답분 100%)이면서
- * 토큰·지연도 우수해 1순위로, Nova(Lite)가 Bedrock 내부에서 다음으로 견고해 폴백으로 뽑혔다.
- * Gemini 가 null(키 미설정·429 소진·타임아웃·빈 응답)을 주면 그 호출만 Nova 로 넘긴다.
+ * 토큰·지연도 우수해 1순위로 뽑혔다. 폴백은 처음엔 Nova Lite 였고, 2026-11-02 274케이스 비교 뒤 Claude Haiku 4.5 로 바꿨다(#395).
+ * Gemini 가 null(키 미설정·429 소진·타임아웃·빈 응답)을 주면 그 호출만 Haiku 로 넘긴다.
  *
  * <p>{@link GeminiClient}·{@link BedrockNovaClient} 는 각각 조건부 빈이라 provider=fallback 에서는
  * 빈으로 뜨지 않는다 — 여기서 직접 생성해 위임한다(둘 다 AppProperties 만 필요). 실패는 예외 없이
@@ -27,8 +27,9 @@ import org.springframework.stereotype.Component;
  * 제공자별로 나누지 않는다 — 어느 쪽이 실패했는지는 {@code llm_fail} 로그가 알려 준다.
  *
  * <p>운영 경보 EXT-01/02 는 그와 별개로 <b>공급자 호출 시도마다</b>({@link OpsSignals#providerCall}) 본다 —
- * Gemini 가 429 로 계속 막혀도 Nova 폴백이 받아 내면 위 실패 수는 0 이지만, 공급자 장애는 장애다.
- * 기능 차원은 부른 쪽 패키지로 정한다(moderation → moderation, 그 밖 → generation).
+ * Gemini 가 429 로 계속 막혀도 Haiku 폴백이 받아 내면 위 실패 수는 0 이지만, 공급자 장애는 장애다.
+ * 기능 차원은 부른 쪽 패키지로 정한다(moderation → moderation, 그 밖 → generation). 공급자 차원은 gemini·haiku 다 —
+ * BEDROCK_MODEL_ID 로 다른 모델로 되돌리면 이 이름과 경보 카탈로그(LLM_PROVIDERS)도 같이 바꾼다.
  */
 @Component
 @ConditionalOnProperty(name = "app.llm.provider", havingValue = "fallback", matchIfMissing = true)
@@ -65,7 +66,7 @@ public class FallbackLlmClient implements LlmClient {
         return measured(() -> {
             String r = primary.isConfigured() ? attempt("gemini", () -> primary.generateText(prompt)) : null;
             if (r != null) return r;
-            return novaFallback("generateText", () -> fallback.generateText(prompt));
+            return haikuFallback("generateText", () -> fallback.generateText(prompt));
         });
     }
 
@@ -75,7 +76,7 @@ public class FallbackLlmClient implements LlmClient {
             String r = primary.isConfigured()
                     ? attempt("gemini", () -> primary.generateStructured(prompt, responseSchemaJson)) : null;
             if (r != null) return r;
-            return novaFallback("generateStructured", () -> fallback.generateStructured(prompt, responseSchemaJson));
+            return haikuFallback("generateStructured", () -> fallback.generateStructured(prompt, responseSchemaJson));
         });
     }
 
@@ -85,7 +86,7 @@ public class FallbackLlmClient implements LlmClient {
             String r = primary.isConfigured()
                     ? attempt("gemini", () -> primary.generateText(prompt, image, mimeType)) : null;
             if (r != null) return r;
-            return novaFallback("generateText(image)", () -> fallback.generateText(prompt, image, mimeType));
+            return haikuFallback("generateText(image)", () -> fallback.generateText(prompt, image, mimeType));
         });
     }
 
@@ -99,11 +100,11 @@ public class FallbackLlmClient implements LlmClient {
         return r;
     }
 
-    /** Gemini 가 null 을 준 뒤 Nova 로 넘기는 공통 처리(폴백 발생을 로그로 남긴다). */
-    private String novaFallback(String op, java.util.function.Supplier<String> novaCall) {
+    /** Gemini 가 null 을 준 뒤 Bedrock(Haiku)으로 넘기는 공통 처리(폴백 발생을 로그로 남긴다). */
+    private String haikuFallback(String op, java.util.function.Supplier<String> haikuCall) {
         if (!fallback.isConfigured()) return null;
-        log.debug("Gemini {} 실패/미설정 → Nova 폴백", op);
-        return attempt("nova", novaCall);
+        log.debug("Gemini {} 실패/미설정 → Haiku 폴백", op);
+        return attempt("haiku", haikuCall);
     }
 
     /** 공급자 한 번 — null 이면(키 없음 제외) 실패다. 429·timeout·빈 응답이 모두 여기로 온다. */

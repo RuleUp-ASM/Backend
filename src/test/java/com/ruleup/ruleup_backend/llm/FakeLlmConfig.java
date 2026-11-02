@@ -9,7 +9,7 @@ import org.springframework.context.annotation.Profile;
 /**
  * 테스트 전용 LLM fake — 실제 Gemini/Bedrock 호출을 차단한다.
  *
- * <p>기본 provider 는 {@code fallback}(Gemini→Nova)이라, 개발자 머신의 .env 자격증명이 있으면
+ * <p>기본 provider 는 {@code fallback}(Gemini→Haiku)이라, 개발자 머신의 .env 자격증명이 있으면
  * 테스트가 실제로 외부를 호출한다(관측된 429/403). 결과적으로는 각 소비자의 폴백으로 통과하지만
  * CI 지연·불안정·비용을 만든다. 여기서는 "미설정 클라이언트"로 고정해 같은 폴백 경로를 즉시 타게 한다.
  *

@@ -38,7 +38,9 @@ RETIRED = {
              'ruleup-prod-P1-verification-finalize-late', 'ruleup-prod-rds-connections',
              # v1 자원 경보 — DB-01~07·REDIS-01/02 로 대체. RDS 쪽은 이미 없는 인스턴스(ruleup-prod-mysql)를 봐서 울릴 수 없었다.
              'ruleup-prod-P1-rds-ruleup-prod-mysql-cpu-high', 'ruleup-prod-P1-redis-ruleup-prod-redis-001-cpu-high',
-             'ruleup-prod-P1-redis-ruleup-prod-redis-001-memory-high'],
+             'ruleup-prod-P1-redis-ruleup-prod-redis-001-memory-high',
+             # 폴백 공급자 이름 nova → haiku(EXT-01-*-haiku 로 대체)
+             'ruleup-prod-P1-EXT-01-generation-nova', 'ruleup-prod-P1-EXT-01-moderation-nova'],
     'stg': ['ruleup-stg-P0-api-no-healthy-target', 'ruleup-stg-P0-ecs-cpu-critical', 'ruleup-stg-P0-ecs-memory-critical',
             'ruleup-stg-P0-api-latency-p95-critical', 'ruleup-stg-P0-rds-ruleup-stg-mysql-v2-storage-low', 'ruleup-stg-P0-api-5xx-ratio',
             'ruleup-stg-P0-api-5xx-alb', 'ruleup-stg-P1-ecs-cpu-high', 'ruleup-stg-P1-ecs-memory-high', 'ruleup-stg-P1-api-latency-p95',
@@ -50,10 +52,12 @@ RETIRED = {
              'ruleup-stg-P1-verification-materialize-failed', 'ruleup-stg-P1-outbox-dead-lettered',
              'ruleup-stg-P1-verification-finalize-late',
              'ruleup-stg-P1-rds-ruleup-stg-mysql-v2-cpu-high', 'ruleup-stg-P1-redis-ruleup-stg-redis-cpu-high',
-             'ruleup-stg-P1-redis-ruleup-stg-redis-memory-high'],
+             'ruleup-stg-P1-redis-ruleup-stg-redis-memory-high',
+             'ruleup-stg-P1-EXT-01-generation-nova', 'ruleup-stg-P1-EXT-01-moderation-nova'],
 }
 
-LLM_PROVIDERS = (('generation', 'gemini'), ('generation', 'nova'), ('moderation', 'gemini'), ('moderation', 'nova'))
+# 폴백 공급자는 2026-11-02 Nova Lite → Claude Haiku 4.5(#395). 앱의 Provider 차원(FallbackLlmClient)과 같아야 한다.
+LLM_PROVIDERS = (('generation', 'gemini'), ('generation', 'haiku'), ('moderation', 'gemini'), ('moderation', 'haiku'))
 
 # 야간 보류 큐 — 앱 컨슈머가 21:00~08:00 KST 에 일부러 수신하지 않는다(NotificationWindow). 밤에는 가장 오래된 메시지가
 # 쌓이는 게 정상이라 이 큐의 QUEUE-01 은 night_hold.py 가 밤에 동작을 끄고 아침에 OK 로 되돌린 뒤 켠다.

@@ -32,13 +32,13 @@ class OpsSignalsTest {
     @DisplayName("공급자 호출은 시도마다 세고, 실패는 Feature·Provider 로 나뉜다(폴백 성공이어도 1차 실패는 실패)")
     void providerAttempts() {
         ops.providerCall("generation", "gemini", true, 900);
-        ops.providerCall("generation", "nova", false, 1200);
+        ops.providerCall("generation", "haiku", false, 1200);
 
         Map<String, Double> m = drain();
         assertThat(m).containsEntry("RuleUp/Ops ProviderCallCount {Env=prod, Feature=generation, Provider=gemini, Service=ruleup-api}", 1.0)
                 .containsEntry("RuleUp/Ops ProviderFailureCount {Env=prod, Feature=generation, Provider=gemini, Service=ruleup-api}", 1.0)
-                .containsEntry("RuleUp/Ops ProviderCallCount {Env=prod, Feature=generation, Provider=nova, Service=ruleup-api}", 1.0)
-                .doesNotContainKey("RuleUp/Ops ProviderFailureCount {Env=prod, Feature=generation, Provider=nova, Service=ruleup-api}");
+                .containsEntry("RuleUp/Ops ProviderCallCount {Env=prod, Feature=generation, Provider=haiku, Service=ruleup-api}", 1.0)
+                .doesNotContainKey("RuleUp/Ops ProviderFailureCount {Env=prod, Feature=generation, Provider=haiku, Service=ruleup-api}");
     }
 
     @Test
