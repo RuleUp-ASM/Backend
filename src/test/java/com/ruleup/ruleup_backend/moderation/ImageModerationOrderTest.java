@@ -14,7 +14,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 이미지 심사 순서 — SafeSearch → (판정 불가일 때만) LLM. LLM 안의 Gemini → Nova 폴백은 {@link LlmClient} 가 맡는다.
+ * 이미지 심사 순서 — SafeSearch → (판정 불가일 때만) LLM. LLM 안의 Gemini → Haiku 폴백은 {@link LlmClient} 가 맡는다.
  */
 class ImageModerationOrderTest {
 
@@ -35,7 +35,7 @@ class ImageModerationOrderTest {
     }
 
     @Test
-    @DisplayName("SafeSearch 가 판정 불가면 LLM(Gemini → Nova) 결과를 쓴다")
+    @DisplayName("SafeSearch 가 판정 불가면 LLM(Gemini → Haiku) 결과를 쓴다")
     void fallsBackToLlmWhenSafeSearchUnavailable() {
         when(safeSearch.check(IMAGE)).thenReturn(ModerationResult.UNAVAILABLE);
         when(llm.generateText(anyString(), any(byte[].class), anyString())).thenReturn("{\"flagged\": true, \"reason\": \"노출\"}");

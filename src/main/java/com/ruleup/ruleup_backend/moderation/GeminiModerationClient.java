@@ -14,8 +14,8 @@ import java.util.Locale;
 
 /**
  * 닉네임·챌린지 문구·이미지를 검수하는 클라이언트.
- *  - 닉네임·문구: LLM 텍스트 검수 (Gemini → Nova, {@link LlmClient} 가 폴백)
- *  - 이미지     : SafeSearch → Gemini → Nova. SafeSearch 가 판정을 못 내렸을 때만 LLM 멀티모달로 넘긴다.
+ *  - 닉네임·문구: LLM 텍스트 검수 (Gemini → Haiku, {@link LlmClient} 가 폴백)
+ *  - 이미지     : SafeSearch → Gemini → Haiku. SafeSearch 가 판정을 못 내렸을 때만 LLM 멀티모달로 넘긴다.
  * 어떤 실패든 {@link ModerationResult#UNAVAILABLE}로 폴백 → 검수 보류(가입은 이미 끝났으므로 안전).
  */
 @Component
@@ -67,7 +67,7 @@ public class GeminiModerationClient implements ContentModerationClient {
             return safe;
         }
         String mime = (mimeType != null && !mimeType.isBlank()) ? mimeType : "image/jpeg";
-        ModerationResult result = toResult(llm.generateText(buildImagePrompt(), bytes, mime));   // Gemini → Nova
+        ModerationResult result = toResult(llm.generateText(buildImagePrompt(), bytes, mime));   // Gemini → Haiku
         log.info("image_moderation provider=llm result={}", result);
         return result;
     }

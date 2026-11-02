@@ -1,7 +1,7 @@
 package com.ruleup.ruleup_backend.llm;
 
 /**
- * LLM 호출 추상화. 제공자(Gemini · AWS Bedrock Nova 등)를 감춘다.
+ * LLM 호출 추상화. 제공자(Gemini · AWS Bedrock Claude Haiku 등)를 감춘다.
  *
  * <p>구현체는 {@code app.llm.provider} 설정으로 하나만 활성화된다(조건부 빈). 소비자(챌린지 초안·검수)는
  * 이 인터페이스에만 의존하므로, provider 를 env 로 바꾸면 코드 변경 없이 모델을 교체할 수 있다.

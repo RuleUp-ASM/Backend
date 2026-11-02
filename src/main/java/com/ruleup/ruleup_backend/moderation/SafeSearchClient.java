@@ -20,7 +20,7 @@ import java.util.Map;
  *
  * <p>LLM 보다 빠르고 싸며 판정이 결정적이다. 다만 SafeSearch 는 음란·폭력·선정성만 본다 — 정치 선동·광고·사칭은
  * 모른다. 그래도 SafeSearch 가 판정을 내리면 그대로 쓰고, <b>판정을 못 내렸을 때만</b>(키 미설정·오류·타임아웃)
- * 호출부가 LLM(Gemini → Nova)으로 넘긴다.
+ * 호출부가 LLM(Gemini → Haiku)으로 넘긴다.
  *
  * <p>기준(가능성 등급 VERY_UNLIKELY < UNLIKELY < POSSIBLE < LIKELY < VERY_LIKELY):
  * <ul>
