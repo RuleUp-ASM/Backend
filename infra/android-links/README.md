@@ -28,10 +28,13 @@ Install Referrer 소비 구현이 추가되어야 한다. 현재 앱에는 그 �
 ## 앱 연결 인증서
 
 `public/.well-known/assetlinks.json`은 패키지 `com.ruleup.android_ruleup`에 대해
-다음 두 개발 인증서의 SHA-256을 등록한다. 개인 키는 포함하지 않는다.
+다음 인증서의 SHA-256을 등록한다. 개인 키는 포함하지 않는다.
 
 | 용도·출처 | SHA-256 |
 |---|---|
+| 2026-11-03 Play Console 딥링크 → 도메인 상세 "해결 방법"이 제시한 Play 배포 지문 1 (앱 서명 키 교체 전·후 키와 업로드 키, 개별 대응은 미확인) | `9B:F7:8F:69:1F:58:97:4B:EE:D5:4C:E2:71:96:CD:D2:6B:47:3F:22:58:35:DB:8D:CE:7B:0D:BE:C4:CB:EE:0B` |
+| 같은 출처, Play 배포 지문 2 | `6D:73:ED:AE:E4:4A:CB:E0:88:4D:0D:AA:00:94:EF:36:D6:80:5E:B6:61:A7:B8:E5:6C:80:70:6C:43:05:86:55` |
+| 같은 출처, Play 배포 지문 3 | `D1:A7:6D:E0:E0:B5:9E:FC:AC:E6:3D:22:61:7E:0A:2B:03:4E:84:AB:C3:0D:DD:6B:85:D3:F7:6A:23:5C:21:8B` |
 | 2026-09-18 QA APK (`app/build/outputs/apk/debug/app-debug.apk`)에서 `apksigner verify --print-certs`로 확인 | `83:6C:EE:89:35:88:B1:8C:39:A3:C6:CF:80:EC:8F:63:36:75:19:9E:BB:D8:D5:B9:C2:1D:F0:55:14:36:33:B6` |
 | 2026-09-23 사용자 제공 진단 화면의 Android debug 인증서 (해당 APK 직접 검증은 별도 필요) | `C6:C7:4F:C8:EF:37:58:26:A9:A4:68:62:7E:A8:C7:6D:CD:3C:7F:2D:2A:30:41:AC:68:87:C9:80:17:BB:73:EE` |
 
@@ -39,9 +42,12 @@ Install Referrer 소비 구현이 추가되어야 한다. 현재 앱에는 그 �
 Google Play 배포 서명은 자동으로 신뢰되지 않는다. 기존 QA 인증서도 유지해 이전
 QA 앱의 링크 검증이 끊기지 않도록 한다.
 
-Play 출시 전 Play Console의 **앱 서명 키 인증서** SHA-256을 추가하고 배포한다.
-업로드 키와 앱 서명 키를 혼동하지 않는다. 알 수 없는 release 지문을 임의로 넣지 않는다.
-QA가 끝나면 운영 도메인에서 debug 지문을 제거한다.
+Play로 설치한 앱은 Google이 **앱 서명 키**로 다시 서명하므로 이 지문이 없으면
+세 경로 모두 "도메인 검사 실패"가 된다(2026-11-03 출시 후 실제 발생). 앱 서명 키를
+교체하면 이전 키로 설치된 기기도 남으므로 교체 전·후 지문을 모두 유지한다.
+알 수 없는 release 지문을 임의로 넣지 않고 Play Console이 제시한 값만 넣는다.
+Android 측 보고(2026-11-03)에 따르면 debug 빌드는 패키지가
+`com.ruleup.android_ruleup.debug`라 위 debug 지문은 현재 효과가 없다. QA가 끝나면 운영 도메인에서 debug 지문을 제거한다.
 
 ## 카카오톡 공유에서 앱 실행
 
