@@ -207,7 +207,7 @@ class ReviewSessionCutoffIT extends AuthApiSupport {
     @DisplayName("회전 유예 중인 이전 RT 를 꺼진 뒤 제출하면 family 전체가 끊긴다 — 다시 켜도 이전·후속 RT 모두 401")
     void rotationGraceDoesNotSurviveSwitchOff() throws Exception {
         String rt1 = read(codeLogin(), "$.data.refreshToken");
-        String rt2 = read(refresh(rt1), "$.data.refreshToken");   // rt1 은 방금 회전돼 유예(12시간) 안이다
+        String rt2 = read(refresh(rt1), "$.data.refreshToken");   // rt1 은 방금 회전돼 유예(7일) 안이다
         switchOff();
 
         // 스위치 확인이 회전 유예 분기보다 먼저다 — 유예로 새 페어가 나가지 않는다.
