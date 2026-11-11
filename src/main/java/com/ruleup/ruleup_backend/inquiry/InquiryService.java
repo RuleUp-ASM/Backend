@@ -5,10 +5,13 @@ import com.ruleup.ruleup_backend.common.error.ErrorCode;
 import com.ruleup.ruleup_backend.inquiry.domain.Inquiry;
 import com.ruleup.ruleup_backend.inquiry.domain.InquiryCategory;
 import com.ruleup.ruleup_backend.inquiry.dto.InquiryDtos;
+import com.ruleup.ruleup_backend.observability.ops.InquirySlackAlert;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -53,6 +56,7 @@ public class InquiryService {
     private static final int PREVIEW_LENGTH = 60;
 
     private final InquiryRepository repository;
+    private final InquirySlackAlert slackAlert;
 
     @Transactional
     public InquiryDtos.CreateResponse create(UUID userId, InquiryDtos.CreateRequest request) {
@@ -74,7 +78,12 @@ public class InquiryService {
                 request.appVersion(), request.osVersion(), request.deviceModel(),
                 request.errorLogId(), now));
 
-        return new InquiryDtos.CreateResponse(inquiry.getId().toString(),
+        // 운영 Slack 알림 — 커밋된 뒤에만. 롤백된 문의가 채널에 뜨면 콘솔에서 찾을 수 없는 알림이 된다.
+        String inquiryId = inquiry.getId().toString();
+        int imageCount = images.size();
+        afterCommit(() -> slackAlert.received(inquiryId, category.name(), imageCount, now));
+
+        return new InquiryDtos.CreateResponse(inquiryId,
                 inquiry.getStatus().name(), now.toString());
     }
 
@@ -131,5 +140,18 @@ public class InquiryService {
         } catch (IllegalArgumentException e) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST);
         }
+    }
+
+    private static void afterCommit(Runnable task) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            task.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                task.run();
+            }
+        });
     }
 }

@@ -1,4 +1,5 @@
 import os, sys, unittest
+from datetime import datetime, timezone
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import slo_core as s
 
@@ -103,6 +104,47 @@ class BudgetTest(unittest.TestCase):
             hourly = {h: (0, 0) for h in range(1, 721)}
             hourly[720] = (total, 10)
             self.assertEqual(s.budget(hourly, 720).freeze, expected, total)
+
+    def test_excluded_hours_are_not_counted_but_keep_coverage(self):
+        """부하테스트 구간을 빼면 그 실패는 세지 않고, 뺀 구간 때문에 판단이 멈추지도 않는다."""
+        hourly = {h: (10, 0) for h in range(1, 721)}          # 평소 7,200건·실패 0
+        for h in range(100, 130):
+            hourly[h] = (100_000, 5_000)                        # 부하테스트 30시간 — 실패 5%
+        self.assertTrue(s.budget(hourly, 720).freeze, '빼지 않으면 동결')
+        b = s.budget(hourly, 720, frozenset(range(100, 130)))
+        self.assertFalse(b.freeze)
+        self.assertEqual(b.eligible, 6_900)
+        self.assertEqual(b.bad, 0)
+        self.assertEqual(b.coverage, 1.0, '뺀 시간도 관측된 시간으로 친다')
+        self.assertTrue(b.enforceable)
+
+    def test_excluded_window_still_freezes_on_real_failures(self):
+        """뺀 구간 밖의 실제 실패는 그대로 동결시킨다."""
+        hourly = {h: (10, 1) for h in range(1, 721)}           # 실패 10%
+        self.assertTrue(s.budget(hourly, 720, frozenset(range(100, 130))).freeze)
+
+    def test_excluded_hours_parses_windows(self):
+        hours = s.excluded_hours([{'from': '2026-10-15T10:00:00Z', 'to': '2026-10-15T13:00:00Z', 'reason': '부하테스트'}])
+        first = int(datetime(2026, 10, 15, 10, tzinfo=timezone.utc).timestamp()) // 3600
+        self.assertEqual(hours, frozenset({first, first + 1, first + 2}), 'to 는 포함하지 않는다')
+        self.assertEqual(s.excluded_hours(None), frozenset())
+
+    def test_excluded_hours_rejects_bad_windows(self):
+        for w in ({'from': '2026-10-15T10:00:00Z', 'to': '2026-10-15T13:00:00Z'},                  # 이유 없음
+                  {'from': '2026-10-15T10:30:00Z', 'to': '2026-10-15T13:00:00Z', 'reason': 'x'},    # 정시 아님
+                  {'from': '2026-10-15T10:00:00', 'to': '2026-10-15T13:00:00', 'reason': 'x'},      # 오프셋 없음
+                  {'from': '2026-10-15T13:00:00Z', 'to': '2026-10-15T10:00:00Z', 'reason': 'x'}):   # 거꾸로
+            with self.assertRaises(ValueError, msg=str(w)):
+                s.excluded_hours([w])
+
+    def test_registered_windows_are_valid(self):
+        """원장에 적힌 구간이 기동 시 Lambda 를 깨뜨리지 않는다."""
+        import json
+        env_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'env')
+        for name in os.listdir(env_dir):
+            if name.endswith('.json'):
+                with open(os.path.join(env_dir, name), encoding='utf-8') as f:
+                    s.excluded_hours(json.load(f).get('budget_excluded_windows'))
 
     def test_incomplete_coverage_never_freezes(self):
         hourly = {h: (10, 1) for h in range(100, 721)}   # 621/720 시간

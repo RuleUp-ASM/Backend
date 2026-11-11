@@ -163,16 +163,46 @@ class Budget:
         return self.enforceable and r is not None and r <= 0
 
 
-def budget(hourly, last_hour):
-    """hourly: {시간 인덱스: (eligible, bad)} — 최근 30일(720시간)."""
+def budget(hourly, last_hour, excluded=frozenset()):
+    """hourly: {시간 인덱스: (eligible, bad)} — 최근 30일(720시간).
+
+    excluded: 버짓에서 뺄 시간 인덱스(부하테스트처럼 실사용이 아닌 구간 — excluded_hours()).
+    그 시간의 요청·실패는 세지 않되 **관측된 시간으로 친다** — 일부러 뺀 구간이 「데이터 누락」이 되어
+    coverage 를 깎으면, 뺀 뒤 30일 동안 버짓 판단 자체가 멈춘다.
+    """
     e = b = present = 0
     for h in range(last_hour - 719, last_hour + 1):
+        if h in excluded:
+            present += 1
+            continue
         row = hourly.get(h)
         if row is None:
             continue
         present += 1
         e += row[0]; b += row[1]
     return Budget(present, e, b)
+
+
+def excluded_hours(windows):
+    """원장 `budget_excluded_windows` [{from, to, reason}] → 시간 인덱스 집합. to 는 포함하지 않는다.
+
+    ISO-8601(UTC) 정시만 받는다 — 시간 해상도라 정시가 아닌 경계는 어느 시간을 뺐는지 모호해진다.
+    reason 이 없으면 거부한다: 버짓에서 뺀 이유가 원장에 남아야 나중에 「왜 이때 동결이 안 걸렸나」를 답할 수 있다.
+    """
+    from datetime import datetime
+    out = set()
+    for w in windows or ():
+        if not (w.get('reason') or '').strip():
+            raise ValueError(f'budget_excluded_windows 에 reason 이 없다: {w}')
+        start, end = (datetime.fromisoformat(w[k].replace('Z', '+00:00')) for k in ('from', 'to'))
+        if start.utcoffset() is None or end.utcoffset() is None:
+            raise ValueError(f'budget_excluded_windows 는 UTC 오프셋이 있어야 한다: {w}')
+        if start.minute or start.second or end.minute or end.second:
+            raise ValueError(f'budget_excluded_windows 경계는 정시여야 한다: {w}')
+        if end <= start:
+            raise ValueError(f'budget_excluded_windows 의 to 가 from 보다 늦어야 한다: {w}')
+        out.update(range(int(start.timestamp()) // 3600, int(end.timestamp()) // 3600))
+    return frozenset(out)
 
 
 def _bad(w, kind):
