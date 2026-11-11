@@ -37,6 +37,10 @@
   "iac_type": null,
   "iac_dir": null,
   "deploy_workflow": ".github/workflows/deploy.yml",
+  "budget_excluded_windows": [
+    {"from": "2026-10-15T10:00:00Z", "to": "2026-10-17T02:00:00Z",
+     "reason": "DAU 2만 부하테스트(실측 10/15 21시~10/17 10시 KST, 앞뒤 여유 포함). explore 260만·detail 240만 건 중 실패 약 27만이 버짓을 소진시켜 2026-11-11 stg 배포가 막혔다"}
+  ],
   "owner": "이성은",
   "rules": {
     "slo_operations": "all",
