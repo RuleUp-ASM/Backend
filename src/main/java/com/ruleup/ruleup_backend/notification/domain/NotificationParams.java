@@ -45,6 +45,8 @@ public final class NotificationParams {
     public static final String ANNOUNCEMENT_ID = "announcement_id";
     /** CS 문의 id — 답변 통지의 진입점이자 멱등 키다. */
     public static final String INQUIRY_ID = "inquiry_id";
+    /** 운영자 개별 메시지 1건 — 보낼 때마다 새로 만든다(OPERATOR_MESSAGE 의 멱등 키). */
+    public static final String MESSAGE_ID = "message_id";
     public static final String CAMPAIGN_ID = "campaign_id";
     /** 리마인더 대상 일자(KST, ISO-8601). */
     public static final String DATE = "date";

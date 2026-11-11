@@ -15,7 +15,7 @@ import java.util.UUID;
  * 적재가 도메인 트랜잭션 안에 있기 때문이다 — 템플릿이 엔티티를 들여다보다 터지면
  * <b>알림 버그가 강퇴 판정을 롤백시킨다</b>(백엔드 4-1).
  *
- * @param title 사람이 쓴 제목. <b>공지·캠페인만</b> 값을 갖는다({@link #authored}) —
+ * @param title 사람이 쓴 제목. <b>공지·캠페인·운영자 개별 메시지만</b> 값을 갖는다({@link #authored}) —
  *              나머지 타입은 null 이고 {@link NotificationTemplate} 이 렌더한다.
  * @param body 사람이 쓴 본문. 규칙은 {@code title} 과 같다.
  *
@@ -64,7 +64,7 @@ public record NotificationEvent(
     }
 
     /**
-     * <b>사람이 쓴 문구</b>로 발행 — 운영자 공지와 캠페인뿐이다. 그 둘은 문장 자체가 내용이라
+     * <b>사람이 쓴 문구</b>로 발행 — 운영자 공지·캠페인·개별 메시지뿐이다. 문장 자체가 내용이라
      * 템플릿으로 환원할 수 없다({@link NotificationTemplate#AUTHORED_TYPES}).
      */
     public static NotificationEvent authored(UUID userId, NotificationType type, String title,
