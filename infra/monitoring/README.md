@@ -40,6 +40,23 @@
 | `detectors_enabled` | false | 출시 D+14 — 밴드 학습·최소 표본 확인. 켜면 `deploy.py --only anomaly` 로 모델을 만든다 |
 | `slo_rules` | prod all · stg SLO-01/API-01/API-02 | stg 는 시험에 필요한 규칙만(경보 수 과금) |
 
+## 버짓에서 구간 빼기 (원장 `budget_excluded_windows`)
+
+부하테스트처럼 **실사용이 아닌 요청**이 30일 버짓을 소진시켜 배포 사전 점검(`BudgetFreeze`)을 막을 때 쓴다.
+CloudWatch 지표는 지울 수 없어서, 그 구간을 계산에서 뺀다.
+
+```json
+"budget_excluded_windows": [
+  {"from": "2026-10-15T10:00:00Z", "to": "2026-10-17T02:00:00Z", "reason": "DAU 2만 부하테스트 …"}
+]
+```
+
+- UTC 정시 경계, `to` 는 포함하지 않는다. `reason` 이 없으면 Lambda 가 거부한다(뺀 이유가 원장에 남아야 한다).
+- 뺀 시간의 요청·실패는 세지 않지만 **관측된 시간으로 친다** — coverage 가 깎여 30일간 판단이 멈추지 않게.
+- 바꾼 뒤 `python3 infra/monitoring/lambdas/deploy.py <env> --only lambdas` 로 다시 올린다(원장이 Lambda 패키지에 묶인다).
+  `BudgetFreeze` 는 15분마다 다시 계산되므로 다음 정각·15분 단위에 반영된다.
+- 다음 부하테스트 때 구간을 미리 적어 두면 버짓을 지킨 채 시험할 수 있다. 실사용 장애 구간은 빼지 않는다.
+
 ## 노션과 다르게 한 것 (이유)
 
 - **분 버킷 DynamoDB 없음** — CloudWatch 가 1분 해상도를 15일 보관하고 GetMetricData 는 지표 개수로 과금돼, 72시간을 매분 다시 읽는 비용이 노션 추정(월 약 130만 조회 단위)과 같다. 30일 버짓은 1시간 해상도로 15분마다.

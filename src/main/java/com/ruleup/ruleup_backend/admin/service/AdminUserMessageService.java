@@ -169,7 +169,66 @@ public class AdminUserMessageService {
                 targetUserId.toString(), nickname.getFirst(), now.toString(), NotificationWindow.isNight(now));
     }
 
+    // ===== 보낸 내역 =====
+
+    /**
+     * 보낸 개별 알림 — 최신순(id = UUIDv7). 회원으로 거를 수 있다.
+     *
+     * <p>{@code type} 에는 인덱스가 없어 멱등 키 접두({@code OPERATOR_MESSAGE:{userId}:…})로 고른다 —
+     * {@code uq_notifications_dedup} 범위 탐색이라 알림 전체를 훑지 않는다. 받은 회원이 탈퇴해 행이 지워지면
+     * (FK CASCADE) 내역에서도 사라진다.
+     */
+    @Transactional(readOnly = true)
+    public AdminUserMessageDtos.SentListResponse sent(UUID operatorId, String userIdRaw, String cursor, Integer size) {
+        UUID userId = (userIdRaw == null || userIdRaw.isBlank()) ? null : parseIdOrThrow(userIdRaw.strip());
+        UUID before = (cursor == null || cursor.isBlank()) ? null : parseIdOrThrow(cursor.strip());
+        auditService.allowed(operatorId, AdminAction.USER_MESSAGE_LIST_VIEW,
+                userId == null ? null : AdminAuditLog.TargetType.USER, userId, null);
+
+        int limit = (size == null || size <= 0) ? DEFAULT_SIZE : Math.min(size, MAX_SIZE);
+        String prefix = NotificationType.OPERATOR_MESSAGE.name() + ":" + (userId == null ? "" : userId + ":");
+
+        List<Object> args = new ArrayList<>();
+        args.add(escapeLike(prefix) + "%");
+        String page = "";
+        if (before != null) {
+            page = " AND n.id < ?";
+            args.add(bytes(before));
+        }
+        args.add(limit + 1);
+
+        List<AdminUserMessageDtos.SentItem> rows = jdbc.query("SELECT n.id, n.user_id, u.approved_nickname, u.status,"
+                        + " n.title, n.body, n.created_at, n.pushed_at"
+                        + " FROM notifications n LEFT JOIN users u ON u.id = n.user_id"
+                        + " WHERE n.dedup_key LIKE ?" + page
+                        + " ORDER BY n.id DESC LIMIT ?",
+                (rs, i) -> {
+                    Instant pushedAt = DbTime.read(rs, "pushed_at");
+                    String status = rs.getString("status");
+                    return new AdminUserMessageDtos.SentItem(
+                            uuid(rs.getBytes("id")).toString(),
+                            uuid(rs.getBytes("user_id")).toString(),
+                            "WITHDRAWN".equals(status) ? null : rs.getString("approved_nickname"),
+                            status,
+                            rs.getString("title"),
+                            rs.getString("body"),
+                            DbTime.read(rs, "created_at").toString(),
+                            pushedAt == null ? null : pushedAt.toString());
+                }, args.toArray());
+
+        boolean hasMore = rows.size() > limit;
+        List<AdminUserMessageDtos.SentItem> items = hasMore ? rows.subList(0, limit) : rows;
+        return new AdminUserMessageDtos.SentListResponse(items,
+                hasMore ? items.getLast().notificationId() : null);
+    }
+
     // ===== 도우미 =====
+
+    private static UUID parseIdOrThrow(String raw) {
+        UUID id = parseId(raw);
+        if (id == null) throw new BusinessException(ErrorCode.INVALID_REQUEST);
+        return id;
+    }
 
     /** LIKE 의 와일드카드를 글자 그대로 찾게 한다 — 닉네임에 % · _ 가 들어갈 수 있다. */
     private static String escapeLike(String s) {

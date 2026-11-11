@@ -68,6 +68,7 @@ class AdminUserMessageIT extends ChallengeApiSupport {
                 .isEqualTo(403);
         assertThat(postJsonAuth("/api/v1/admin/users/" + normal.id() + "/messages", normal.token(),
                 Map.of("title", "t", "body", "b")).getResponse().getStatus()).isEqualTo(403);
+        assertThat(getAuth("/api/v1/admin/messages", normal.token()).getResponse().getStatus()).isEqualTo(403);
     }
 
     @Test
@@ -173,6 +174,62 @@ class AdminUserMessageIT extends ChallengeApiSupport {
                         + " AND result = 'ALLOWED' AND payload_digest IS NOT NULL",
                 Integer.class, bytes(op.id()), bytes(who.id()));
         assertThat(audited).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("보낸 내역은 최신순이고 회원으로 거르며, 커서로 빠짐없이 넘기고 USER_MESSAGE_LIST_VIEW 로 남는다")
+    void sentHistory() throws Exception {
+        Member op = operator("umh");
+        Member a = member(uniq("uma"));
+        Member b = member(uniq("umb2"));
+        List<String> sentToA = new java.util.ArrayList<>();
+        for (int i = 1; i <= 3; i++) {
+            MvcResult r = postJsonAuth("/api/v1/admin/users/" + a.id() + "/messages", op.token(),
+                    Map.of("title", "제목" + i, "body", "본문" + i));
+            sentToA.add(read(r, "$.data.notificationId"));
+        }
+        postJsonAuth("/api/v1/admin/users/" + b.id() + "/messages", op.token(), Map.of("title", "다른 회원", "body", "본문"));
+
+        MvcResult res = getAuth("/api/v1/admin/messages?userId=" + a.id(), op.token());
+        assertThat(res.getResponse().getStatus()).isEqualTo(200);
+        List<String> ids = read(res, "$.data.items[*].notificationId");
+        assertThat(ids).containsExactly(sentToA.get(2), sentToA.get(1), sentToA.get(0));
+        assertThat((String) read(res, "$.data.items[0].title")).isEqualTo("제목3");
+        assertThat((String) read(res, "$.data.items[0].body")).isEqualTo("본문3");
+        assertThat((String) read(res, "$.data.items[0].userId")).isEqualTo(a.id().toString());
+        assertThat((String) read(res, "$.data.items[0].nickname")).isNotBlank();
+        assertThat((String) read(res, "$.data.items[0].status")).isEqualTo("ACTIVE");
+        assertThat((Object) read(res, "$.data.items[0].pushedAt")).as("시험 환경엔 기기가 없다").isNull();
+        assertThat((Object) read(res, "$.data.nextCursor")).isNull();
+
+        // 한 장에 한 건씩 넘겨도 세 건을 정확히 한 번씩 본다.
+        List<String> paged = new java.util.ArrayList<>();
+        String cursor = null;
+        do {
+            MvcResult page = getAuth("/api/v1/admin/messages?size=1&userId=" + a.id()
+                    + (cursor == null ? "" : "&cursor=" + cursor), op.token());
+            paged.addAll(read(page, "$.data.items[*].notificationId"));
+            cursor = read(page, "$.data.nextCursor");
+        } while (cursor != null);
+        assertThat(paged).containsExactlyElementsOf(ids);
+
+        // 거르지 않으면 다른 회원 것도 함께, 최신이 먼저.
+        List<String> all = read(getAuth("/api/v1/admin/messages?size=100", op.token()), "$.data.items[*].userId");
+        assertThat(all).contains(a.id().toString(), b.id().toString());
+        assertThat(all.getFirst()).isEqualTo(b.id().toString());
+
+        // 다른 종류의 알림은 섞이지 않는다.
+        List<String> types = jdbcTemplate.queryForList("SELECT type FROM notifications WHERE id IN (?, ?, ?)",
+                String.class, bytes(UUID.fromString(ids.get(0))), bytes(UUID.fromString(ids.get(1))),
+                bytes(UUID.fromString(ids.get(2))));
+        assertThat(types).containsOnly("OPERATOR_MESSAGE");
+
+        expectError(getAuth("/api/v1/admin/messages?userId=not-a-uuid", op.token()), 400, "INVALID_REQUEST");
+        expectError(getAuth("/api/v1/admin/messages?cursor=%21%21", op.token()), 400, "INVALID_REQUEST");
+
+        Integer audited = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM admin_audit_logs WHERE operator_id = ?"
+                + " AND action = 'USER_MESSAGE_LIST_VIEW' AND result = 'ALLOWED'", Integer.class, bytes(op.id()));
+        assertThat(audited).isGreaterThanOrEqualTo(4);
     }
 
     @Test

@@ -50,4 +50,20 @@ public final class AdminUserMessageDtos {
             String nickname,
             String sentAt,
             @Schema(description = "21:00~08:00(KST)라 푸시가 다음 날 08:00 으로 미뤄지는지") boolean pushDeferredToMorning) {}
+
+    @Schema(name = "AdminSentMessageListResponse", description = """
+            운영자가 보낸 개별 알림 — 최신순. `nextCursor` 가 있으면 그 값을 `cursor` 로 넘겨 다음 장을 받는다.""")
+    public record SentListResponse(List<SentItem> items, String nextCursor) {}
+
+    @Schema(name = "AdminSentMessageItem")
+    public record SentItem(
+            @Schema(description = "알림함 행 ID") String notificationId,
+            String userId,
+            @Schema(description = "받은 회원의 지금 닉네임. 탈퇴했으면 null") String nickname,
+            @Schema(description = "ACTIVE / SUSPENDED / WITHDRAWN") String status,
+            String title,
+            String body,
+            String sentAt,
+            @Schema(description = "푸시가 기기에 전달된 시각. null 이면 알림함에만 있다(기기 미등록·알림 꺼짐·야간 보류 중)")
+            String pushedAt) {}
 }
