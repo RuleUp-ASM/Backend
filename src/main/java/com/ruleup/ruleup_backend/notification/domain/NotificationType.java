@@ -9,12 +9,13 @@ import java.util.UUID;
 import static com.ruleup.ruleup_backend.notification.domain.NotificationParams.*;
 
 /**
- * 알림 타입 레지스트리 <b>27종</b> — 백엔드 테크 스펙 5절, 공통 8절.
+ * 알림 타입 레지스트리 <b>28종</b> — 백엔드 테크 스펙 5절, 공통 8절.
  *
  * <p>2026-09-19 {@link #VERIFICATION_FAIL_EXPECTED}(이의 필요) 가 추가돼 24종, 2026-09-28
  * {@link #INVITATION_RECEIVED}(설치 후 가입한 사람이 받은 초대, QA NAV-06) 가 추가돼 25종,
  * 2026-10-13 {@link #ROUTINE_MISSED}(수동 방 미체크) · {@link #DAILY_ROUTINES_COMPLETED}(오늘 루틴 모두 완료) 가
- * 추가돼 27종이다. 두 타입은 아직 노션 공통 8절 표에 행이 없다.
+ * 추가돼 27종, 2026-11-11 {@link #OPERATOR_MESSAGE}(운영자 개별 메시지) 가 추가돼 28종이다.
+ * 이 세 타입은 아직 노션 공통 8절 표에 행이 없다.
  *
  * <h4>23종 — 문서와 맞다</h4>
  * 한동안 코드가 문서보다 한 종 앞서 있었다. {@code CS_ANSWERED} 가 앱 운영 정책 §5.5 에만 있고
@@ -150,6 +151,19 @@ public enum NotificationType {
      */
     CS_ANSWERED(NotificationToggleGroup.ACCOUNT, "ruleup://me/inquiries/{inquiry_id}",
             new String[]{INQUIRY_ID}),
+
+    /**
+     * 운영자가 <b>한 사람에게</b> 직접 쓴 메시지 — 관리자 콘솔 「회원에게 알림 보내기」(2026-11-11).
+     *
+     * <p>이의 사유 칸에 문의를 적는 등 답할 통로가 없는 사람에게 운영자가 먼저 말을 건다. 공지와 같이
+     * <b>사람이 쓴 문장이 곧 내용</b>이라 템플릿이 없다({@link NotificationTemplate#AUTHORED_TYPES}).
+     * 공지(전원 팬아웃)와 달리 받는 사람이 한 명이고 알림 탭에 쌓인다.
+     *
+     * <p>계정 그룹이다 — CS 답변과 같은 성격의 운영 연락이라 같은 토글을 따른다. 딥링크는 두지 않는다:
+     * 받침 화면이 없고, 없으면 앱이 알림함에 머문다. 앱은 모르는 타입도 목록에 제목·본문으로 세우므로
+     * <b>앱 수정 없이</b> 보인다. 멱등 키는 보낼 때마다 새로 만드는 {@code message_id} 다.
+     */
+    OPERATOR_MESSAGE(NotificationToggleGroup.ACCOUNT, null, new String[]{MESSAGE_ID}),
 
     // ===== 챌린지 그룹 11종 =====
 

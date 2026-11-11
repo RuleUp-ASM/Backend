@@ -4,6 +4,8 @@ import com.ruleup.ruleup_backend.admin.dto.AdminAppealDtos;
 import com.ruleup.ruleup_backend.admin.dto.AdminDtos;
 import com.ruleup.ruleup_backend.admin.dto.AdminInquiryDtos;
 import com.ruleup.ruleup_backend.admin.service.AdminAppealService;
+import com.ruleup.ruleup_backend.admin.service.AdminUserMessageService;
+import com.ruleup.ruleup_backend.admin.dto.AdminUserMessageDtos;
 import com.ruleup.ruleup_backend.admin.service.AdminDashboardService;
 import com.ruleup.ruleup_backend.admin.service.AdminInquiryService;
 import com.ruleup.ruleup_backend.admin.service.AdminOpsService;
@@ -35,7 +37,7 @@ import java.util.UUID;
  * 2단계 확인은 형태와 무관하게 필수</b>라 서버가 소유한다. 경로 prefix 전체에 인터셉터가 걸려
  * 있어 엔드포인트를 추가해도 권한 검사를 빠뜨릴 자리가 없다.
  */
-@Tag(name = "Admin", description = "운영자 백오피스 — 대시보드 · 일별 지표 · 신고 · 제재 · CS · 이의 · 직권 폐쇄 · 이상탐지 · 공지")
+@Tag(name = "Admin", description = "운영자 백오피스 — 대시보드 · 일별 지표 · 신고 · 제재 · CS · 이의 · 직권 폐쇄 · 이상탐지 · 공지 · 회원 개별 알림")
 @SecurityRequirement(name = "bearerAuth")
 @RestController
 @RequestMapping("/api/v1/admin")
@@ -49,6 +51,7 @@ public class AdminController {
     private final AdminDashboardService dashboardService;
     private final AdminStatsService statsService;
     private final AdminAppealService appealService;
+    private final AdminUserMessageService userMessageService;
 
     // ===== 대시보드 =====
 
@@ -280,6 +283,42 @@ public class AdminController {
     public ApiResponse<AdminDtos.UserView> userView(@AuthenticationPrincipal String userId,
                                                      @PathVariable UUID targetUserId) {
         return ApiResponse.ok(opsService.userView(UUID.fromString(userId), targetUserId));
+    }
+
+    // ===== 회원에게 알림 보내기 =====
+
+    @Operation(summary = "회원 검색 — 개별 알림 받는 사람 고르기", description = """
+            닉네임(승인된 것·심사 중인 새 것 둘 다, 부분 일치) 또는 회원 ID 로 찾는다.
+
+            **최근 30일에 이의·신고·문의를 한 사람이 위에 온다** — 그 안에서는 마지막 활동이 최근인 순.
+            `q` 가 없으면 그런 사람만 내려간다(최근 활동 목록). 탈퇴자·운영자 계정은 빠진다.
+            """)
+    @ApiErrorCodes({ErrorCode.ADMIN_FORBIDDEN, ErrorCode.LOGIN_REQUIRED})
+    @GetMapping("/users/search")
+    public ApiResponse<AdminUserMessageDtos.SearchResponse> searchUsers(
+            @AuthenticationPrincipal String userId,
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) Integer size) {
+        return ApiResponse.ok(userMessageService.search(UUID.fromString(userId), q, size));
+    }
+
+    @Operation(summary = "회원에게 알림 보내기", description = """
+            운영자가 쓴 제목·본문을 **그 회원 한 명의 알림함에 쌓고 푸시도 보낸다**(타입 `OPERATOR_MESSAGE`, 계정 알림 그룹).
+            문의를 남기지 않은 사람(예: 이의 사유 칸에 문의를 적은 사람)에게 답할 때 쓴다.
+
+            - 제목 1~50자 · 본문 1~500자. 잠금화면에 그대로 뜨므로 민감한 말은 넣지 않는다.
+            - 푸시는 회원의 알림 설정(전체·계정 그룹)과 기기 등록을 따른다. 21:00~08:00 KST 에는 08:00 까지 미뤄진다.
+            - 탭하면 앱 알림함으로 간다(딥링크 없음). 앱 수정 없이 보인다.
+            - 감사 로그에 `USER_MESSAGE` 로 남는다(본문은 다이제스트).
+            """)
+    @ApiErrorCodes({ErrorCode.INVALID_REQUEST, ErrorCode.USER_NOT_FOUND,
+            ErrorCode.ADMIN_FORBIDDEN, ErrorCode.LOGIN_REQUIRED})
+    @PostMapping("/users/{targetUserId}/messages")
+    public ApiResponse<AdminUserMessageDtos.MessageResponse> messageUser(
+            @AuthenticationPrincipal String userId,
+            @PathVariable UUID targetUserId,
+            @RequestBody AdminUserMessageDtos.MessageRequest request) {
+        return ApiResponse.ok(userMessageService.send(UUID.fromString(userId), targetUserId, request));
     }
 
     // ===== CS 문의 =====

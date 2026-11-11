@@ -52,5 +52,9 @@ public enum AdminAction {
     /** 일별 서비스 지표 수동 재계산 — 저장된 값을 덮어쓰는 조작이다. */
     STATS_RECOMPUTE,
     /** 콘솔 진입 인증 시도. 실패는 DENIED 로 남아 무차별 대입의 흔적이 된다. */
-    ADMIN_LOGIN
+    ADMIN_LOGIN,
+    /** 회원 검색 — 개별 알림을 보낼 사람을 고른다. */
+    USER_SEARCH,
+    /** 운영자가 회원 한 명에게 직접 쓴 알림을 보냈다. 본문은 다이제스트로만 남는다. */
+    USER_MESSAGE
 }

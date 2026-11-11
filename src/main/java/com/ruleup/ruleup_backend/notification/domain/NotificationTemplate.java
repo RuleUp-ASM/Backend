@@ -25,10 +25,10 @@ import static com.ruleup.ruleup_backend.notification.domain.NotificationParams.*
  * 이미 의미 있는 파라미터가 있으면 그것을 쓴다 — 생명주기는 {@code phase}, 티어는
  * {@code direction} 이라 같은 값을 {@code variant} 로 한 번 더 넘기지 않는다.
  *
- * <h4>문구가 없는 두 타입</h4>
- * {@code ANNOUNCEMENT} · {@code MARKETING} 은 <b>사람이 쓴 문장</b>이 곧 내용이다. 공지와 캠페인은
- * 운영자가 콘솔에서 제목·본문을 직접 적고, 그것을 템플릿으로 환원할 방법이 없다.
- * {@link #AUTHORED_TYPES} 가 그 예외이고, 기동 검증이 <b>그 둘만</b> 템플릿 없이 남아 있는지 본다.
+ * <h4>문구가 없는 세 타입</h4>
+ * {@code ANNOUNCEMENT} · {@code MARKETING} · {@code OPERATOR_MESSAGE} 는 <b>사람이 쓴 문장</b>이 곧 내용이다.
+ * 공지·캠페인·개별 메시지는 운영자가 콘솔에서 제목·본문을 직접 적고, 그것을 템플릿으로 환원할 방법이 없다.
+ * {@link #AUTHORED_TYPES} 가 그 예외이고, 기동 검증이 <b>그 셋만</b> 템플릿 없이 남아 있는지 본다.
  *
  * <h4>문구에 민감정보를 담지 않는다</h4>
  * 잠금 사유·CS 답변 전문·인증 사진은 여기 들어오지 않는다(백엔드 10절). 잠금화면에 뜨는 문장이다.
@@ -224,12 +224,13 @@ public enum NotificationTemplate {
             "남은 루틴: {routine_summary}. 오늘이 지나기 전에 인증해주세요.");
 
     /**
-     * 문구를 <b>사람이 쓰는</b> 두 타입. 운영자가 콘솔에서 제목·본문을 직접 적으므로 템플릿이 없다.
+     * 문구를 <b>사람이 쓰는</b> 세 타입. 운영자가 콘솔에서 제목·본문을 직접 적으므로 템플릿이 없다.
      * 기동 검증이 이 집합과 「템플릿 없는 타입」이 정확히 일치하는지 본다 — 템플릿을 빠뜨린
      * 타입이 여기 조용히 섞여 들어가면 그 알림은 폴백 문구로 나간다.
      */
     public static final Set<NotificationType> AUTHORED_TYPES =
-            EnumSet.of(NotificationType.ANNOUNCEMENT, NotificationType.MARKETING);
+            EnumSet.of(NotificationType.ANNOUNCEMENT, NotificationType.MARKETING,
+                    NotificationType.OPERATOR_MESSAGE);
 
     private static final Map<NotificationType, List<NotificationTemplate>> BY_TYPE =
             new EnumMap<>(NotificationType.class);
