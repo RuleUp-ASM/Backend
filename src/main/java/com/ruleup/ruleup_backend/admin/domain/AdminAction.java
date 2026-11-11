@@ -56,5 +56,7 @@ public enum AdminAction {
     /** 회원 검색 — 개별 알림을 보낼 사람을 고른다. */
     USER_SEARCH,
     /** 운영자가 회원 한 명에게 직접 쓴 알림을 보냈다. 본문은 다이제스트로만 남는다. */
-    USER_MESSAGE
+    USER_MESSAGE,
+    /** 보낸 개별 알림 내역 조회 — 본문을 보므로 따로 남긴다. */
+    USER_MESSAGE_LIST_VIEW
 }

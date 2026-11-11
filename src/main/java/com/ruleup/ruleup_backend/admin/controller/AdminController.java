@@ -321,6 +321,21 @@ public class AdminController {
         return ApiResponse.ok(userMessageService.send(UUID.fromString(userId), targetUserId, request));
     }
 
+    @Operation(summary = "보낸 개별 알림 내역", description = """
+            「회원에게 알림 보내기」로 보낸 것 — **최신순**. `userId` 로 한 회원만 거른다.
+            `pushedAt` 이 null 이면 알림함에만 있고 푸시는 기기에 닿지 않은 것이다(기기 미등록·알림 꺼짐·야간 보류 중).
+            본문을 보는 조회라 감사 로그에 `USER_MESSAGE_LIST_VIEW` 로 남는다.
+            """)
+    @ApiErrorCodes({ErrorCode.INVALID_REQUEST, ErrorCode.ADMIN_FORBIDDEN, ErrorCode.LOGIN_REQUIRED})
+    @GetMapping("/messages")
+    public ApiResponse<AdminUserMessageDtos.SentListResponse> sentMessages(
+            @AuthenticationPrincipal String userId,
+            @RequestParam(name = "userId", required = false) String memberId,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(required = false) Integer size) {
+        return ApiResponse.ok(userMessageService.sent(UUID.fromString(userId), memberId, cursor, size));
+    }
+
     // ===== CS 문의 =====
 
     @Operation(summary = "문의 큐", description = """
