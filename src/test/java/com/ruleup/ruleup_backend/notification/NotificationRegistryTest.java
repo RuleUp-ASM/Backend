@@ -35,7 +35,7 @@ class NotificationRegistryTest {
     class Types {
 
         @Test
-        @DisplayName("27종 — 공통 8절 표 22종 + CS 답변 + 실패 예정(09-19) + 받은 초대(09-28) + 수동 방 미체크·모두 완료(10-13)")
+        @DisplayName("28종 — 공통 8절 표 22종 + CS 답변 + 실패 예정(09-19) + 받은 초대(09-28) + 수동 방 미체크·모두 완료(10-13) + 운영자 개별 메시지(11-11)")
         void twentyThreeTypes() {
             assertThat(Arrays.stream(NotificationType.values()).map(Enum::name))
                     .containsExactlyInAnyOrder(
@@ -43,7 +43,7 @@ class NotificationRegistryTest {
                             "INACTIVE_WITHDRAWAL_NOTICE", "MODERATION_REJECTED",
                             "CHALLENGE_IMAGE_REMOVED", "PERMISSION_REGRANT_REQUIRED",
                             "CHEAT_DETECTED", "APPEAL_RESULT", "TERMS_UPDATED",
-                            "DEVICE_LOGGED_OUT", "CS_ANSWERED", "INVITATION_RECEIVED",
+                            "DEVICE_LOGGED_OUT", "CS_ANSWERED", "OPERATOR_MESSAGE", "INVITATION_RECEIVED",
                             "VERIFICATION_RESULT", "VERIFICATION_FAIL_EXPECTED", "CONSECUTIVE_FAILURE_WARNING",
                             "CHALLENGE_LIFECYCLE", "WATCHER_INVITATION_EXPIRED", "TIER_CHANGED",
                             "TIER_BOUNDARY_NEAR", "PENALTY_FAILURE_SHARED", "WATCHER_REACTION",
@@ -66,7 +66,7 @@ class NotificationRegistryTest {
     class ToggleGroups {
 
         @Test
-        @DisplayName("계정 13종")
+        @DisplayName("계정 14종")
         void account() {
             assertThat(byGroup(NotificationToggleGroup.ACCOUNT)).containsExactlyInAnyOrder(
                     NotificationType.CHALLENGE_KICKED, NotificationType.ACCOUNT_SANCTION,
@@ -75,7 +75,7 @@ class NotificationRegistryTest {
                     NotificationType.PERMISSION_REGRANT_REQUIRED, NotificationType.CHEAT_DETECTED,
                     NotificationType.APPEAL_RESULT, NotificationType.TERMS_UPDATED,
                     NotificationType.DEVICE_LOGGED_OUT, NotificationType.CS_ANSWERED,
-                    NotificationType.INVITATION_RECEIVED);
+                    NotificationType.OPERATOR_MESSAGE, NotificationType.INVITATION_RECEIVED);
         }
 
         @Test
@@ -208,6 +208,7 @@ class NotificationRegistryTest {
         void nullByDefault() {
             assertThat(link(NotificationType.MARKETING)).isNull();
             assertThat(link(NotificationType.ANNOUNCEMENT)).isNull();
+            assertThat(link(NotificationType.OPERATOR_MESSAGE)).as("받침 화면이 없어 알림함에 머문다").isNull();
         }
 
         @Test
@@ -428,6 +429,7 @@ class NotificationRegistryTest {
         p.put(NotificationParams.TARGET_KEY, "nickname");
         p.put(NotificationParams.ANNOUNCEMENT_ID, "an-3");
         p.put(NotificationParams.INQUIRY_ID, "iq-8");
+        p.put(NotificationParams.MESSAGE_ID, "msg-1");
         p.put(NotificationParams.CAMPAIGN_ID, "cp-1");
         p.put(NotificationParams.DATE, "2026-09-08");
         p.put(NotificationParams.SLOT, "MORNING");
