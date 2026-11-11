@@ -4,6 +4,7 @@
 2. Rule 7개(SLO-01~04·LAT-01·API-01/02)를 두 창 AND·표본 게이트까지 판정해 RuleUp/SLO AlarmFlag(Env,Service,Operation,Rule) 로 낸다.
    입력 부족이면 그 Rule 의 Flag 를 내지 않는다(0 으로 메우지 않는다 — slo_core 참고).
 3. refresh·sync 의 BurnRate 4창, 15분마다 30일 BudgetRemainingPct·BudgetFreeze(배포 사전 점검용).
+   원장 budget_excluded_windows(부하테스트 등 실사용이 아닌 구간)는 버짓에서 뺀다.
 4. 원천 조회가 전부 끝나면 RuleUp/Observe CollectorHeartbeat(Component=slo-calculator) — OBS-01·OBS-04 의 근거.
 5. detectors_enabled 이면 5분마다 FLOW·HTTP·CACHE 이상 탐지 Flag(RuleUp/Detectors).
 
@@ -53,7 +54,8 @@ def handler(event, context):
 
     cwio.put(out, 'RuleUp/SLO', flags + diag)
     if now.minute % 15 == 0:
-        publish_budget(src, out, env, service, ops, now, stamp)
+        publish_budget(src, out, env, service, ops, now, stamp,
+                       slo_core.excluded_hours(reg.get('budget_excluded_windows')))
     if reg['rules'].get('detectors_enabled') and now.minute % 5 == 0:
         detectors.run(reg, src, out, now)
     cwio.put(out, 'RuleUp/Observe', [('CollectorHeartbeat', {'Env': env, 'Component': 'slo-calculator'}, 1, stamp, 'Count')])
@@ -66,7 +68,8 @@ def to_series(e, b, l):
     return {m: (e[m], b[m], l[m]) for m in e if m in b and m in l}
 
 
-def publish_budget(src, out, env, service, ops, now, stamp):
+def publish_budget(src, out, env, service, ops, now, stamp, excluded=frozenset()):
+    """30일 버짓. excluded 는 원장 budget_excluded_windows 의 시간(부하테스트 등) — 세지 않는다."""
     last_hour = int((now - timedelta(seconds=120)).timestamp()) // 3600 - 1   # 마지막 완료 시간
     start = datetime.fromtimestamp((last_hour - 719) * 3600, timezone.utc)
     end = datetime.fromtimestamp((last_hour + 1) * 3600, timezone.utc)
@@ -76,11 +79,12 @@ def publish_budget(src, out, env, service, ops, now, stamp):
     data = []
     for i, op in enumerate(ops):
         e, b = raw.get(f'e{i}', {}), raw.get(f'b{i}', {})
-        bud = slo_core.budget({h: (e[h], b.get(h, 0)) for h in e}, last_hour)
+        bud = slo_core.budget({h: (e[h], b.get(h, 0)) for h in e}, last_hour, excluded)
         dims = {'Env': env, 'Service': service, 'Operation': op}
         if bud.remaining_pct is not None:
             data.append(('BudgetRemainingPct', dims, bud.remaining_pct, stamp, 'Percent'))
         data.append(('BudgetFreeze', dims, 1 if bud.freeze else 0, stamp, 'None'))
         cwio.log('budget', env=env, operation=op, eligible=bud.eligible, bad=bud.bad,
-                 coverage=round(bud.coverage, 4), remaining_pct=bud.remaining_pct, enforceable=bud.enforceable)
+                 coverage=round(bud.coverage, 4), remaining_pct=bud.remaining_pct, enforceable=bud.enforceable,
+                 excluded_hours=sum(1 for h in excluded if last_hour - 719 <= h <= last_hour))
     cwio.put(out, 'RuleUp/SLO', data)
