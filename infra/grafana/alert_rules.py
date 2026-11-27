@@ -102,7 +102,9 @@ RULES = [
     ("THREAD-01", "", "P1", "5m", f"max(ruleup_ops_max_busy_thread_pct{{{E}}}) >= 80", "Tomcat 스레드 사용 80% 이상 5분"),
     ("DB-01", "80", "P1", "5m", f"aws_rds_cpuutilization_average{{{RDS}}} >= 80", "RDS CPU 80% 이상 5분"),
     ("DB-01", "90", "P1", "1m", f"aws_rds_cpuutilization_average{{{RDS}}} >= 90", "RDS CPU 90% 이상 1분"),
-    ("DB-02", "", "P1", "5m", f"(aws_rds_freeable_memory_minimum{{{RDS}}} <= {int(RAM * 0.10)}) and (delta(aws_rds_swap_usage_maximum{{{RDS}}}[10m]) > 0)", "RDS 여유 메모리 10% 이하 5분 + 스왑 증가"),
+    ("DB-02", "", "P1", "5m", f"(aws_rds_freeable_memory_minimum{{{RDS}}} <= {int(RAM * 0.075)}) and (delta(aws_rds_swap_usage_maximum{{{RDS}}}[10m]) > 0)", "RDS 여유 메모리 7.5% 이하 5분 + 스왑 증가"),
+    # ↑ 10% 였으나 db.t4g.micro(1GB)는 평상시 여유가 100~109MB(≈10%)라 늘 걸쳐 있었다(2026-11-27, 성능 영향 없음 확인).
+    #   비용 때문에 등급을 올리지 않고 기준을 7.5%(≈80MB)로 낮춘다. 5% 는 P0(DB-11)가 맡는다. 등급을 올리면 10% 로 되돌린다.
     ("DB-03", "75", "P1", "5m", f"max(ruleup_db_db_connection_pct{{{E}}}) >= 75", "DB 접속 수가 최대의 75% 이상 5분"),
     ("DB-03", "95", "P1", "1m", f"max(ruleup_db_db_connection_pct{{{E}}}) >= 95", "DB 접속 수가 최대의 95% 이상"),
     ("DB-05", "", "P1", "5m", f"aws_rds_free_storage_space_minimum{{{RDS}}} / {DISK} < 0.15", "RDS 여유 저장공간 15% 미만"),
