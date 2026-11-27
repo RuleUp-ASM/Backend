@@ -82,9 +82,10 @@ public class AdminAuthService {
      */
     @Transactional
     public Session login(String passcode, String clientKey) {
-        // 관리자 서비스는 Cloudflare Access 신원으로만 들어온다. 여기서 앱 JWT 를 내주면 그 토큰이
-        // 공개 API 에서도 통하는 운영자 토큰이 된다 — 비밀번호 진입 자체를 닫는다.
-        if (runtimeRole.role() == RuntimeRole.ADMIN) {
+        // 관리자 서비스는 기본이 Cloudflare Access 신원이다 — 그때는 비밀번호 진입 자체를 닫는다.
+        // app.admin.login=passcode 로 띄운 관리자 서비스(prod Lambda)만 비밀번호를 받는다. 이때 내주는 토큰은
+        // 관리자 서비스 전용 서명키(ADMIN_JWT_SECRET)로 서명되어 공개 API 에서는 통하지 않는다.
+        if (runtimeRole.role() == RuntimeRole.ADMIN && !adminProperties.passcodeLogin()) {
             auditService.denied(null, AdminAction.ADMIN_LOGIN, "passcode-login-disabled");
             throw new BusinessException(ErrorCode.INVALID_PASSCODE);
         }

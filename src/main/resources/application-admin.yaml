@@ -1,7 +1,8 @@
 # 관리자 API 전용 서비스 — SPRING_PROFILES_ACTIVE=<stg|prod>,admin
 #
 # 같은 jar 를 쓰되 「관리자 엔드포인트 + 그것이 부르는 도메인 로직」만 산다.
-#  · 인증은 Cloudflare Access JWT 뿐이다(admin.access.AdminSecurityConfig). 앱 JWT 는 받지도 내주지도 않는다.
+#  · 인증은 기본이 Cloudflare Access JWT 다(admin.access.AdminSecurityConfig) — 앱 JWT 는 받지도 내주지도 않는다.
+#    ADMIN_LOGIN=passcode 로 띄우면 비밀번호(ADMIN_PASSCODE)로 들어와 관리자 전용 키(ADMIN_JWT_SECRET)의 토큰으로 다닌다.
 #  · 배치·SQS 컨슈머·기동 워밍업은 돌지 않는다. 공개 API 서비스가 서비스당 한 벌로 맡는다 —
 #    여기서도 돌면 공지 팬아웃·알림 발송·심사가 두 번 나간다.
 #  · 알림은 저장 + SQS 발행(커밋 후)까지만 한다. FCM 전달은 공개 API 서비스의 컨슈머가 한다.
@@ -19,8 +20,10 @@ app:
 
   # 관리자 서비스는 앱 사용자 토큰을 발급·검증하지 않는다. 그런데 JwtProvider 빈은 키를 요구하므로
   # 기동마다 버려지는 임의 값을 준다 — 공개 API 의 JWT 서명키는 이 서비스에 들어오지 않는다.
+  # 비밀번호 진입(ADMIN_LOGIN=passcode)일 때는 ADMIN_JWT_SECRET 을 준다 — 관리자 서비스만 아는 키라, 여기서 내준
+  # 운영자 토큰은 공개 API 에서 통하지 않고 그 반대도 마찬가지다. 고정값이어야 인스턴스가 바뀌어도 세션이 이어진다.
   jwt:
-    secret: ${random.value}${random.value}
+    secret: ${ADMIN_JWT_SECRET:${random.value}${random.value}}
   # 관리자 화면은 소셜 로그인을 쓰지 않는다. 키를 넘기지 않기 위해 자리만 채운다.
   oauth:
     kakao:
@@ -30,7 +33,8 @@ app:
       client-id: unused-in-admin
 
   admin:
-    passcode: ""      # 비밀번호 진입은 관리자 서비스에서 닫힌다(AdminAuthService)
+    # 기본(login=access)에서는 값이 있어도 비밀번호 진입이 닫힌다(AdminAuthService). login=passcode 일 때만 쓰인다.
+    passcode: ${ADMIN_PASSCODE:}
     access:
       team-domain: ${ADMIN_ACCESS_TEAM_DOMAIN:}
       audiences: ${ADMIN_ACCESS_AUDIENCES:}
