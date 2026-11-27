@@ -1,8 +1,9 @@
-name: Deploy to ECS (prod)
+name: Deploy to EC2 (prod)
 
 # main 브랜치 push 시 운영 배포. dev → main 머지가 곧 릴리스다. (테스트는 ci.yml이 병렬로 검증)
-# 스테이징(deploy.yml)과 같은 절차를 쓰되, AWS 역할이 main 브랜치에서만 assume 되도록 묶여 있어
-# 다른 브랜치에서 이 워크플로를 돌려도 운영에 닿지 못한다.
+# 운영은 2026-11-27 부터 새 계정(063450199872)의 EC2 한 대다 — 이미지를 ECR 에 올리고, SSM 으로 서버의
+# /opt/ruleup/deploy.sh(블루그린: 새 색 기동 → 헬스 통과 → 프록시 전환 → 옛 색 정리)를 부른다.
+# AWS 역할이 main 브랜치에서만 assume 되도록 묶여 있어 다른 브랜치에서 돌려도 운영에 닿지 못한다.
 on:
   push:
     branches: [ main ]
@@ -20,8 +21,7 @@ permissions:
 env:
   AWS_REGION: ap-northeast-2
   ECR_REPOSITORY: ruleup-api
-  ECS_CLUSTER: ruleup-prod-cluster
-  ECS_SERVICE: ruleup-prod-api
+  ASG_NAME: ruleup-prod-api
   IMAGE_TAG: prod
 
 jobs:
@@ -46,7 +46,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: arn:aws:iam::961178969292:role/ruleup-prod-gha-deploy
+          role-to-assume: arn:aws:iam::063450199872:role/ruleup-prod-gha-deploy
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
@@ -63,81 +63,39 @@ jobs:
           context: .
           file: Dockerfile.deploy
           platforms: linux/arm64
-          provenance: false          # ECS Fargate가 단일 아키 이미지를 받도록(매니페스트 리스트 방지)
+          provenance: false          # 단일 아키 이미지로 올린다(매니페스트 리스트 방지)
           push: true
           tags: |
             ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
             ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
 
-      # 배포 사전 점검(노션 「알람 카탈로그」 §9.1·G04) — 연결 경보 ALARM·관측 하트비트 stale·CUJ EligibleCount 원천 누락·
-      # 실요청 대비 계측 불일치·버짓 동결이면 막는다. 저장소 변수 MONITORING_PREFLIGHT=enforce 일 때만 실패시키고,
-      # 기본(warn)은 사유를 경고로만 남긴다 — 감시 Lambda·앱 계측이 처음 올라가는 동안 배포를 막지 않게.
-      - name: Monitoring preflight
-        env:
-          MODE: ${{ vars.MONITORING_PREFLIGHT || 'warn' }}
+      # 서버의 deploy.sh 가 실패하면(새 색이 헬스를 통과하지 못함) 프록시는 옛 색 그대로이고 0 이 아닌 값으로 끝난다.
+      # 스키마 마이그레이션은 앱이 기동할 때 돌린다. CloudWatch 기반 사전 점검(monitoring_preflight)은 계정 이전으로
+      # 뺐다 — 경보가 Grafana 로 옮겨 가면 그쪽 기준으로 다시 붙인다.
+      - name: Deploy on server (blue-green via SSM)
         run: |
-          python3 -m venv /tmp/preflight && /tmp/preflight/bin/pip install --quiet boto3
-          /tmp/preflight/bin/python .github/scripts/monitoring_preflight.py prod --mode "$MODE"
-
-      # 스키마 마이그레이션을 서비스 갱신 전에 별도 태스크(DDL 계정)로 돌린다. 켜기 전에는 공개 API 가 기동 때 돌린다.
-      # 전환 절차: infra/admin-split/README.md「마이그레이션 분리」.
-      - name: Run schema migration (one-off task)
-        if: ${{ vars.MIGRATION_TASK_ENABLED == 'true' }}
-        run: bash .github/scripts/run-migration.sh prod ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
-
-      # 새 태스크가 뜨지 못하면(마이그레이션 실패·스키마 누락으로 기동 중단) 회로차단기가 이전 태스크로
-      # 되돌린다. 그런데 되돌린 뒤에도 services-stable 은 「안정」이라 워크플로가 초록불로 끝난다 —
-      # 배포가 실제로 나갔는지는 이번에 만든 deployment 의 rolloutState 로 확인한다.
-      - name: Deploy to ECS (rolling)
-        run: |
-          DEPLOYMENT_ID=$(aws ecs update-service \
-            --cluster ${{ env.ECS_CLUSTER }} \
-            --service ${{ env.ECS_SERVICE }} \
-            --force-new-deployment \
-            --query 'service.deployments[?status==`PRIMARY`].id | [0]' --output text)
-          echo "deployment=$DEPLOYMENT_ID"
-          aws ecs wait services-stable \
-            --cluster ${{ env.ECS_CLUSTER }} \
-            --services ${{ env.ECS_SERVICE }}
-          # services-stable 이 풀린 뒤에도 rolloutState 는 옛 태스크 드레이닝이 끝날 때까지 수 초간
-          # IN_PROGRESS 로 남는다. 그 순간에 한 번만 보면 성공한 배포를 실패로 오판한다 — 종결 상태까지 기다린다.
-          for i in $(seq 1 60); do
-            STATE=$(aws ecs describe-services \
-              --cluster ${{ env.ECS_CLUSTER }} \
-              --services ${{ env.ECS_SERVICE }} \
-              --query "services[0].deployments[?id=='$DEPLOYMENT_ID'].rolloutState | [0]" --output text)
-            [ "$STATE" != "IN_PROGRESS" ] && break
+          IMAGE="${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}"
+          IID=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "$ASG_NAME" \
+            --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`].InstanceId | [0]' --output text)
+          if [ -z "$IID" ] || [ "$IID" = "None" ]; then echo "::error::서버 인스턴스를 찾지 못했다($ASG_NAME)"; exit 1; fi
+          echo "instance=$IID image=$IMAGE"
+          CID=$(aws ssm send-command --instance-ids "$IID" --document-name AWS-RunShellScript \
+            --comment "deploy ${{ github.sha }}" \
+            --parameters "{\"commands\":[\"/opt/ruleup/deploy.sh $IMAGE < /dev/null\"],\"executionTimeout\":[\"900\"]}" \
+            --query Command.CommandId --output text)
+          for i in $(seq 1 120); do
+            STATUS=$(aws ssm get-command-invocation --command-id "$CID" --instance-id "$IID" --query Status --output text 2>/dev/null || echo Pending)
+            case "$STATUS" in Success|Failed|TimedOut|Cancelled) break;; esac
             sleep 10
           done
-          echo "rolloutState=$STATE"
-          if [ "$STATE" = "IN_PROGRESS" ]; then
-            echo "::error::10분이 지나도 롤아웃이 끝나지 않았다. ECS 서비스 이벤트와 CloudWatch /ecs/ruleup-prod-api 를 확인한다."
-            exit 1
-          fi
-          if [ "$STATE" != "COMPLETED" ]; then
-            echo "::error::새 태스크가 뜨지 못해 이전 버전으로 되돌려졌다(rolloutState=$STATE). CloudWatch /ecs/ruleup-prod-api 기동 로그를 확인한다."
+          aws ssm get-command-invocation --command-id "$CID" --instance-id "$IID" --query StandardOutputContent --output text
+          if [ "$STATUS" != "Success" ]; then
+            aws ssm get-command-invocation --command-id "$CID" --instance-id "$IID" --query StandardErrorContent --output text
+            echo "::error::배포 실패(status=$STATUS) — 프록시는 이전 버전 그대로다. 위 서버 출력의 기동 로그를 확인한다."
             exit 1
           fi
 
-      # 기동 확인 — /actuator/health 는 관리 포트(8081)로 옮겨 ALB 밖에서는 404 다(2026-10-17 apply_prod_dau2.py).
-      # 그 헬스체크는 ALB 대상 그룹이 보고, 위 rolloutState=COMPLETED 가 새 태스크 전부 통과했다는 뜻이다.
-      # 스키마 누락은 기동 단계(SchemaPresenceCheck)에서 이미 걸러진다.
       - name: Smoke test
         run: |
-          # 외부 점검(EDGE-01)·Route 53(NATIVE-01)이 보는 무인증 경로 — 사용자와 같은 길(Cloudflare 경유)로 고정 본문이 와야 한다.
+          # 외부 점검이 보는 무인증 경로 — 사용자와 같은 길(Cloudflare 터널 경유)로 고정 본문이 와야 한다.
           curl -fsS --retry 5 --retry-delay 10 --retry-all-errors -H 'Cache-Control: no-cache' https://prod.ruleup.co.kr/health/public | grep -qx 'ruleup-ok'
-
-  # 관리자 API 서비스 — 같은 이미지를 관리자 프로필로. 공개 API 와 따로 배포·롤백된다(실패해도 공개 API 는 그대로).
-  # 서비스가 아직 없으면 건너뛴다. 수동 배포·롤백: deploy-admin.yml
-  deploy-admin:
-    needs: deploy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: arn:aws:iam::961178969292:role/ruleup-prod-gha-deploy
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Deploy admin service
-        run: bash .github/scripts/deploy-admin.sh prod 961178969292.dkr.ecr.ap-northeast-2.amazonaws.com/ruleup-api:${{ github.sha }}

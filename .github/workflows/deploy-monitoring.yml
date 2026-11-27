@@ -1,12 +1,9 @@
 name: Deploy sync monitoring (stg)
 
+# CloudWatch 감시 계층은 기존 계정(961178969292)에 있었다. 2026-11-27 계정 이전 뒤로는 경보가 Grafana 로 옮겨 가는 중이라
+# dev push 로는 돌지 않는다. 수동 실행만 남긴다.
 on:
   workflow_dispatch:
-  push:
-    branches: [ dev ]
-    paths:
-      - 'infra/monitoring/**'
-      - '.github/workflows/deploy-monitoring.yml'
 
 permissions:
   id-token: write
