@@ -1,0 +1,86 @@
+// 로그·호스트 지표·앱 OTLP 를 Grafana Cloud OTLP 게이트웨이 하나로 보낸다.
+otelcol.auth.basic "grafana" {
+	username = sys.env("GRAFANA_OTLP_USER")
+	password = sys.env("GRAFANA_OTLP_TOKEN")
+}
+
+otelcol.exporter.otlphttp "grafana" {
+	client {
+		endpoint = sys.env("GRAFANA_OTLP_ENDPOINT")
+		auth     = otelcol.auth.basic.grafana.handler
+	}
+}
+
+otelcol.processor.batch "default" {
+	output {
+		metrics = [otelcol.exporter.otlphttp.grafana.input]
+		logs    = [otelcol.exporter.otlphttp.grafana.input]
+		traces  = [otelcol.exporter.otlphttp.grafana.input]
+	}
+}
+
+// 앱이 보내는 OTLP (지표·트레이스)
+otelcol.receiver.otlp "app" {
+	grpc { endpoint = "0.0.0.0:4317" }
+	http { endpoint = "0.0.0.0:4318" }
+	output {
+		metrics = [otelcol.processor.batch.default.input]
+		logs    = [otelcol.processor.batch.default.input]
+		traces  = [otelcol.processor.batch.default.input]
+	}
+}
+
+// 컨테이너 stdout 로그
+discovery.docker "containers" {
+	host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "containers" {
+	targets = discovery.docker.containers.targets
+	rule {
+		source_labels = ["__meta_docker_container_name"]
+		regex         = "/(.*)"
+		target_label  = "container"
+	}
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+		target_label  = "service_name"
+	}
+}
+
+loki.source.docker "containers" {
+	host       = "unix:///var/run/docker.sock"
+	targets    = discovery.relabel.containers.output
+	labels     = {env = "prod", host = "ruleup-prod-ec2"}
+	forward_to = [loki.write.grafana.receiver]
+}
+
+// 로그는 OTLP 로 돌리지 않고 Loki 로 바로 보낸다 — OTLP 변환을 거치면 service_name 라벨이 빠진다.
+loki.write "grafana" {
+	endpoint {
+		url = sys.env("GRAFANA_LOKI_URL") + "/loki/api/v1/push"
+		basic_auth {
+			username = sys.env("GRAFANA_LOKI_USER")
+			password = sys.env("GRAFANA_OTLP_TOKEN")
+		}
+	}
+}
+
+// 호스트 지표 (CPU·메모리·디스크·스왑)
+prometheus.exporter.unix "host" {
+	rootfs_path = "/host/root"
+	procfs_path = "/host/proc"
+	sysfs_path  = "/host/sys"
+}
+
+prometheus.scrape "host" {
+	targets         = prometheus.exporter.unix.host.targets
+	scrape_interval = "60s"
+	forward_to      = [otelcol.receiver.prometheus.default.receiver]
+}
+
+otelcol.receiver.prometheus "default" {
+	output {
+		metrics = [otelcol.processor.batch.default.input]
+	}
+}

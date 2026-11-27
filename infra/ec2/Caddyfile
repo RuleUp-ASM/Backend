@@ -1,0 +1,9 @@
+{
+	admin localhost:2019
+	auto_https off
+}
+
+:80 {
+	# 업스트림(blue/green/hold)은 deploy.sh · db-cutover.sh 가 run/upstream.caddy 를 바꾸고 reload 한다.
+	import /etc/caddy/run/upstream.caddy
+}
