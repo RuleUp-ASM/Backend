@@ -22,6 +22,10 @@ WORKDIR /app
 ARG ADOT_JAVA_AGENT_VERSION=v2.31.0
 ADD https://github.com/aws-observability/aws-otel-java-instrumentation/releases/download/${ADOT_JAVA_AGENT_VERSION}/aws-opentelemetry-agent.jar /app/otel/aws-opentelemetry-agent.jar
 COPY --from=build /src/build/libs/*.jar app.jar
+# 관리자 API 는 이 이미지를 그대로 Lambda(ruleup-prod-admin, role=admin)로 띄운다. Lambda Web Adapter 가 Lambda 이벤트를
+# localhost:8080 HTTP 요청으로 바꿔 준다. Lambda 밖(EC2)에서는 /opt/extensions 를 아무도 읽지 않아 영향이 없다.
+# 구성: infra/admin-lambda/README.md
+COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.9.1 /lambda-adapter /opt/extensions/lambda-adapter
 COPY infra/monitoring/tracing/entrypoint.sh /app/entrypoint.sh
 # glibc 는 스레드마다 64MB 단위 malloc 아레나를 늘려 가며 돌려주지 않는다. stg(1GB 태스크)에서 JVM RSS 800MB 중
 # 힙은 256MB 였고 아레나가 ~200MB 를 차지해, 하루쯤마다 하드 메모리 80% 경보(ECS-06-80)를 다시 울렸다(2026-10-14 smaps 실측).

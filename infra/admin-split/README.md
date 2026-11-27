@@ -1,5 +1,9 @@
 # 관리자 API 분리 — 구성·권한·전환·복구
 
+> **2026-11-27**: 계정 이전 뒤 prod 는 이 문서의 ECS 서비스·터널 사이드카·NAT 인스턴스 대신 **Lambda** 로 올렸다 —
+> `infra/admin-lambda/README.md`. 역할(`app.runtime.role`)·Access JWT 검증·DB 계정 분리의 근거는 이 문서 그대로다.
+> 아래 절차·식별자(`provision.py`, `deploy-admin.yml`)는 기존 계정의 ECS 구성 기준이라 새 계정에는 맞지 않는다.
+
 관리자 API(`/api/v1/admin/**`)를 공개 API 와 **다른 실행 환경·인증·DB 계정·네트워크 경로**로 나눈다.
 같은 jar 를 역할(`app.runtime.role`)만 바꿔 띄운다 — 도메인 로직(제재·신고·문의·공지·통계 재계산)과
 일관성 처리(커밋 후 SQS 발행, 아웃박스, Redis 투영)는 한 벌이다.

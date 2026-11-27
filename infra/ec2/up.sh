@@ -13,5 +13,7 @@ for REG in $(grep -E '^IMAGE_' .env | cut -d= -f2 | cut -d/ -f1 | sort -u); do
   aws ecr get-login-password | docker login --username AWS --password-stdin "$REG" >/dev/null
 done
 docker compose --profile "$ACTIVE" up -d --remove-orphans
+# 관리자 Lambda 의 외부 출구. 실패해도 공개 API 는 올라와 있어야 하므로 여기서 멈추지 않는다.
+/opt/ruleup/nat.sh || echo "WARN: nat.sh 실패 — 관리자 콘솔이 외부·Redis 에 닿지 못한다"
 echo "$ACTIVE" > run/active
 docker compose --profile "$ACTIVE" ps --format 'table {{.Service}}\t{{.State}}\t{{.Status}}'
