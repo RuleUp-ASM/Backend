@@ -79,6 +79,96 @@ prometheus.scrape "host" {
 	forward_to      = [otelcol.receiver.prometheus.default.receiver]
 }
 
+// RDS·SQS 는 CloudWatch 에만 있는 지표다 — 경보에 쓰는 것만 골라 1분마다 가져온다(서버 역할의 cloudwatch:GetMetricData).
+// 이름은 aws_rds_cpuutilization_average 꼴, 차원은 dimension_<이름> 라벨.
+prometheus.exporter.cloudwatch "aws" {
+	sts_region = "ap-northeast-2"
+
+	static "rds" {
+		regions    = ["ap-northeast-2"]
+		namespace  = "AWS/RDS"
+		dimensions = { "DBInstanceIdentifier" = "ruleup-prod-mysql" }
+		metric {
+			name       = "CPUUtilization"
+			statistics = ["Average"]
+			period     = "1m"
+			length     = "5m"   // 최근 5분에서 마지막 점을 쓴다 — 방금 지난 분은 아직 비어 있을 수 있다
+		}
+		metric {
+			name       = "FreeableMemory"
+			statistics = ["Minimum"]
+			period     = "1m"
+			length     = "5m"   // 최근 5분에서 마지막 점을 쓴다 — 방금 지난 분은 아직 비어 있을 수 있다
+		}
+		metric {
+			name       = "SwapUsage"
+			statistics = ["Maximum"]
+			period     = "1m"
+			length     = "5m"   // 최근 5분에서 마지막 점을 쓴다 — 방금 지난 분은 아직 비어 있을 수 있다
+		}
+		metric {
+			name       = "FreeStorageSpace"
+			statistics = ["Minimum"]
+			period     = "1m"
+			length     = "5m"   // 최근 5분에서 마지막 점을 쓴다 — 방금 지난 분은 아직 비어 있을 수 있다
+		}
+	}
+
+	static "sqs_notifications" {
+		regions    = ["ap-northeast-2"]
+		namespace  = "AWS/SQS"
+		dimensions = { "QueueName" = "ruleup-prod-notifications" }
+		metric {
+			name       = "ApproximateAgeOfOldestMessage"
+			statistics = ["Maximum"]
+			period     = "1m"
+			length     = "5m"   // 최근 5분에서 마지막 점을 쓴다 — 방금 지난 분은 아직 비어 있을 수 있다
+		}
+	}
+
+	static "sqs_moderation" {
+		regions    = ["ap-northeast-2"]
+		namespace  = "AWS/SQS"
+		dimensions = { "QueueName" = "ruleup-prod-moderation" }
+		metric {
+			name       = "ApproximateAgeOfOldestMessage"
+			statistics = ["Maximum"]
+			period     = "1m"
+			length     = "5m"   // 최근 5분에서 마지막 점을 쓴다 — 방금 지난 분은 아직 비어 있을 수 있다
+		}
+	}
+
+	static "sqs_notifications_dlq" {
+		regions    = ["ap-northeast-2"]
+		namespace  = "AWS/SQS"
+		dimensions = { "QueueName" = "ruleup-prod-notifications-dlq" }
+		metric {
+			name       = "ApproximateNumberOfMessagesVisible"
+			statistics = ["Maximum"]
+			period     = "1m"
+			length     = "5m"   // 최근 5분에서 마지막 점을 쓴다 — 방금 지난 분은 아직 비어 있을 수 있다
+		}
+	}
+
+	static "sqs_moderation_dlq" {
+		regions    = ["ap-northeast-2"]
+		namespace  = "AWS/SQS"
+		dimensions = { "QueueName" = "ruleup-prod-moderation-dlq" }
+		metric {
+			name       = "ApproximateNumberOfMessagesVisible"
+			statistics = ["Maximum"]
+			period     = "1m"
+			length     = "5m"   // 최근 5분에서 마지막 점을 쓴다 — 방금 지난 분은 아직 비어 있을 수 있다
+		}
+	}
+}
+
+prometheus.scrape "aws" {
+	targets         = prometheus.exporter.cloudwatch.aws.targets
+	scrape_interval = "60s"
+	forward_to      = [otelcol.receiver.prometheus.default.receiver]
+}
+
 otelcol.receiver.prometheus "default" {
 	output {
 		metrics = [otelcol.processor.batch.default.input]
