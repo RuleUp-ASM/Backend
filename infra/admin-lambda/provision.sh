@@ -3,7 +3,8 @@
 #   provision.sh net       보안 그룹 규칙 · 내부 DNS 영역 · 서버 역할 권한(NAT 경로·내부 이름 갱신)
 #   provision.sh db        DB 계정 ruleup_admin (비밀번호는 Secrets Manager ruleup-prod/admin 에 만들고 서버에서 적용)
 #   provision.sh function <이미지 URI>   실행 역할 · 함수 · 함수 URL
-# Cloudflare Access 값(팀 도메인·AUD·운영자 이메일)은 환경변수 ACCESS_TEAM_DOMAIN · ACCESS_AUD · ACCESS_EMAILS 로 준다.
+# 진입은 비밀번호다(ADMIN_LOGIN=passcode) — 비밀번호는 시크릿 ruleup-prod/app 의 ADMIN_PASSCODE, 토큰 서명키는 ruleup-prod/admin 의 JWT_SECRET.
+# Cloudflare Access 로 바꾸려면 LOGIN=access ACCESS_TEAM_DOMAIN=… ACCESS_AUD=… ACCESS_EMAILS=… 를 주고 function 을 다시 돌린다.
 # 구성과 이유는 같은 폴더 README.md.
 set -euo pipefail
 export AWS_PAGER="" AWS_PROFILE=ruleup-new AWS_DEFAULT_REGION=ap-northeast-2
@@ -75,6 +76,15 @@ function_() {
 
   # 환경변수 파일은 값이 화면·셸 기록에 남지 않게 파이썬이 임시 파일로 만든다.
   ENVF=$(mktemp); trap 'rm -f "$ENVF"' EXIT
+  # 관리자 서비스 전용 토큰 서명키 — 없으면 한 번 만들어 시크릿에 넣는다(공개 API 의 JWT_SECRET 과 다른 값이어야 한다).
+  python3 - <<'PY'
+import json, subprocess
+def aws(*a): return subprocess.run(["aws", *a, "--output", "text"], check=True, capture_output=True, text=True).stdout.strip()
+cur = json.loads(aws("secretsmanager", "get-secret-value", "--secret-id", "ruleup-prod/admin", "--query", "SecretString"))
+if not cur.get("JWT_SECRET"):
+    cur["JWT_SECRET"] = aws("secretsmanager", "get-random-password", "--exclude-punctuation", "--password-length", "64", "--query", "RandomPassword")
+    aws("secretsmanager", "put-secret-value", "--secret-id", "ruleup-prod/admin", "--secret-string", json.dumps(cur))
+PY
   aws secretsmanager get-secret-value --secret-id ruleup-prod/app --query SecretString --output text > "$ENVF.app"
   aws secretsmanager get-secret-value --secret-id ruleup-prod/admin --query SecretString --output text > "$ENVF.admin"
   python3 - "$ENVF" "$DB_HOST" "$ACC" <<'PY'
@@ -100,6 +110,10 @@ env = {
     "NOTIFICATION_QUEUE_REGION": "ap-northeast-2",
     "IMAGE_STORAGE": "s3", "IMAGE_S3_BUCKET": f"ruleup-prod-media-{acc}",
     "METRICS_CLOUDWATCH_ENABLED": "false", "METRICS_OTLP_ENABLED": "false", "FCM_ENABLED": "false",
+    # 진입 방식. passcode: 콘솔이 비밀번호로 로그인해 관리자 전용 키로 서명된 토큰을 받는다(공개 API 에서는 통하지 않는다).
+    "ADMIN_LOGIN": os.environ.get("LOGIN", "passcode"),
+    "ADMIN_PASSCODE": app["ADMIN_PASSCODE"],
+    "ADMIN_JWT_SECRET": admin["JWT_SECRET"],
     "ADMIN_ACCESS_TEAM_DOMAIN": os.environ.get("ACCESS_TEAM_DOMAIN", ""),
     "ADMIN_ACCESS_AUDIENCES": os.environ.get("ACCESS_AUD", ""),
     "ADMIN_ACCESS_ALLOWED_EMAILS": os.environ.get("ACCESS_EMAILS", ""),
@@ -126,7 +140,7 @@ PY
   # 새 인스턴스가 90초씩 콜드 스타트를 한다. DB 연결 수와, 주소가 새어 나가 두드려질 때의 비용도 함께 묶인다.
   aws lambda put-function-concurrency --function-name "$FN" --reserved-concurrent-executions 1 >/dev/null
   warm
-  # 함수 URL 은 공개(NONE)다. 문지기는 앱의 Cloudflare Access JWT 검증 — 서명·발급자·AUD·만료·허용 이메일이 맞지 않으면 401.
+  # 함수 URL 은 공개(NONE)다. 문지기는 앱이다 — 비밀번호 로그인(10분에 10회 제한)으로 받은 토큰 없이는 401 이고, 관리자 경로 밖에는 매핑이 없다.
   if ! aws lambda get-function-url-config --function-name "$FN" >/dev/null 2>&1; then
     aws lambda create-function-url-config --function-name "$FN" --auth-type NONE >/dev/null
     aws lambda add-permission --function-name "$FN" --statement-id url --action lambda:InvokeFunctionUrl --principal '*' --function-url-auth-type NONE >/dev/null

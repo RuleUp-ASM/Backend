@@ -206,6 +206,8 @@ app:
   admin:
     passcode: ${ADMIN_PASSCODE:}
     operator-id: ${ADMIN_OPERATOR_ID:}
+    # 관리자 서비스(role=admin)의 진입 방식 — access(기본, Cloudflare Access JWT) | passcode(위 비밀번호).
+    login: ${ADMIN_LOGIN:access}
     # 회원 구성 집계(콘솔·biz.members.* 게이지)에서 뺄 계정 — 개발자 시험 계정 UUID 를 쉼표로. 비우면 운영자만 뺀다.
     stats-excluded-user-ids: ${ADMIN_STATS_EXCLUDED_USER_IDS:}
 
