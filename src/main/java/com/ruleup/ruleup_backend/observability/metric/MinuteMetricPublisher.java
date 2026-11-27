@@ -4,7 +4,6 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.services.cloudwatch.CloudWatchAsyncClient;
@@ -23,7 +22,9 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 /**
- * {@link MinuteMetricBuffer} 의 끝난 분을 CloudWatch 로 보낸다 — <b>태스크마다</b> 돈다(ShedLock 없음).
+ * {@link MinuteMetricBuffer} 의 끝난 분을 CloudWatch 와 OTLP({@link OtlpMetricExporter}) 로 보낸다 — <b>태스크마다</b> 돈다(ShedLock 없음).
+ * 두 곳은 따로 켜고 끈다({@code app.observability.cloudwatch.enabled} · {@code app.observability.otlp.enabled}). 둘 다 꺼져
+ * 있어도 버퍼는 비운다 — 안 비우면 분이 쌓인다.
  *
  * <p>각 태스크가 자기 몫을 같은 분 timestamp 로 보내면 CloudWatch 가 Sum 으로 합친다. 한 대가 죽어도 나머지가 계속
  * 보내므로 서비스 시계열이 끊기지 않는다. 전송 실패는 그 분을 버리고 로그만 남긴다 — 다시 쌓아 두면 장애 중에
@@ -36,7 +37,6 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 @Component
 @Profile({"prod", "stg"})
-@ConditionalOnProperty(name = "app.observability.cloudwatch.enabled", havingValue = "true", matchIfMissing = true)
 public class MinuteMetricPublisher {
 
     /** PutMetricData 한 번에 실을 데이터포인트 수(상한 1,000·1MB 보다 넉넉히 낮게). */
@@ -45,7 +45,10 @@ public class MinuteMetricPublisher {
     static final int MAX_VALUES = 150;
 
     private final MinuteMetricBuffer buffer;
+    /** CloudWatch 를 끈 환경에서는 없다(null). */
     private final CloudWatchAsyncClient client;
+    /** OTLP 를 켠 환경에서만 있다(null). */
+    private final OtlpMetricExporter otlp;
     private final ObjectProvider<MinuteSampler> samplers;
     private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "metric-publisher");
@@ -53,10 +56,11 @@ public class MinuteMetricPublisher {
         return t;
     });
 
-    public MinuteMetricPublisher(MinuteMetricBuffer buffer, CloudWatchAsyncClient client,
-                                 ObjectProvider<MinuteSampler> samplers) {
+    public MinuteMetricPublisher(MinuteMetricBuffer buffer, ObjectProvider<CloudWatchAsyncClient> client,
+                                 ObjectProvider<OtlpMetricExporter> otlp, ObjectProvider<MinuteSampler> samplers) {
         this.buffer = buffer;
-        this.client = client;
+        this.client = client.getIfAvailable();
+        this.otlp = otlp.getIfAvailable();
         this.samplers = samplers;
     }
 
@@ -88,6 +92,8 @@ public class MinuteMetricPublisher {
     public void publish() {
         List<MinuteMetricBuffer.Datum> data = buffer.drainCompleted();
         if (data.isEmpty()) return;
+        if (otlp != null) otlp.export(data);
+        if (client == null) return;
         for (Map.Entry<String, List<MetricDatum>> ns : toRequests(data).entrySet()) {
             List<MetricDatum> all = ns.getValue();
             for (int i = 0; i < all.size(); i += BATCH) {
