@@ -20,9 +20,16 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *
  * @param passcode   진입 비밀번호. 비어 있으면 로그인 비활성.
  * @param operatorId 발급 토큰의 주체가 될 운영자 계정 id(UUID 문자열). 비우면 자동 탐색.
+ * @param login      관리자 서비스(role=admin)의 진입 방식 — {@code access}(기본, Cloudflare Access JWT) 또는
+ *                   {@code passcode}(이 비밀번호). 공개 API 의 전환 기간 관리자 경로는 이 값과 상관없이 비밀번호다.
  */
 @ConfigurationProperties(prefix = "app.admin")
-public record AdminProperties(String passcode, String operatorId) {
+public record AdminProperties(String passcode, String operatorId, String login) {
+
+    /** 관리자 서비스가 비밀번호로 진입을 받는가. 값이 없거나 다른 값이면 Access 다(닫히는 쪽이 기본). */
+    public boolean passcodeLogin() {
+        return "passcode".equalsIgnoreCase(login);
+    }
 
     /** 비밀번호가 있어야 문이 열린다. <b>미설정이 곧 비활성</b>이다. */
     public boolean isConfigured() {

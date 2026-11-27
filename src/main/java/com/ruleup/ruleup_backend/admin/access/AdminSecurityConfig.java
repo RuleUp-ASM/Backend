@@ -33,7 +33,7 @@ import java.time.Duration;
  */
 @Configuration
 @EnableWebSecurity
-@ConditionalOnExpression("'${app.runtime.role:api}'.equalsIgnoreCase('admin')")
+@ConditionalOnExpression("'${app.runtime.role:api}'.equalsIgnoreCase('admin') and !'${app.admin.login:access}'.equalsIgnoreCase('passcode')")
 public class AdminSecurityConfig {
 
     /** 팀 도메인의 공개키 묶음. 시험은 {@code @Primary} 로 직접 만든 키를 대신 꽂는다. */

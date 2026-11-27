@@ -22,7 +22,8 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
  */
 @Configuration
 @EnableWebSecurity
-@ConditionalOnExpression("!'${app.runtime.role:api}'.equalsIgnoreCase('admin')")
+// 관리자 역할이라도 비밀번호 진입(app.admin.login=passcode)이면 이 체인을 쓴다 — 비밀번호 확인 뒤 앱 JWT 로 다닌다.
+@ConditionalOnExpression("!'${app.runtime.role:api}'.equalsIgnoreCase('admin') or '${app.admin.login:access}'.equalsIgnoreCase('passcode')")
 @RequiredArgsConstructor
 public class SecurityConfig {
 
