@@ -1,0 +1,13 @@
+# 생성 파일 — 손으로 고치지 않는다(deploy.sh). 대상: __TARGET__
+reverse_proxy __TARGET__ {
+	# 들어오는 길이 터널 하나뿐이라 CF-Connecting-IP 는 Cloudflare 가 쓴 값이다. 앱의 IP 판별
+	# (X-Forwarded-For 끝 값)이 실제 클라이언트를 보도록 그 값 하나로 덮어쓴다.
+	header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
+	header_up X-Forwarded-Proto https
+	# 업스트림이 잠깐 없을 때(배포 전환·DB 전환) 요청을 실패시키지 않고 붙잡아 둔다.
+	lb_try_duration 40s
+	lb_try_interval 250ms
+	transport http {
+		dial_timeout 2s
+	}
+}
