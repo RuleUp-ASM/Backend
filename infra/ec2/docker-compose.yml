@@ -1,5 +1,6 @@
 # prod EC2 한 대에 올리는 구성. 밖에서 들어오는 길은 cloudflared(아웃바운드 터널) 하나뿐이다.
 #   cloudflared → caddy → api-blue | api-green → dbproxy → RDS
+# 관리자 API 는 Lambda(ruleup-prod-admin)다 — 이 서버는 그 Lambda 의 외부 출구(nat.sh)와 Redis 통로(redis-gw)만 맡는다.
 # 파일 원본은 저장소 infra/ec2, 서버에서는 /opt/ruleup. 반영은 sync-config.sh, 배포는 deploy.sh.
 name: ruleup
 
@@ -41,6 +42,17 @@ services:
     # 탐색 인덱스·인기 랭킹 전용. 원천은 MySQL 이라 디스크에 남기지 않는다 — 재시작하면 앱 워밍업이 다시 채운다.
     command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction"]
     mem_limit: 192m
+    logging: *logging
+
+  redis-gw:
+    image: haproxy:lts-alpine
+    restart: unless-stopped
+    stop_grace_period: 1s
+    volumes:
+      - /opt/ruleup/redis-gw.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    ports: ["6379:6379"]     # 관리자 Lambda 전용 — 보안 그룹이 Lambda SG 에서만 받는다
+    depends_on: [redis]
+    mem_limit: 48m
     logging: *logging
 
   dbproxy:
