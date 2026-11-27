@@ -1,0 +1,80 @@
+# prod EC2 한 대에 올리는 구성. 밖에서 들어오는 길은 cloudflared(아웃바운드 터널) 하나뿐이다.
+#   cloudflared → caddy → api-blue | api-green → dbproxy → RDS
+# 파일 원본은 저장소 infra/ec2, 서버에서는 /opt/ruleup. 반영은 sync-config.sh, 배포는 deploy.sh.
+name: ruleup
+
+x-api: &api
+  restart: unless-stopped
+  env_file:
+    - path: /opt/ruleup/app.env
+      format: raw            # 시크릿에 든 $ · 따옴표를 compose 가 해석하지 않게 한다
+  stop_grace_period: 45s     # 앱 graceful shutdown 30s + 여유
+  mem_limit: 1100m
+  depends_on: [redis, dbproxy]
+  logging: &logging
+    driver: json-file
+    options: { max-size: "20m", max-file: "3" }
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    volumes:
+      - /opt/ruleup/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /opt/ruleup/run:/etc/caddy/run:ro
+    ports: ["127.0.0.1:8000:80"]
+    logging: *logging
+
+  api-blue:
+    <<: *api
+    image: ${IMAGE_BLUE:-scratch}
+    profiles: [blue]
+
+  api-green:
+    <<: *api
+    image: ${IMAGE_GREEN:-scratch}
+    profiles: [green]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # 탐색 인덱스·인기 랭킹 전용. 원천은 MySQL 이라 디스크에 남기지 않는다 — 재시작하면 앱 워밍업이 다시 채운다.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction"]
+    mem_limit: 192m
+    logging: *logging
+
+  dbproxy:
+    image: haproxy:lts-alpine
+    restart: unless-stopped
+    stop_grace_period: 1s    # DB 전환 때 바로 끊고 새 대상으로 다시 뜬다
+    environment:
+      DB_HOST: ${DB_HOST}
+    volumes:
+      - /opt/ruleup/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    logging: *logging
+
+  alloy:
+    image: grafana/alloy:latest
+    restart: unless-stopped
+    command: ["run", "--server.http.listen-addr=0.0.0.0:12345", "--storage.path=/var/lib/alloy/data", "/etc/alloy/config.alloy"]
+    env_file: [/opt/ruleup/infra.env]
+    volumes:
+      - /opt/ruleup/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro
+      - alloy-data:/var/lib/alloy/data
+    mem_limit: 256m
+    logging: *logging
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "run"]
+    env_file: [/opt/ruleup/infra.env]     # TUNNEL_TOKEN
+    depends_on: [caddy]
+    logging: *logging
+
+volumes:
+  alloy-data:
